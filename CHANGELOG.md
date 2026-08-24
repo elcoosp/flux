@@ -699,10 +699,60 @@ All workflows run on push (any branch) and PR to `main`, with `docs/**`,
 `runtimes/**`, `adapters/**`, `**.md` path-ignored where appropriate so doc-only
 changes don't trigger the Rust/iOS/Android builds.
 
+#### FLUX-012 — `flux-types` bidirectional type checker — DONE
+
+Implemented the Flux bidirectional (constraint-based) type checker per
+FLUX-012, consuming `flux-parser`'s `AST` and `flux-syntax`'s `TypeKind`.
+
+- `checker.rs` — HM(X) inference with unification variables, constrained
+  (generic) variables carrying trait bounds, env-based name resolution, a
+  trait/ADT/component/**fn** collection pre-pass so earlier declarations can
+  call later ones, generic-component instantiation with concrete
+  type-argument recording, arithmetic/`Show`/`Eq` trait enforcement,
+  offside-free block/binary/field/call handling, module-constant
+  (`Color.red`) resolution, `Numeric.zero`/`one` returning
+  `Numeric`-constrained variables.
+- `unify.rs` — substitution-based unification with occurs-check and
+  cycle-safe constrained-variable handling (preserves the constraint on the
+  canonical variable).
+- `traits.rs` — closed-world `Numeric`/`Eq`/`Show` resolution; arithmetic
+  now rejects operands whose trait bound does not include `Numeric`.
+- `kind.rs`/`env.rs`/`scheme.rs` — `TcType` internal repr, env bindings,
+  generalisation/instantiation scaffolding.
+- `error.rs` — span-carrying `TypeError` with actionable messages.
+- `prelude.rs` — prelude traits/fns/components (`Show`/`Eq`/`Numeric`,
+  `platform`, etc.).
+- `exhaust.rs` — match exhaustiveness over `TcType`.
+- `lib.rs` — public API `type_check(ast) -> Result<TypedAST, TypeError>` and
+  `TypedAST { ast, types, instantiations }`; re-exports.
+- `tests/typecheck.rs` — all 10 Appendix B.3 examples + diagnostics
+  (span/mismatch/unbound/non-exhaustive) + both `Counter[Int]`/`Counter[Float]`
+  instantiations + module-constant and trait-bound negative tests.
+- `benches/typecheck.rs` — 500-line fixture benchmark → **544 µs** (< 3 ms
+  budget, §3.6).
+
+Verification (all gates green, run locally):
+- `cargo fmt --check` — clean.
+- `cargo clippy -p flux-types --all-targets -- -D warnings` — zero warnings.
+- `cargo test -p flux-types` — 1 unit + 16 integration + 3 doctests, all pass.
+- `cargo doc -p flux-types --no-deps` — clean.
+- `cargo bench` — 544 µs for a 500-line file.
+
+#### FLUX-003 (follow-up) — `if/else` lowering bug fixed
+
+`flux-parser`'s `if_expr` lowering wrapped an `else { block }` in a bogus
+`Call { callee: Elided, trailing: Some(block) }`, which is not a real call
+and forced every downstream consumer to special-case it. Fixed in
+`lower/exprs/control.rs` so `else { block }` lowers to a block-valued
+expression (the grammar's zero-argument-lambda "block as expression" form),
+mirroring `when_expr`'s clean handling. `flux-types` dropped its
+`Elided`-callee workaround and instead infers an `else` zero-arg-lambda as a
+block so it unifies with the `then` branch. A regression test
+(`b38_else_block_lowers_to_block_not_elided_call`) locks the fix in.
+
 #### Outstanding Phase 1–4 crates (stubs / in-flight, owned by named flux-N agents)
 
 The following workspace crates are owned by other agents (not built by this
 agent, to avoid directory-collision with the dispatched flux-N work):
-`flux-types` (FLUX-012 — in-flight, substantially implemented), `flux-devserver`,
-`flux-codegen-swift`, `flux-codegen-kotlin`, `flux-cli`, `flux-parity` (Phase 6).
-CI (FLUX-011) is orchestrator-owned.
+`flux-devserver`, `flux-codegen-swift`, `flux-codegen-kotlin`, `flux-cli`,
+`flux-parity` (Phase 6). CI (FLUX-011) is orchestrator-owned.

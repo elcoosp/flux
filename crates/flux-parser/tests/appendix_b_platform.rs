@@ -11,7 +11,12 @@ mod common;
 use common::{component, parse_ok};
 
 #[test]
-fn b38_platform_conditional_parses_both_branches() {
+fn b38_else_block_lowers_to_block_not_elided_call() {
+    // Regression: an `else { … }` block must lower to a block-valued
+    // expression, never to `Call { callee: Elided, trailing: Some(block) }`
+    // (the old degenerate shape that forced every downstream consumer to
+    // special-case it). The grammar represents a bare block as a zero-argument
+    // lambda, so the else branch must be that — not a `Call`.
     let ast = parse_ok(
         r#"component PlatformButton {
   if platform() == "ios" {
@@ -28,7 +33,21 @@ fn b38_platform_conditional_parses_both_branches() {
     else {
         panic!("expected an `if` expression");
     };
-    assert!(else_branch.is_some());
+    let Some(branch) = else_branch else {
+        panic!("expected an else branch");
+    };
+    assert!(
+        matches!(
+            &branch.kind,
+            ExprKind::Lambda { params, .. } if params.is_empty()
+        ),
+        "else branch should be a zero-argument lambda (block), got {:?}",
+        branch.kind
+    );
+    assert!(
+        !matches!(&branch.kind, ExprKind::Call { callee, .. } if matches!(callee.kind, ExprKind::Elided)),
+        "else branch must not be an `Elided`-callee call"
+    );
 }
 
 #[test]

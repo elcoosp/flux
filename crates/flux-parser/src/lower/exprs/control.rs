@@ -71,19 +71,21 @@ pub(crate) fn if_expr(ctx: &Ctx<'_>, pair: Pair<'_, Rule>, span: Span) -> Lowere
     let else_branch = match inner.next() {
         Some(branch) => {
             let branch_span = ctx.span(&branch);
-            Some(Box::new(match branch.as_rule() {
-                Rule::block => Expr {
-                    kind: ExprKind::Call {
-                        callee: Box::new(Expr {
-                            kind: ExprKind::Elided,
-                            span: branch_span,
-                        }),
-                        args: Vec::new(),
-                        trailing: Some(Box::new(block(ctx, branch)?)),
-                    },
-                    span: branch_span,
+            // `else { block }` lowers to the block directly; `else if …`
+            // lowers to the nested `if` expression. The previous lowering
+            // wrapped a bare block in a `Call { callee: Elided, … }`, which
+            // is not a real call and forced downstream consumers to special-
+            // case it.
+            let kind = match branch.as_rule() {
+                Rule::block => ExprKind::Lambda {
+                    params: Vec::new(),
+                    body: Box::new(block(ctx, branch)?),
                 },
-                _ => expr(ctx, branch)?,
+                _ => expr(ctx, branch)?.kind,
+            };
+            Some(Box::new(Expr {
+                kind,
+                span: branch_span,
             }))
         }
         None => None,
