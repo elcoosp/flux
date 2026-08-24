@@ -1,0 +1,31 @@
+# Rust
+/target
+**/*.rs.bk
+*.pdb
+
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcscmblueprint
+*.xccheckout
+.swiftpm/
+Packages/
+
+# Gradle / Android
+.gradle/
+local.properties
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+**/android/build/
+**/android/app/build/
+
+# macOS
+.DS_Store
+
+# Tooling
+.hermes/
+node_modules/

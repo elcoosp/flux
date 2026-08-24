@@ -1,0 +1,15 @@
+[package]
+name = "flux-ir-serde"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+flux-syntax.workspace = true
+flux-ir.workspace = true
+rmp-serde.workspace = true
+serde.workspace = true
+blake3.workspace = true
+thiserror.workspace = true

@@ -1,0 +1,58 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/flux-syntax",
+    "crates/flux-parser",
+    "crates/flux-types",
+    "crates/flux-ir",
+    "crates/flux-ir-serde",
+    "crates/flux-differ",
+    "crates/flux-devserver",
+    "crates/flux-codegen-swift",
+    "crates/flux-codegen-kotlin",
+    "crates/flux-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "Apache-2.0"
+repository = "https://github.com/flux-lang/flux"
+
+[workspace.dependencies]
+flux-syntax = { path = "crates/flux-syntax" }
+flux-parser = { path = "crates/flux-parser" }
+flux-types = { path = "crates/flux-types" }
+flux-ir = { path = "crates/flux-ir" }
+flux-ir-serde = { path = "crates/flux-ir-serde" }
+flux-differ = { path = "crates/flux-differ" }
+flux-devserver = { path = "crates/flux-devserver" }
+flux-codegen-swift = { path = "crates/flux-codegen-swift" }
+flux-codegen-kotlin = { path = "crates/flux-codegen-kotlin" }
+
+ahash = "^0.8"
+anyhow = "^1"
+axum = "^0.8"
+blake3 = "^1"
+bytes = "^1"
+clap = { version = "^4", features = ["derive"] }
+criterion = "^0.8"
+insta = "^1"
+notify = "^8"
+parking_lot = "^0.12"
+pest = "^2"
+pest_derive = "^2"
+proptest = "^1"
+rmp-serde = "^1"
+serde = { version = "^1", features = ["derive"] }
+smallvec = { version = "^1", features = ["union"] }
+thiserror = "^2"
+tokio = { version = "^1", features = ["full"] }
+tokio-tungstenite = "^0.30"
+tracing = "^0.1"
+tracing-subscriber = { version = "^0.3", features = ["env-filter"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

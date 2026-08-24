@@ -1,0 +1,13 @@
+[package]
+name = "flux-differ"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+flux-syntax.workspace = true
+flux-ir.workspace = true
+ahash.workspace = true
+smallvec.workspace = true

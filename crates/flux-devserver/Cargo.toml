@@ -1,0 +1,23 @@
+[package]
+name = "flux-devserver"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+flux-syntax.workspace = true
+flux-parser.workspace = true
+flux-types.workspace = true
+flux-ir.workspace = true
+flux-ir-serde.workspace = true
+flux-differ.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+notify.workspace = true
+axum.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+bytes.workspace = true
+parking_lot.workspace = true
