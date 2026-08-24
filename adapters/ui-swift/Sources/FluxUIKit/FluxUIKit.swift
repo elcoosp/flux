@@ -1,14 +1,12 @@
-//
 //  FluxUIKit.swift
-//  Skeleton placeholder created by the foundation pass (FLUX-001).
-//  The swift-adapters agent (FLUX-008) replaces this with the real adapter kit.
+//  FluxUIKit — Swift adapter kit entry (FLUX-008).
 //
+//  The kit's public surface is the contract the dev runtime (FLUX-006)
+//  consumes: `FluxValue`, `Props`, `FluxColor`/`FluxFount`/`FluxAlignment`,
+//  `FluxEvent`, `FluxExecutor`, and the `FluxAdapter` protocol, plus the seven
+//  dev adapters (Text, Button, Column, Row, TextField, Router, Screen).
 
-/// Marker for the Flux Swift adapter kit.
-///
-/// Adapters translate Flux IR nodes into native views; the props are the
-/// contract (Appendix F). This placeholder exists only so the package compiles
-/// and CI has something to build before FLUX-008 lands.
+/// The adapter contract version this kit implements (Appendix F).
 public enum FluxUIKit {
     /// The adapter contract version this kit implements (Appendix F).
     public static let adapterContractVersion = 1

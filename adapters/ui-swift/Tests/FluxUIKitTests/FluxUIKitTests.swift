@@ -1,10 +1,7 @@
-//
 //  FluxUIKitTests.swift
-//  Skeleton placeholder created by the foundation pass (FLUX-001).
-//
+//  FluxUIKitTests — adapter contract version check (Appendix F).
 
 import XCTest
-
 @testable import FluxUIKit
 
 final class FluxUIKitTests: XCTestCase {
