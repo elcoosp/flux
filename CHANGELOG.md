@@ -494,6 +494,14 @@ Coverage:
 `docs/adr/parser-grammar-extensions.md` records the reconciliation and the
 remaining parser-internal concern (G6 depth limit).
 
+**Addendum (2026-08-24):** the module-level `state` form (`module_state`,
+`Decl::State`) that the first reconciliation added for `stdlib/platform.flux`
+was reverted. File scope has no `state` form; `platform.flux` now exposes the
+platform tag as `fn platform() -> String { … }` (queried via `platform()`),
+and Appendix B.3.8's conditional is `if platform() == "ios"`. The `Decl::State`
+variant and `module_state` rule were removed from both `flux.pest` and
+Appendix B.
+
 #### Outstanding Phase 1–4 crates (stubs owned by named flux-N agents)
 
 The following workspace crates remain 1-file stubs and are explicitly assigned to

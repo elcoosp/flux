@@ -14,7 +14,7 @@ use common::{component, parse_ok};
 fn b38_platform_conditional_parses_both_branches() {
     let ast = parse_ok(
         r#"component PlatformButton {
-  if platform == "ios" {
+  if platform() == "ios" {
     CupertinoButton(text: "Tap", onClick: { ... })
   } else {
     MaterialButton(text: "Tap", onClick: { ... })
