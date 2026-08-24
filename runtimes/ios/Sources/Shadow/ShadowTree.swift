@@ -47,7 +47,7 @@ enum Child: Equatable, Sendable {
 /// A single prop: a `PropIdx` (Appendix C) paired with its value.
 struct Prop: Equatable, Sendable {
     let index: UInt16
-    let value: FluxValue
+    let value: VMValue
 }
 
 /// A deserialized node from an `Init` or `Replace`/`Insert` frame.
@@ -65,7 +65,7 @@ struct ShadowNode: Equatable, Sendable {
 
 extension ShadowNode {
     /// Looks up a prop value by index, or `nil` if absent.
-    func prop(_ index: UInt16) -> FluxValue? {
+    func prop(_ index: UInt16) -> VMValue? {
         props.first { $0.index == index }?.value
     }
 }

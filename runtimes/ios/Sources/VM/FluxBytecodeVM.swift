@@ -14,11 +14,11 @@ import Foundation
 /// The signal graph a handler reads from and writes to.
 protocol SignalStore {
     /// Returns the current value of `id`, or `nil` if unbound.
-    func read(_ id: UInt32) -> FluxValue?
+    func read(_ id: UInt32) -> VMValue?
     /// Writes `value` into `id`.
-    mutating func write(_ id: UInt32, _ value: FluxValue)
+    mutating func write(_ id: UInt32, _ value: VMValue)
     /// Returns every written signal as a sorted `(id, value)` list.
-    func snapshot() -> [(UInt32, FluxValue)]
+    func snapshot() -> [(UInt32, VMValue)]
 }
 
 /// In-memory `SignalStore` used by tests, the reconciler and the dev server.
@@ -26,17 +26,17 @@ protocol SignalStore {
 /// A value type (not a class) so it can cross queue boundaries safely: the
 /// executor reassigns its copy after each handler dispatch.
 struct InMemorySignals: SignalStore {
-    private var store: [UInt32: FluxValue]
+    private var store: [UInt32: VMValue]
 
-    init(store: [UInt32: FluxValue] = [:]) {
+    init(store: [UInt32: VMValue] = [:]) {
         self.store = store
     }
 
-    func read(_ id: UInt32) -> FluxValue? { store[id] }
+    func read(_ id: UInt32) -> VMValue? { store[id] }
 
-    mutating func write(_ id: UInt32, _ value: FluxValue) { store[id] = value }
+    mutating func write(_ id: UInt32, _ value: VMValue) { store[id] = value }
 
-    func snapshot() -> [(UInt32, FluxValue)] {
+    func snapshot() -> [(UInt32, VMValue)] {
         store.map { ($0.key, $0.value) }.sorted { $0.0 < $1.0 }
     }
 }
@@ -44,9 +44,9 @@ struct InMemorySignals: SignalStore {
 /// Result of running a handler to completion.
 struct VmOutcome {
     /// Final values of all signal cells that were written, sorted by id.
-    let signals: [(UInt32, FluxValue)]
+    let signals: [(UInt32, VMValue)]
     /// Final values of the 16 registers (r0 = entry payload, r15 = remaining gas).
-    let registers: [FluxValue]
+    let registers: [VMValue]
     /// Number of non-`HALT` instructions executed (ADR-0021).
     let gasUsed: UInt32
 }
@@ -64,11 +64,11 @@ enum FluxBytecodeVM {
     static func run(
         _ bytecode: [UInt8],
         signals: inout SignalStore,
-        payload: FluxValue
+        payload: VMValue
     ) throws -> VmOutcome {
         let program = try Instruction.decode(bytecode)
         let offsets = program.map { $0.offset }
-        var regs = [FluxValue](repeating: .null, count: 16)
+        var regs = [VMValue](repeating: .null, count: 16)
         regs[0] = payload
         var gas = entryGas
         regs[15] = .int(Int64(gas))
@@ -86,7 +86,7 @@ enum FluxBytecodeVM {
             regs[15] = .int(Int64(gas))
             let nextIP = ip + 1
 
-            let reg = { (r: UInt8) -> FluxValue in regs[Int(r)] }
+            let reg = { (r: UInt8) -> VMValue in regs[Int(r)] }
 
             switch op {
             case .halt:
@@ -245,7 +245,7 @@ enum FluxBytecodeVM {
             case .allocRecord:
                 let dst = instr.u8(0)
                 let count = Int(instr.u16(1))
-                var fields: [(UInt16, FluxValue)] = []
+                var fields: [(UInt16, VMValue)] = []
                 fields.reserveCapacity(count)
                 for i in 0..<count {
                     fields.append((UInt16(i), .null))
@@ -383,7 +383,7 @@ enum FluxBytecodeVM {
         return x / y
     }
 
-    private static func truthy(_ v: FluxValue) -> Bool {
+    private static func truthy(_ v: VMValue) -> Bool {
         switch v {
         case let .bool(b): b
         case let .int(i): i != 0
@@ -391,32 +391,32 @@ enum FluxBytecodeVM {
         }
     }
 
-    private static func requireInt(_ v: FluxValue, at offset: Int) throws -> Int64 {
+    private static func requireInt(_ v: VMValue, at offset: Int) throws -> Int64 {
         guard case let .int(i) = v else { throw VMError.typeMismatch(offset: offset) }
         return i
     }
 
-    private static func requireFloat(_ v: FluxValue, at offset: Int) throws -> Double {
+    private static func requireFloat(_ v: VMValue, at offset: Int) throws -> Double {
         guard case let .float(f) = v else { throw VMError.typeMismatch(offset: offset) }
         return f
     }
 
-    private static func requireBool(_ v: FluxValue, at offset: Int) throws -> Bool {
+    private static func requireBool(_ v: VMValue, at offset: Int) throws -> Bool {
         guard case let .bool(b) = v else { throw VMError.typeMismatch(offset: offset) }
         return b
     }
 
-    private static func requireStr(_ v: FluxValue, at offset: Int) throws -> UInt32 {
+    private static func requireStr(_ v: VMValue, at offset: Int) throws -> UInt32 {
         guard case let .str(id) = v else { throw VMError.typeMismatch(offset: offset) }
         return id
     }
 
-    private static func requireList(_ v: FluxValue, at offset: Int) throws -> [FluxValue] {
+    private static func requireList(_ v: VMValue, at offset: Int) throws -> [VMValue] {
         guard case let .list(items) = v else { throw VMError.typeMismatch(offset: offset) }
         return items
     }
 
-    private static func requireRecord(_ v: FluxValue, at offset: Int) throws -> [(UInt16, FluxValue)] {
+    private static func requireRecord(_ v: VMValue, at offset: Int) throws -> [(UInt16, VMValue)] {
         guard case let .record(fields) = v else { throw VMError.typeMismatch(offset: offset) }
         return fields
     }
@@ -424,8 +424,8 @@ enum FluxBytecodeVM {
     /// Structural record equality: same field count, same prop indices in order,
     /// and equal values (recursively).
     private static func recordsEqual(
-        _ a: [(UInt16, FluxValue)],
-        _ b: [(UInt16, FluxValue)]
+        _ a: [(UInt16, VMValue)],
+        _ b: [(UInt16, VMValue)]
     ) -> Bool {
         guard a.count == b.count else { return false }
         for (lhs, rhs) in zip(a, b) {
@@ -434,7 +434,7 @@ enum FluxBytecodeVM {
         return true
     }
 
-    private static func getField(_ obj: FluxValue, idx: Int, at offset: Int) throws -> FluxValue {
+    private static func getField(_ obj: VMValue, idx: Int, at offset: Int) throws -> VMValue {
         if case .null = obj {
             throw VMError.nullDereference(offset: offset)
         }
@@ -447,7 +447,7 @@ enum FluxBytecodeVM {
         return fields[idx].value
     }
 
-    private static func setField(_ obj: inout FluxValue, idx: Int, value: FluxValue, at offset: Int) throws {
+    private static func setField(_ obj: inout VMValue, idx: Int, value: VMValue, at offset: Int) throws {
         if case .null = obj {
             throw VMError.nullDereference(offset: offset)
         }

@@ -1,69 +1,95 @@
-//  FluxExecutor.swift
+//  FluxRuntime.swift
 //  Dispatches an incoming frame through the VM and signal graph (FLUX-006 scope
-//  items 7 & 9), thread-safely.
+//  items 7 & 9) and drives the real `FluxUIKit` adapters (FLUX-016), on the
+//  main actor.
 //
 //  The executor is the boundary between the (future) WebSocket transport and the
 //  native UI. In dev mode it is driven synchronously from tests; in the live app
-//  the transport hands raw frames to `dispatch(_:)` on a background queue and the
-//  executor evaluates handler closures via `FluxBytecodeVM.run`, then reports the
-//  resulting signal writes back to the `SignalGraph` so observers (and thus the
-//  reconciled views) update. No VM error is ever allowed to escape: a failure is
-//  captured into `lastError` and surfaced as an error overlay by `FluxRootView`.
+//  the transport hands raw frames to `apply(_:)` and `dispatch(_:)` on the main
+//  actor, the VM evaluates handler closures via `FluxBytecodeVM.run`, then the
+//  resulting signal writes are reconciled back into the live UIKit tree. No VM
+//  error is ever allowed to escape: a fault is captured into `lastError` and
+//  surfaced as an error overlay by `FluxRootView`.
 
 import Foundation
+import FluxUIKit
 
 /// The outcome of dispatching one frame.
 struct DispatchResult: Sendable {
     /// Node ids whose views were (re)built or updated by the reconciler.
     let builtOrUpdated: [UInt32]
     /// The signals written by handler evaluation, sorted by id.
-    let signals: [(UInt32, FluxValue)]
+    let signals: [(UInt32, VMValue)]
     /// `nil` on success, or the VM error that occurred.
     let error: VMError?
 }
 
-/// Owns the signal graph, the adapter registry and the reconciler, and applies
-/// decoded frames to them. Actor-isolated so UI updates happen on the main
-/// actor after evaluation.
+/// Owns the signal graph, the adapter registry, the string table and the
+/// reconciler, and applies decoded frames to them. Main-actor isolated so all
+/// UIKit view mutations happen on the main actor after evaluation.
+///
+/// Conforms to `FluxRuntime`: native controls (via the kit's
+/// `HandlerTarget`) call `dispatch(_:)` with a `FluxEvent`, which evaluates the
+/// bound handler closure and reconciles the result.
 @MainActor
-final class FluxExecutor {
+final class FluxRuntime: FluxExecutor {
     /// The live signal graph.
     private(set) var graph: SignalGraph
-    /// The reconciler driving native views.
+    /// The reconciler driving the real UIKit views.
     private var reconciler: ShadowTreeReconciler
+    /// The interned string table from the most recent Init frame.
+    private(set) var table: StringTable
+    /// Handler id → (closure descriptor + bytecode blob), registered by
+    /// Init/delta frames so native controls can fire them later.
+    private var handlerClosures: [UInt32: (closure: ClosureRef, bytecode: [UInt8])]
+    /// The most recent full frame's node table, kept so handler dispatches can
+    /// re-reconcile the affected views after a signal write.
+    private var currentNodes: [UInt32: ShadowNode]
+    /// The most recent full root id.
+    private var currentRootId: UInt32?
     /// The most recent VM error, surfaced to the UI overlay.
     private(set) var lastError: VMError?
 
-    /// Creates an executor backed by `graph` and `registry`.
+    /// Creates an executor backed by `graph` and an `AdapterRegistry` built from
+    /// `table`.
     init(graph: SignalGraph, registry: AdapterRegistry) {
         self.graph = graph
-        self.reconciler = ShadowTreeReconciler(registry: registry)
+        self.table = StringTable()
+        self.reconciler = ShadowTreeReconciler(registry: registry, executor: nil)
+        self.handlerClosures = [:]
+        self.currentNodes = [:]
+        self.currentRootId = nil
+        self.lastError = nil
+        self.reconciler.setExecutor(self)
     }
 
-    /// Applies an Init/full frame: seeds state, builds the view tree.
-    /// - Returns: the node ids built.
+    /// Applies an Init/full frame: seeds state, builds the string table, builds
+    /// the view tree.
+    /// - Returns: the node ids built or updated.
     @discardableResult
     func apply(_ frame: FluxFrame) -> [UInt32] {
         lastError = nil
         for cell in frame.state { graph.seed(cell.signalId, cell.value) }
-        for str in frame.strings { _ = str } // string table is read by the VM at eval time
-        guard let root = frame.root else { return [] }
-        let report = reconciler.reconcile(root)
+        for str in frame.strings { table.intern(str.stringId, str.value) }
+        if let root = frame.root {
+            currentNodes = frame.nodes
+            currentRootId = root.id
+        }
+        // Drive the reconciler unconditionally: a full frame (root != nil)
+        // rebuilds the tree, while a patch frame (root == nil) applies only its
+        // patches. The reconciler no-ops the tree build when root is absent.
+        let report = reconciler.apply(frame)
         return report.built + report.updated
     }
 
     /// Evaluates a handler closure against the current graph. Mirrors
     /// `flux-vm-ref`: runs the bytecode, then folds the written signals back into
-    /// the graph so observers (and thus views) update.
-    /// - Parameters:
-    ///   - bytecode: the handler's bytecode blob.
-    ///   - closure: the descriptor carrying captured signal ids and gas budget.
-    ///   - payload: the event payload (e.g. a tap), placed in r0.
+    /// the graph and reconciles the affected views.
     /// - Returns: a `DispatchResult` describing what changed.
     func dispatch(
         bytecode: [UInt8],
         closure: ClosureRef,
-        payload: FluxValue
+        payload: VMValue
     ) -> DispatchResult {
         var store: any SignalStore = graph
         let outcome: VmOutcome
@@ -80,10 +106,9 @@ final class FluxExecutor {
         // Fold VM-written signals back into the live graph.
         let written = outcome.signals
         for (id, value) in written { graph.write(id, value) }
-        // Reconcile again if the handler rebuilt/patched the tree (rare; handled
-        // via explicit Insert/Replace patches in real frames, but we re-run to
-        // keep the view set coherent).
-        let report = reconcilerForCurrentTree()
+        // Re-reconcile the current tree so any view whose props read a changed
+        // signal is updated in place (never recreated).
+        let report = reconciler.apply(currentFrame())
         return DispatchResult(
             builtOrUpdated: report.built + report.updated,
             signals: written,
@@ -91,16 +116,42 @@ final class FluxExecutor {
         )
     }
 
-    /// Re-runs the reconciler against the last known tree (no-op placeholder for
-    /// the test path; real diffs arrive as patches in delta frames).
-    private func reconcilerForCurrentTree() -> ReconcileReport {
-        // In dev without a persistent tree the executor only builds what handlers
-        // touch via signals; views are reconciled from full frames in `apply`.
-        ReconcileReport()
+    /// `FluxRuntime` entry point: evaluate the handler bound to
+    /// `event.handlerId` against the current signal graph, then reconcile.
+    ///
+    /// The event is always delivered on the main actor (the kit's
+    /// `HandlerTarget` asserts isolation), so dispatching a handler — which
+    /// evaluates bytecode and mutates UIKit views — is safe here.
+    func dispatch(_ event: FluxEvent) {
+        guard let (closure, bytecode) = handlerClosures[event.handlerId] else {
+            lastError = VMError(kind: .invalidDispatch, offset: 0)
+            return
+        }
+        let payload: VMValue = event.payload.map { toRuntime($0, table: &table) } ?? .null
+        _ = dispatch(bytecode: bytecode, closure: closure, payload: payload)
     }
 
-    /// The built mock view for a node id, for test assertions.
-    func view(for nodeId: UInt32) -> MockView? {
+    /// The built native view for a node id, for test assertions (real UIKit
+    /// views, not mocks).
+    func view(for nodeId: UInt32) -> AnyObject? {
         reconciler.view(for: nodeId)
+    }
+
+    /// Registers handler bytecode so native controls can fire it later.
+    func registerHandler(_ id: UInt32, closure: ClosureRef, bytecode: [UInt8]) {
+        handlerClosures[id] = (closure: closure, bytecode: bytecode)
+    }
+
+    /// Reconstructs a frame carrying the last full tree so the reconciler can
+    /// re-apply it after a signal write (without re-decoding).
+    private func currentFrame() -> FluxFrame {
+        let root = currentRootId.flatMap { currentNodes[$0] }
+        return FluxFrame(
+            version: 1, seq: 0, flags: 0,
+            root: root, nodes: currentNodes,
+            patches: [], handlers: [],
+            strings: [], state: [],
+            files: []
+        )
     }
 }

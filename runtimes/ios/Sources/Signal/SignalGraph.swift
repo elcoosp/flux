@@ -1,7 +1,7 @@
 //  SignalGraph.swift
 //  SolidJS-style reactive signal graph (FLUX-006 scope item 8).
 //
-//  A `SignalGraph` owns a value-semantic map of `SignalId -> FluxValue` plus the
+//  A `SignalGraph` owns a value-semantic map of `SignalId -> VMValue` plus the
 //  dependency edges between signals and derived computations. On `write`, it
 //  marks the written cell dirty and runs the minimal notification set so that
 //  only observers of the changed signals recompute — never the whole graph.
@@ -24,26 +24,26 @@ struct Subscription: Hashable, Sendable {
 /// `SignalStore` so the VM can run handlers against it directly.
 struct SignalGraph: SignalStore {
     /// The current value of every signal.
-    private(set) var values: [SignalId: FluxValue]
+    private(set) var values: [SignalId: VMValue]
     /// Observers keyed by the signal they watch.
     private var observers: [SignalId: [Subscription: () -> Void]]
     /// Monotonic id source for subscriptions.
     private var nextSub: UInt64
 
     /// Creates an empty graph.
-    init(values: [SignalId: FluxValue] = [:]) {
+    init(values: [SignalId: VMValue] = [:]) {
         self.values = values
         self.observers = [:]
         self.nextSub = 1
     }
 
     /// Reads a signal's current value, or `nil` if it has never been written.
-    func read(_ id: UInt32) -> FluxValue? {
+    func read(_ id: UInt32) -> VMValue? {
         values[id]
     }
 
     /// Writes a value and notifies every observer of that signal.
-    mutating func write(_ id: UInt32, _ value: FluxValue) {
+    mutating func write(_ id: UInt32, _ value: VMValue) {
         values[id] = value
         let subs = observers[id] ?? [:]
         for notify in subs.values { notify() }
@@ -51,7 +51,7 @@ struct SignalGraph: SignalStore {
 
     /// Seeds a value without notifying observers (used for initial state seeds
     /// from an Init frame, where nothing is observing yet).
-    mutating func seed(_ id: SignalId, _ value: FluxValue) {
+    mutating func seed(_ id: SignalId, _ value: VMValue) {
         values[id] = value
     }
 
@@ -72,7 +72,7 @@ struct SignalGraph: SignalStore {
     }
 
     /// Every written signal as a sorted `(id, value)` list.
-    func snapshot() -> [(UInt32, FluxValue)] {
+    func snapshot() -> [(UInt32, VMValue)] {
         values.map { ($0.key, $0.value) }.sorted { $0.0 < $1.0 }
     }
 }

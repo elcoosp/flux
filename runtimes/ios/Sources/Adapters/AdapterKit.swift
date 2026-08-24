@@ -1,76 +1,247 @@
 //  AdapterKit.swift
-//  Native adapter contract (Appendix F) + in-dir mock adapters (FLUX-006 scope #11).
+//  Native adapter bridge (FLUX-016).
 //
-//  The `FluxAdapter` protocol is the contract every platform widget implements:
-//  given a `ShadowNode` it produces a native view and reacts to prop changes.
-//  In dev mode (this issue) we use `MockAdapter`s that record the operations
-//  they receive so tests can assert on them without a real UIKit/SwiftUI tree.
-//  Wiring to the real `FluxUIKit` package is deferred to FLUX-016.
+//  Wires the real `FluxUIKit` adapter kit into the FLUX-006 runtime. The
+//  runtime speaks an id-based value vocabulary (`VMValue` with interned
+//  string ids); the kit speaks resolved values (`VMValue` with
+//  concrete `String`s). This module is the translation layer plus a
+//  `ComponentId -> adapter instance` registry driven by the Init frame's
+//  string table.
 
 import Foundation
+import FluxUIKit
 
-/// A native view produced by an adapter. In dev mode this is a lightweight
-/// record; in release mode it would be a real `UIView`/`View`.
-protocol FluxView: AnyObject {
-    /// The stable node id this view was built for.
-    var nodeId: UInt32 { get }
-    /// Applies a changed prop to the already-built view.
-    func apply(prop: Prop)
-    /// Removes the view from its parent (reconciliation removal).
-    func detach()
-}
+/// A host-side string table mirroring `flux_syntax::StringTable` (Appendix C).
+///
+/// The Init frame interns every string — including each component's *name*
+/// under its own `ComponentId` — so the runtime resolves a node's
+/// `component_id` to its adapter by looking the id up here.
+@MainActor
+struct StringTable {
+    /// The id → string mapping.
+    private var strings: [UInt32: String] = [:]
 
-/// The contract every adapter conforms to. The props are the contract: an
-/// adapter maps `ShadowNode.props` onto native view state. Both the dev
-/// (mock) and release (FluxUIKit) implementations consume the same props.
-protocol FluxAdapter {
-    /// The `NodeKind` this adapter handles (e.g. `.primitive` for `Text`).
-    var handles: NodeKind { get }
-    /// Builds a fresh native view for `node`.
-    func build(_ node: ShadowNode) -> FluxView
-}
+    /// Every known string id (used to discover declared components).
+    var ids: [UInt32] { Array(strings.keys) }
 
-/// Records the operations a mock adapter performs, so tests can assert the
-/// reconciler drives the right views without a real rendering surface.
-final class MockView: FluxView {
-    let nodeId: UInt32
-    private(set) var appliedProps: [Prop] = []
-    private(set) var detached = false
+    /// Creates an empty table.
+    init() {}
 
-    init(nodeId: UInt32) { self.nodeId = nodeId }
+    /// Interns `value` under `id`, replacing any prior entry.
+    mutating func intern(_ id: UInt32, _ value: String) {
+        strings[id] = value
+    }
 
-    func apply(prop: Prop) { appliedProps.append(prop) }
-    func detach() { detached = true }
-}
+    /// Resolves `id` to its string, or `nil` if unknown.
+    func lookup(_ id: UInt32) -> String? {
+        strings[id]
+    }
 
-/// A mock adapter that records every node it builds and prop it applies.
-final class MockAdapter: FluxAdapter {
-    let handles: NodeKind
-    private(set) var built: [UInt32: MockView] = [:]
-    private(set) var buildOrder: [UInt32] = []
-
-    init(handles: NodeKind) { self.handles = handles }
-
-    func build(_ node: ShadowNode) -> FluxView {
-        let view = MockView(nodeId: node.id)
-        built[node.id] = view
-        buildOrder.append(node.id)
-        return view
+    /// Resolves `value` to an existing id, or interns it under a fresh,
+    /// high-range id (distinct from the low stdlib component ids) so native
+    /// event payloads can be converted back to the runtime's id-based
+    /// `VMValue` without colliding with declared strings.
+    mutating func id(for value: String) -> UInt32 {
+        if let existing = strings.first(where: { $0.value == value })?.key {
+            return existing
+        }
+        // Reserve the high half for reverse-interns to avoid colliding with
+        // forward-interns made by the decoder.
+        var candidate: UInt32 = 0x8000_0000
+        while strings[candidate] != nil { candidate &+= 1 }
+        strings[candidate] = value
+        return candidate
     }
 }
 
-/// The registry of adapters keyed by the node kind they serve.
+/// Translates a runtime `VMValue` (id-based, interned strings) into the
+/// kit's resolved `VMValue` using `table` for string ids.
+///
+/// - Parameter table: the live string table used to resolve `.str` ids.
+/// - Returns: the equivalent kit value; unresolved string ids fall back to a
+///   debug representation so an adapter never receives a dangling reference.
+@MainActor
+func toKit(_ value: VMValue, table: StringTable) -> FluxValue {
+    switch value {
+    case let .int(i):
+        return .int(i)
+    case let .float(f):
+        return .float(f)
+    case let .bool(b):
+        return .bool(b)
+    case .null:
+        return .null
+    case let .str(id):
+        return .str(table.lookup(id) ?? "str(\(id))")
+    case let .handlerRef(h):
+        return .handlerRef(h)
+    case let .list(items):
+        return .list(items.map { toKit($0, table: table) })
+    case let .record(fields):
+        var dict: [UInt16: FluxValue] = [:]
+        for field in fields {
+            dict[field.propIndex] = toKit(field.value, table: table)
+        }
+        return .record(Props(dict))
+    }
+}
+
+/// Builds a kit `Props` map from runtime `Prop`s, resolving strings via `table`.
+@MainActor
+func kitProps(_ props: [Prop], table: StringTable) -> Props {
+    var fields: [UInt16: FluxValue] = [:]
+    for p in props {
+        fields[p.index] = toKit(p.value, table: table)
+    }
+    return Props(fields)
+}
+
+/// Converts a kit `FluxValue` (resolved strings) back to the runtime's
+/// id-based `VMValue`, interning any resolved string through `table`. Used to
+/// hand a native event's payload to the VM, which speaks id-based values.
+@MainActor
+func toRuntime(_ value: FluxValue, table: inout StringTable) -> VMValue {
+    switch value {
+    case let .int(i):
+        return .int(i)
+    case let .float(f):
+        return .float(f)
+    case let .bool(b):
+        return .bool(b)
+    case .null:
+        return .null
+    case let .str(s):
+        return .str(table.id(for: s))
+    case let .handlerRef(h):
+        return .handlerRef(h)
+    case let .list(items):
+        return .list(items.map { toRuntime($0, table: &table) })
+    case let .record(props):
+        var arr: [(propIndex: UInt16, value: VMValue)] = []
+        for (idx, v) in props.fields {
+            arr.append((propIndex: idx, value: toRuntime(v, table: &table)))
+        }
+        return .record(arr)
+    }
+}
+
+/// A type-erased box around a concrete `FluxAdapter`, hiding the
+/// `associatedtype View` so heterogeneous adapters can live in one registry
+/// and be driven uniformly by the reconciler.
+///
+/// Each box wraps a **fresh** adapter instance (the kit's adapters are
+/// reference types that retain per-node state, e.g. `TextFieldAdapter`'s
+/// delegate), so identity and state are preserved per native view. The executor
+/// is injected at creation time via the adapter's public `init(executor:)`
+/// (the `executor` property is `internal` to `FluxUIKit`, so it cannot be set
+/// from this module after the fact) — see `RegistryFactory` below.
+@MainActor
+struct AnyFluxAdapter {
+    /// Holds the concrete adapter so its operation closures reference a stable
+    /// instance for the node's lifetime.
+    private final class Holder<A: FluxAdapter> {
+        let adapter: A
+        init(_ adapter: A) { self.adapter = adapter }
+    }
+
+    private let holder: AnyObject
+    private let createImpl: () -> AnyObject
+    private let updateImpl: (AnyObject, Props, Props) -> Void
+    private let setChildrenImpl: (AnyObject, [AnyObject]) -> Void
+    private let bindImpl: (AnyObject, FluxHandlerId, FluxNodeId) -> Void
+    private let destroyImpl: (AnyObject) -> Void
+
+    /// Wraps a concrete adapter, capturing its `create`/`update`/`setChildren`/
+    /// `bindHandler`/`destroy` entry points behind `AnyObject` views.
+    init<A: FluxAdapter>(_ adapter: A) {
+        let holder = Holder(adapter)
+        self.holder = holder
+        self.createImpl = { holder.adapter.create() }
+        self.updateImpl = { view, old, new in
+            guard let v = view as? A.View else { return }
+            holder.adapter.update(v, from: old, to: new)
+        }
+        self.setChildrenImpl = { view, children in
+            guard let v = view as? A.View else { return }
+            holder.adapter.setChildren(children, on: v)
+        }
+        self.bindImpl = { view, handlerId, nodeId in
+            guard let v = view as? A.View else { return }
+            holder.adapter.bindHandler(handlerId, to: v, nodeId: nodeId)
+        }
+        self.destroyImpl = { view in
+            guard let v = view as? A.View else { return }
+            holder.adapter.destroy(v)
+        }
+    }
+
+    /// Creates a fresh native view.
+    func create() -> AnyObject { createImpl() }
+
+    /// Applies a prop diff onto an existing view.
+    func update(_ view: AnyObject, from old: Props, to new: Props) {
+        updateImpl(view, old, new)
+    }
+
+    /// Reconciles `view`'s children.
+    func setChildren(_ children: [AnyObject], on view: AnyObject) {
+        setChildrenImpl(view, children)
+    }
+
+    /// Binds `handlerId` to `view`, scoped to `nodeId`.
+    func bindHandler(_ handlerId: FluxHandlerId, to view: AnyObject, nodeId: FluxNodeId) {
+        bindImpl(view, handlerId, nodeId)
+    }
+
+    /// Tears down `view`'s bindings.
+    func destroy(_ view: AnyObject) {
+        destroyImpl(view)
+    }
+}
+
+/// A closure that builds a fresh adapter pre-wired to `executor`, used by the
+/// registry so each created adapter dispatches native events back to the host
+/// coordinator without retaining the runtime.
+typealias RegistryFactory = ((any FluxExecutor)?) -> AnyFluxAdapter
+
+/// Resolves a `ComponentId` to a fresh adapter instance, using the Init
+/// frame's string table to map each declared component id to its adapter.
+///
+/// The standard library's seven primitives — `Text`, `Button`, `Column`,
+/// `Row`, `TextField`, `Router`, `Screen` — each have a fixed adapter
+/// factory; a component id whose name matches one of these is bound.
+@MainActor
 struct AdapterRegistry {
-    private var adapters: [NodeKind: any FluxAdapter]
+    /// Factories keyed by `ComponentId`.
+    private let factories: [UInt32: RegistryFactory]
 
-    init(_ adapters: [any FluxAdapter]) {
-        var map: [NodeKind: any FluxAdapter] = [:]
-        for a in adapters { map[a.handles] = a }
-        self.adapters = map
+    /// Creates a registry from `table`, binding every component id whose
+    /// interned name is a known primitive.
+    init(table: StringTable) {
+        let byName: [String: RegistryFactory] = [
+            "Text": { AnyFluxAdapter(TextAdapter(executor: $0)) },
+            "Button": { AnyFluxAdapter(ButtonAdapter(executor: $0)) },
+            "Column": { AnyFluxAdapter(ColumnAdapter(executor: $0)) },
+            "Row": { AnyFluxAdapter(RowAdapter(executor: $0)) },
+            "TextField": { AnyFluxAdapter(TextFieldAdapter(executor: $0)) },
+            "Router": { AnyFluxAdapter(RouterAdapter(executor: $0)) },
+            "Screen": { AnyFluxAdapter(ScreenAdapter(executor: $0)) },
+        ]
+        var map: [UInt32: RegistryFactory] = [:]
+        for id in table.ids {
+            if let name = table.lookup(id), let factory = byName[name] {
+                map[id] = factory
+            }
+        }
+        self.factories = map
     }
 
-    /// Returns the adapter for `kind`, or `nil` if none is registered.
-    func adapter(for kind: NodeKind) -> (any FluxAdapter)? {
-        adapters[kind]
+    /// Produces a fresh adapter for `componentId`, wired to `executor`, or
+    /// `nil` if the id is unbound.
+    func make(for componentId: UInt32, executor: (any FluxExecutor)?) -> AnyFluxAdapter? {
+        factories[componentId]?(executor)
     }
+
+    /// Every `ComponentId` this registry can resolve.
+    var resolvedComponentIds: [UInt32] { Array(factories.keys) }
 }
