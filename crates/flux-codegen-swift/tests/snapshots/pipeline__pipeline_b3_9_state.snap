@@ -1,0 +1,13 @@
+---
+source: crates/flux-codegen-swift/tests/pipeline.rs
+assertion_line: 127
+expression: "codegen_example(name, src)"
+---
+struct Toggle: View {
+    @State private var on: Bool = false
+    var body: some View {
+  Button(action: {}) {
+      Text("")
+  }
+    }
+}

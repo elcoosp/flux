@@ -1,0 +1,16 @@
+---
+source: crates/flux-codegen-swift/tests/pipeline.rs
+assertion_line: 121
+expression: "codegen_example(name, src)"
+---
+struct Login: View {
+    @State private var value: String = ""
+    var body: some View {
+  VStack {
+      Text("Login")
+      Button(action: {}) {
+          Text("")
+      }
+  }
+    }
+}

@@ -1,0 +1,17 @@
+---
+source: crates/flux-codegen-swift/tests/pipeline.rs
+assertion_line: 103
+expression: "codegen_example(name, src)"
+---
+struct App: View {
+    @State private var show: Bool = false
+    var body: some View {
+  VStack {
+      if show {
+          Text("visible")
+      } else {
+          Text("hidden")
+      }
+  }
+    }
+}

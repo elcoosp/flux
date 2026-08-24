@@ -1,0 +1,14 @@
+---
+source: crates/flux-codegen-swift/tests/pipeline.rs
+assertion_line: 109
+expression: "codegen_example(name, src)"
+---
+struct Feed: View {
+    @State private var items: List<String> = ["a", "b"]
+    var body: some View {
+  VStack {
+      ForEach(items, id: \.id) { item in
+      }
+  }
+    }
+}

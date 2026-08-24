@@ -1,0 +1,18 @@
+---
+source: crates/flux-codegen-swift/tests/pipeline.rs
+assertion_line: 91
+expression: "codegen_example(name, src)"
+---
+struct AreaView: View {
+    let shape: Shape
+    var body: some View {
+  VStack {
+      switch shape {
+          case Circle(r):
+              Text("circle")
+          case Rect(w, h):
+              Text("rect")
+      }
+  }
+    }
+}
