@@ -9,8 +9,10 @@
 //   max_lines   Option[Int]     defaults to None when omitted
 //   overflow    Option[Overflow]  defaults to None when omitted
 //
-// The `= None` defaults encode Appendix F.1's "optional" props; the parser
-// support for default values is tracked in ADR stdlib-grammar-gaps (G2).
+// The `= None` defaults encode Appendix F.1's "optional" props. `prop_decl`
+// carries an optional `"=" expr` default (Appendix B.2); the gap recorded as
+// G2 in ADR stdlib-grammar-gaps was closed by FLUX-003 and is verified by
+// FLUX-015's parse check.
 //
 // Native rendering is defined by Appendix F.1 (UILabel / TextView in dev
 // mode; SwiftUI `Text` / Compose `Text` in release). This declaration is
