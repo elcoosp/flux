@@ -951,169 +951,244 @@ agent ADRs use `<scope>-<slug>.md` or the next free `ADR-NNNN`. CI guard:
 ### B.1 Lexer Rules (pest)
 
 ```pest
+// This grammar is normative. crates/flux-parser/src/flux.pest mirrors it 1:1;
+// the two are kept in sync and tests/appendix_b_examples.rs asserts every
+// B.3 example against the parser that implements it.
+
 // Whitespace and comments
 WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
-COMMENT    = { "//" ~ (!"\n" ~ ANY)* }
+COMMENT    = _{ "//" ~ (!"\n" ~ ANY)* }
 
-// Identifiers
-ident      = @{ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* }
-path       = { ident ~ ("::" ~ ident)* }
+// A keyword may not be followed by an identifier continuation character, so
+// `state` matches the keyword but `stateful` matches an identifier.
+word_end = _{ !(ASCII_ALPHANUMERIC | "_") }
+
+// Keywords are matched before identifiers (see `ident` below), which prevents
+// an identifier from consuming a leading keyword token.
+keyword = @{ ("component" | "capability" | "createRef" | "onCleanup" | "onMount" | "otherwise" | "untrack" | "resource" | "provide" | "derived" | "effect" | "import" | "batch" | "false" | "match" | "state" | "trait" | "true" | "type" | "when" | "with" | "else" | "let" | "use" | "if" | "fn" | "ForEach" | "useContext" | "props") ~ word_end }
+
+ident = @{ !keyword ~ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* }
+path  = { ident ~ ("::" ~ ident)* }
 
 // Literals
-int_lit    = { "-"? ~ ASCII_DIGIT+ }
-float_lit  = { "-"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ }
-bool_lit   = { "true" | "false" }
-string_lit = { "\"" ~ (string_char | interp)* ~ "\"" }
-string_char = { !("\"" | "{" | "\\") ~ ANY | "\\\"" | "\\{" | "\\\\" }
-interp     = { "{" ~ ident ~ ("." ~ ident)* ~ "}" }
-list_lit   = { "[" ~ (expr ~ ("," ~ expr)*)? ~ "]" }
+float_lit  = @{ "-" ? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ }
+int_lit    = @{ "-" ? ~ ASCII_DIGIT+ }
+bool_lit   = @{ ("true" | "false") ~ word_end }
 
-// Keywords (reserved)
-keyword    = { "component" | "fn" | "state" | "props" | "type" | "trait"
-             | "import" | "use" | "let" | "if" | "else" | "when" | "otherwise"
-             | "match" | "ForEach" | "provide" | "with" | "capability"
-             | "onMount" | "onCleanup" | "effect" | "derived" | "batch"
-             | "untrack" | "resource" | "createRef" | "useContext" | "pure" }
-```
+string_lit = ${ "\"" ~ str_part* ~ "\"" }
+str_part   = { interp | str_text }
+str_text   = @{ (escape | !("\"" | "{" | "\\") ~ ANY)+ }
+escape     = @{ "\\" ~ ANY }
+// Interpolation holds a full condition expression, which permits dotted
+// access such as `{user.name}` (Appendix B.3.6).
+interp     = !{ "{" ~ cond_expr ~ "}" }
 
-### B.2 Parser Rules (pest)
+list_lit = { "[" ~ (expr ~ ("," ~ expr)*)? ~ ","? ~ "]" }
+literal  = { float_lit | int_lit | bool_lit | string_lit | list_lit }
 
-```pest
+// `...` marks an elided body, as in the Appendix B.3.8 platform example.
+ellipsis = { "..." }
+
 // ========================= Top-level =========================
 
-file        = { SOI ~ statement* ~ EOI }
-statement   = { import_decl | use_decl | component_decl | fn_decl
-             | type_decl | trait_decl | capability_decl | const_binding }
+file      = { SOI ~ statement* ~ EOI }
+statement = { import_decl | use_decl | annotated_component | fn_decl | type_decl | trait_decl | capability_decl | module_state | const_binding }
 
-// Module-level associated constant. `Name` is a dot-qualified type or
-// module path; the bound value is any expression. Examples (mlp-spec §18.6):
-//   Color.red = RGB(1.0, 0.0, 0.0)
-//   Font.body = Font("", 17.0, Regular, Normal)
-const_binding = { ident ~ ("." ~ ident)* ~ "=" ~ expr }
-
-// ========================= Imports ==========================
+// Module-level `state` declares a runtime-bound module value, e.g. the
+// `state platform: String = "ios"` in stdlib/platform.flux. The body is
+// shared with the block-level `state_decl`.
+module_state = { state_decl }
 
 import_decl = { "import" ~ ident ~ "from" ~ string_lit }
 use_decl    = { "use" ~ path ~ ("::" ~ "*")? }
 
-// ========================= Components =======================
+// Module-level associated constant (mlp-spec §18.6):
+//   Color.red = RGB(1.0, 0.0, 0.0)
+//   Font.body = Font("", 17.0, Regular, Normal)
+const_binding = { const_path ~ assign_op ~ expr }
+const_path    = { ident ~ ("." ~ ident)+ }
 
-component_decl
-            = { annotations? ~ "component" ~ ident ~ generic_params?
-                  ~ props_block? ~ block }
+// `assign_op` is `=` that is not the start of `==`.
+assign_op = _{ "=" ~ !"=" }
 
-annotations = { "@" ~ ident ~ ("(" ~ args? ~ ")")? }
+// ========================= Components =========================
 
-props_block = { "(" ~ prop_decl ~ ("," ~ prop_decl?)* ~ ")" }
-prop_decl   = { ident ~ ":" ~ type ~ ("=" ~ expr)? }
+annotated_component = { annotation* ~ component_decl }
+annotation          = { "@" ~ ident ~ ("(" ~ args? ~ ")")? }
 
-// ========================= Functions ========================
+component_decl = { "component" ~ ident ~ generic_params? ~ props_block? ~ block }
 
-// A function/trait-method name is either an identifier or a symbolic
-// operator (mlp-spec §18.2 / B.3.2): `fn +(a: T, b: T) -> T`, `fn ==(a, b)`.
-fn_name     = { ident | operator }
-operator    = { "+" | "-" | "*" | "/" | "%" | "==" | "!=" | "<" | ">"
-             | "<=" | ">=" }
+// The optional prop list (`Avatar(url: String, size: Float)`) and the
+// trailing prop block (`Image(url) { width: size }`, Appendix B.3.7) share
+// this rule; a trailing comma is accepted.
+props_block = { "(" ~ (prop_decl ~ ("," ~ prop_decl)* ~ ","?)? ~ ")" }
+prop_decl   = { ident ~ ":" ~ ty ~ (assign_op ~ expr)? }
 
-fn_decl     = { "fn" ~ fn_name ~ generic_params? ~ "(" ~ params? ~ ")"
-                  ~ ("->" ~ type)? ~ block }
+// ========================= Functions =========================
 
-params      = { param ~ ("," ~ param)* }
-param       = { ident ~ ":" ~ type ~ ("=" ~ expr)? }
+// A function or trait-method name is an identifier or a symbolic operator
+// (mlp-spec §18.2 / B.3.2): `fn +(a: T, b: T) -> T`.
+fn_name  = { ident | operator }
+operator = @{ "==" | "!=" | "<=" | ">=" | "+" | "-" | "*" | "/" | "%" | "<" | ">" }
 
-// ========================= Types ============================
+fn_decl = { "fn" ~ fn_name ~ generic_params? ~ "(" ~ params? ~ ")" ~ ret_ty? ~ block }
+ret_ty  = { "->" ~ ty }
 
-type_decl   = { "type" ~ ident ~ generic_params? ~ "=" ~ variant+ }
-variant     = { "|" ~ ident ~ ("(" ~ type_list? ~ ")")? }
+params = { param ~ ("," ~ param)* ~ ","? }
+// The type annotation is optional so the same `param` rule serves a lambda's
+// parameter list (Appendix B.3.6 `fn(u, i) { ... }`).
+param  = { ident ~ (":" ~ ty)? ~ (assign_op ~ expr)? }
+
+// ========================= Types =========================
+
+type_decl = { "type" ~ ident ~ generic_params? ~ assign_op ~ first_variant ~ variant* }
+// The leading `|` is optional on the first variant only, so a single-variant
+// newtype (`type Ref[T] = Ref(T)`) parses while `A B` still does not.
+first_variant = _{ "|"? ~ variant_body }
+variant       = _{ "|" ~ variant_body }
+variant_body  = { ident ~ ("(" ~ type_list? ~ ")")? }
 
 trait_decl  = { "trait" ~ ident ~ generic_params? ~ "{" ~ method_decl* ~ "}" }
-method_decl = { "fn" ~ fn_name ~ "(" ~ params? ~ ")" ~ ("->" ~ type)? }
+method_decl = { "fn" ~ fn_name ~ generic_params? ~ "(" ~ params? ~ ")" ~ ret_ty? }
 
-// ========================= Capabilities =====================
+capability_decl = { "capability" ~ ident ~ "{" ~ method_decl* ~ "}" }
 
-capability_decl
-            = { "capability" ~ ident ~ "{" ~ cap_method* ~ "}" }
-cap_method  = { "fn" ~ fn_name ~ "(" ~ params? ~ ")" ~ ("->" ~ type)? }
+generic_params = { "[" ~ type_param ~ ("," ~ type_param)* ~ "]" }
+type_param     = { ident ~ (":" ~ ident)? }
+generic_args   = { "[" ~ ty ~ ("," ~ ty)* ~ "]" }
 
-// ========================= Generics =========================
-
-generic_params
-            = { "[" ~ type_param ~ ("," ~ type_param)* ~ "]" }
-type_param  = { ident ~ (":" ~ ident)? }
-
-generic_args = { "[" ~ type ~ ("," ~ type)* ~ "]" }
-
-// ========================= Type Expressions =================
-
-type        = { type_app | type_var | primitive | record_type | fn_type }
+ty          = { fn_type | record_type | primitive | type_app }
+primitive   = @{ ("Int" | "Float" | "Bool" | "String" | "Unit") ~ word_end }
 type_app    = { ident ~ generic_args? }
-type_var    = { ident }
-primitive   = { "Int" | "Float" | "Bool" | "String" | "Unit" }
-record_type = { "{" ~ field_type ~ ("," ~ field_type)* ~ "}" }
-field_type  = { ident ~ ":" ~ type }
-fn_type     = { "Fn" ~ "(" ~ type_list? ~ ")" ~ "->" ~ type }
-type_list   = { type ~ ("," ~ type)* }
+record_type = { "{" ~ field_type ~ ("," ~ field_type)* ~ ","? ~ "}" }
+field_type  = { ident ~ ":" ~ ty }
+fn_type     = { "Fn" ~ "(" ~ type_list? ~ ")" ~ "->" ~ ty }
+type_list   = { ty ~ ("," ~ ty)* ~ ","? }
 
-// ========================= Value Literals ====================
-// Record literal (field-name constructor) used as a value. Example
-// (mlp-spec §18.6): Font { family: "", size: 17.0, weight: Regular, style: Normal }
-record_lit  = { ident ~ "{" ~ record_field ~ ("," ~ record_field)* ~ "}" }
+// ========================= Blocks =========================
+
+// A block may open with closure parameters (`{ msg => ... }`, Appendix
+// B.3.4 / B.3.6) and may hold `state` declarations and `name: value` prop
+// entries (Appendix B.3.1 / B.3.7) alongside expressions.
+block       = { "{" ~ block_params? ~ block_item* ~ "}" }
+block_params = { pat_ident ~ ("," ~ pat_ident)* ~ "=>" }
+block_item  = { state_decl | prop_entry | expr ~ ","? }
+prop_entry  = { ident ~ ":" ~ expr ~ ","? }
+
+state_decl = { "state" ~ ident ~ (":" ~ ty)? ~ assign_op ~ expr }
+
+// ========================= Expressions =========================
+
+expr = { let_expr | assign_expr | or_expr }
+
+// `let` binds an identifier, a tuple, or a record pattern (B.3.6).
+let_expr    = { "let" ~ let_pattern ~ (assign_op ~ expr)? }
+let_pattern = { tuple_pattern | record_pattern | ident }
+tuple_pattern  = { "(" ~ let_pattern ~ ("," ~ let_pattern)* ~ ")" }
+record_pattern = { "{" ~ ident ~ ("," ~ ident)* ~ "}" }
+
+// Assignment targets may be member chains (`socket.get().x = ...`).
+assign_expr = { postfix_nb ~ assign_op ~ expr }
+
+// Binary operators with C-like precedence (lowest to highest).
+or_expr  = { and_expr ~ ("||" ~ and_expr)* }
+and_expr = { cmp_expr ~ ("&&" ~ cmp_expr)* }
+cmp_expr = { add_expr ~ (cmp_op ~ add_expr)* }
+add_expr = { mul_expr ~ (add_op ~ mul_expr)* }
+mul_expr = { postfix_expr ~ (mul_op ~ postfix_expr)* }
+
+cmp_op = @{ "==" | "!=" | "<=" | ">=" | "<" | ">" }
+add_op = @{ "+" | "-" }
+mul_op = @{ "*" | "/" | "%" }
+
+postfix_expr = { primary ~ postfix* }
+postfix      = { field_access | call_args | block }
+field_access = { "." ~ ident }
+call_args    = { "(" ~ args? ~ ")" }
+
+args      = { arg ~ ("," ~ arg)* ~ ","? }
+arg       = { named_arg | expr }
+named_arg = { ident ~ ":" ~ expr }
+
+primary = { paren_expr | if_expr | when_expr | match_expr | for_expr | provide_expr | use_context_expr | lifecycle_expr | lambda | block_expr | record_lit | literal | ellipsis | ident }
+
+// A bare block in value position is a zero-argument closure, the
+// `onClick: { count = count + 1 }` form from Appendix B.3.1.
+block_expr = { block }
+
+paren_expr = { "(" ~ expr ~ ")" }
+
+record_lit   = { ident ~ "{" ~ record_field ~ ("," ~ record_field)* ~ ","? ~ "}" }
 record_field = { ident ~ ":" ~ expr }
 
-// ========================= Blocks & Expressions =============
+// Condition position forbids a trailing block, so `when users.loading {`
+// binds the block to the `when` rather than to a call. The `_nb` variants
+// omit `block` and the `if`/`when` primaries, eliminating that ambiguity.
+cond_expr    = { cmp_nb }
+cmp_nb       = { add_nb ~ (cmp_op ~ add_nb)* }
+add_nb       = { mul_nb ~ (add_op ~ mul_nb)* }
+mul_nb       = { postfix_nb ~ (mul_op ~ postfix_nb)* }
+postfix_nb   = { primary_nb ~ (field_access | call_args)* }
+primary_nb   = { paren_expr | lambda | literal | ellipsis | ident }
 
-block       = { "{" ~ (state_decl | expr)* ~ "}" }
+if_expr   = { "if" ~ cond_expr ~ block ~ ("else" ~ (if_expr | block))? }
+when_expr = { "when" ~ cond_expr ~ block ~ ("otherwise" ~ block)? }
 
-expr        = { let_expr | assign_expr | if_expr | when_expr
-             | match_expr | for_expr | call_expr | provide_expr
-             | lifecycle_expr | literal | record_lit | ident }
+match_expr = { "match" ~ cond_expr ~ "{" ~ match_arm+ ~ "}" }
+match_arm  = { pattern ~ "=>" ~ expr }
+pattern    = { guard_pattern | variant_pattern | literal | wildcard }
+variant_pattern = { ident ~ ("(" ~ pat_ident_list? ~ ")")? }
+guard_pattern   = { ident ~ "if" ~ cond_expr }
+wildcard        = { "_" }
+pat_ident_list  = { pat_ident ~ ("," ~ pat_ident)* }
+pat_ident       = { ident | wildcard }
 
-let_expr    = { "let" ~ ident ~ ("=" ~ expr)? }
-assign_expr = { lvalue ~ "=" ~ expr }
-state_decl  = { "state" ~ ident ~ (":" ~ type)? ~ "=" ~ expr }
-lvalue      = { ident ~ ("." ~ ident)* }
+for_expr = { "ForEach" ~ "(" ~ expr ~ "," ~ "key" ~ ":" ~ expr ~ ")" ~ block }
 
-if_expr     = { "if" ~ expr ~ block ~ ("else" ~ (if_expr | block))? }
-when_expr   = { "when" ~ expr ~ block ~ ("otherwise" ~ block)? }
+provide_expr     = { "provide" ~ ident ~ "with" ~ expr }
+use_context_expr = { "useContext" ~ "(" ~ ident ~ ")" }
 
-match_expr  = { "match" ~ expr ~ "{" ~ match_arm+ ~ "}" }
-match_arm   = { pattern ~ "=>" ~ expr }
-pattern     = { ident ~ ("(" ~ ident_list? ~ ")")? | "_" 
-             | literal | guard_pattern }
-guard_pattern = { ident ~ "if" ~ expr }
-ident_list  = { ident ~ ("," ~ ident)* }
+// A lambda is `fn (params) { ... }`; the parameter list may be omitted
+// (Appendix B.3.6 `resource(fn { ... })`).
+lambda = { "fn" ~ ("(" ~ params? ~ ")")? ~ block }
 
-for_expr    = { "ForEach" ~ "(" ~ expr ~ "," ~ "key:" ~ expr ~ ")"
-                  ~ block }
+// ========================= Lifecycle =========================
 
-call_expr   = { ident ~ "(" ~ args? ~ ")" ~ block? }
-args        = { arg ~ ("," ~ arg)* }
-arg         = { named_arg | expr }
-named_arg   = { ident ~ ":" ~ expr }
+lifecycle_expr = { on_mount_expr | on_cleanup_expr | effect_expr | derived_expr | batch_expr | untrack_expr | resource_expr | create_ref_expr }
 
-provide_expr = { "provide" ~ ident ~ "with" ~ expr }
-useContext_expr = { "useContext" ~ "(" ~ ident ~ ")" }
-
-// ========================= Lifecycle ========================
-
-lifecycle_expr
-            = { onMount_expr | onCleanup_expr | effect_expr
-             | derived_expr | batch_expr | untrack_expr
-             | resource_expr | createRef_expr }
-
-onMount_expr   = { "onMount" ~ block }
-onCleanup_expr = { "onCleanup" ~ block }
-effect_expr    = { "effect" ~ block }
-derived_expr   = { "derived" ~ block }
-batch_expr     = { "batch" ~ block }
-untrack_expr   = { "untrack" ~ block }
-resource_expr  = { "resource" ~ "(" ~ expr ~ ")" }
-createRef_expr = { "createRef" ~ generic_args? ~ "(" ~ ")" }
-
-// ========================= Literals =========================
-
-literal     = { float_lit | int_lit | bool_lit | string_lit | list_lit }
+on_mount_expr   = { "onMount" ~ block }
+on_cleanup_expr = { "onCleanup" ~ block }
+effect_expr     = { "effect" ~ block }
+derived_expr    = { "derived" ~ block }
+batch_expr      = { "batch" ~ block }
+untrack_expr    = { "untrack" ~ block }
+resource_expr   = { "resource" ~ "(" ~ expr ~ ")" }
+create_ref_expr = { "createRef" ~ generic_args? ~ "(" ~ ")" }
 ```
+
+### B.2 Notes
+
+The grammar above is one normative pest file. Selected points that the prose
+of the specification leaves implicit but the parser must honour:
+
+- **Lexer before identifier.** `keyword` is matched ahead of `ident`, so a
+  leading keyword token (`component`, `state`, `fn`, …) is never swallowed by
+  an identifier. `word_end` stops a keyword from prefix-matching a longer
+  identifier (`state` vs `stateful`).
+- **Assignment vs equality.** `assign_op` is `=` that is not followed by `=`,
+  which keeps `==` an operator and `=` an assignment target.
+- **Trailing-block ambiguity.** `cond_expr` (and its `_nb` derivatives) omit
+  `block` and the `if`/`when` primaries, so a block after a `when`/`if`
+  condition binds to the `when`/`if`, never to a preceding call. The same
+  postfix `block` is what attaches a trailing block to `Image(url) { … }`.
+- **Closures.** A bare `block` in value position (`block_expr`) is a
+  zero-argument closure; `lambda` is the `fn (params) { … }` form, with the
+  parameter list optional (Appendix B.3.6 `resource(fn { … })`). Both lower to
+  `ExprKind::Lambda`.
+- **Module state.** `module_state` reuses `state_decl`; the parser records it
+  as `Decl::State`. This is the only production not present in the original
+  Appendix B and is tracked as gap G5 in
+  `/docs/adr/parser-grammar-extensions.md`.
 
 ### B.3 Grammar Examples
 
