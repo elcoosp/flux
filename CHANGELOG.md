@@ -676,6 +676,29 @@ Committed as `1d52b57` + `1c9705f` + `6bc37c6`:
 This replaced a divergent FNV fork in `flux-types` that omitted `span.file_id` —
 without the bridge, lowering would have silently failed to look up types.
 
+#### FLUX-011 — CI pipelines — DONE
+
+Added GitHub Actions workflows that enforce the AGENTS.md Definition-of-Done
+gates automatically as crates land. Committed as `8ac2655` + `7b223b3`
++ `85b0e47` + `402fbb3` (all under `ci(flux-011)`):
+
+- `.github/workflows/rust-check.yml` — `cargo fmt --all -- --check`,
+  `cargo clippy --all-targets --all-features -- -D warnings`,
+  `cargo test --workspace --all-targets`, `cargo doc --no-deps --workspace`.
+  Globs are workspace-wide, so a crate is covered the moment its real source
+  lands (Phase 1+) with no manifest edit.
+- `.github/workflows/ios-check.yml` — XcodeGen + `xcodebuild test` for the
+  iOS runtime/adapters, plus `swift test` for the Swift package.
+- `.github/workflows/android-check.yml` — `./gradlew` Kotlin + Android test.
+- `.github/workflows/adr-numbering.yml` — the ADR-naming guard (fails when a
+  new agent ADR reuses a reserved `ADR-NNNN`), paired with
+  `docs/scripts/check-adr-numbering.sh` and the ADR-renumbering governance
+  (ADR-0021…0024).
+
+All workflows run on push (any branch) and PR to `main`, with `docs/**`,
+`runtimes/**`, `adapters/**`, `**.md` path-ignored where appropriate so doc-only
+changes don't trigger the Rust/iOS/Android builds.
+
 #### Outstanding Phase 1–4 crates (stubs / in-flight, owned by named flux-N agents)
 
 The following workspace crates are owned by other agents (not built by this
