@@ -11,9 +11,10 @@
 use blake3::Hasher;
 use flux_syntax::{Patch, PropIdx, SignalId, StringTable, Value};
 
-use crate::wire::{WireError, Writer, decode_patch, encode_patch};
+use crate::frame::Frame;
+use crate::wire::WireError;
 
-/// Serializes a patch stream to the Appendix D binary layout.
+/// Serializes a patch stream into a `Delta` wire frame (Appendix D §D.1 + §D.2).
 ///
 /// The encoder does **not** mutate `table`; the caller passes the table that
 /// owns every `StringId` referenced by the patches, and the host app is
@@ -24,26 +25,18 @@ use crate::wire::{WireError, Writer, decode_patch, encode_patch};
 /// # Examples
 ///
 /// ```
-/// use flux_ir_serde::{hash_props, serialize_patches};
+/// use flux_ir_serde::{deserialize_patches, serialize_patches};
 /// use flux_syntax::{Patch, StringTable};
 ///
 /// let table = StringTable::new();
-/// let bytes = serialize_patches(&[], &table);
-/// assert!(bytes.is_empty());
-/// // hash_props is deterministic across calls.
-/// let fields = vec![(0u16, flux_syntax::Value::Int(7))];
-/// assert_eq!(hash_props(&fields), hash_props(&fields));
+/// let patches = vec![Patch::Remove { id: 42 }];
+/// let bytes = serialize_patches(&patches, &table);
+/// let back = deserialize_patches(&bytes).unwrap();
+/// assert_eq!(serialize_patches(&back, &table), bytes);
 /// ```
 #[must_use]
-pub fn serialize_patches(patches: &[Patch], table: &StringTable) -> Vec<u8> {
-    let mut writer = Writer::new();
-    for patch in patches {
-        encode_patch(&mut writer, patch);
-    }
-    // `table` is read for completeness in the public signature; the wire layout
-    // ships only IDs (Appendix D §D.9 deltas are carried by the frame layer).
-    let _ = table;
-    writer.into_vec()
+pub fn serialize_patches(patches: &[Patch], _table: &StringTable) -> Vec<u8> {
+    Frame::delta(0, 0, patches, &[]).to_bytes()
 }
 
 /// Round-trip decoder for tests only (production decoders are Swift/Kotlin).
@@ -64,13 +57,7 @@ pub fn serialize_patches(patches: &[Patch], table: &StringTable) -> Vec<u8> {
 /// assert_eq!(serialize_patches(&back, &StringTable::new()), bytes);
 /// ```
 pub fn deserialize_patches(bytes: &[u8]) -> Result<Vec<Patch>, WireError> {
-    let mut reader = crate::wire::Reader::new(bytes);
-    let total = bytes.len();
-    let mut out = Vec::new();
-    while reader.pos() < total {
-        out.push(decode_patch(&mut reader)?);
-    }
-    Ok(out)
+    Frame::from_delta_bytes(bytes).map(|frame| frame.patches)
 }
 
 /// BLAKE3 content hash of a props map.

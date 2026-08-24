@@ -102,7 +102,10 @@ fn round_trips_sample_patches() {
 #[test]
 fn round_trips_empty_patch_set() {
     let bytes = serialize_patches(&[], &StringTable::new());
-    assert!(bytes.is_empty());
+    // An empty set still serializes to a valid (minimal) Delta frame, not an
+    // empty buffer: magic(4) + version(1) + frame_type(1) + seq(4) + flags(1)
+    // + patch_count(2) + handler_count(2) + string_count(2) = 17 bytes.
+    assert_eq!(bytes.len(), 17);
     assert!(deserialize_patches(&bytes).unwrap().is_empty());
 }
 
@@ -259,7 +262,12 @@ fn init_frame_round_trips() {
 #[test]
 fn delta_frame_round_trips() {
     let patches = sample_patches();
-    let frame = Frame::delta(&patches, &[(StringId::from(1u32), "hello".to_string())]);
+    let frame = Frame::delta(
+        0,
+        0,
+        &patches,
+        &[(StringId::from(1u32), "hello".to_string())],
+    );
     let bytes = frame.to_bytes();
     let decoded = Frame::from_delta_bytes(&bytes).expect("delta decodes");
     // `Patch` does not derive `Eq`; compare the canonical encodings instead.

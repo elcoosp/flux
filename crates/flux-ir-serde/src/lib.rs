@@ -18,12 +18,11 @@
 //! [`IRArena`]: flux_ir::IRArena
 
 #![forbid(unsafe_code)]
-#![warn(
-    missing_docs,
-    missing_debug_implementations,
-    rust_2018_idioms,
-    unreachable_pub
-)]
+#![warn(missing_docs, missing_debug_implementations, rust_2018_idioms)]
+// The crate's public API (`Frame`, `*Frame`, `FrameKind`, `MAGIC`, `FLAG_*`, …)
+// is consumed by downstream crates (devserver/codegen), so `unreachable_pub`
+// is a false positive here; the items are intentionally exposed.
+#![allow(unreachable_pub)]
 
 mod encode;
 mod frame;
@@ -33,5 +32,9 @@ pub use encode::{deserialize_patches, hash_closure, hash_props, serialize_patche
 pub use frame::{
     DeltaFrame, ErrorFrame, Frame, FrameKind, HeartbeatFrame, HelloFrame, InitFrame, MAGIC,
     PROTOCOL_VERSION,
+};
+pub use frame::{
+    FLAG_FULL_TREE, FLAG_HAS_SRC_MAP_DELTA, FLAG_HAS_STATE_DELTA, FLAG_HAS_STRING_DELTA,
+    FLAG_HEARTBEAT, FRAME_DELTA, FRAME_ERROR, FRAME_HEARTBEAT, FRAME_HELLO, FRAME_INIT,
 };
 pub use wire::WireError;

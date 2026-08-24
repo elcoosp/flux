@@ -524,9 +524,18 @@ Structure:
   (`Frame::hello`/`from_hello_bytes`), `Init` (`Frame::init`/`from_init_bytes`,
   round-trips a `StringTable` by exact id), `Delta` (`Frame::delta`/
   `from_delta_bytes`), `Error` (`Frame::error`/`from_error_bytes`, `span:
-  Option<Span>`), `Heartbeat` (`Frame::heartbeat`/`from_heartbeat_bytes`). The
-  16-byte header is magic `0x465C5558`, version, seq, flags (Hello = reserved
-  bit 3, Init = full-tree bit 0, Error = bit 1, Heartbeat = bit 2, Delta = 0).
+  Option<Span>`), `Heartbeat` (`Frame::heartbeat`/`from_heartbeat_bytes`).
+
+  **Frame-header conformance (corrected 2026-08-24):** the earlier draft
+  unified every frame under the D.1 header with a `flags` byte and an invented
+  `bit3 = Hello`. That deviated from Appendix D. The shipped code follows D.12
+  exactly: a `magic(4) version(1) frame_type(1)` prefix (frame_type `0x01`
+  Hello / `0x02` Init / `0x03` Error / `0x04` Delta / `0x05` Heartbeat), then a
+  type-specific payload — Hello has no sequence number; Init/Error carry `seq`
+  at offset 6; the Delta frame uses the D.1 header (`seq`, `flags` bitfield,
+  `patch_count`/`handler_count`/`string_count` at offsets 11–15). Init's
+  `string_count` is a **u32** per D.12.2. `tests/conformance.rs` asserts these
+  exact offsets and the D.2/D.5 patch/value tags byte-for-byte.
 
 Encoding details matching Appendix D §D.1–D.8 exactly: `Value` 1-byte tag
 (`Int 1`, `Float 2`, `Bool 3`, `Str 4`, `HandlerRef 5`, `List 6`, `Record 7`)

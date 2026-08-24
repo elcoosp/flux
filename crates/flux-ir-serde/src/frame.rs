@@ -1,10 +1,15 @@
 //! Wire frame construction and header codec (Appendix D §D.1, §D.12).
 //!
-//! Every frame begins with the fixed 16-byte header (magic, version, sequence,
-//! flags, and three counts) followed by a typed payload. The typed-frame API
-//! (`Frame::hello`/`init`/`delta`/`error`/`heartbeat`) lays out each payload
-//! per Appendix D §D.12 and §D.9; production decoders in Swift/Kotlin read the
-//! same structure.
+//! The frame family uses two header shapes:
+//! - **Delta** frames follow the generic D.1 header: `magic(4) version(1)
+//!   frame_type(1)=0x04 seq(4) flags(1) patch_count(2) handler_count(2)
+//!   string_count(2)`, payload at offset 16.
+//! - **Hello / Init / Error / Heartbeat** follow the D.12 handshake layout:
+//!   `magic(4) version(1) frame_type(1)` then a type-specific payload
+//!   (Hello has no sequence number; Init/Error carry `seq` at offset 6).
+//!
+//! All integers are little-endian. Production decoders in Swift/Kotlin (FLUX-007,
+//! FLUX-008) read the same byte layout.
 
 use crate::wire::{
     Reader, WireError, Writer, decode_node, decode_patch, decode_string_entry, decode_value,
@@ -17,48 +22,75 @@ pub const MAGIC: u32 = 0x465C_5558;
 /// Current wire protocol version.
 pub const PROTOCOL_VERSION: u8 = 1;
 
-const FLAG_FULL_TREE: u8 = 1 << 0;
-const FLAG_ERROR: u8 = 1 << 1;
-const FLAG_HEARTBEAT: u8 = 1 << 2;
-const FLAG_HELLO: u8 = 1 << 3;
+/// `frame_type` byte at header offset 5 (Appendix D §D.12).
+pub const FRAME_HELLO: u8 = 0x01;
+/// `frame_type` for the `Init` (full-tree) frame.
+pub const FRAME_INIT: u8 = 0x02;
+/// `frame_type` for the `Error` frame.
+pub const FRAME_ERROR: u8 = 0x03;
+/// `frame_type` for the `Delta` (patch) frame (D.1).
+pub const FRAME_DELTA: u8 = 0x04;
+/// `frame_type` for the `Heartbeat` frame (D.12.5).
+pub const FRAME_HEARTBEAT: u8 = 0x05;
 
-/// The kind of a wire frame, derived from the `flags` bitfield (Appendix D §D.1).
+/// Bit flags inside a `Delta` frame's `flags` byte (D.1).
+///
+/// These name the reserved `flags` bits; the devserver sets/reads them when it
+/// ships `StateDelta`/`SourceMapDelta`/string-delta sections (D.10–D.11). The
+/// Delta encoder here leaves `flags` at 0 by default, so the constants are not
+/// yet referenced in-tree — kept as the normative bit map.
+#[allow(dead_code)]
+pub const FLAG_FULL_TREE: u8 = 1 << 0;
+/// Error frame flag.
+#[allow(dead_code)]
+pub const FLAG_ERROR: u8 = 1 << 1;
+/// Heartbeat flag.
+#[allow(dead_code)]
+pub const FLAG_HEARTBEAT: u8 = 1 << 2;
+/// Carries a `StateDelta` after the strings.
+#[allow(dead_code)]
+pub const FLAG_HAS_STATE_DELTA: u8 = 1 << 3;
+/// Carries a `SourceMapDelta` after the state delta.
+#[allow(dead_code)]
+pub const FLAG_HAS_SRC_MAP_DELTA: u8 = 1 << 4;
+/// Carries a `StringEntry` delta (otherwise `string_count` is 0).
+#[allow(dead_code)]
+pub const FLAG_HAS_STRING_DELTA: u8 = 1 << 5;
+
+/// The kind of a wire frame, derived from the `frame_type` byte (Appendix D §D.12).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FrameKind {
     /// Handshake frame (Host → Server, Appendix D §D.12.1).
     Hello,
     /// Full-tree `Init` frame (Appendix D §D.12.2).
     Init,
-    /// Patch delta frame.
-    Delta,
     /// Error frame.
     Error,
+    /// Patch delta frame.
+    Delta,
     /// Heartbeat.
     Heartbeat,
 }
 
 impl FrameKind {
-    fn flag(self) -> u8 {
+    fn type_byte(self) -> u8 {
         match self {
-            FrameKind::Hello => FLAG_HELLO,
-            FrameKind::Init => FLAG_FULL_TREE,
-            FrameKind::Delta => 0,
-            FrameKind::Error => FLAG_ERROR,
-            FrameKind::Heartbeat => FLAG_HEARTBEAT,
+            FrameKind::Hello => FRAME_HELLO,
+            FrameKind::Init => FRAME_INIT,
+            FrameKind::Error => FRAME_ERROR,
+            FrameKind::Delta => FRAME_DELTA,
+            FrameKind::Heartbeat => FRAME_HEARTBEAT,
         }
     }
 
-    fn from_flags(flags: u8) -> FrameKind {
-        if flags & FLAG_ERROR != 0 {
-            FrameKind::Error
-        } else if flags & FLAG_HEARTBEAT != 0 {
-            FrameKind::Heartbeat
-        } else if flags & FLAG_FULL_TREE != 0 {
-            FrameKind::Init
-        } else if flags & FLAG_HELLO != 0 {
-            FrameKind::Hello
-        } else {
-            FrameKind::Delta
+    fn from_type_byte(tag: u8) -> Option<FrameKind> {
+        match tag {
+            FRAME_HELLO => Some(FrameKind::Hello),
+            FRAME_INIT => Some(FrameKind::Init),
+            FRAME_ERROR => Some(FrameKind::Error),
+            FRAME_DELTA => Some(FrameKind::Delta),
+            FRAME_HEARTBEAT => Some(FrameKind::Heartbeat),
+            _ => None,
         }
     }
 }
@@ -69,27 +101,20 @@ impl FrameKind {
 #[derive(Debug)]
 pub struct Frame;
 
-// ── shared header helpers ───────────────────────────────────────────────────
+// ── shared primitive helpers ────────────────────────────────────────────────
 
-fn write_header(w: &mut Writer, kind: FrameKind) {
-    w.u8(MAGIC as u8);
-    w.u8((MAGIC >> 8) as u8);
-    w.u8((MAGIC >> 16) as u8);
-    w.u8((MAGIC >> 24) as u8);
+fn write_magic_version(w: &mut Writer) {
+    w.u32(MAGIC);
     w.u8(PROTOCOL_VERSION);
-    w.u32(0); // sequence — set by caller before shipping
-    w.u8(kind.flag());
-    w.u16(0);
-    w.u16(0);
-    w.u16(0);
 }
 
-/// Splits a frame buffer into `(version, seq, kind, payload)`.
-fn read_header(bytes: &[u8]) -> Result<(u8, u32, FrameKind, &[u8]), WireError> {
-    if bytes.len() < 16 {
+/// Validates the magic + version prefix and returns the `frame_type` byte and
+/// the remaining payload.
+fn read_frame_type(bytes: &[u8]) -> Result<(u8, FrameKind, &[u8]), WireError> {
+    if bytes.len() < 6 {
         return Err(WireError::Truncated {
             at: 0,
-            needed: 16,
+            needed: 6,
             context: "frame.header",
             available: bytes.len(),
         });
@@ -103,9 +128,19 @@ fn read_header(bytes: &[u8]) -> Result<(u8, u32, FrameKind, &[u8]), WireError> {
         });
     }
     let version = bytes[4];
-    let seq = u32::from_le_bytes(bytes[5..9].try_into().unwrap());
-    let kind = FrameKind::from_flags(bytes[9]);
-    Ok((version, seq, kind, &bytes[16..]))
+    if version != PROTOCOL_VERSION {
+        return Err(WireError::InvalidTag {
+            tag: version,
+            context: "frame.version",
+            at: 4,
+        });
+    }
+    let kind = FrameKind::from_type_byte(bytes[5]).ok_or(WireError::InvalidTag {
+        tag: bytes[5],
+        context: "frame.type",
+        at: 5,
+    })?;
+    Ok((version, kind, &bytes[6..]))
 }
 
 // ── str helpers (not exported by wire.rs) ───────────────────────────────────
@@ -115,14 +150,29 @@ fn encode_str(w: &mut Writer, s: &str) {
     w.bytes(s.as_bytes());
 }
 
-fn decode_str(r: &mut Reader<'_>) -> Result<String, WireError> {
-    let len = r.u16("str.len")? as usize;
-    let raw = r.bytes(len, "str")?;
+fn decode_str(r: &[u8], pos: &mut usize) -> Result<String, WireError> {
+    let len = r
+        .get(*pos..*pos + 2)
+        .map(|b| u16::from_le_bytes([b[0], b[1]]) as usize)
+        .ok_or(WireError::Truncated {
+            at: *pos,
+            needed: 2,
+            context: "str.len",
+            available: r.len(),
+        })?;
+    *pos += 2;
+    let raw = r.get(*pos..*pos + len).ok_or(WireError::Truncated {
+        at: *pos,
+        needed: len,
+        context: "str",
+        available: r.len(),
+    })?;
+    *pos += len;
     std::str::from_utf8(raw)
         .map(str::to_owned)
         .map_err(|_| WireError::InvalidUtf8 {
             context: "str",
-            at: r.pos() - len,
+            at: *pos - len,
         })
 }
 
@@ -132,11 +182,15 @@ fn encode_span(w: &mut Writer, span: &Span) {
     w.u32(span.end);
 }
 
-fn decode_span(r: &mut Reader<'_>) -> Result<Span, WireError> {
-    let file_id = r.u32("span.file")?;
-    let start = r.u32("span.start")?;
-    let end = r.u32("span.end")?;
-    Ok(Span::new(file_id, start, end))
+fn read_u32(r: &[u8], pos: &mut usize, ctx: &'static str) -> Result<u32, WireError> {
+    let b = r.get(*pos..*pos + 4).ok_or(WireError::Truncated {
+        at: *pos,
+        needed: 4,
+        context: ctx,
+        available: r.len(),
+    })?;
+    *pos += 4;
+    Ok(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
 }
 
 // ── Hello (D.12.1) ──────────────────────────────────────────────────────────
@@ -146,8 +200,6 @@ fn decode_span(r: &mut Reader<'_>) -> Result<Span, WireError> {
 pub struct HelloFrame {
     /// Protocol version.
     pub version: u8,
-    /// Monotonic sequence number.
-    pub seq: u32,
     /// Frame kind (always `Hello`).
     pub kind: FrameKind,
     /// Host platform, e.g. `"ios"` or `"android"`.
@@ -168,7 +220,6 @@ impl Frame {
     ) -> HelloFrame {
         HelloFrame {
             version: PROTOCOL_VERSION,
-            seq: 0,
             kind: FrameKind::Hello,
             platform: platform.to_owned(),
             device: device.to_owned(),
@@ -179,28 +230,33 @@ impl Frame {
     /// Decodes a `Hello` frame, or `None` on a malformed/short buffer.
     #[must_use]
     pub fn from_hello_bytes(bytes: &[u8]) -> Option<HelloFrame> {
-        let (version, seq, kind, payload) = read_header(bytes).ok()?;
+        let (version, kind, payload) = read_frame_type(bytes).ok()?;
         if kind != FrameKind::Hello {
             return None;
         }
-        let mut r = Reader::new(payload);
-        let platform = decode_str(&mut r).ok()?;
-        let device = decode_str(&mut r).ok()?;
-        let cap_count = r.u16("hello.caps").ok()?;
-        let mut capabilities = Vec::with_capacity(cap_count as usize);
+        let mut pos = 0;
+        let platform = decode_str(payload, &mut pos).ok()?;
+        let device = decode_str(payload, &mut pos).ok()?;
+        let cap_count =
+            u16::from_le_bytes([payload.get(pos).copied()?, payload.get(pos + 1).copied()?])
+                as usize;
+        pos += 2;
+        let mut capabilities = Vec::with_capacity(cap_count);
         for _ in 0..cap_count {
-            let name = decode_str(&mut r).ok()?;
-            let ver = r.u32("hello.cap.ver").ok()?;
-            let feat_count = r.u16("hello.cap.feats").ok()?;
-            let mut feats = Vec::with_capacity(feat_count as usize);
+            let name = decode_str(payload, &mut pos).ok()?;
+            let ver = read_u32(payload, &mut pos, "hello.cap.ver").ok()?;
+            let feat_count =
+                u16::from_le_bytes([payload.get(pos).copied()?, payload.get(pos + 1).copied()?])
+                    as usize;
+            pos += 2;
+            let mut feats = Vec::with_capacity(feat_count);
             for _ in 0..feat_count {
-                feats.push(decode_str(&mut r).ok()?);
+                feats.push(decode_str(payload, &mut pos).ok()?);
             }
             capabilities.push((name, ver, feats));
         }
         Some(HelloFrame {
             version,
-            seq,
             kind,
             platform,
             device,
@@ -210,11 +266,12 @@ impl Frame {
 }
 
 impl HelloFrame {
-    /// Encodes the `Hello` frame per Appendix D §D.1 + §D.12.1.
+    /// Encodes the `Hello` frame per Appendix D §D.12.1.
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut w = Writer::new();
-        write_header(&mut w, FrameKind::Hello);
+        write_magic_version(&mut w);
+        w.u8(self.kind.type_byte());
         encode_str(&mut w, &self.platform);
         encode_str(&mut w, &self.device);
         w.u16(self.capabilities.len() as u16);
@@ -273,15 +330,16 @@ impl Frame {
 
     /// Decodes an `Init` frame.
     pub fn from_init_bytes(bytes: &[u8]) -> Result<InitFrame, WireError> {
-        let (version, seq, kind, payload) = read_header(bytes)?;
+        let (version, kind, payload) = read_frame_type(bytes)?;
         if kind != FrameKind::Init {
             return Err(WireError::InvalidTag {
                 tag: 0,
                 context: "frame.kind.init",
-                at: 9,
+                at: 5,
             });
         }
         let mut r = Reader::new(payload);
+        let seq = r.u32("init.seq")?;
         let root = decode_node(&mut r)?;
         let seed_count = r.u16("init.seed")?;
         let mut state_seed = Vec::with_capacity(seed_count as usize);
@@ -294,17 +352,26 @@ impl Frame {
         let mut source_map = Vec::with_capacity(sm_count as usize);
         for _ in 0..sm_count {
             let fid = FileId::from(r.u32("init.srcmap.file")?);
-            let path = decode_str(&mut r)?;
+            let len = r.u16("init.srcmap.path.len")? as usize;
+            let raw = r.bytes(len, "init.srcmap.path")?;
+            let path = std::str::from_utf8(raw).map(str::to_owned).map_err(|_| {
+                WireError::InvalidUtf8 {
+                    context: "init.srcmap.path",
+                    at: r.pos(),
+                }
+            })?;
             source_map.push((fid, path));
         }
-        let str_count = r.u16("init.strings")?;
-        let mut string_table = StringTable::new();
+        // D.12.2: `string_count` is a u32.
+        let str_count = r.u32("init.string_count")? as usize;
+        let mut entries: Vec<(StringId, String)> = Vec::with_capacity(str_count);
         for _ in 0..str_count {
-            let (id, text) = decode_string_entry(&mut r)?;
-            // Interning in ID order reproduces the original dense IDs (the table
-            // assigns IDs from zero in insertion order).
-            let _ = id;
-            string_table.intern(&text);
+            entries.push(decode_string_entry(&mut r)?);
+        }
+        entries.sort_by_key(|(id, _)| *id);
+        let mut string_table = StringTable::new();
+        for (_, text) in &entries {
+            string_table.intern(text);
         }
         Ok(InitFrame {
             version,
@@ -323,7 +390,9 @@ impl InitFrame {
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut w = Writer::new();
-        write_header(&mut w, FrameKind::Init);
+        write_magic_version(&mut w);
+        w.u8(self.kind.type_byte());
+        w.u32(self.seq);
         encode_node(&mut w, &self.root);
         w.u16(self.state_seed.len() as u16);
         for (sig, val) in &self.state_seed {
@@ -340,7 +409,8 @@ impl InitFrame {
             .iter()
             .map(|(id, text)| (id, text.to_owned()))
             .collect();
-        w.u16(entries.len() as u16);
+        // D.12.2: `string_count` is a u32.
+        w.u32(entries.len() as u32);
         for (id, text) in &entries {
             encode_string_entry(&mut w, *id, text);
         }
@@ -348,7 +418,7 @@ impl InitFrame {
     }
 }
 
-// ── Delta (D.12.3) ───────────────────────────────────────────────────────────
+// ── Delta (D.1) ──────────────────────────────────────────────────────────────
 
 /// A decoded `Delta` (patch) frame.
 #[derive(Clone, Debug)]
@@ -359,6 +429,8 @@ pub struct DeltaFrame {
     pub seq: u32,
     /// Frame kind (always `Delta`).
     pub kind: FrameKind,
+    /// Delta flags (D.1 bitfield).
+    pub flags: u8,
     /// Patch stream.
     pub patches: Vec<Patch>,
     /// Newly interned strings carried by this frame.
@@ -368,11 +440,17 @@ pub struct DeltaFrame {
 impl Frame {
     /// Builds a `Delta` frame carrying `patches` and a string delta.
     #[must_use]
-    pub fn delta(patches: &[Patch], strings: &[(StringId, String)]) -> DeltaFrame {
+    pub fn delta(
+        seq: u32,
+        flags: u8,
+        patches: &[Patch],
+        strings: &[(StringId, String)],
+    ) -> DeltaFrame {
         DeltaFrame {
             version: PROTOCOL_VERSION,
-            seq: 0,
+            seq,
             kind: FrameKind::Delta,
+            flags,
             patches: patches.to_vec(),
             strings: strings.to_vec(),
         }
@@ -380,22 +458,33 @@ impl Frame {
 
     /// Decodes a `Delta` frame.
     pub fn from_delta_bytes(bytes: &[u8]) -> Result<DeltaFrame, WireError> {
-        let (version, seq, kind, payload) = read_header(bytes)?;
+        let (version, kind, payload) = read_frame_type(bytes)?;
         if kind != FrameKind::Delta {
             return Err(WireError::InvalidTag {
                 tag: 0,
                 context: "frame.kind.delta",
-                at: 9,
+                at: 5,
             });
         }
-        let mut r = Reader::new(payload);
-        let patch_count = r.u16("delta.patch_count")?;
-        let mut patches = Vec::with_capacity(patch_count as usize);
+        if payload.len() < 10 {
+            return Err(WireError::Truncated {
+                at: 6,
+                needed: 10,
+                context: "delta.header",
+                available: payload.len(),
+            });
+        }
+        let seq = u32::from_le_bytes(payload[0..4].try_into().unwrap());
+        let flags = payload[4];
+        let patch_count = u16::from_le_bytes([payload[5], payload[6]]) as usize;
+        let _handler_count = u16::from_le_bytes([payload[7], payload[8]]);
+        let str_count = u16::from_le_bytes([payload[9], payload[10]]) as usize;
+        let mut r = Reader::new(&payload[11..]);
+        let mut patches = Vec::with_capacity(patch_count);
         for _ in 0..patch_count {
             patches.push(decode_patch(&mut r)?);
         }
-        let str_count = r.u16("delta.string_count")?;
-        let mut strings = Vec::with_capacity(str_count as usize);
+        let mut strings = Vec::with_capacity(str_count);
         for _ in 0..str_count {
             strings.push(decode_string_entry(&mut r)?);
         }
@@ -403,6 +492,7 @@ impl Frame {
             version,
             seq,
             kind,
+            flags,
             patches,
             strings,
         })
@@ -414,12 +504,16 @@ impl DeltaFrame {
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut w = Writer::new();
-        write_header(&mut w, FrameKind::Delta);
+        write_magic_version(&mut w);
+        w.u8(self.kind.type_byte());
+        w.u32(self.seq);
+        w.u8(self.flags);
         w.u16(self.patches.len() as u16);
+        w.u16(0); // handler_count (HandlerDef stream reserved for D.8)
+        w.u16(self.strings.len() as u16);
         for patch in &self.patches {
             encode_patch(&mut w, patch);
         }
-        w.u16(self.strings.len() as u16);
         for (id, text) in &self.strings {
             encode_string_entry(&mut w, *id, text);
         }
@@ -427,9 +521,9 @@ impl DeltaFrame {
     }
 }
 
-// ── Error (D.12.4) ──────────────────────────────────────────────────────────
+// ── Error (D.12.3) ──────────────────────────────────────────────────────────
 
-/// A decoded `Error` frame (Appendix D §D.12.4).
+/// A decoded `Error` frame (Appendix D §D.12.3).
 #[derive(Clone, Debug)]
 pub struct ErrorFrame {
     /// Protocol version.
@@ -459,19 +553,28 @@ impl Frame {
 
     /// Decodes an `Error` frame.
     pub fn from_error_bytes(bytes: &[u8]) -> Result<ErrorFrame, WireError> {
-        let (version, seq, kind, payload) = read_header(bytes)?;
+        let (version, kind, payload) = read_frame_type(bytes)?;
         if kind != FrameKind::Error {
             return Err(WireError::InvalidTag {
                 tag: 0,
                 context: "frame.kind.error",
-                at: 9,
+                at: 5,
             });
         }
         let mut r = Reader::new(payload);
-        let message = decode_str(&mut r)?;
+        let seq = r.u32("error.seq")?;
+        let msg_len = r.u16("error.msg.len")? as usize;
+        let raw = r.bytes(msg_len, "error.msg")?;
+        let message =
+            std::str::from_utf8(raw)
+                .map(str::to_owned)
+                .map_err(|_| WireError::InvalidUtf8 {
+                    context: "error.msg",
+                    at: r.pos(),
+                })?;
         let has_span = r.u8("error.span_flag")?;
         let span = if has_span != 0 {
-            Some(decode_span(&mut r)?)
+            Some(decode_span_from_reader(&mut r)?)
         } else {
             None
         };
@@ -485,12 +588,23 @@ impl Frame {
     }
 }
 
+/// Decodes a `Span` from the shared `Reader` (mirrors `decode_span` but on the
+/// reader type the Error frame uses).
+fn decode_span_from_reader(r: &mut Reader<'_>) -> Result<Span, WireError> {
+    let file_id = r.u32("span.file")?;
+    let start = r.u32("span.start")?;
+    let end = r.u32("span.end")?;
+    Ok(Span::new(file_id, start, end))
+}
+
 impl ErrorFrame {
-    /// Encodes the `Error` frame per Appendix D §D.1 + §D.12.4.
+    /// Encodes the `Error` frame per Appendix D §D.1 + §D.12.3.
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut w = Writer::new();
-        write_header(&mut w, FrameKind::Error);
+        write_magic_version(&mut w);
+        w.u8(self.kind.type_byte());
+        w.u32(self.seq);
         encode_str(&mut w, &self.message);
         match &self.span {
             Some(span) => {
@@ -530,20 +644,26 @@ impl Frame {
     /// Decodes a `Heartbeat` frame.
     #[must_use]
     pub fn from_heartbeat_bytes(bytes: &[u8]) -> Option<HeartbeatFrame> {
-        let (version, seq, kind, _payload) = read_header(bytes).ok()?;
+        let (version, kind, payload) = read_frame_type(bytes).ok()?;
         if kind != FrameKind::Heartbeat {
             return None;
         }
+        if payload.len() < 4 {
+            return None;
+        }
+        let seq = u32::from_le_bytes(payload[0..4].try_into().unwrap());
         Some(HeartbeatFrame { version, seq, kind })
     }
 }
 
 impl HeartbeatFrame {
-    /// Encodes the `Heartbeat` frame per Appendix D §D.1.
+    /// Encodes the `Heartbeat` frame per Appendix D §D.12.5.
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut w = Writer::new();
-        write_header(&mut w, FrameKind::Heartbeat);
+        write_magic_version(&mut w);
+        w.u8(self.kind.type_byte());
+        w.u32(self.seq);
         w.into_vec()
     }
 }
