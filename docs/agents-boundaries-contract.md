@@ -859,15 +859,18 @@ section). **Sequence after FLUX-018** defines `ClosureIR`'s final shape, then a
 bytecode blob to `Init`/`Delta`. FLUX-019 (devserver) must not hard-code a
 handler wire shape until G1 lands.
 
-### Gap G2 — node-ID derivation has no single source (orchestrator task; BLOCKS FLUX-018)
-`flux-types/src/kind.rs:303` defines its own `compute_node_id` (u8 tag, u64 key)
-and `flux-ir/src/node_id.rs:46` is the canonical one (`NodeKind`, `Option<Key>`).
-They live in separate crates; `flux-types` does not depend on `flux-ir`. FLUX-018
-lowering keys `TypedAST.types` by `NodeId`, so the two derivations must agree.
-**This is an orchestrator pass (R5 forbids agents from editing `flux-syntax`):**
-relocate the single `compute_node_id` into `flux-syntax`, update both crates,
-add a cross-crate proptest, and write `docs/adr/ir-node-id-bridge.md`. Must
-complete **before** FLUX-018 is dispatched.
+### Gap G2 — node-ID derivation has no single source (orchestrator task; BLOCKS FLUX-018) — DONE (2026-08-24)
+`flux-types/src/kind.rs:303` defined its own `compute_node_id` (u8 tag, u64 key,
+FNV hash) and `flux-ir/src/node_id.rs:46` was the canonical one (`NodeKind`,
+`Option<Key>`, BLAKE3) — they hashed **different bytes** (flux-types omitted
+`span.file_id`). RESOLVED by `ADR-0027`: canonical `compute_node_id` now lives
+in `flux-syntax` (BLAKE3, the flux-ir layout), `flux-ir` delegates to it (public
+`NodeKind` API unchanged, output identical — committed `1c9705f`), and
+`flux-types` now also delegates (signature `key: u64`→`Option<Key>`, call sites
+`0`→`None`; edits in working tree, pending the in-flight FLUX-012 agent finishing
+their unrelated `CalleeShape::Adt` fix so `flux-types` compiles). Bridge tests
+assert both crates equal `flux_syntax::compute_node_id`. FLUX-018 may now be
+dispatched once FLUX-012 lands.
 
 ### Verify-only (post-MLP unless explicitly pulled in)
 - **FR-014** `Image` adapter + asset pipeline: referenced in `mlp-spec.md` but
