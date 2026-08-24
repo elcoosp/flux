@@ -1,0 +1,21 @@
+name: ADR numbering guard
+
+on:
+  push:
+    paths:
+      - 'docs/adr/**'
+      - 'docs/spec/mlp-appendices.md'
+      - 'docs/scripts/check-adr-numbering.sh'
+  pull_request:
+    paths:
+      - 'docs/adr/**'
+      - 'docs/spec/mlp-appendices.md'
+      - 'docs/scripts/check-adr-numbering.sh'
+
+jobs:
+  check-adr-numbering:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run ADR numbering guard
+        run: bash docs/scripts/check-adr-numbering.sh
