@@ -8,6 +8,10 @@ repository.workspace = true
 
 [dependencies]
 flux-syntax.workspace = true
+# FLUX-018 (Phase 3) lowering lives in this crate and reads the typed AST.
+# Pre-wired by foundation as workspace deps; added here for the second-pass scope.
+flux-parser.workspace = true
+flux-types.workspace = true
 ahash.workspace = true
 blake3.workspace = true
 thiserror.workspace = true
@@ -15,6 +19,7 @@ thiserror.workspace = true
 [dev-dependencies]
 criterion.workspace = true
 flux-vm-ref.workspace = true
+flux-differ.workspace = true
 proptest.workspace = true
 
 [[bench]]
