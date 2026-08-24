@@ -10,7 +10,9 @@
 //   keyboard    Option[KeyboardType] soft keyboard flavor, defaults to None
 //
 // The `= ""` / `= true` / `= false` / `= None` defaults encode Appendix F.5's
-// optional props (see ADR stdlib-grammar-gaps, G2).
+// optional props. `prop_decl` carries an optional `"=" expr` default
+// (Appendix B.2); the gap recorded as G2 in ADR stdlib-grammar-gaps was closed
+// by FLUX-003 and is verified by FLUX-015's parse check.
 //
 // Native rendering is defined by Appendix F.5 (UITextField / EditText in
 // dev mode; SwiftUI `TextField` / Compose `TextField` in release).
