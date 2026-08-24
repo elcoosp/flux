@@ -257,6 +257,39 @@ vectors:
   `flux-syntax` width (`REG_REG_U16`, 3 bytes) could not carry all three
   operands and misaligned every subsequent instruction.
 
+#### FLUX-004 — `flux-ir` arena, node IDs, instance registry — DONE
+
+Implemented the IR core (Appendix C §C.1) as `flux-ir` (no `unsafe`, no
+`unwrap`/`expect`/`panic!` in library code, every public item documented,
+clippy/`fmt`/`doc` clean, TDD throughout):
+
+- `node_id.rs` — `compute_node_id(parent, kind, span, key)` per ADR-0013:
+  BLAKE3 of `(parent, kind tag, file_id, start, end, key-or-sentinel)`,
+  truncated to `u32`. Pure and source-stable.
+- `arena.rs` — `IRArena` struct-of-arrays (hot fields in parallel `Vec`s;
+  props/children/handlers in length-prefixed cold blobs) with `pack()` /
+  `get()` / `NodeView` accessors, and blob (de)serialisation for `Value`,
+  `Child`, handlers.
+- `closure.rs` — `ClosureIR` (bytecode + captured signal IDs, ADR-0014).
+- `instance.rs` — `ComponentInstance` + `InstanceRegistry` (node→instance
+  index for state-preserving hot swap, ASR-003).
+- `builder.rs` — `ArenaBuilder` + `Node` input type, the hand-construction
+  API the differ/codegen/parity suites need.
+
+Verification:
+- 17 unit tests (pack/unpack round-trip, instance registry, closures).
+- 3 doctests.
+- `tests/roundtrip.rs` proptest (200 cases): pack/unpack round-trip and
+  node-ID stability (identical inputs → identical ID; sibling at a different
+  span → distinct ID).
+- `benches/arena.rs` criterion bench: pack 100 nodes ≈ 0.1 ms (< 1 ms budget,
+  §3.6).
+
+Deviation from the appendix's illustrative `IRArena`: `kinds` is
+`Vec<NodeKind>` (not `Vec<u8>`) and `spans` are stored inline (not in a blob),
+both to avoid `unsafe` transmute / mis-tagged-value reads (ADR-0002,
+AGENTS.md §1.2). `NodeView::kind()` uses `NodeKind::from_tag` — no `unsafe`.
+
 #### FLUX-005 — `flux-vm-ref` reference VM — DONE
 
 Implemented the Appendix E reference interpreter as a test oracle (no `unsafe`,

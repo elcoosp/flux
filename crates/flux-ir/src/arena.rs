@@ -1,0 +1,492 @@
+//! The reactive-tree arena (Appendix C §C.1).
+//!
+//! Nodes are packed into a struct-of-arrays layout for cache-linear diff
+//! scanning: hot, fixed-width fields live in parallel [`Vec`]s, while
+//! variable-width cold data (props, children, handlers) is serialised into
+//! length-prefixed blobs addressed by per-node offset vectors.
+//!
+//! Two deliberate deviations from the illustrative `IRArena` in the appendices:
+//! 1. `kinds` is `Vec<NodeKind>`, not `Vec<u8>`. `NodeKind` is a fieldless
+//!    `#[repr(u8)]` enum, so it is layout-identical to `u8`, but reading it back
+//!    needs no `unsafe` transmute or fallible tag decode (ADR-0002 / AGENTS.md).
+//! 2. `spans` are stored inline as `Vec<Span>` (fixed 12 bytes, on the diff hot
+//!    path) rather than in a blob, avoiding an offset indirection for hot reads.
+
+use ahash::AHashMap;
+use flux_syntax::{Child, ComponentId, HandlerId, NodeId, Span};
+use flux_syntax::{NodeKind, Props, StringTable, Value};
+
+use crate::builder::Node;
+use crate::closure::ClosureIR;
+
+/// A packed reactive tree.
+///
+/// Build it with [`ArenaBuilder`](crate::builder::ArenaBuilder), pack nodes with
+/// [`IRArena::pack`], and read them back through [`NodeView`].
+#[derive(Debug, Default, Clone)]
+pub struct IRArena {
+    // Struct-of-arrays for diff-hot fields.
+    ids: Vec<NodeId>,
+    kinds: Vec<NodeKind>,
+    component_ids: Vec<ComponentId>,
+    spans: Vec<Span>,
+
+    // Offsets into the cold blobs (start of node `i`; end is the next offset,
+    // or the blob length for the final node).
+    props_offsets: Vec<u32>,
+    children_offsets: Vec<u32>,
+    handler_offsets: Vec<u32>,
+
+    // Variable-width cold data.
+    props_blob: Vec<u8>,
+    children_blob: Vec<u8>,
+    handlers_blob: Vec<u8>,
+
+    // NodeId → arena slot.
+    node_index: AHashMap<NodeId, usize>,
+
+    // Shared interning table.
+    string_table: StringTable,
+
+    // Handler bytecode table.
+    closures: AHashMap<HandlerId, ClosureIR>,
+}
+
+impl IRArena {
+    /// Creates an empty arena with a fresh string table.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Number of packed nodes.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.ids.len()
+    }
+
+    /// Returns `true` when no nodes have been packed.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.ids.is_empty()
+    }
+
+    /// Looks up a node by [`NodeId`], returning a read-only [`NodeView`].
+    #[must_use]
+    pub fn get(&self, id: NodeId) -> Option<NodeView<'_>> {
+        let index = *self.node_index.get(&id)?;
+        Some(NodeView { arena: self, index })
+    }
+
+    /// Packs `node`, returning its stable [`NodeId`].
+    ///
+    /// The node's `id` is the source-derived ID from
+    /// [`compute_node_id`](crate::compute_node_id); the arena neither mints nor
+    /// remaps IDs.
+    pub fn pack(&mut self, node: Node) -> NodeId {
+        let index = self.ids.len();
+        self.ids.push(node.id);
+        self.kinds.push(node.kind);
+        self.component_ids.push(node.component_id);
+        self.spans.push(node.span);
+
+        self.props_offsets.push(self.props_blob.len() as u32);
+        pack_props(&mut self.props_blob, &node.props);
+
+        self.children_offsets.push(self.children_blob.len() as u32);
+        pack_children(&mut self.children_blob, &node.children);
+
+        self.handler_offsets.push(self.handlers_blob.len() as u32);
+        pack_handlers(&mut self.handlers_blob, &node.handlers);
+
+        self.node_index.insert(node.id, index);
+        node.id
+    }
+
+    /// Inserts or replaces a closure in the table.
+    pub fn add_closure(&mut self, closure: ClosureIR) {
+        self.closures.insert(closure.id, closure);
+    }
+
+    /// Returns the closure for `id`, if registered.
+    #[must_use]
+    pub fn closure(&self, id: HandlerId) -> Option<&ClosureIR> {
+        self.closures.get(&id)
+    }
+
+    /// Returns the shared string table.
+    #[must_use]
+    pub fn string_table(&self) -> &StringTable {
+        &self.string_table
+    }
+
+    fn props_of(&self, index: usize) -> Props {
+        let start = self.props_offsets[index] as usize;
+        let end = self
+            .props_offsets
+            .get(index + 1)
+            .copied()
+            .map(|o| o as usize)
+            .unwrap_or(self.props_blob.len());
+        unpack_props(&self.props_blob[start..end])
+    }
+
+    fn children_of(&self, index: usize) -> Vec<Child> {
+        let start = self.children_offsets[index] as usize;
+        let end = self
+            .children_offsets
+            .get(index + 1)
+            .copied()
+            .map(|o| o as usize)
+            .unwrap_or(self.children_blob.len());
+        unpack_children(&self.children_blob[start..end])
+    }
+
+    fn handlers_of(&self, index: usize) -> Vec<HandlerId> {
+        let start = self.handler_offsets[index] as usize;
+        let end = self
+            .handler_offsets
+            .get(index + 1)
+            .copied()
+            .map(|o| o as usize)
+            .unwrap_or(self.handlers_blob.len());
+        unpack_handlers(&self.handlers_blob[start..end])
+    }
+}
+
+/// A read-only projection of one packed node.
+///
+/// Constructed by [`IRArena::get`]; every accessor decodes the node's slice of
+/// the cold blobs on demand so the arena stays compact in memory.
+#[derive(Debug, Clone, Copy)]
+pub struct NodeView<'a> {
+    arena: &'a IRArena,
+    index: usize,
+}
+
+impl<'a> NodeView<'a> {
+    /// The node's stable ID.
+    #[must_use]
+    pub fn id(&self) -> NodeId {
+        self.arena.ids[self.index]
+    }
+
+    /// The node kind.
+    #[must_use]
+    pub fn kind(&self) -> NodeKind {
+        self.arena.kinds[self.index]
+    }
+
+    /// The interned component/primitive name.
+    #[must_use]
+    pub fn component_id(&self) -> ComponentId {
+        self.arena.component_ids[self.index]
+    }
+
+    /// The source span this node was lowered from.
+    #[must_use]
+    pub fn span(&self) -> Span {
+        self.arena.spans[self.index]
+    }
+
+    /// The node's prop map (unpacked from the cold blob).
+    #[must_use]
+    pub fn props(&self) -> Props {
+        self.arena.props_of(self.index)
+    }
+
+    /// The node's child slots (unpacked from the cold blob).
+    #[must_use]
+    pub fn children(&self) -> Vec<Child> {
+        self.arena.children_of(self.index)
+    }
+
+    /// The handlers bound by this node (unpacked from the cold blob).
+    #[must_use]
+    pub fn handlers(&self) -> Vec<HandlerId> {
+        self.arena.handlers_of(self.index)
+    }
+}
+
+// ── blob (de)serialisation ────────────────────────────────────────────────
+
+struct Cursor<'b> {
+    bytes: &'b [u8],
+    pos: usize,
+}
+
+impl<'b> Cursor<'b> {
+    fn new(bytes: &'b [u8]) -> Self {
+        Self { bytes, pos: 0 }
+    }
+    fn take(&mut self, n: usize) -> &'b [u8] {
+        let slice = &self.bytes[self.pos..self.pos + n];
+        self.pos += n;
+        slice
+    }
+    fn u8(&mut self) -> u8 {
+        self.bytes[self.pos]
+    }
+    fn u16(&mut self) -> u16 {
+        let mut buf = [0u8; 2];
+        buf.copy_from_slice(self.take(2));
+        u16::from_le_bytes(buf)
+    }
+    fn u32(&mut self) -> u32 {
+        let mut buf = [0u8; 4];
+        buf.copy_from_slice(self.take(4));
+        u32::from_le_bytes(buf)
+    }
+    fn u64(&mut self) -> u64 {
+        let mut buf = [0u8; 8];
+        buf.copy_from_slice(self.take(8));
+        u64::from_le_bytes(buf)
+    }
+    fn advance(&mut self, n: usize) {
+        self.pos += n;
+    }
+}
+
+fn pack_props(blob: &mut Vec<u8>, props: &Props) {
+    blob.extend_from_slice(&(props.fields().len() as u16).to_le_bytes());
+    for (idx, value) in props.fields() {
+        blob.extend_from_slice(&idx.to_le_bytes());
+        pack_value(blob, value);
+    }
+}
+
+fn unpack_props(bytes: &[u8]) -> Props {
+    let mut cur = Cursor::new(bytes);
+    let count = cur.u16();
+    let mut fields = Vec::with_capacity(count as usize);
+    for _ in 0..count {
+        let idx = cur.u16();
+        let value = unpack_value(&mut cur);
+        fields.push((idx, value));
+    }
+    Props::from_fields(fields)
+}
+
+fn pack_value(blob: &mut Vec<u8>, value: &Value) {
+    blob.push(value.tag());
+    match value {
+        Value::Null => {}
+        Value::Int(i) => blob.extend_from_slice(&i.to_le_bytes()),
+        Value::Float(f) => blob.extend_from_slice(&f.to_le_bytes()),
+        Value::Bool(b) => blob.push(u8::from(*b)),
+        Value::Str(id) | Value::HandlerRef(id) => blob.extend_from_slice(&id.to_le_bytes()),
+        Value::List(items) => {
+            blob.extend_from_slice(&(items.len() as u16).to_le_bytes());
+            for item in items {
+                pack_value(blob, item);
+            }
+        }
+        Value::Record(fields) => {
+            blob.extend_from_slice(&(fields.len() as u16).to_le_bytes());
+            for (idx, val) in fields {
+                blob.extend_from_slice(&idx.to_le_bytes());
+                pack_value(blob, val);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn unpack_value(cur: &mut Cursor<'_>) -> Value {
+    const TAG_NULL: u8 = 0x00;
+    const TAG_INT: u8 = 0x01;
+    const TAG_FLOAT: u8 = 0x02;
+    const TAG_BOOL: u8 = 0x03;
+    const TAG_STR: u8 = 0x04;
+    const TAG_HANDLER: u8 = 0x05;
+    const TAG_LIST: u8 = 0x06;
+    const TAG_RECORD: u8 = 0x07;
+    let tag = cur.u8();
+    cur.advance(1);
+    match tag {
+        TAG_NULL => Value::Null,
+        TAG_INT => Value::Int(cur.u64() as i64),
+        TAG_FLOAT => Value::Float(f64::from_bits(cur.u64())),
+        TAG_BOOL => {
+            let b = cur.u8();
+            cur.advance(1);
+            Value::Bool(b != 0)
+        }
+        TAG_STR => Value::Str(cur.u32()),
+        TAG_HANDLER => Value::HandlerRef(cur.u32()),
+        TAG_LIST => {
+            let count = cur.u16();
+            let mut items = Vec::with_capacity(count as usize);
+            for _ in 0..count {
+                items.push(unpack_value(cur));
+            }
+            Value::List(items)
+        }
+        TAG_RECORD => {
+            let count = cur.u16();
+            let mut fields = Vec::with_capacity(count as usize);
+            for _ in 0..count {
+                let idx = cur.u16();
+                let val = unpack_value(cur);
+                fields.push((idx, val));
+            }
+            Value::Record(fields)
+        }
+        _ => Value::Null,
+    }
+}
+
+fn pack_children(blob: &mut Vec<u8>, children: &[Child]) {
+    blob.extend_from_slice(&(children.len() as u16).to_le_bytes());
+    for child in children {
+        match child {
+            Child::Node(id) => {
+                blob.push(0);
+                blob.extend_from_slice(&id.to_le_bytes());
+            }
+            Child::Splice { items } => {
+                blob.push(1);
+                blob.extend_from_slice(&(items.len() as u16).to_le_bytes());
+                for (key, id) in items {
+                    blob.extend_from_slice(&key.to_le_bytes());
+                    blob.extend_from_slice(&id.to_le_bytes());
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn unpack_children(bytes: &[u8]) -> Vec<Child> {
+    let mut cur = Cursor::new(bytes);
+    let count = cur.u16();
+    let mut out = Vec::with_capacity(count as usize);
+    for _ in 0..count {
+        let tag = cur.u8();
+        cur.advance(1);
+        match tag {
+            0 => out.push(Child::Node(cur.u32())),
+            1 => {
+                let n = cur.u16();
+                let mut items = Vec::with_capacity(n as usize);
+                for _ in 0..n {
+                    let key = cur.u64();
+                    let id = cur.u32();
+                    items.push((key, id));
+                }
+                out.push(Child::Splice { items });
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+fn pack_handlers(blob: &mut Vec<u8>, handlers: &[HandlerId]) {
+    blob.extend_from_slice(&(handlers.len() as u16).to_le_bytes());
+    for id in handlers {
+        blob.extend_from_slice(&id.to_le_bytes());
+    }
+}
+
+fn unpack_handlers(bytes: &[u8]) -> Vec<HandlerId> {
+    let mut cur = Cursor::new(bytes);
+    let count = cur.u16();
+    let mut out = Vec::with_capacity(count as usize);
+    for _ in 0..count {
+        out.push(cur.u32());
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flux_syntax::PropIdx;
+
+    fn sample_node() -> Node {
+        Node {
+            id: 7,
+            kind: NodeKind::Component,
+            component_id: 3,
+            props: Props::from_fields(vec![
+                (PropIdx::from(0u16), Value::Int(12)),
+                (
+                    PropIdx::from(1u16),
+                    Value::Str(flux_syntax::StringId::from(4u32)),
+                ),
+                (
+                    PropIdx::from(2u16),
+                    Value::List(vec![Value::Bool(true), Value::Null]),
+                ),
+            ]),
+            children: vec![
+                Child::Node(8),
+                Child::Splice {
+                    items: vec![(1, 9), (2, 10)],
+                },
+            ],
+            handlers: vec![HandlerId::from(5u32), HandlerId::from(6u32)],
+            span: Span::new(1, 0, 42),
+        }
+    }
+
+    #[test]
+    fn pack_then_get_round_trips() {
+        let mut arena = IRArena::new();
+        let id = arena.pack(sample_node());
+        let view = arena.get(id).expect("node present");
+        assert_eq!(view.id(), 7);
+        assert_eq!(view.kind(), NodeKind::Component);
+        assert_eq!(view.component_id(), 3);
+        assert_eq!(view.span(), Span::new(1, 0, 42));
+        assert_eq!(view.props().fields().len(), 3);
+        assert_eq!(view.props().get(PropIdx::from(0u16)), Some(&Value::Int(12)));
+        assert_eq!(view.children().len(), 2);
+        assert_eq!(
+            view.handlers(),
+            vec![HandlerId::from(5u32), HandlerId::from(6u32)]
+        );
+    }
+
+    #[test]
+    fn duplicate_id_replaces_slot() {
+        let mut arena = IRArena::new();
+        arena.pack(sample_node());
+        let mut changed = sample_node();
+        changed.props = Props::from_fields(vec![(PropIdx::from(0u16), Value::Int(99))]);
+        arena.pack(changed);
+        assert_eq!(arena.len(), 2, "pack does not de-dupe; two slots exist");
+        let view = arena.get(7).expect("present");
+        assert_eq!(view.props().get(PropIdx::from(0u16)), Some(&Value::Int(99)));
+    }
+
+    #[test]
+    fn nested_values_round_trip() {
+        let node = Node {
+            id: 1,
+            kind: NodeKind::Primitive,
+            component_id: 0,
+            props: Props::from_fields(vec![(
+                PropIdx::from(0u16),
+                Value::Record(vec![(PropIdx::from(0u16), Value::Float(3.5))]),
+            )]),
+            children: vec![],
+            handlers: vec![],
+            span: Span::new(0, 0, 1),
+        };
+        let mut arena = IRArena::new();
+        arena.pack(node);
+        let got = arena
+            .get(1)
+            .unwrap()
+            .props()
+            .get(PropIdx::from(0u16))
+            .unwrap()
+            .clone();
+        assert_eq!(
+            got,
+            Value::Record(vec![(PropIdx::from(0u16), Value::Float(3.5))])
+        );
+    }
+}
