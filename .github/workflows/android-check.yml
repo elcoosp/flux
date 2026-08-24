@@ -1,0 +1,53 @@
+name: android-check
+
+# FLUX-011 (CI pipelines) — Android quality gate.
+# Runs the unit-test suites for the Kotlin adapter (adapters/ui-kotlin) and the
+# Android runtime app (runtimes/android:app). Both modules are included via the
+# frozen settings.gradle.kts, so their tests are covered with no manifest edits.
+# The Android SDK platform must be present for the android application plugin to
+# configure, so it is installed from the command-line tools on every run.
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "runtimes/android/**"
+      - "adapters/ui-kotlin/**"
+      - "gradle/**"
+      - "settings.gradle.kts"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "runtimes/android/**"
+      - "adapters/ui-kotlin/**"
+      - "gradle/**"
+      - "settings.gradle.kts"
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    name: gradlew :adapters:ui-kotlin:test :runtimes:android:app:test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform & accept licenses
+        run: |
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager "platforms;android-37"
+
+      - name: Run adapter & runtime unit tests
+        run: ./gradlew :adapters:ui-kotlin:test :runtimes:android:app:test --no-daemon
