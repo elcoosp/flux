@@ -35,3 +35,6 @@ captures/
 .hermes/
 node_modules/
 dump.txt
+
+# SwiftPM build output (regenerable)
+.build

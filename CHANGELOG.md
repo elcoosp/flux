@@ -262,3 +262,62 @@ Resolution (see `docs/adr/adr-naming-and-numbering.md`):
 - `mlp-spec.md` Appendix A no longer duplicates the canonical ADRs; it is now a
   single pointer to `mlp-appendices.md` Appendix A. `mlp-appendices.md` gained an
   "Appendix A — Continuation (ADR-0021…)" block recording the renumbered decisions.
+
+---
+
+## Agent-delivered work (tracked by orchestrator — NOT yet committed by this agent)
+
+The following were produced by concurrently-dispatched flux-N agents. They are
+recorded here for progress tracking only; this agent did **not** write, modify, or
+commit any of the code below (the owning agents / orchestrator handle those
+directories per the boundary contract). Status reflects the live working tree at
+the time of writing, **not** a verified test pass — uncommitted code is marked as
+such.
+
+#### FLUX-009 — Kotlin adapter kit + dev adapters — DONE (committed)
+
+Fully implemented and committed across `adapters/ui-kotlin/src/**` (22 files):
+`FluxValue`, `FluxColor`/`FluxFont`, `Props` typed accessors, `FluxNativeView`
+abstraction + in-memory test double, `FluxExecutor` boundary + `HandlerEvent`,
+`FluxAdapter` contract, and dev adapters (Text, Button, TextField, Column/Row with
+keyed child reconciliation, Screen, Router). Test suites cover FluxValue record,
+Props accessors, Text/Button/TextField, Column/Row keyed diff, Router/Screen state
+preservation. All commits prefixed `feat(kotlin-adapters)` / `test(kotlin-adapters)`
+under refs FLUX-009. (See `62a5fdf` and the chain beneath it.)
+
+#### FLUX-006 — iOS host app runtime — IN PROGRESS (uncommitted)
+
+Delivered into `runtimes/ios/Sources/**` and `runtimes/ios/Tests/**` by the
+ios-runtime agent: `FluxAppMain.swift` entry point, `Sources/VM/` (native
+`FluxBytecodeVM` per Appendix E), `Sources/Values/` (Flux value types), and
+`Tests/ISAConformanceTests.swift` + `ISAVector.swift` (shared-vector conformance
+target). `runtimes/ios/project.yml` was also updated. **Uncommitted in the working
+tree at time of writing**; not yet verified by this agent (Swift build host not
+exercised here).
+
+#### FLUX-007 — Android host app runtime — IN PROGRESS (uncommitted)
+
+Delivered into `runtimes/android/app/src/**` by the android-runtime agent:
+`FluxHostActivity.kt` host entry, `src/main/kotlin/.../vm/` (Kotlin
+`FluxBytecodeVM` per Appendix E), `src/main/kotlin/.../wire/` (Appendix D frame
+codec), `src/main/kotlin/.../shadow/` (shadow tree + reconciler). Test suite under
+`src/test/kotlin/.../`: `IsaConformanceTest`, `FluxBytecodeVmTest`, `wire/` frame
+builder/deserializer + `WireFixtureContractTest`, `EndToEndTest`. **Uncommitted in
+the working tree at time of writing**; not yet verified by this agent (Android
+emulator not exercised here, per memory: ADB not on PATH).
+
+#### FLUX-010 — standard library `.flux` sources — IN PROGRESS (uncommitted)
+
+12 `.flux` modules landed in `stdlib/`: `prelude`, `traits`, `color`, `font`,
+`text`, `button`, `text_field`, `column`, `row`, `router`, `platform`,
+`capabilities`. These are source-only (parse-checked by the parser once FLUX-003
+lands); per R8 the directory is write-only for the stdlib agent. **Uncommitted in
+the working tree at time of writing.**
+
+#### Outstanding Phase 1–4 crates (still stubs, owned by named flux-N agents)
+
+The following workspace crates remain 1-file stubs and are explicitly assigned to
+other agents (not built by this agent, to avoid directory-collision with the
+dispatched flux-N work): `flux-parser` (FLUX-003), `flux-types`, `flux-differ`,
+`flux-ir-serde`, `flux-devserver`, `flux-codegen-swift`, `flux-codegen-kotlin`,
+`flux-cli`, `flux-parity` (Phase 6). CI (FLUX-011) is orchestrator-owned.
