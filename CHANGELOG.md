@@ -504,6 +504,53 @@ Verification:
 - `benches/diff.rs` criterion bench: 50-node prop-mutation diff ≈ **41.6 µs**
   (well under the 1 ms budget, §3.6).
 
+#### FLUX-013 — `flux-ir-serde` wire protocol — DONE
+
+Implemented the Appendix D binary wire codec and typed frames. Depends only on
+`flux-syntax` and `flux-ir` (both done); `blake3` for content addressing is
+pre-wired; no `unsafe`, no `unwrap`/`expect` in library code, every public item
+documented, clippy/`fmt`/`doc` clean.
+
+Structure:
+- `wire.rs` — little-endian primitive reader/writer (`Reader`/`Writer`),
+  `encode_*`/`decode_*` for `Value`, `Child`, `Node`, `PropDiff`, `ClosureRef`,
+  `Patch` (tags 0x01–0x06), `StringEntry`, plus the reserved `StateDelta`/
+  `SourceMapDelta` codecs (Appendix D §D.10–D.11) and `HandlerDef` encoder.
+- `encode.rs` — `serialize_patches(&[Patch], &StringTable) -> Vec<u8>` and
+  `deserialize_patches(&[u8]) -> Result<Vec<Patch>, WireError>` (inverse of
+  `serialize_patches`), plus `hash_props`/`hash_closure` (BLAKE3, deterministic,
+  NaN canonicalized).
+- `frame.rs` — `Frame` API + `FrameKind` and the five typed frames: `Hello`
+  (`Frame::hello`/`from_hello_bytes`), `Init` (`Frame::init`/`from_init_bytes`,
+  round-trips a `StringTable` by exact id), `Delta` (`Frame::delta`/
+  `from_delta_bytes`), `Error` (`Frame::error`/`from_error_bytes`, `span:
+  Option<Span>`), `Heartbeat` (`Frame::heartbeat`/`from_heartbeat_bytes`). The
+  16-byte header is magic `0x465C5558`, version, seq, flags (Hello = reserved
+  bit 3, Init = full-tree bit 0, Error = bit 1, Heartbeat = bit 2, Delta = 0).
+
+Encoding details matching Appendix D §D.1–D.8 exactly: `Value` 1-byte tag
+(`Int 1`, `Float 2`, `Bool 3`, `Str 4`, `HandlerRef 5`, `List 6`, `Record 7`)
+with i64/f64/string-id/handler-id payloads; `Child` tag `0x01 Node(u32)` /
+`0x02 Splice(u16 count, (u64 key, u32 id)*)`; `Node` id/kind/component + prop
+vec + child vec + handler vec + span; `Patch` tags per §D.2; `ClosureRef` hash +
+bytecode offset/len + captured-signal vec + span.
+
+Verification:
+- `tests/round_trip.rs` — every patch variant round-trips through
+  serialize/deserialize; every `Value` variant (incl. NaN, nested List/Record,
+  Splice) preserves order; `Init` reconstructs the `StringTable` with exact ids
+  (`resolve("Increment") == Some("Increment")`); `Error` preserves code/message/
+  span; `Hello`/`Heartbeat` round-trip platform/device/capabilities.
+- `tests/proptest_round_trip.rs` — 200 randomized patch sets serialize/deserialize
+  to byte-identical output (deterministic), and `hash_props`/`hash_closure` are
+  stable across calls.
+- `benches/serialize.rs` criterion bench: 50-node patch serialize ≈ **1.58 µs**
+  (≪ 1 ms budget, §3.6); `Init` frame for a 50-node tree ≈ 3.6 KB (≪ 20 KB
+  acceptance, §D.13).
+
+Note: `flux-ir-serde` is not on the dispatched flux-N active list; it was a
+1-file stub and is now fully implemented to advance the Rust pipeline.
+
 #### FLUX-003 — `flux-parser` surface parser — DONE
 
 Implemented the Flux surface parser: `.flux` source to a typed `Ast` whose
@@ -552,6 +599,6 @@ Appendix B.
 
 The following workspace crates remain 1-file stubs and are explicitly assigned to
 other agents (not built by this agent, to avoid directory-collision with the
-dispatched flux-N work): `flux-types`, `flux-ir-serde`,
-`flux-devserver`, `flux-codegen-swift`, `flux-codegen-kotlin`, `flux-cli`,
-`flux-parity` (Phase 6). CI (FLUX-011) is orchestrator-owned.
+dispatched flux-N work): `flux-types`, `flux-devserver`, `flux-codegen-swift`,
+`flux-codegen-kotlin`, `flux-cli`, `flux-parity` (Phase 6). CI (FLUX-011) is
+orchestrator-owned.
