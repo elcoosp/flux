@@ -1,0 +1,30 @@
+[package]
+name = "flux-parity"
+description = "Dev-VM versus release-codegen parity harness for the Flux toolchain"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+flux-codegen-kotlin.workspace = true
+flux-codegen-swift.workspace = true
+flux-differ.workspace = true
+flux-ir.workspace = true
+flux-ir-serde.workspace = true
+flux-parser.workspace = true
+flux-syntax.workspace = true
+flux-types.workspace = true
+flux-vm-ref.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+
+[[bench]]
+name = "end_to_end"
+harness = false

@@ -1,5 +1,6 @@
 [package]
-name = "flux-codegen-kotlin"
+name = "flux-vm-ref"
+description = "Reference implementation of the Flux VM, used as a test oracle only"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,10 +9,9 @@ repository.workspace = true
 
 [dependencies]
 flux-syntax.workspace = true
-flux-ir.workspace = true
-flux-parser.workspace = true
-flux-types.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-insta.workspace = true
+proptest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
