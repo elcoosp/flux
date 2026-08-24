@@ -1,0 +1,61 @@
+name: rust-check
+
+# FLUX-011 (CI pipelines) — Rust quality gate.
+# Runs the AGENTS.md Definition-of-Done checks for the whole Cargo workspace:
+#   * cargo fmt --check
+#   * cargo clippy -- -D warnings
+#   * cargo test
+#   * cargo doc
+# Globs are workspace-wide, so as soon as a crate's real source lands (Phase 1+)
+# it is automatically covered — no manifest edits required.
+
+on:
+  push:
+    branches: ["**"]
+    paths-ignore:
+      - "docs/**"
+      - "runtimes/**"
+      - "adapters/**"
+      - "**.md"
+  pull_request:
+    branches: ["main"]
+    paths-ignore:
+      - "docs/**"
+      - "runtimes/**"
+      - "adapters/**"
+      - "**.md"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  rust:
+    name: fmt, clippy, test, doc
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: cargo test
+        run: cargo test --workspace --all-targets
+
+      - name: cargo doc
+        run: cargo doc --no-deps --workspace
