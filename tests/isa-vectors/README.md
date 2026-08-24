@@ -57,10 +57,12 @@ through the orchestrator, who re-runs all three VM conformance suites.
 3. Opcode byte values come from `crates/flux-syntax/src/opcode/raw.rs` (or
    Appendix E §E.1). Do not invent values.
 4. **Gas** (`expected_gas_used`) = the number of *executed, non-`HALT`*
-   instructions (ADR-0006). `HALT` (0x00) is free; `GAS_CHECK` (0xC0) is charged
-   1 gas before its budget check. Handler entry budget in `r15` is 100,000.
-5. **Lengths** are derived strictly from the §E.1 width table (ADR-0007); do not
-   trust prose byte counts in the appendices. The canonical `count = count + 1`
+   instructions (ADR-0021 — `docs/adr/ADR-0021-gas-accounting.md`). `HALT` (0x00)
+   is free; `GAS_CHECK` (0xC0) is charged 1 gas before its budget check. Handler
+   entry budget in `r15` is 100,000.
+5. **Lengths** are derived strictly from the §E.1 width table (ADR-0022 —
+   `docs/adr/ADR-0022-byte-length-erratum.md`); do not trust prose byte counts in
+   the appendices. The canonical `count = count + 1`
    example is **27 bytes**, not the "21 bytes" stated in §E.5.
 6. The instruction pointer is a **byte offset** into the bytecode (§E.4). Jump
    offsets (`JUMP`, `COND_JUMP`, `COND_JUMP_NOT`, `MATCH_TAG`) are relative to
@@ -154,11 +156,11 @@ decodable and deterministic.
 
 1. **`DivByZero` is not an enumerated error in Appendix E §E.6**, yet integer
    division by zero must fail. Vectors encode it as `DivByZero`. → see
-   `docs/adr/ADR-0008-div-by-zero-error.md`.
+   `docs/adr/ADR-0023-div-by-zero-error.md`.
 2. **`GET_FIELD` on `Null`**: §E.6 lists `NullDereference` for "GET_FIELD on
    Null value," but `GET_FIELD` on a *non-record, non-null* value (e.g. an
    `Int`) is a type error. Vectors encode `Null` → `NullDereference` and other
-   non-records → `TypeMismatch`. → see `docs/adr/ADR-0009-getfield-null.md`.
+   non-records → `TypeMismatch`. → see `docs/adr/ADR-0024-getfield-null.md`.
 3. **`MemoryExhausted` is not asserted as a predicted value** here: the 16 MB
    pool threshold depends on the oracle's allocation accounting, which is not
    pinned by the spec. Vectors exercise allocations and assert *success*; the
