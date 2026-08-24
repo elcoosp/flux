@@ -6,7 +6,7 @@
 | Document | Parallel Agent Boundary Contract & Issue Plan |
 | Version | 2.0 (replaces v1 in full) |
 | Status | Canonical — supersedes all prior versions |
-| Companion docs | `/docs/spec.md`, `/docs/appendices.md`, `/AGENTS.md` |
+| Companion docs | `/docs/spec/mlp-spec.md`, `/docs/spec/mlp-appendices.md`, `/AGENTS.md` |
 
 ---
 
@@ -399,7 +399,7 @@ After each batch merges:
 
 **Agent:** isa-vectors (runs once; output frozen)  
 **Owns:** `/tests/isa-vectors/**`  
-**Depends on:** Nothing (needs only `/docs/appendices.md` — may run parallel with FLUX-001)  
+**Depends on:** Nothing (needs only `/docs/spec/mlp-appendices.md` — may run parallel with FLUX-001)  
 **Estimated effort:** 1 day
 
 **Scope:**
@@ -846,7 +846,7 @@ Author pure-data JSON fixtures derived **exclusively from Appendix E**. No code.
 Before writing any code:
 1. Read /AGENTS.md in full. It is the law of the land. TDD is mandatory:
    every production change starts with a failing test.
-2. Read /docs/spec.md sections and /docs/appendices.md appendices
+2. Read /docs/spec/mlp-spec.md sections and /docs/spec/mlp-appendices.md appendices
    referenced by your issue. The spec is normative; do not improvise.
 3. You OWN exactly these directories (and nothing else):
    {OWNED_DIRS}
