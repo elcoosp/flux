@@ -174,3 +174,39 @@ Toolchain probe (recorded so agents know what can actually be verified):
 - No `gradle` or `kotlinc` on `PATH`; the committed wrapper is the supported
   entry point. `JAVA_HOME` must point at Android Studio's JBR (the system JDK is
   Zulu 21, which also works — AGP 9.3 requires only JDK 17+).
+
+#### Spec errata resolved before Phase 1 (orchestrator ADRs)
+
+Before dispatching the golden ISA vector agent (FLUX-002), two internal
+contradictions in Appendix E were found and resolved via ADRs (create-only,
+orchestrator-owned):
+
+- **ADR-0006 — Gas accounting.** §E.6 says gas is "decremented per instruction,"
+  but both concrete examples (§E.5 = 4 gas for a 5-instruction sequence ending in
+  HALT; the contract's FLUX-002 vector example = 4 gas for `READ`/`LOAD`/`ADD`/
+  `WRITE`) charge 4, not 5. Resolution: every decoded instruction costs 1 gas
+  **except `HALT` (0x00)**, which terminates the handler and is free; `GAS_CHECK`
+  (0xC0) is charged 1 gas before its budget check. Entry budget in `r15` = 100,000.
+- **ADR-0007 — Byte-length erratum.** §E.5 claims the canonical `count = count + 1`
+  example is "21 bytes," but the literal encoding (6+10+4+6+1) is **27 bytes**. The
+  §E.1 operand-width table is normative; the "21 bytes" prose is an erratum. All
+  vector and VM decoders compute lengths from the width table only.
+
+Both ADRs are referenced by FLUX-002 (vectors), FLUX-005 (`flux-vm-ref`),
+FLUX-006 (Swift VM), and FLUX-007 (Kotlin VM) so all three implementations agree.
+
+#### FLUX-002 — golden ISA vectors (in flight)
+
+The second Phase-0 agent (the first was FLUX-001, now done) is dispatched and
+running: author `/tests/isa-vectors/**` as pure JSON fixtures from Appendix E
+(≥60 vectors, every opcode covered, error + boundary + register-convention
+cases), plus a `README.md` documenting the schema and a per-opcode coverage
+matrix. The agent is constrained to that directory and writes no code. Vectors
+are frozen after merge (R8); corrections thereafter route through the
+orchestrator, who re-runs all three VM conformance suites. Deviation noted: the
+directory is `/tests/isa-vectors/` per the contract, whereas AGENTS.md §9 still
+says `tests/parity/` — the contract wins.
+
+Phase 0 will be complete when FLUX-002 lands and its vectors pass a self-review
+against Appendix E (no code exists yet to validate them, so the orchestrator
+reviews byte-exactness by hand / via the FLUX-005 oracle once that crate exists).
