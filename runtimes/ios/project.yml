@@ -20,9 +20,17 @@ settings:
     ENABLE_USER_SCRIPT_SANDBOXING: true
     SWIFT_TREAT_WARNINGS_AS_ERRORS: true
 
-packages:
-  FluxUIKit:
-    path: ../../adapters/ui-swift
+# NOTE (FLUX-006): the `FluxUIKit` package dependency normally declared here has
+# been removed because FLUX-008 (the adapter kit) was still mid-flight when this
+# issue started and its sources did not compile, which would block the runtime's
+# `xcodebuild test` gate (FLUX-006 acceptance) entirely. FLUX-006 defines its own
+# in-dir mock adapters (scope item 11) and leaves real-kit wiring to FLUX-016.
+# If this project is regenerated after FLUX-008 has merged a compiling kit,
+# restore these lines:
+#
+# packages:
+#   FluxUIKit:
+#     path: ../../adapters/ui-swift
 
 targets:
   FluxApp:
@@ -33,8 +41,6 @@ targets:
     sources:
       - path: Sources
         createIntermediateGroups: true
-    dependencies:
-      - package: FluxUIKit
     info:
       path: Sources/Info.plist
       properties:
@@ -54,12 +60,23 @@ targets:
   FluxAppTests:
     type: bundle.unit-test
     platform: iOS
+    # Foundation's skeleton omitted an Info.plist for the test bundle, which
+    # blocks `xcodebuild test` (FLUX-006 acceptance). Let Xcode generate one.
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        # Pin the ISA vector directory for the conformance test. xcodebuild
+        # exports target build settings into the test runner's environment, so
+        # `FLUX_ISA_VECTORS` is visible to the test process without a manual
+        # launch-arg. `$(SRCROOT)` is the project dir (runtimes/ios), so this
+        # resolves to the repo-root `tests/isa-vectors` (read-only, shared with
+        # the Rust reference VM and the Kotlin VM).
+        FLUX_ISA_VECTORS: "$(SRCROOT)/../../tests/isa-vectors"
     sources:
       - path: Tests
         createIntermediateGroups: true
     dependencies:
       - target: FluxApp
-      - package: FluxUIKit
 
 schemes:
   FluxApp:
