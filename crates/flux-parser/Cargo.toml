@@ -11,3 +11,12 @@ flux-syntax.workspace = true
 pest.workspace = true
 pest_derive.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+insta.workspace = true
+proptest.workspace = true
+
+[[bench]]
+name = "parse"
+harness = false

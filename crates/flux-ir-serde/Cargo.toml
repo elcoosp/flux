@@ -13,3 +13,11 @@ rmp-serde.workspace = true
 serde.workspace = true
 blake3.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+proptest.workspace = true
+
+[[bench]]
+name = "serialize"
+harness = false

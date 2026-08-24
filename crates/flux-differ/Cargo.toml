@@ -11,3 +11,11 @@ flux-syntax.workspace = true
 flux-ir.workspace = true
 ahash.workspace = true
 smallvec.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+proptest.workspace = true
+
+[[bench]]
+name = "diff"
+harness = false

@@ -55,7 +55,29 @@ Notes and deviations from the spec:
   dense-ID invariant the wire delta depends on cannot be violated by a caller.
 
 Verification:
-- `cargo test --workspace` — 38 passed, 0 failed.
+- `cargo nextest run --workspace` — 38 tests run, 38 passed, 0 skipped.
+- `cargo test --doc -p flux-syntax` — 6 doctests passed.
 - `cargo clippy --workspace --all-targets -- -D warnings` — clean.
 - `cargo fmt --check` — clean.
 - `cargo doc -p flux-syntax --no-deps` — clean.
+
+#### Tooling — `cargo nextest` mandated
+
+Changed:
+- `AGENTS.md` now mandates `cargo nextest run` as the project's test runner and
+  forbids `cargo test`, with the single exception of doctests
+  (`cargo test --doc`), which nextest does not support. Added the useful
+  invocations, a note that nextest's exit code must not be masked by a pipe, a
+  `cargo-nextest` row in the dependency table, and a doctest line in the Rust
+  reviewer checklist. Local runner is cargo-nextest 0.9.135.
+- `AGENTS.md` §2.1 now records the edition-2024 / `resolver = "3"` /
+  `rust-version = 1.86` reality of the workspace against the local rustc 1.94.1,
+  superseding the spec's "edition 2021, Rust 1.75" wording.
+- Workspace `rust-version` raised from 1.85 to 1.86: `criterion` 0.8.2 requires
+  1.86, and the dependency policy is latest-stable.
+
+Added:
+- `[dev-dependencies]` and `[[bench]]` targets pre-wired into every crate
+  manifest (`criterion`, `insta`, `proptest`, `tokio` as each crate needs), plus
+  compiling criterion bench stubs under `benches/`. Agents may not edit
+  manifests, so these must exist before Phase 1 starts.

@@ -10,3 +10,6 @@ repository.workspace = true
 flux-syntax.workspace = true
 flux-ir.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
