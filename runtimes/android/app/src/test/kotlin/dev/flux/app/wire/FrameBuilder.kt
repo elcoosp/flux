@@ -40,6 +40,67 @@ class FrameBuilder {
 
     fun stringCount(n: Int) = u16(n)
 
+    /**
+     * Writes one string-table entry (Appendix D §D.9) as `(id, utf8 text)`.
+     * Call these after [stringCount] and before the root [node] in a full-tree
+     * frame, matching the order [FrameDeserializer] reads them.
+     */
+    fun stringEntry(
+        id: UInt,
+        text: String,
+    ) {
+        u32(id.toInt())
+        val bytes = text.toByteArray(Charsets.UTF_8)
+        u16(bytes.size)
+        out.addAll(bytes.toList())
+    }
+
+    /**
+     * Writes an `Update` patch (Appendix D §D.2, tag 0x02): a prop diff applied
+     * to the node [id].
+     */
+    fun patchUpdate(
+        id: UInt,
+        changes: List<Pair<UShort, WireValue>>,
+        removals: List<UShort> = emptyList(),
+    ) {
+        out.add(0x02)
+        u32(id.toInt())
+        u16(changes.size)
+        for ((idx, value) in changes) {
+            u16(idx.toInt())
+            writeValue(value)
+        }
+        u16(removals.size)
+        for (r in removals) u16(r.toInt())
+    }
+
+    /**
+     * Writes an `Insert` patch (Appendix D §D.2, tag 0x03): a new [node] placed
+     * at [index] under [parentId]. The inserted node is self-contained (its own
+     * children are not decoded by the host from this patch).
+     */
+    fun patchInsert(
+        parentId: UInt,
+        index: Int,
+        id: UInt,
+        kind: UInt,
+        component: UInt,
+        props: List<Pair<UShort, WireValue>>,
+        childIds: List<UInt>,
+    ) {
+        out.add(0x03)
+        u32(parentId.toInt())
+        u16(index)
+        node(id, kind, component, props, childIds)
+    }
+
+    /** Writes a `Remove` patch (Appendix D §D.2, tag 0x04) for node [id]. */
+    fun patchRemove(id: UInt) {
+        out.add(0x04)
+        u32(id.toInt())
+    }
+
     fun node(
         id: UInt,
         kind: UInt,
