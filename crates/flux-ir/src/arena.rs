@@ -65,6 +65,11 @@ impl IRArena {
         self.ids.len()
     }
 
+    /// Iterates over every packed [`NodeId`] in insertion order.
+    pub fn all_ids(&self) -> impl Iterator<Item = NodeId> + '_ {
+        self.ids.iter().copied()
+    }
+
     /// Returns `true` when no nodes have been packed.
     #[must_use]
     pub fn is_empty(&self) -> bool {

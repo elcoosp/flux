@@ -25,19 +25,15 @@ fn make_node(index: u32) -> Node {
 
 fn bench_pack_100(c: &mut Criterion) {
     let mut group = c.benchmark_group("pack_100");
-    group.bench_with_input(
-        BenchmarkId::new("nodes", 100),
-        &100,
-        |b, &n| {
-            b.iter(|| {
-                let mut builder = ArenaBuilder::new();
-                for i in 0..n {
-                    builder.pack(make_node(i));
-                }
-                builder.finish()
-            });
-        },
-    );
+    group.bench_with_input(BenchmarkId::new("nodes", 100), &100, |b, &n| {
+        b.iter(|| {
+            let mut builder = ArenaBuilder::new();
+            for i in 0..n {
+                builder.pack(make_node(i));
+            }
+            builder.finish()
+        });
+    });
     group.finish();
 }
 

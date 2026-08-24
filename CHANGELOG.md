@@ -427,10 +427,41 @@ Notes and deviations:
   verification harness used an out-of-tree `xcodegen` project wrapping the
   Sources/Tests; no manifest was modified.
 
+#### FLUX-014 — `flux-differ` keyed tree differ — DONE
+
+Implemented `diff(old: &IRArena, new: &IRArena) -> Vec<Patch>` (udomdiff-style
+keyed reconciliation over stable `NodeId`s). Depends only on `flux-syntax` and
+`flux-ir` (both done); no new dependencies, no `unsafe`, no `unwrap` in library
+code, every public item documented, clippy/`fmt`/`doc` clean.
+
+Structure: `diff.rs` (`diff` + helpers `to_ref`, `find_parent_and_index`,
+`child_ids`, `child_order`, `props_equal`, `props_diff`, `handlers_equal`,
+`emit_replace`, `emit_handler`, `closure_ref`), `lib.rs` (re-exports + algorithm
+doc). Also added `IRArena::all_ids()` iterator to `flux-ir` (needed by the differ).
+
+Reconciliation rules:
+- Both-present nodes: kind/component change → `Replace`; prop-only → `Update`
+  (`PropDiff`); handler-body-only → `Handler` (state-preserving fast path);
+  same child *set* but different order → single `Reorder` (not remove+insert).
+- A parent whose child *set* merely grew/shrank is **not** replaced — the
+  added/removed children are covered by `Insert`/`Remove`, avoiding spurious
+  whole-subtree replaces.
+- Missing-from-new → `Remove`; new-to-new → `Insert { parent, index, node }`.
+
+Verification:
+- 7 unit tests (identical→empty; canonical Replace/Update/Insert/Remove/Reorder
+  each emit exactly one minimal patch; diff-then-apply reconstructs the tree).
+- `tests/roundtrip.rs` proptest (200 cases): diff-then-apply == new tree over
+  randomized star trees of varying size/content. The test-only `apply` reconstructs
+  an id→`NodeRef` map and applies `Insert` patches in `(parent, index)` order so
+  out-of-order patch delivery still yields correct child ordering.
+- `benches/diff.rs` criterion bench: 50-node prop-mutation diff ≈ **41.6 µs**
+  (well under the 1 ms budget, §3.6).
+
 #### Outstanding Phase 1–4 crates (still stubs, owned by named flux-N agents)
 
 The following workspace crates remain 1-file stubs and are explicitly assigned to
 other agents (not built by this agent, to avoid directory-collision with the
-dispatched flux-N work): `flux-parser` (FLUX-003), `flux-types`, `flux-differ`,
-`flux-ir-serde`, `flux-devserver`, `flux-codegen-swift`, `flux-codegen-kotlin`,
-`flux-cli`, `flux-parity` (Phase 6). CI (FLUX-011) is orchestrator-owned.
+dispatched flux-N work): `flux-parser` (FLUX-003), `flux-types`, `flux-ir-serde`,
+`flux-devserver`, `flux-codegen-swift`, `flux-codegen-kotlin`, `flux-cli`,
+`flux-parity` (Phase 6). CI (FLUX-011) is orchestrator-owned.
