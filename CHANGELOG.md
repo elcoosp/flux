@@ -175,6 +175,41 @@ Toolchain probe (recorded so agents know what can actually be verified):
   entry point. `JAVA_HOME` must point at Android Studio's JBR (the system JDK is
   Zulu 21, which also works — AGP 9.3 requires only JDK 17+).
 
+#### FLUX-009 — Kotlin adapter kit + dev adapters — DONE
+
+Added the Kotlin mirror of the Swift adapter kit (FLUX-008) under
+`adapters/ui-kotlin/src`. The module is a `kotlin.jvm` target (the frozen
+`build.gradle.kts` has no Android dependency), so adapters are written against
+a platform-neutral `FluxNativeView` abstraction the Android runtime (FLUX-007)
+later backs with a real `android.view.View`.
+
+Kit types:
+- `FluxValue` — sealed interface mirroring `flux_syntax::Value` (Appendix C.1),
+  with typed accessors on `Record`.
+- `Props` + `PropsIndex` — typed accessors (`getString/getBool/getRecord/
+  getColor/getFont`) and the canonical component-local field indices for every
+  adapter; missing fields degrade to `null`/default, reserved-zero handler id.
+- `FluxColor`/`FluxFont` — value types mirroring the Color/Font records
+  (Appendix F) with `toRecord()` encoders.
+- `FluxExecutor` + `HandlerEvent` — the narrow boundary adapters may touch;
+  adapters hold it through a `WeakReference` so a stale executor is GC'd.
+- `FluxNativeView` + `FluxNativeViewImpl` — platform-neutral view contract and
+  the kit's in-memory test double.
+- `FluxAdapter` — the `create/update/setChildren/bindHandler/destroy`
+  contract; `reconcileChildren` does keyed reconciliation that reuses view
+  instances (no recreate on reorder/remove).
+
+Dev adapters (Appendix F): `TextAdapter`, `ButtonAdapter`, `TextFieldAdapter`,
+`ColumnAdapter`/`RowAdapter` (shared base), `ScreenAdapter`, `RouterAdapter`.
+Router/Screen reconcile by stable node id and preserve the existing screen
+view instance across push/pop, matching `NavHost` semantics.
+
+Verification:
+- `./gradlew :adapters:ui-kotlin:test` — 22 JUnit 5 tests green:
+  FluxValue/Props accessors, leaf adapter create/update/destroy + weak-executor
+  dispatch, linear keyed diff, and router screen-state preservation.
+- `./gradlew :adapters:ui-kotlin:ktlintCheck` — zero violations.
+
 #### Spec errata resolved before Phase 1 (orchestrator ADRs)
 
 Before dispatching the golden ISA vector agent (FLUX-002), two internal
