@@ -880,7 +880,7 @@ When `.flux` can't express something (e.g., ARKit integration, custom platform A
 - Cons: Breaks type safety. LLM-unfriendly (string interpolation of native code). Can't be hot-swapped. Parity impossible.
 
 **Option B — Platform conditional.**
-- `if platform == "ios" { CupertinoButton(...) } else { MaterialButton(...) }`.
+- `if platform() == "ios" { CupertinoButton(...) } else { MaterialButton(...) }`.
 - Pros: Still in `.flux`. Type-checked.
 - Cons: Doesn't solve the "can't express at all" case (e.g., ARKit).
 
@@ -992,12 +992,7 @@ ellipsis = { "..." }
 // ========================= Top-level =========================
 
 file      = { SOI ~ statement* ~ EOI }
-statement = { import_decl | use_decl | annotated_component | fn_decl | type_decl | trait_decl | capability_decl | module_state | const_binding }
-
-// Module-level `state` declares a runtime-bound module value, e.g. the
-// `state platform: String = "ios"` in stdlib/platform.flux. The body is
-// shared with the block-level `state_decl`.
-module_state = { state_decl }
+statement = { import_decl | use_decl | annotated_component | fn_decl | type_decl | trait_decl | capability_decl | const_binding }
 
 import_decl = { "import" ~ ident ~ "from" ~ string_lit }
 use_decl    = { "use" ~ path ~ ("::" ~ "*")? }
@@ -1185,10 +1180,11 @@ of the specification leaves implicit but the parser must honour:
   zero-argument closure; `lambda` is the `fn (params) { … }` form, with the
   parameter list optional (Appendix B.3.6 `resource(fn { … })`). Both lower to
   `ExprKind::Lambda`.
-- **Module state.** `module_state` reuses `state_decl`; the parser records it
-  as `Decl::State`. This is the only production not present in the original
-  Appendix B and is tracked as gap G5 in
-  `/docs/adr/parser-grammar-extensions.md`.
+- **No module-level `state`.** Declarations at file scope are `import`, `use`,
+  `component`, `fn`, `type`, `trait`, `capability` and associated `const`. A
+  runtime-bound module value such as the platform tag is written as a `fn`
+  (e.g. `fn platform() -> String { … }`, stdlib/platform.flux) and queried by
+  calling it — there is deliberately no module-level `state` form.
 
 ### B.3 Grammar Examples
 
@@ -1360,7 +1356,7 @@ component Profile {
 
 ```flux
 component PlatformButton {
-  if platform == "ios" {
+  if platform() == "ios" {
     CupertinoButton(text: "Tap", onClick: { ... })
   } else {
     MaterialButton(text: "Tap", onClick: { ... })

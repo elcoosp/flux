@@ -72,8 +72,6 @@ pub enum Decl {
     Capability(CapabilityDecl),
     /// `Color.red = RGB(1.0, 0.0, 0.0)`.
     Const(ConstBinding),
-    /// Module-level `state platform: String = "ios"` (extension G5).
-    State(StateDecl),
 }
 
 impl Decl {
@@ -89,7 +87,6 @@ impl Decl {
             Self::Trait(decl) => decl.span,
             Self::Capability(decl) => decl.span,
             Self::Const(decl) => decl.span,
-            Self::State(decl) => decl.span,
         }
     }
 }

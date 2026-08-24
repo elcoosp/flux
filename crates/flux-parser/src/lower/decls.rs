@@ -8,7 +8,7 @@ use crate::ast::{
     UseDecl,
 };
 use crate::grammar::Rule;
-use crate::lower::exprs::{block, call_args, expr, state_decl};
+use crate::lower::exprs::{block, call_args, expr};
 use crate::lower::types::ty;
 use crate::lower::{Ctx, Lowered, generic_params, ident, next_pair, unescape};
 
@@ -30,17 +30,8 @@ pub(crate) fn decl(ctx: &Ctx<'_>, pair: Pair<'_, Rule>) -> Lowered<Decl> {
         Rule::trait_decl => trait_decl(ctx, form).map(Decl::Trait),
         Rule::capability_decl => capability_decl(ctx, form).map(Decl::Capability),
         Rule::const_binding => const_binding(ctx, form).map(Decl::Const),
-        Rule::module_state => module_state(ctx, form).map(Decl::State),
         _ => Err(ctx.malformed(span, "declaration")),
     }
-}
-
-/// Lowers a `module_state` pair: a module-level `state` binding (extension G5).
-fn module_state(ctx: &Ctx<'_>, pair: Pair<'_, Rule>) -> Lowered<crate::ast::StateDecl> {
-    let span = ctx.span(&pair);
-    let mut inner = pair.into_inner();
-    let decl = next_pair(ctx, &mut inner, span, "module-level state declaration")?;
-    state_decl(ctx, decl)
 }
 
 fn import_decl(ctx: &Ctx<'_>, pair: Pair<'_, Rule>) -> Lowered<ImportDecl> {
