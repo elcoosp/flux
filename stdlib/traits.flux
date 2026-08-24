@@ -8,8 +8,10 @@
 // `trait Numeric[T]` with `fn zero()`, `fn one()`, `fn +(a: T, b: T)`,
 // `fn -(a: T, b: T)`; the forms below record the additive group plus `Eq`
 // and `Show` per the §18.2 enumerations. Operator methods are declared by
-// their symbolic name (the parser treats `+` / `-` / `==` / `!=` as method
-// identifiers of a trait — see ADR stdlib-grammar-gaps, G4).
+// their symbolic name: `fn_name` admits `+` / `-` / `==` / `!=` alongside
+// identifiers (Appendix B.2), so the gap recorded as G4 in ADR
+// stdlib-grammar-gaps was closed by FLUX-003 and is verified by FLUX-015's
+// parse check.
 
 trait Numeric[T] {
   fn zero() -> T
