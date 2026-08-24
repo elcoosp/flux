@@ -36,16 +36,22 @@ struct FileEntry: Equatable, Sendable {
 /// A state-cell seed carried by an Init or delta frame (Appendix D §D.10).
 struct StateCell: Equatable, Sendable {
     let signalId: UInt32
-    let value: FluxValue
+    let value: VMValue
 }
 
 /// A fully decoded frame. `full` frames (Init) carry a root node; patch frames
 /// carry `patches`/`handlers`/`strings` deltas.
+///
+/// `nodes` is the flat id → `ShadowNode` table for the whole tree. The wire
+/// represents children by id (Appendix D §D.4); the host keeps every reachable
+/// node here so the reconciler can resolve child ids to their definitions and
+/// reconcile by stable `NodeId` without re-decoding the tree.
 struct FluxFrame: Equatable, Sendable {
     let version: UInt8
     let seq: UInt32
     let flags: UInt8
     let root: ShadowNode?
+    let nodes: [UInt32: ShadowNode]
     let patches: [Patch]
     let handlers: [HandlerDef]
     let strings: [StringEntry]

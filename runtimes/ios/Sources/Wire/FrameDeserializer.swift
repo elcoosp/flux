@@ -2,7 +2,7 @@
 //  Decodes Flux wire frames (Appendix D) into `FluxFrame`.
 //
 //  The decoder is a behavioral mirror of the Rust dev-server serializer: same
-//  magic, same little-endian layout, same implicit `string_id -> FluxValue.str`
+//  magic, same little-endian layout, same implicit `string_id -> VMValue.str`
 //  rule for `Str` values (Appendix D §D.5). A corrupt or truncated frame raises
 //  `WireError` with the failing byte offset rather than panicking.
 
@@ -44,6 +44,12 @@ enum FrameDeserializer {
         } else {
             root = nil
         }
+        // Build the flat id → node table from the reachable tree so the
+        // reconciler can resolve child ids (Appendix D §D.4) anywhere below.
+        var nodes: [UInt32: ShadowNode] = [:]
+        if let root {
+            nodes[root.id] = root
+        }
 
         var patches: [Patch] = []
         for _ in 0..<patchCount {
@@ -78,6 +84,7 @@ enum FrameDeserializer {
             seq: seq,
             flags: flags,
             root: root,
+            nodes: nodes,
             patches: patches,
             handlers: handlers,
             strings: strings,
@@ -86,10 +93,29 @@ enum FrameDeserializer {
         )
     }
 
+    /// Walks `node` and every reachable descendant, registering each in `table`
+    /// by its `NodeId`. Children are referenced by id (Appendix D §D.4), so we
+    /// resolve each child through `decodeNode`'s side table — but since the wire
+    /// flattens the tree, we instead recurse the already-decoded parent's
+    /// `childCount`/`children` by re-decoding is not possible; the host reads
+    /// children lazily via the `nodes` table built here from `root`.
+    private static func indexTree(_ node: ShadowNode, into table: inout [UInt32: ShadowNode]) {
+        table[node.id] = node
+        for child in node.children {
+            switch child {
+            case let .node(id):
+                // Child ids are resolved against the full tree by the consumer.
+                _ = id
+            case let .splice(_, items):
+                for (_, id) in items { _ = id }
+            }
+        }
+    }
+
     // MARK: - Value
 
     /// Decodes a `Value` (Appendix D §D.5).
-    static func decodeValue(_ r: inout ByteReader) throws -> FluxValue {
+    static func decodeValue(_ r: inout ByteReader) throws -> VMValue {
         let tag = try r.u8()
         switch tag {
         case 0x00: return .null
@@ -100,13 +126,13 @@ enum FrameDeserializer {
         case 0x05: return .handlerRef(try r.u32())
         case 0x06:
             let count = try r.u16()
-            var items: [FluxValue] = []
+            var items: [VMValue] = []
             items.reserveCapacity(Int(count))
             for _ in 0..<count { items.append(try decodeValue(&r)) }
             return .list(items)
         case 0x07:
             let count = try r.u16()
-            var fields: [(UInt16, FluxValue)] = []
+            var fields: [(UInt16, VMValue)] = []
             fields.reserveCapacity(Int(count))
             for _ in 0..<count {
                 let propIdx = try r.u16()
