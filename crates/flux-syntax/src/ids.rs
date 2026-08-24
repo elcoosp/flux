@@ -94,3 +94,54 @@ impl Span {
         }
     }
 }
+
+/// Derives the stable [`NodeId`] for a node — the **single source of truth**
+/// for node-ID computation across the whole toolchain.
+///
+/// This is the canonical implementation that every crate delegates to (see
+/// `docs/adr/ir-node-id-bridge.md`). It mirrors the layout historically used
+/// by `flux-ir` so existing IR/differ/wire hashes stay stable:
+///
+/// ```text
+/// BLAKE3( parent
+///       | kind_tag
+///       | span.file_id
+///       | span.start
+///       | span.end
+///       | key-or-0xFF*8 )  -> truncate to 32 bits
+/// ```
+///
+/// The digest is BLAKE3 (already a `flux-syntax` dependency) truncated to 32
+/// bits, consistent with every other content address in Flux (prop hash,
+/// closure hash, wire interning). Node IDs are stable across edits: a sibling
+/// insertion or handler-body edit does not shift any other node's ID, which is
+/// what makes keyed reconciliation and state preservation work.
+///
+/// # Examples
+///
+/// ```
+/// use flux_syntax::{compute_node_id, Key, Span};
+///
+/// let span = Span::new(1, 0, 10);
+/// let a = compute_node_id(0, 7, span, None);
+/// let b = compute_node_id(1, 7, span, None);
+/// assert_ne!(a, b);
+/// // Identical inputs always produce the identical ID.
+/// assert_eq!(a, compute_node_id(0, 7, span, None));
+/// ```
+#[must_use]
+pub fn compute_node_id(parent: NodeId, kind_tag: u8, span: Span, key: Option<Key>) -> NodeId {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(&parent.to_le_bytes());
+    hasher.update(&[kind_tag]);
+    hasher.update(&span.file_id.to_le_bytes());
+    hasher.update(&span.start.to_le_bytes());
+    hasher.update(&span.end.to_le_bytes());
+    match key {
+        Some(k) => hasher.update(&k.to_le_bytes()),
+        None => hasher.update(&[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]),
+    };
+    let mut digest = [0_u8; 4];
+    digest.copy_from_slice(&hasher.finalize().as_bytes()[..4]);
+    u32::from_le_bytes(digest)
+}
