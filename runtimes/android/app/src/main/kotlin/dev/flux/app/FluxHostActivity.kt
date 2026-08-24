@@ -4,11 +4,11 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.material3.MaterialTheme
+import dev.flux.app.AdapterRegistry
 import dev.flux.app.shadow.ShadowTree
 import dev.flux.app.signal.SignalGraph
 import dev.flux.app.transport.FluxTransport
 import dev.flux.app.transport.OkHttpTransport
-import dev.flux.ui.FluxUiKit
 
 /**
  * The Flux dev-mode host activity (FLUX-007).
@@ -30,7 +30,7 @@ class FluxHostActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         signals = SignalGraph()
-        shadowTree = ShadowTree(FluxUiKit.adapters)
+        shadowTree = ShadowTree(AdapterRegistry.fromStringTable(emptyList()))
         transport = OkHttpTransport("ws://127.0.0.1:9001")
         setContent {
             MaterialTheme {

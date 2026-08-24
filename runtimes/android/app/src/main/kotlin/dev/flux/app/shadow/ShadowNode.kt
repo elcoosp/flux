@@ -14,7 +14,9 @@ import dev.flux.ui.Props
  * runtime consumes that contract rather than defining its own.
  *
  * @property id the stable IR node id.
- * @property kind the component-local kind tag (e.g. `"text"`, `"column"`).
+ * @property kind the component-local kind tag (e.g. `\"text\"`, `\"column\"`).
+ * @property componentId the interned component-name id from the wire node; the
+ *   [dev.flux.app.AdapterRegistry] resolves this to the dev adapter.
  * @property key the optional stable reconciliation key (`null` when absent).
  * @property props the decoded component props.
  * @property view the native view this node is bound to.
@@ -23,6 +25,7 @@ import dev.flux.ui.Props
 public data class ShadowNode(
     val id: UInt,
     val kind: String,
+    val componentId: UInt,
     val key: UInt?,
     /** The decoded component props. Reassigned on patch updates. */
     var props: Props,

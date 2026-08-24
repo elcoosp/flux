@@ -1,5 +1,7 @@
 package dev.flux.app.shadow
 
+import dev.flux.app.AdapterRegistry
+import dev.flux.app.StringTableEntry
 import dev.flux.app.wire.ClosureRef
 import dev.flux.app.wire.Frame
 import dev.flux.app.wire.Patch
@@ -15,19 +17,25 @@ import java.lang.ref.WeakReference
 
 /**
  * The host render tree: a map of [ShadowNode]s keyed by id, plus the adapter
- * registry that translates IR node kinds into native views.
+ * registry that translates IR nodes into native views.
  *
  * The shadow tree is the source of truth for *structure* (the dev server owns
  * the IR; the host owns the signal graph — ADR-0002). Patches from the wire (or
  * a full-tree Init frame) mutate it through [applyFrame]; the reconciler then
  * drives the adapters so the native view subtree matches.
  *
- * @property adapters the adapter registry, keyed by IR node-kind tag. The map
- *   uses `FluxAdapter<*>` so any kind's adapter can be invoked uniformly; calls
- *   go through [invokeAdapter], which erases the out-projection safely.
+ * Resolution now goes through the [AdapterRegistry], which maps an interned
+ * `ComponentId` (carried on every wire node) to a dev adapter from the
+ * `adapters/ui-kotlin` kit (FLUX-017). The registry is seeded from the string
+ * table delivered in each `Init` frame, so a node's `componentId` resolves to
+ * the correct adapter without re-deriving the kind from the raw wire byte.
+ *
+ * @property registry the adapter registry, keyed by `ComponentId`. Mutated in
+ *   place as string-table deltas arrive so the tree always resolves against the
+ *   latest `Init` frame.
  */
 public class ShadowTree(
-    private val adapters: Map<String, FluxAdapter<*>>,
+    private var registry: AdapterRegistry,
 ) {
     private val nodes = LinkedHashMap<UInt, ShadowNode>()
     private var root: ShadowNode? = null
@@ -52,6 +60,9 @@ public class ShadowTree(
         executor: FluxExecutor,
     ): ShadowNode? {
         executorRef = executor
+        if (frame.strings.isNotEmpty()) {
+            registry = registry.withEntries(frame.strings.map { StringTableEntry(it.id, it.text) })
+        }
         if (frame.fullTree && frame.root != null) {
             val index = LinkedHashMap<UInt, WireNode>()
             index[frame.root.id] = frame.root
@@ -95,7 +106,7 @@ public class ShadowTree(
                 val diff = patch.diff ?: return
                 val merged = mergeProps(node.props, diff)
                 node.props = merged
-                withAdapter(node.kind, node.view) { adapter, view ->
+                withAdapter(node.kind, node.componentId, node.view) { adapter, view ->
                     adapter.update(view, merged)
                 }
             }
@@ -107,14 +118,14 @@ public class ShadowTree(
                 parent.children.add(idx, built)
                 nodes[built.id] = built
                 collect(built)
-                withAdapter(parent.kind, parent.view) { adapter, view ->
+                withAdapter(parent.kind, parent.componentId, parent.view) { adapter, view ->
                     adapter.setChildren(view, parent.children.map { it.id }, parent.children.map { it.view })
                 }
             }
             0x04 -> { // Remove
                 val node = nodes.remove(patch.id) ?: return
                 parentOf(patch.id)?.children?.removeIf { it.id == patch.id }
-                withAdapter(node.kind, node.view) { adapter, view -> adapter.destroy(view) }
+                withAdapter(node.kind, node.componentId, node.view) { adapter, view -> adapter.destroy(view) }
             }
             0x06 -> { // Handler
                 val node = nodes[patch.id] ?: return
@@ -155,7 +166,7 @@ public class ShadowTree(
         index: Map<UInt, WireNode>,
         executor: FluxExecutor,
     ): ShadowNode {
-        val adapter = adapterFor(wire.kind)
+        val adapter = adapterFor(wire.kind, wire.componentId)
         val props =
             Props(
                 wire.props.map {
@@ -165,9 +176,9 @@ public class ShadowTree(
             )
         val view =
             adapter?.create(wire.id)
-                ?: error("no adapter registered for kind \"${wire.kind}\" (node ${wire.id})")
-        withAdapter(wire.kind, view) { a, v -> a.update(v, props) }
-        val node = ShadowNode(wire.id, wire.kind, key = null, props, view)
+                ?: error("no adapter registered for component ${wire.componentId} (kind \"${wire.kind}\", node ${wire.id})")
+        withAdapter(wire.kind, wire.componentId, view) { a, v -> a.update(v, props) }
+        val node = ShadowNode(wire.id, wire.kind, wire.componentId, key = null, props, view)
         for (child in wire.children) {
             val childId =
                 when (child) {
@@ -177,29 +188,35 @@ public class ShadowTree(
             val childWire = index[childId] ?: continue
             node.children.add(build(childWire, index, executor))
         }
-        withAdapter(wire.kind, view) { a, v ->
+        withAdapter(wire.kind, wire.componentId, view) { a, v ->
             a.setChildren(v, node.children.map { it.id }, node.children.map { it.view })
         }
-        withAdapter(wire.kind, view) { a, v -> a.bindHandler(v, props, WeakReference(executor)) }
+        withAdapter(wire.kind, wire.componentId, view) { a, v -> a.bindHandler(v, props, WeakReference(executor)) }
         return node
     }
 
     /**
-     * Invokes [block] on the adapter for [kind] (if present), erasing the
-     * `out`-projection so `update`/`setChildren`/`destroy`/`bindHandler` can be
-     * called. The contract guarantees every adapter's `V` is a `FluxNativeView`,
-     * so the unchecked cast is sound (see adapter kit docs). [view] is supplied
-     * by the caller and is always the view that adapter [create]d for the node.
+     * Invokes [block] on the adapter for [componentId]/[kind] (if present),
+     * erasing the `out`-projection so `update`/`setChildren`/`destroy`/
+     * `bindHandler` can be called. The contract guarantees every adapter's `V`
+     * is a `FluxNativeView`, so the unchecked cast is sound (see adapter kit
+     * docs). [view] is supplied by the caller and is always the view that
+     * adapter [create]d for the node.
      */
     @Suppress("UNCHECKED_CAST")
     private fun withAdapter(
         kind: String,
+        componentId: UInt,
         view: FluxNativeView,
         block: (FluxAdapter<FluxNativeView>, FluxNativeView) -> Unit,
     ) {
-        val adapter = adapterFor(kind) ?: return
+        val adapter = adapterFor(kind, componentId) ?: return
         block(adapter as FluxAdapter<FluxNativeView>, view)
     }
 
-    private fun adapterFor(kind: String): FluxAdapter<*>? = adapters[kind]
+    /** Resolves the adapter for [componentId], falling back to the raw [kind] tag. */
+    private fun adapterFor(
+        kind: String,
+        componentId: UInt,
+    ): FluxAdapter<*>? = registry.resolve(componentId) ?: registry.adapterForKind(kind)
 }
