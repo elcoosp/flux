@@ -9,7 +9,7 @@
 
 **Flux** is a write-once UI language for native iOS/Android development. A Rust dev server parses `.flux` source, lowers it to a Reactive Tree IR, diffs it, and ships binary patches over WebSocket to a precompiled host app. The host app contains an embedded register-based bytecode VM, a SolidJS-style signal graph, and a shadow tree of native views. In release mode, the same IR is codegen'd to idiomatic Swift/SwiftUI and Kotlin/Jetpack Compose.
 
-**You are building the MLP.** The spec is in `/docs/spec.md` and `/docs/appendices.md`. Read the relevant appendix before starting any work. Do not improvise architecture — follow the spec.
+**You are building the MLP.** The spec is in `/docs/spec/mlp-spec.md` and `/docs/spec/mlp-appendices.md`. Read the relevant appendix before starting any work. Do not improvise architecture — follow the spec.
 
 ---
 
@@ -518,21 +518,30 @@ When you encounter a decision point not covered by the spec:
 ### Project Structure
 ```
 flux/
-├── crates/           # Rust workspace crates
-├── runtimes/         # iOS (Swift) and Android (Kotlin) host apps
-├── adapters/         # Platform adapter implementations
-├── stdlib/           # .flux standard library source
-├── docs/             # Spec, appendices, ADRs
-├── tests/            # Integration and parity tests
-├── Cargo.toml        # Workspace root (DO NOT MODIFY)
-└── AGENTS.md         # This file
+├── crates/                       # Rust workspace crates
+├── runtimes/                     # iOS (Swift) and Android (Kotlin) host apps
+├── adapters/                     # Platform adapter implementations
+├── stdlib/                       # .flux standard library source
+├── docs/
+│   ├── spec/
+│   │   ├── mlp-spec.md           # The specification
+│   │   └── mlp-appendices.md     # Appendices A–G
+│   ├── agents-boundaries-contract.md  # Ownership map + issue plan
+│   └── adr/                      # ADRs (created on first ADR)
+├── tests/                        # Integration and parity tests
+├── Cargo.toml                    # Workspace root (DO NOT MODIFY)
+├── rust-toolchain.toml           # Pinned toolchain (DO NOT MODIFY)
+├── CHANGELOG.md                  # Progress log and spec deviations
+└── AGENTS.md                     # This file
 ```
 
 ### Key Files To Read First
-- `/docs/spec.md` — the full specification
-- `/docs/appendices.md` — grammar, IR schema, wire protocol, VM ISA, adapter contracts
-- `crates/flux-syntax/src/lib.rs` — the shared type vocabulary
-- `/docs/adr/` — past decisions and their rationale
+- `/docs/spec/mlp-spec.md` — the full specification (vision, BRS, SRS, architecture, verification)
+- `/docs/spec/mlp-appendices.md` — Appendices A–G: ADRs, grammar, IR schema, wire protocol, VM ISA, adapter contracts, glossary
+- `/docs/agents-boundaries-contract.md` — directory ownership map, modification rules, and the FLUX-001…FLUX-016 issue plan
+- `/CHANGELOG.md` — what is already built, and every recorded deviation from the spec
+- `crates/flux-syntax/src/lib.rs` — the shared type vocabulary (re-exports; the definitions live in the sibling modules `ids`, `strings`, `value`, `ty`, `node`, `patch`)
+- `/docs/adr/` — past decisions and their rationale (created on first ADR; Appendix A of the appendices holds ADR-0001…ADR-0013)
 
 ### Commands
 ```bash
