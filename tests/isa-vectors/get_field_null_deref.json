@@ -1,0 +1,11 @@
+{
+  "bytecode_hex": "b400710100000000",
+  "description": "GET_FIELD on Null raises NullDereference.",
+  "expected_error": "NullDereference",
+  "expected_gas_used": 0,
+  "expected_registers": {},
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "get_field_null_deref",
+  "payload": null
+}

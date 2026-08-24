@@ -1,0 +1,11 @@
+{
+  "bytecode_hex": "b40000",
+  "description": "LOAD_NULL loads Null.",
+  "expected_error": null,
+  "expected_gas_used": 1,
+  "expected_registers": {},
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "load_null",
+  "payload": null
+}

@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b100000000000000454034010000",
+  "description": "NEG_F64 negates.",
+  "expected_error": null,
+  "expected_gas_used": 2,
+  "expected_registers": {
+    "r1": {
+      "type": "Float",
+      "value": -42.0
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "neg_f64_basic",
+  "payload": null
+}

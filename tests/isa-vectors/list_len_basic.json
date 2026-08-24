@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "80000400b0010100000000000000810001b002020000000000000081000283030000",
+  "description": "LIST_LEN returns element count.",
+  "expected_error": null,
+  "expected_gas_used": 6,
+  "expected_registers": {
+    "r3": {
+      "type": "Int",
+      "value": 2
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "list_len_basic",
+  "payload": null
+}

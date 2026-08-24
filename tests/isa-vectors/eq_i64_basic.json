@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b0002a00000000000000b0012a000000000000002602000100",
+  "description": "EQ_I64 true when equal.",
+  "expected_error": null,
+  "expected_gas_used": 3,
+  "expected_registers": {
+    "r2": {
+      "type": "Int",
+      "value": 1
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "eq_i64_basic",
+  "payload": null
+}

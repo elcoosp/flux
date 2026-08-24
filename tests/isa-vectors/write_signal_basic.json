@@ -1,0 +1,24 @@
+{
+  "bytecode_hex": "b0002a0000000000000011010000000000",
+  "description": "WRITE_SIGNAL sig1, r0 stores into the signal.",
+  "expected_error": null,
+  "expected_gas_used": 2,
+  "expected_registers": {
+    "r0": {
+      "type": "Int",
+      "value": 42
+    }
+  },
+  "expected_signals": [
+    {
+      "id": 1,
+      "value": {
+        "type": "Int",
+        "value": 42
+      }
+    }
+  ],
+  "initial_signals": [],
+  "name": "write_signal_basic",
+  "payload": null
+}

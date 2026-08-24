@@ -1,0 +1,11 @@
+{
+  "bytecode_hex": "b0000100000000000000b00100000000000000002302000100",
+  "description": "DIV_I64 by zero raises DivByZero (spec gap: not in E.6; see README).",
+  "expected_error": "DivByZero",
+  "expected_gas_used": 0,
+  "expected_registers": {},
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "div_i64_by_zero",
+  "payload": null
+}

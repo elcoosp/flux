@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b000ffffffffffffff7fb00100000000000000002002000100",
+  "description": "ADD_I64 with i64::MAX unchanged by +0.",
+  "expected_error": null,
+  "expected_gas_used": 3,
+  "expected_registers": {
+    "r2": {
+      "type": "Int",
+      "value": 9223372036854775807
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "add_i64_max_basic",
+  "payload": null
+}

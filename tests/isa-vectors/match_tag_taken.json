@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "70010100b00205000000000000007201000002a001050000000a000000b003e703000000000000b003010000000000000000",
+  "description": "MATCH_TAG jumps when the record's first field (tag) matches.",
+  "expected_error": null,
+  "expected_gas_used": 5,
+  "expected_registers": {
+    "r3": {
+      "type": "Int",
+      "value": 1
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "match_tag_taken",
+  "payload": null
+}

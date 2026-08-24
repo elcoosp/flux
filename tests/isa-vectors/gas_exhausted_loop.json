@@ -1,0 +1,11 @@
+{
+  "bytecode_hex": "60fbffffff00",
+  "description": "An infinite JUMP loop exhausts the 100k gas budget.",
+  "expected_error": "GasExhausted",
+  "expected_gas_used": 100000,
+  "expected_registers": {},
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "gas_exhausted_loop",
+  "payload": null
+}

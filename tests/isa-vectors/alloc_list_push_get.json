@@ -1,0 +1,29 @@
+{
+  "bytecode_hex": "80000400b0016400000000000000810001b002c8000000000000008100028203000100",
+  "description": "ALLOC_LIST + LIST_PUSH + LIST_GET round-trip.",
+  "expected_error": null,
+  "expected_gas_used": 6,
+  "expected_registers": {
+    "r0": {
+      "type": "List",
+      "value": [
+        {
+          "type": "Int",
+          "value": 100
+        },
+        {
+          "type": "Int",
+          "value": 200
+        }
+      ]
+    },
+    "r3": {
+      "type": "Int",
+      "value": 200
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "alloc_list_push_get",
+  "payload": null
+}

@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "70000100b0010500000000000000720000000170020100b003050000000000000072020000037304000200",
+  "description": "RECORD_EQ true for equal records.",
+  "expected_error": null,
+  "expected_gas_used": 7,
+  "expected_registers": {
+    "r4": {
+      "type": "Bool",
+      "value": 1
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "record_eq_true",
+  "payload": null
+}

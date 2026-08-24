@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b0000300000000000000b00102000000000000002802000100",
+  "description": "GT_I64 true when greater.",
+  "expected_error": null,
+  "expected_gas_used": 3,
+  "expected_registers": {
+    "r2": {
+      "type": "Int",
+      "value": 1
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "gt_i64_basic",
+  "payload": null
+}

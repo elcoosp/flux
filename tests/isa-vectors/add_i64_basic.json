@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b0002900000000000000b00101000000000000002002000100",
+  "description": "ADD_I64 computes 41+1.",
+  "expected_error": null,
+  "expected_gas_used": 3,
+  "expected_registers": {
+    "r2": {
+      "type": "Int",
+      "value": 42
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "add_i64_basic",
+  "payload": null
+}

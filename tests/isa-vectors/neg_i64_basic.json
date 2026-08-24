@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b0002a0000000000000025010000",
+  "description": "NEG_I64 negates.",
+  "expected_error": null,
+  "expected_gas_used": 2,
+  "expected_registers": {
+    "r1": {
+      "type": "Int",
+      "value": -42
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "neg_i64_basic",
+  "payload": null
+}

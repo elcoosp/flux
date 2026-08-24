@@ -1,0 +1,29 @@
+{
+  "bytecode_hex": "70010200b0020a000000000000007201000002b00314000000000000007201010003a10100000400",
+  "description": "EXTRACT_FIELD pulls a field from a record.",
+  "expected_error": null,
+  "expected_gas_used": 6,
+  "expected_registers": {
+    "r1": {
+      "type": "Record",
+      "value": [
+        {
+          "type": "Int",
+          "value": 10
+        },
+        {
+          "type": "Int",
+          "value": 20
+        }
+      ]
+    },
+    "r4": {
+      "type": "Int",
+      "value": 10
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "extract_field_basic",
+  "payload": null
+}

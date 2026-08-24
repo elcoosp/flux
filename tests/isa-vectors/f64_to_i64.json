@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b100333333333373454039010000",
+  "description": "F64_TO_I64 truncates a float.",
+  "expected_error": null,
+  "expected_gas_used": 2,
+  "expected_registers": {
+    "r1": {
+      "type": "Int",
+      "value": 42
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "f64_to_i64",
+  "payload": null
+}

@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b0000000000000000080b001ffffffffffffffff2002000100",
+  "description": "ADD_I64 wraps at i64::MIN-1.",
+  "expected_error": null,
+  "expected_gas_used": 3,
+  "expected_registers": {
+    "r2": {
+      "type": "Int",
+      "value": 9223372036854775807
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "add_i64_overflow_min_basic",
+  "payload": null
+}

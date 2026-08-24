@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b2000142010000",
+  "description": "NOT_BOOL negates.",
+  "expected_error": null,
+  "expected_gas_used": 2,
+  "expected_registers": {
+    "r1": {
+      "type": "Bool",
+      "value": 0
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "not_bool",
+  "payload": null
+}

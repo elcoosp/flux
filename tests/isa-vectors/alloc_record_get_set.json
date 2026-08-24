@@ -1,0 +1,33 @@
+{
+  "bytecode_hex": "70000200b0010b000000000000007200000001b002160000000000000072000100027103000000710400010000",
+  "description": "ALLOC_RECORD + GET/SET_FIELD round-trip.",
+  "expected_error": null,
+  "expected_gas_used": 7,
+  "expected_registers": {
+    "r0": {
+      "type": "Record",
+      "value": [
+        {
+          "type": "Int",
+          "value": 11
+        },
+        {
+          "type": "Int",
+          "value": 22
+        }
+      ]
+    },
+    "r3": {
+      "type": "Int",
+      "value": 11
+    },
+    "r4": {
+      "type": "Int",
+      "value": 22
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "alloc_record_get_set",
+  "payload": null
+}

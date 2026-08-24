@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b20001b201004102000100",
+  "description": "OR_BOOL true||false.",
+  "expected_error": null,
+  "expected_gas_used": 3,
+  "expected_registers": {
+    "r2": {
+      "type": "Bool",
+      "value": 1
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "or_bool",
+  "payload": null
+}

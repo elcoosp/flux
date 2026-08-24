@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b3003930000053010000",
+  "description": "STR_LEN returns id length.",
+  "expected_error": null,
+  "expected_gas_used": 2,
+  "expected_registers": {
+    "r1": {
+      "type": "Int",
+      "value": 5
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "str_len_basic",
+  "payload": null
+}

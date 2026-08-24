@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b3002a00000000",
+  "description": "LOAD_STR_CONST loads a string id.",
+  "expected_error": null,
+  "expected_gas_used": 1,
+  "expected_registers": {
+    "r0": {
+      "type": "Str",
+      "value": 42
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "load_str_const",
+  "payload": null
+}

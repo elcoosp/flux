@@ -1,0 +1,11 @@
+{
+  "bytecode_hex": "0100",
+  "description": "NOP is a no-op.",
+  "expected_error": null,
+  "expected_gas_used": 1,
+  "expected_registers": {},
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "nop_basic",
+  "payload": null
+}

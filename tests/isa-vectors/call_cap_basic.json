@@ -1,0 +1,33 @@
+{
+  "bytecode_hex": "70000100b0014d00000000000000720000000190020100000001000000",
+  "description": "CALL_CAP registers a callback; stubbed host writes arg[0] into signal 99 and result_reg.",
+  "expected_error": null,
+  "expected_gas_used": 4,
+  "expected_registers": {
+    "r0": {
+      "type": "Record",
+      "value": [
+        {
+          "type": "Int",
+          "value": 77
+        }
+      ]
+    },
+    "r2": {
+      "type": "Int",
+      "value": 77
+    }
+  },
+  "expected_signals": [
+    {
+      "id": 99,
+      "value": {
+        "type": "Int",
+        "value": 77
+      }
+    }
+  ],
+  "initial_signals": [],
+  "name": "call_cap_basic",
+  "payload": null
+}

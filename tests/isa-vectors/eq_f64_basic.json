@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b1000000000000004540b10100000000000045403502000100",
+  "description": "EQ_F64 true when equal.",
+  "expected_error": null,
+  "expected_gas_used": 3,
+  "expected_registers": {
+    "r2": {
+      "type": "Float",
+      "value": 1
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "eq_f64_basic",
+  "payload": null
+}

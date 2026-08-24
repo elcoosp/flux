@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b0000100000000000000b00101000000000000002002000100",
+  "description": "r15 (gas) decrements as instructions run.",
+  "expected_error": null,
+  "expected_gas_used": 3,
+  "expected_registers": {
+    "r15": {
+      "type": "Int",
+      "value": 99997
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "reg_r15_gas_decrements",
+  "payload": null
+}

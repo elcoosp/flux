@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b100000000000000f03fb10100000000000000003302000100",
+  "description": "DIV_F64 by zero yields +inf (IEEE 754).",
+  "expected_error": null,
+  "expected_gas_used": 3,
+  "expected_registers": {
+    "r2": {
+      "type": "Float",
+      "value": Infinity
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "div_f64_by_zero",
+  "payload": null
+}

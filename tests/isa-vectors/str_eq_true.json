@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b30005000000b301050000005202000100",
+  "description": "STR_EQ true for equal ids.",
+  "expected_error": null,
+  "expected_gas_used": 3,
+  "expected_registers": {
+    "r2": {
+      "type": "Bool",
+      "value": 1
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "str_eq_true",
+  "payload": null
+}

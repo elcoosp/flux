@@ -1,0 +1,11 @@
+{
+  "bytecode_hex": "80000200b00101000000000000008100018202000900",
+  "description": "LIST_GET out of bounds raises IndexOutOfBounds.",
+  "expected_error": "IndexOutOfBounds",
+  "expected_gas_used": 0,
+  "expected_registers": {},
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "list_get_oob",
+  "payload": null
+}

@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b0000100000000000000b00102000000000000002702000100",
+  "description": "LT_I64 true when less.",
+  "expected_error": null,
+  "expected_gas_used": 3,
+  "expected_registers": {
+    "r2": {
+      "type": "Int",
+      "value": 1
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "lt_i64_basic",
+  "payload": null
+}

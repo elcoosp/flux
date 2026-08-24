@@ -1,0 +1,11 @@
+{
+  "bytecode_hex": "01010101010101010101c0a086010000",
+  "description": "GAS_CHECK with budget > remaining raises GasExhausted.",
+  "expected_error": "GasExhausted",
+  "expected_gas_used": 11,
+  "expected_registers": {},
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "gas_check_exhausted",
+  "payload": null
+}

@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b10090f7aa9509bf054000",
+  "description": "LOAD_FLOAT_CONST loads an f64.",
+  "expected_error": null,
+  "expected_gas_used": 1,
+  "expected_registers": {
+    "r0": {
+      "type": "Float",
+      "value": 2.71828
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "load_float_const",
+  "payload": null
+}

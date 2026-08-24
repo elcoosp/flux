@@ -1,0 +1,29 @@
+{
+  "bytecode_hex": "b5010000",
+  "description": "r0 holds the entry payload (a record).",
+  "expected_error": null,
+  "expected_gas_used": 1,
+  "expected_registers": {
+    "r1": {
+      "type": "Record",
+      "value": [
+        {
+          "type": "Int",
+          "value": 99
+        }
+      ]
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "reg_r0_payload",
+  "payload": [
+    "Record",
+    [
+      [
+        "Int",
+        99
+      ]
+    ]
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "bytecode_hex": "70000100710100050000",
+  "description": "GET_FIELD beyond record length raises IndexOutOfBounds.",
+  "expected_error": "IndexOutOfBounds",
+  "expected_gas_used": 0,
+  "expected_registers": {},
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "get_field_oob",
+  "payload": null
+}

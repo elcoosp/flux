@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b00085ffffffffffffff00",
+  "description": "LOAD_INT_CONST loads an i64.",
+  "expected_error": null,
+  "expected_gas_used": 1,
+  "expected_registers": {
+    "r0": {
+      "type": "Int",
+      "value": -123
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "load_int_const",
+  "payload": null
+}

@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b0000200000000000000b00103000000000000002a02000100",
+  "description": "GTE_I64 false when not >=.",
+  "expected_error": null,
+  "expected_gas_used": 3,
+  "expected_registers": {
+    "r2": {
+      "type": "Int",
+      "value": 0
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "gte_i64_basic",
+  "payload": null
+}

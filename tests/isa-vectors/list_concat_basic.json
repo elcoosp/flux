@@ -1,0 +1,25 @@
+{
+  "bytecode_hex": "80000200b001010000000000000081000180020200b00302000000000000008102038404000200",
+  "description": "LIST_CONCAT joins two lists.",
+  "expected_error": null,
+  "expected_gas_used": 7,
+  "expected_registers": {
+    "r4": {
+      "type": "List",
+      "value": [
+        {
+          "type": "Int",
+          "value": 1
+        },
+        {
+          "type": "Int",
+          "value": 2
+        }
+      ]
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "list_concat_basic",
+  "payload": null
+}

@@ -1,0 +1,32 @@
+{
+  "bytecode_hex": "10000500000011050000000000",
+  "description": "READ then WRITE round-trips a signal unchanged.",
+  "expected_error": null,
+  "expected_gas_used": 2,
+  "expected_registers": {
+    "r0": {
+      "type": "Float",
+      "value": 3.5
+    }
+  },
+  "expected_signals": [
+    {
+      "id": 5,
+      "value": {
+        "type": "Float",
+        "value": 3.5
+      }
+    }
+  ],
+  "initial_signals": [
+    {
+      "id": 5,
+      "value": {
+        "type": "Float",
+        "value": 3.5
+      }
+    }
+  ],
+  "name": "signal_roundtrip",
+  "payload": null
+}

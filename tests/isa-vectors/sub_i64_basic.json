@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b0000a00000000000000b00104000000000000002102000100",
+  "description": "SUB_I64 computes 10-4.",
+  "expected_error": null,
+  "expected_gas_used": 3,
+  "expected_registers": {
+    "r2": {
+      "type": "Int",
+      "value": 6
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "sub_i64_basic",
+  "payload": null
+}

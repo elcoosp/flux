@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "51000700000000",
+  "description": "STR_INTERN loads a string id from the table offset.",
+  "expected_error": null,
+  "expected_gas_used": 1,
+  "expected_registers": {
+    "r0": {
+      "type": "Str",
+      "value": 7
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "str_intern_basic",
+  "payload": null
+}

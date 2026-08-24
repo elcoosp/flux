@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b0002a0000000000000038010000",
+  "description": "I64_TO_F64 widens an integer.",
+  "expected_error": null,
+  "expected_gas_used": 2,
+  "expected_registers": {
+    "r1": {
+      "type": "Float",
+      "value": 42.0
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "i64_to_f64",
+  "payload": null
+}

@@ -1,0 +1,32 @@
+{
+  "bytecode_hex": "10000100000000",
+  "description": "READ_SIGNAL r0, sig1 loads the signal value.",
+  "expected_error": null,
+  "expected_gas_used": 1,
+  "expected_registers": {
+    "r0": {
+      "type": "Int",
+      "value": 7
+    }
+  },
+  "expected_signals": [
+    {
+      "id": 1,
+      "value": {
+        "type": "Int",
+        "value": 7
+      }
+    }
+  ],
+  "initial_signals": [
+    {
+      "id": 1,
+      "value": {
+        "type": "Int",
+        "value": 7
+      }
+    }
+  ],
+  "name": "read_signal_basic",
+  "payload": null
+}

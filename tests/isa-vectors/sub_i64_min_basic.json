@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b0000000000000000080b00100000000000000002102000100",
+  "description": "SUB_I64 i64::MIN - 0 stays MIN.",
+  "expected_error": null,
+  "expected_gas_used": 3,
+  "expected_registers": {
+    "r2": {
+      "type": "Int",
+      "value": -9223372036854775808
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "sub_i64_min_basic",
+  "payload": null
+}

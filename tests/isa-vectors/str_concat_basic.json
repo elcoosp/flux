@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b30001000000b301020000005002000100",
+  "description": "STR_CONCAT joins two string ids.",
+  "expected_error": null,
+  "expected_gas_used": 3,
+  "expected_registers": {
+    "r2": {
+      "type": "Str",
+      "value": 10000002
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "str_concat_basic",
+  "payload": null
+}

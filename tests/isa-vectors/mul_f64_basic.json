@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b1000000000000001840b1010000000000001c403202000100",
+  "description": "MUL_F64 computes 6.0*7.0.",
+  "expected_error": null,
+  "expected_gas_used": 3,
+  "expected_registers": {
+    "r2": {
+      "type": "Float",
+      "value": 42.0
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "mul_f64_basic",
+  "payload": null
+}

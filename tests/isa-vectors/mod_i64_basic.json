@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b0002b00000000000000b0010a000000000000002402000100",
+  "description": "MOD_I64 computes 43%10.",
+  "expected_error": null,
+  "expected_gas_used": 3,
+  "expected_registers": {
+    "r2": {
+      "type": "Int",
+      "value": 3
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "mod_i64_basic",
+  "payload": null
+}

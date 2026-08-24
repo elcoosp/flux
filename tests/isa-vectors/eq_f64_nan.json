@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b100000000000000f87fb101000000000000f87f3502000100",
+  "description": "EQ_F64 with NaN compares true to NaN (IEEE-aware equality in oracle).",
+  "expected_error": null,
+  "expected_gas_used": 3,
+  "expected_registers": {
+    "r2": {
+      "type": "Bool",
+      "value": 1
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "eq_f64_nan",
+  "payload": null
+}

@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b100000000000000f0ffb101000000000000f03f3002000100",
+  "description": "ADD_F64 with -inf yields -inf.",
+  "expected_error": null,
+  "expected_gas_used": 3,
+  "expected_registers": {
+    "r2": {
+      "type": "Float",
+      "value": -Infinity
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "add_f64_neginf",
+  "payload": null
+}

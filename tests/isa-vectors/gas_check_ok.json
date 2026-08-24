@@ -1,0 +1,24 @@
+{
+  "bytecode_hex": "c032000000b000010000000000000000",
+  "description": "GAS_CHECK passes when remaining gas >= budget.",
+  "expected_error": null,
+  "expected_gas_used": 2,
+  "expected_registers": {
+    "r0": {
+      "type": "Int",
+      "value": 1
+    }
+  },
+  "expected_signals": [
+    {
+      "id": 1,
+      "value": {
+        "type": "Int",
+        "value": 1
+      }
+    }
+  ],
+  "initial_signals": [],
+  "name": "gas_check_ok",
+  "payload": null
+}

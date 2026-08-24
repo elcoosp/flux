@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b2000100",
+  "description": "LOAD_BOOL_CONST loads a bool.",
+  "expected_error": null,
+  "expected_gas_used": 1,
+  "expected_registers": {
+    "r0": {
+      "type": "Bool",
+      "value": 1
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "load_bool_const",
+  "payload": null
+}

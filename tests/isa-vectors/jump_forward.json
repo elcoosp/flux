@@ -1,0 +1,20 @@
+{
+  "bytecode_hex": "600a000000b000e703000000000000b00107000000000000002002010100",
+  "description": "JUMP skips the next instruction (a 10-byte LOAD_INT_CONST).",
+  "expected_error": null,
+  "expected_gas_used": 3,
+  "expected_registers": {
+    "r1": {
+      "type": "Int",
+      "value": 7
+    },
+    "r2": {
+      "type": "Int",
+      "value": 14
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "jump_forward",
+  "payload": null
+}

@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b1000000000000000840b10100000000000000403702000100",
+  "description": "GT_F64 true when greater.",
+  "expected_error": null,
+  "expected_gas_used": 3,
+  "expected_registers": {
+    "r2": {
+      "type": "Float",
+      "value": 1
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "gt_f64_basic",
+  "payload": null
+}

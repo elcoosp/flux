@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b0000500000000000000b5010000",
+  "description": "MOV copies a register.",
+  "expected_error": null,
+  "expected_gas_used": 2,
+  "expected_registers": {
+    "r1": {
+      "type": "Int",
+      "value": 5
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "mov_basic",
+  "payload": null
+}

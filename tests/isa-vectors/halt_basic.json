@@ -1,0 +1,11 @@
+{
+  "bytecode_hex": "0100",
+  "description": "HALT terminates the handler with no effect.",
+  "expected_error": null,
+  "expected_gas_used": 1,
+  "expected_registers": {},
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "halt_basic",
+  "payload": null
+}
