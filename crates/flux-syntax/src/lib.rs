@@ -30,6 +30,7 @@
 
 mod ids;
 mod node;
+pub mod opcode;
 mod patch;
 mod strings;
 mod ty;
