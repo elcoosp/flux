@@ -1,12 +1,13 @@
 //! Round-trip, determinism, size and framing tests for `flux-ir-serde`.
 
+use flux_ir::ClosureIR;
 use flux_ir_serde::{
     Frame, MAGIC, PROTOCOL_VERSION, WireError, deserialize_patches, hash_closure, hash_props,
     serialize_patches,
 };
 use flux_syntax::{
-    Child, ClosureRef, NodeKind, Patch, PropDiff, Props, SignalId, Span, StringId, StringTable,
-    Value,
+    Child, ClosureRef, HandlerId, NodeKind, Patch, PropDiff, Props, SignalId, Span, StringId,
+    StringTable, Value,
 };
 
 /// NaN-aware value equality: `f64::NAN` never equals itself under `PartialEq`,
@@ -92,21 +93,24 @@ fn sample_patches() -> Vec<Patch> {
 fn round_trips_sample_patches() {
     let patches = sample_patches();
     let table = StringTable::new();
-    let bytes = serialize_patches(&patches, &table);
-    let back = deserialize_patches(&bytes).expect("decode succeeds");
+    let bytes = serialize_patches(&patches, &table, &[]);
+    let (back, _closures) = deserialize_patches(&bytes).expect("decode succeeds");
     // `Patch` does not derive `Eq` (it lives in `flux-syntax`), so we assert
     // structural equality via the deterministic canonical encoding instead.
-    assert_eq!(serialize_patches(&back, &table), bytes);
+    assert_eq!(serialize_patches(&back, &table, &[]), bytes);
 }
 
 #[test]
 fn round_trips_empty_patch_set() {
-    let bytes = serialize_patches(&[], &StringTable::new());
+    let bytes = serialize_patches(&[], &StringTable::new(), &[]);
     // An empty set still serializes to a valid (minimal) Delta frame, not an
     // empty buffer: magic(4) + version(1) + frame_type(1) + seq(4) + flags(1)
-    // + patch_count(2) + handler_count(2) + string_count(2) = 17 bytes.
-    assert_eq!(bytes.len(), 17);
-    assert!(deserialize_patches(&bytes).unwrap().is_empty());
+    // + patch_count(2) + handler_count(2) + string_count(2) = 17 bytes, plus
+    // the empty handler section (blob_len u32 = 0) = 21 bytes.
+    assert_eq!(bytes.len(), 21);
+    let (patches, closures) = deserialize_patches(&bytes).unwrap();
+    assert!(patches.is_empty());
+    assert!(closures.is_empty());
 }
 
 // ── every value variant round-trips through the codec ──────────────────────
@@ -136,8 +140,8 @@ fn every_value_variant_round_trips() {
                 removals: vec![],
             },
         }];
-        let bytes = serialize_patches(&patches, &table);
-        let back = deserialize_patches(&bytes).unwrap();
+        let bytes = serialize_patches(&patches, &table, &[]);
+        let (back, _closures) = deserialize_patches(&bytes).unwrap();
         match (&value, &back[0]) {
             (_, Patch::Update { id: _, props_diff }) => {
                 assert!(
@@ -182,8 +186,8 @@ fn hash_closure_distinguishes_captures() {
 fn serialize_is_deterministic() {
     let patches = sample_patches();
     let table = StringTable::new();
-    let a = serialize_patches(&patches, &table);
-    let b = serialize_patches(&patches, &table);
+    let a = serialize_patches(&patches, &table, &[]);
+    let b = serialize_patches(&patches, &table, &[]);
     assert_eq!(a, b);
 }
 
@@ -228,6 +232,7 @@ fn init_frame_round_trips() {
         &[(SignalId::from(1u32), Value::Int(0))],
         &[(0u32, "src/main.flux".to_string())],
         &table,
+        &[],
     );
     let bytes = frame.to_bytes();
     let decoded = Frame::from_init_bytes(&bytes).expect("init decodes");
@@ -239,6 +244,7 @@ fn init_frame_round_trips() {
             node: root.clone(),
         }],
         &table,
+        &[],
     );
     let decoded_root = serialize_patches(
         &[Patch::Replace {
@@ -246,6 +252,7 @@ fn init_frame_round_trips() {
             node: decoded.root.clone(),
         }],
         &decoded.string_table,
+        &[],
     );
     assert_eq!(decoded_root, orig);
     assert_eq!(
@@ -267,18 +274,20 @@ fn delta_frame_round_trips() {
         0,
         &patches,
         &[(StringId::from(1u32), "hello".to_string())],
+        &[],
     );
     let bytes = frame.to_bytes();
     let decoded = Frame::from_delta_bytes(&bytes).expect("delta decodes");
     // `Patch` does not derive `Eq`; compare the canonical encodings instead.
     assert_eq!(
-        serialize_patches(&decoded.patches, &StringTable::new()),
-        serialize_patches(&patches, &StringTable::new())
+        serialize_patches(&decoded.patches, &StringTable::new(), &[]),
+        serialize_patches(&patches, &StringTable::new(), &[])
     );
     assert_eq!(
         decoded.strings,
         vec![(StringId::from(1u32), "hello".to_string())]
     );
+    assert!(decoded.closures.is_empty());
 }
 
 #[test]
@@ -311,10 +320,108 @@ fn corrupt_frame_is_rejected() {
 #[test]
 fn truncated_patch_stream_errors() {
     let patches = sample_patches();
-    let bytes = serialize_patches(&patches, &StringTable::new());
+    let bytes = serialize_patches(&patches, &StringTable::new(), &[]);
     // Chop the buffer in half — decoding must fail, not panic.
     let result = deserialize_patches(&bytes[..bytes.len() / 2]);
     assert!(matches!(result, Err(WireError::Truncated { .. })));
+}
+
+// ── Gap G1: handler transport (bytecode blob + HandlerDef stream) ──────────
+
+/// Builds two sample closures with distinct bytecode and captures.
+fn sample_closures() -> Vec<ClosureIR> {
+    vec![
+        ClosureIR::new(
+            HandlerId::from(1u32),
+            vec![0x00, 0x10, 0x20, 0x30], // HALT, READ_SIGNAL, ADD_I64, ...
+            vec![SignalId::from(1u32), SignalId::from(2u32)],
+            Span::new(0, 0, 4),
+        ),
+        ClosureIR::new(
+            HandlerId::from(2u32),
+            vec![0xB0, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00], // LOAD_INT_CONST 1
+            vec![SignalId::from(3u32)],
+            Span::new(0, 4, 12),
+        ),
+    ]
+}
+
+#[test]
+fn init_frame_carries_handlers_round_trip() {
+    let table = StringTable::new();
+    let root = flux_syntax::NodeRef {
+        id: 1,
+        kind: NodeKind::Component,
+        component_id: 1,
+        props: Props::default(),
+        children: vec![],
+        handlers: vec![],
+        span: Span::new(0, 0, 8),
+    };
+    let closures = sample_closures();
+    let frame = Frame::init(
+        &root,
+        &[(SignalId::from(1u32), Value::Int(0))],
+        &[(0u32, "src/main.flux".to_string())],
+        &table,
+        &closures,
+    );
+    let bytes = frame.to_bytes();
+    let decoded = Frame::from_init_bytes(&bytes).expect("init decodes with handlers");
+    assert_eq!(decoded.closures.len(), 2);
+    // Bytecode + captures must round-trip exactly.
+    assert_eq!(decoded.closures[0].id, HandlerId::from(1u32));
+    assert_eq!(decoded.closures[0].bytecode, vec![0x00, 0x10, 0x20, 0x30]);
+    assert_eq!(
+        decoded.closures[0].captured_signals,
+        vec![SignalId::from(1u32), SignalId::from(2u32)]
+    );
+    assert_eq!(
+        decoded.closures[1].bytecode,
+        vec![0xB0, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+    );
+    // The content hash recomputed from the decoded bytecode + captures must
+    // match the canonical BLAKE3 digest (Appendix D §D.7).
+    assert_eq!(
+        flux_ir_serde::hash_closure(
+            &decoded.closures[0].bytecode,
+            &decoded.closures[0].captured_signals
+        ),
+        flux_ir_serde::hash_closure(
+            &[0x00, 0x10, 0x20, 0x30],
+            &[SignalId::from(1u32), SignalId::from(2u32)]
+        )
+    );
+}
+
+#[test]
+fn delta_frame_carries_handlers_round_trip() {
+    let patches = vec![Patch::Remove { id: 7 }];
+    let closures = sample_closures();
+    let frame = Frame::delta(0x1234, 0, &patches, &[], &closures);
+    let bytes = frame.to_bytes();
+    let decoded = Frame::from_delta_bytes(&bytes).expect("delta decodes with handlers");
+    assert_eq!(decoded.closures.len(), 2);
+    assert_eq!(decoded.closures[0].bytecode, vec![0x00, 0x10, 0x20, 0x30]);
+    assert_eq!(
+        decoded.closures[1].captured_signals,
+        vec![SignalId::from(3u32)]
+    );
+    // The closure bytecode must index a stable offset in the shared blob, so
+    // serialization is byte-deterministic.
+    let again = Frame::delta(0x1234, 0, &patches, &[], &closures).to_bytes();
+    assert_eq!(again, bytes);
+}
+
+#[test]
+fn empty_handler_section_is_zero_length_blob() {
+    // A frame with no closures must still encode a valid (empty) handler
+    // section so the decoder's blob read never underflows.
+    let frame = Frame::delta(0, 0, &[Patch::Remove { id: 1 }], &[], &[]);
+    let bytes = frame.to_bytes();
+    let decoded = Frame::from_delta_bytes(&bytes).unwrap();
+    assert!(decoded.closures.is_empty());
+    assert_eq!(decoded.closures, Vec::<ClosureIR>::new());
 }
 
 // ── 50-node Init frame stays under 20 KB ───────────────────────────────────
@@ -343,6 +450,7 @@ fn init_frame_under_20kb() {
         &[(SignalId::from(1u32), Value::Int(0))],
         &[(0u32, "src/main.flux".to_string())],
         &table,
+        &[],
     );
     let bytes = frame.to_bytes();
     assert!(

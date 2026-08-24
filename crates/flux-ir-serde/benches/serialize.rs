@@ -35,8 +35,11 @@ fn bench_serialize_patches(c: &mut Criterion) {
     let (patches, table) = build_50_node_patch();
     c.bench_function("serialize_50_node_patch", |b| {
         b.iter(|| {
-            let bytes =
-                serialize_patches(std::hint::black_box(&patches), std::hint::black_box(&table));
+            let bytes = serialize_patches(
+                std::hint::black_box(&patches),
+                std::hint::black_box(&table),
+                &[],
+            );
             std::hint::black_box(bytes)
         });
     });
@@ -55,6 +58,7 @@ fn bench_init_frame_size(c: &mut Criterion) {
                 std::hint::black_box(&[(0u32, Value::Int(0))]),
                 std::hint::black_box(&[(0u32, "src/main.flux".to_string())]),
                 std::hint::black_box(&table),
+                &[],
             );
             let bytes = frame.to_bytes();
             assert!(bytes.len() < 20 * 1024, "Init frame over 20 KB");

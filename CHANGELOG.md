@@ -8,6 +8,46 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Gap G1 — handler transport on the wire (ADR-0028) — DONE
+
+Resolved "Gap G1" from the boundary contract: handler closures (`ClosureIR`
+bytecode + captured signals) had no wire transport — `Init`/`Delta` frames
+carried patches + strings only, and `ClosureRef.bytecode_offset/len` pointed
+into a bytecode blob no frame shipped. Implemented as the contract's reserved
+`flux-ir-serde` second pass (`crates/flux-ir-serde`).
+
+- `wire.rs` — promoted the `HandlerDef` codec (Appendix D §D.8) from
+  `#[allow(dead_code)]` to live: `encode_handler_def` / `decode_handler_def`,
+  plus a shared `encode_bytecode_blob` / `decode_bytecode_blob` (D.12 handler
+  section: `u32` length + raw little-endian bytecode).
+- `frame.rs` — `Init` and `Delta` frames now carry a **handler section**
+  immediately after the string stream: a shared bytecode blob, then a
+  `HandlerDef` stream (D.8) whose `ClosureRef`s index the blob by
+  `bytecode_offset`/`bytecode_len`. The reserved D.1 `handler_count` slot (offset
+  12) now carries the true `HandlerDef` count. A frame with no handlers writes a
+  zero-length blob so the decoder never underflows — backward-compatible with
+  existing handler-less frames.
+- `encode.rs` — `serialize_patches(patches, table, closures: &[ClosureIR])`
+  threads closures into the `Delta` frame; `deserialize_patches` now returns
+  `(Vec<Patch>, Vec<ClosureIR>)` (the frame's handler section). Doc examples
+  updated.
+
+Public API surface: `Frame::init(..., closures)`, `Frame::delta(...,
+closures)`, and `InitFrame`/`DeltaFrame` gain a `closures: Vec<ClosureIR>`
+field. The only consumers at merge time are `flux-ir-serde`'s own tests/bench
+and the devserver stub (which does not yet ship handlers), so the signature
+change is contained. No production (Swift/Kotlin) deserializer is touched — the
+wire layout is additive and matches the spec's reserved `handler_count`.
+
+Tests (`crates/flux-ir-serde/tests`): 3 new G1 tests — `init_frame_carries_handlers_round_trip`,
+`delta_frame_carries_handlers_round_trip` (assert bytecode + captures round-trip
+and serialization is byte-deterministic), and `empty_handler_section_is_zero_length_blob`.
+All 28 crate tests pass; `cargo clippy -- -D warnings`, `cargo fmt --check`,
+`cargo doc`, and doctests all clean.
+
+Unblocks FLUX-019 (devserver), which the contract explicitly gates on G1
+landing first.
+
 ### Phase 1 — Native runtime
 
 #### FLUX-006 — iOS host runtime (VM + wire + reconciler + executor) — DONE

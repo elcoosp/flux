@@ -9,6 +9,7 @@
 //! BLAKE3 digests used by the host-side cache (Appendix D §D.14).
 
 use blake3::Hasher;
+use flux_ir::ClosureIR;
 use flux_syntax::{Patch, PropIdx, SignalId, StringTable, Value};
 
 use crate::frame::Frame;
@@ -25,24 +26,38 @@ use crate::wire::WireError;
 /// # Examples
 ///
 /// ```
+/// use flux_ir::ClosureIR;
 /// use flux_ir_serde::{deserialize_patches, serialize_patches};
-/// use flux_syntax::{Patch, StringTable};
+/// use flux_syntax::{Patch, SignalId, Span, StringTable};
 ///
 /// let table = StringTable::new();
 /// let patches = vec![Patch::Remove { id: 42 }];
-/// let bytes = serialize_patches(&patches, &table);
-/// let back = deserialize_patches(&bytes).unwrap();
-/// assert_eq!(serialize_patches(&back, &table), bytes);
+/// let bytes = serialize_patches(&patches, &table, &[]);
+/// let (back, closures) = deserialize_patches(&bytes).unwrap();
+/// assert_eq!(serialize_patches(&back, &table, &closures), bytes);
+/// // The example ships no handlers, so the closure stream is empty.
+/// let _ = ClosureIR::new(
+///     flux_syntax::HandlerId::from(1u32),
+///     vec![],
+///     vec![],
+///     Span::new(0, 0, 0),
+/// );
 /// ```
 #[must_use]
-pub fn serialize_patches(patches: &[Patch], _table: &StringTable) -> Vec<u8> {
-    Frame::delta(0, 0, patches, &[]).to_bytes()
+pub fn serialize_patches(
+    patches: &[Patch],
+    _table: &StringTable,
+    closures: &[ClosureIR],
+) -> Vec<u8> {
+    Frame::delta(0, 0, patches, &[], closures).to_bytes()
 }
 
 /// Round-trip decoder for tests only (production decoders are Swift/Kotlin).
 ///
 /// Returns [`WireError`] on any truncated buffer or unknown tag, which the
 /// test harness treats as a serialization bug rather than a recoverable frame.
+/// The returned `Vec<ClosureIR>` is the frame's handler section (Gap G1); it is
+/// empty when the frame carried no handlers.
 ///
 /// # Examples
 ///
@@ -51,13 +66,14 @@ pub fn serialize_patches(patches: &[Patch], _table: &StringTable) -> Vec<u8> {
 /// use flux_syntax::{Patch, StringTable};
 ///
 /// let patches = vec![Patch::Remove { id: 42 }];
-/// let bytes = serialize_patches(&patches, &StringTable::new());
-/// let back = deserialize_patches(&bytes).unwrap();
+/// let bytes = serialize_patches(&patches, &StringTable::new(), &[]);
+/// let (back, _closures) = deserialize_patches(&bytes).unwrap();
 /// // `Patch` does not derive `Eq`, so compare the canonical encodings.
-/// assert_eq!(serialize_patches(&back, &StringTable::new()), bytes);
+/// assert_eq!(serialize_patches(&back, &StringTable::new(), &[]), bytes);
 /// ```
-pub fn deserialize_patches(bytes: &[u8]) -> Result<Vec<Patch>, WireError> {
-    Frame::from_delta_bytes(bytes).map(|frame| frame.patches)
+pub fn deserialize_patches(bytes: &[u8]) -> Result<(Vec<Patch>, Vec<ClosureIR>), WireError> {
+    let frame = Frame::from_delta_bytes(bytes)?;
+    Ok((frame.patches, frame.closures))
 }
 
 /// BLAKE3 content hash of a props map.

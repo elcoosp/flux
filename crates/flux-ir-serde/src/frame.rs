@@ -10,12 +10,22 @@
 //!
 //! All integers are little-endian. Production decoders in Swift/Kotlin (FLUX-007,
 //! FLUX-008) read the same byte layout.
+//!
+//! **Handler transport (Gap G1):** `Init` and `Delta` frames optionally carry a
+//! handler section — a shared `bytecode` blob plus a `HandlerDef` stream (D.8)
+//! whose `ClosureRef`s index that blob by offset/length. This is the wire bridge
+//! the dev server needs to ship handler bodies; before it, closures had no
+//! transport.
 
 use crate::wire::{
-    Reader, WireError, Writer, decode_node, decode_patch, decode_string_entry, decode_value,
-    encode_node, encode_patch, encode_string_entry, encode_value,
+    Reader, WireError, Writer, decode_bytecode_blob, decode_handler_def, decode_node, decode_patch,
+    decode_string_entry, decode_value, encode_bytecode_blob, encode_handler_def, encode_node,
+    encode_patch, encode_string_entry, encode_value,
 };
-use flux_syntax::{FileId, NodeRef, Patch, SignalId, Span, StringId, StringTable, Value};
+use flux_ir::ClosureIR;
+use flux_syntax::{
+    FileId, HandlerId, NodeRef, Patch, SignalId, Span, StringId, StringTable, Value,
+};
 
 /// Magic bytes `"FLUX"` in little-endian (`0x465C5558`).
 pub const MAGIC: u32 = 0x465C_5558;
@@ -106,6 +116,42 @@ pub struct Frame;
 fn write_magic_version(w: &mut Writer) {
     w.u32(MAGIC);
     w.u8(PROTOCOL_VERSION);
+}
+
+/// Writes the frame-level handler section (Gap G1, Appendix D §D.8 + §D.12):
+/// a shared `bytecode` blob, then a `HandlerDef` stream whose `ClosureRef`s
+/// index that blob by `bytecode_offset`/`bytecode_len`.
+fn write_closures(w: &mut Writer, closures: &[ClosureIR]) {
+    if closures.is_empty() {
+        encode_bytecode_blob(w, &[]);
+        return;
+    }
+    // Concatenate every closure's bytecode into one blob and record each
+    // closure's offset within it, so the `ClosureRef` indices stay stable.
+    let mut blob: Vec<u8> = Vec::new();
+    let mut offsets: Vec<(HandlerId, u32, u16)> = Vec::with_capacity(closures.len());
+    for closure in closures {
+        let offset = blob.len() as u32;
+        blob.extend_from_slice(&closure.bytecode);
+        offsets.push((closure.id, offset, closure.bytecode.len() as u16));
+    }
+    encode_bytecode_blob(w, &blob);
+    w.u16(closures.len() as u16);
+    for closure in closures {
+        let (_, offset, len) = offsets
+            .iter()
+            .find(|(id, _, _)| *id == closure.id)
+            .copied()
+            .expect("closure id present in offsets");
+        let closure_ref = flux_syntax::ClosureRef {
+            hash: crate::hash_closure(&closure.bytecode, &closure.captured_signals),
+            bytecode_offset: offset,
+            bytecode_len: len,
+            captured_signals: closure.captured_signals.clone(),
+            span: closure.span,
+        };
+        encode_handler_def(w, closure.id, &closure_ref);
+    }
 }
 
 /// Validates the magic + version prefix and returns the `frame_type` byte and
@@ -306,6 +352,9 @@ pub struct InitFrame {
     pub source_map: Vec<(FileId, String)>,
     /// The string table the tree resolves against.
     pub string_table: StringTable,
+    /// Handler closures shipped with the tree (Gap G1). Empty when the tree
+    /// carries no handlers.
+    pub closures: Vec<ClosureIR>,
 }
 
 impl Frame {
@@ -316,6 +365,7 @@ impl Frame {
         state_seed: &[(SignalId, Value)],
         source_map: &[(FileId, String)],
         table: &StringTable,
+        closures: &[ClosureIR],
     ) -> InitFrame {
         InitFrame {
             version: PROTOCOL_VERSION,
@@ -325,6 +375,7 @@ impl Frame {
             state_seed: state_seed.to_vec(),
             source_map: source_map.to_vec(),
             string_table: table.clone(),
+            closures: closures.to_vec(),
         }
     }
 
@@ -373,6 +424,9 @@ impl Frame {
         for (_, text) in &entries {
             string_table.intern(text);
         }
+        // D.12 handler section (Gap G1): a shared bytecode blob followed by a
+        // `HandlerDef` stream; each `ClosureRef` indexes the blob.
+        let closures = decode_closures(&mut r)?;
         Ok(InitFrame {
             version,
             seq,
@@ -381,12 +435,48 @@ impl Frame {
             state_seed,
             source_map,
             string_table,
+            closures,
         })
     }
 }
 
+/// Decodes a frame's handler section: the shared bytecode blob (D.12) followed
+/// by a `HandlerDef` stream (D.8). Each `HandlerDef`'s `ClosureRef` indexes the
+/// blob by `bytecode_offset`/`bytecode_len`. An empty blob means no handlers.
+fn decode_closures(r: &mut Reader<'_>) -> Result<Vec<ClosureIR>, WireError> {
+    let blob = decode_bytecode_blob(r)?;
+    if blob.is_empty() {
+        return Ok(Vec::new());
+    }
+    let handler_count = r.u16("closures.count")? as usize;
+    let mut closures = Vec::with_capacity(handler_count);
+    for _ in 0..handler_count {
+        let (id, closure_ref) = decode_handler_def(r)?;
+        let start = closure_ref.bytecode_offset as usize;
+        let end = start + usize::from(closure_ref.bytecode_len);
+        let bytecode = blob
+            .get(start..end)
+            .ok_or(WireError::Truncated {
+                at: start,
+                needed: end.saturating_sub(start),
+                context: "closure.bytecode",
+                available: blob.len(),
+            })?
+            .to_vec();
+        closures.push(ClosureIR {
+            id,
+            bytecode,
+            captured_signals: closure_ref.captured_signals,
+            span: closure_ref.span,
+            param_types: Vec::new(),
+            return_type: flux_syntax::TypeId::from(0u32),
+        });
+    }
+    Ok(closures)
+}
+
 impl InitFrame {
-    /// Encodes the `Init` frame per Appendix D §D.1 + §D.12.2.
+    /// Encodes the `Init` frame per Appendix D §D.1 + §D.12.2 + §D.12 handler section.
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut w = Writer::new();
@@ -414,6 +504,8 @@ impl InitFrame {
         for (id, text) in &entries {
             encode_string_entry(&mut w, *id, text);
         }
+        // D.12 handler section (Gap G1): shared blob, then HandlerDef stream.
+        write_closures(&mut w, &self.closures);
         w.into_vec()
     }
 }
@@ -435,16 +527,21 @@ pub struct DeltaFrame {
     pub patches: Vec<Patch>,
     /// Newly interned strings carried by this frame.
     pub strings: Vec<(StringId, String)>,
+    /// Handler closures carried by this frame (Gap G1). Empty when the delta
+    /// introduces no new handlers.
+    pub closures: Vec<ClosureIR>,
 }
 
 impl Frame {
-    /// Builds a `Delta` frame carrying `patches` and a string delta.
+    /// Builds a `Delta` frame carrying `patches`, a string delta and a handler
+    /// closure delta.
     #[must_use]
     pub fn delta(
         seq: u32,
         flags: u8,
         patches: &[Patch],
         strings: &[(StringId, String)],
+        closures: &[ClosureIR],
     ) -> DeltaFrame {
         DeltaFrame {
             version: PROTOCOL_VERSION,
@@ -453,6 +550,7 @@ impl Frame {
             flags,
             patches: patches.to_vec(),
             strings: strings.to_vec(),
+            closures: closures.to_vec(),
         }
     }
 
@@ -488,6 +586,8 @@ impl Frame {
         for _ in 0..str_count {
             strings.push(decode_string_entry(&mut r)?);
         }
+        // D.12 handler section (Gap G1): shared blob, then HandlerDef stream.
+        let closures = decode_closures(&mut r)?;
         Ok(DeltaFrame {
             version,
             seq,
@@ -495,12 +595,13 @@ impl Frame {
             flags,
             patches,
             strings,
+            closures,
         })
     }
 }
 
 impl DeltaFrame {
-    /// Encodes the `Delta` frame per Appendix D §D.1 + §D.2/§D.9.
+    /// Encodes the `Delta` frame per Appendix D §D.1 + §D.2/§D.9 + §D.12 handler section.
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut w = Writer::new();
@@ -509,7 +610,7 @@ impl DeltaFrame {
         w.u32(self.seq);
         w.u8(self.flags);
         w.u16(self.patches.len() as u16);
-        w.u16(0); // handler_count (HandlerDef stream reserved for D.8)
+        w.u16(self.closures.len() as u16); // D.1 handler_count (now meaningful)
         w.u16(self.strings.len() as u16);
         for patch in &self.patches {
             encode_patch(&mut w, patch);
@@ -517,6 +618,7 @@ impl DeltaFrame {
         for (id, text) in &self.strings {
             encode_string_entry(&mut w, *id, text);
         }
+        write_closures(&mut w, &self.closures);
         w.into_vec()
     }
 }

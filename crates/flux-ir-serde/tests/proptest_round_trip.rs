@@ -93,11 +93,11 @@ proptest! {
     #[test]
     fn prop_patch_round_trip(patches in proptest::collection::vec(arb_patch(), 0..12)) {
         let table = StringTable::new();
-        let bytes = serialize_patches(&patches, &table);
-        let back = deserialize_patches(&bytes).expect("decode");
+        let bytes = serialize_patches(&patches, &table, &[]);
+        let (back, _closures) = deserialize_patches(&bytes).expect("decode");
         // `Patch` has no `Eq` impl (it lives in `flux-syntax`); we assert
         // structural equality through the deterministic canonical encoding.
-        prop_assert_eq!(serialize_patches(&back, &table), bytes);
+        prop_assert_eq!(serialize_patches(&back, &table, &[]), bytes);
     }
 
     /// A delta frame round-trips its patch set and string delta.
@@ -110,14 +110,15 @@ proptest! {
             .into_iter()
             .map(|(id, s)| (StringId::from(id), s))
             .collect();
-        let frame = Frame::delta(0, 0, &patches, &deltas);
+        let frame = Frame::delta(0, 0, &patches, &deltas, &[]);
         let bytes = frame.to_bytes();
         let decoded = Frame::from_delta_bytes(&bytes).expect("delta decode");
         prop_assert_eq!(
-            serialize_patches(&decoded.patches, &StringTable::new()),
-            serialize_patches(&patches, &StringTable::new())
+            serialize_patches(&decoded.patches, &StringTable::new(), &[]),
+            serialize_patches(&patches, &StringTable::new(), &[])
         );
         prop_assert_eq!(decoded.strings, deltas);
+        prop_assert!(decoded.closures.is_empty());
     }
 
     /// Two serializations of identical input produce identical bytes.
@@ -126,8 +127,8 @@ proptest! {
         patches in proptest::collection::vec(arb_patch(), 0..12),
     ) {
         let table = StringTable::new();
-        let a = serialize_patches(&patches, &table);
-        let b = serialize_patches(&patches, &table);
+        let a = serialize_patches(&patches, &table, &[]);
+        let b = serialize_patches(&patches, &table, &[]);
         prop_assert_eq!(a, b);
     }
 }
