@@ -1,0 +1,602 @@
+{
+  "builtTestProducts" : [
+    {
+      "binaryPath" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitPackageTests.xctest/Contents/MacOS/FluxUIKitPackageTests",
+      "packagePath" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift",
+      "productName" : "FluxUIKitPackageTests"
+    }
+  ],
+  "copyCommands" : {
+
+  },
+  "explicitTargetDependencyImportCheckingMode" : {
+    "none" : {
+
+    }
+  },
+  "generatedSourceTargetSet" : [
+
+  ],
+  "pluginDescriptions" : [
+
+  ],
+  "swiftCommands" : {
+    "C.FluxUIKit-arm64-apple-macosx-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKit.build/sources",
+      "importPath" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/Sources/FluxUIKit/FluxUIKit.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKit.build/sources"
+        }
+      ],
+      "isLibrary" : true,
+      "moduleName" : "FluxUIKit",
+      "moduleOutputPath" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/Modules/FluxUIKit.swiftmodule",
+      "objects" : [
+        "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKit.build/FluxUIKit.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx10.13",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-j8",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-parse-as-library",
+        "-emit-objc-header",
+        "-emit-objc-header-path",
+        "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKit.build/include/FluxUIKit-Swift.h",
+        "-swift-version",
+        "6",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.4.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.4.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "ui_swift"
+      ],
+      "outputFileMapPath" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKit.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKit.build/FluxUIKit.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/Modules/FluxUIKit.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/adm/Documents/Repos/flux/adapters/ui-swift/Sources/FluxUIKit/FluxUIKit.swift"
+      ],
+      "tempsPath" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKit.build",
+      "wholeModuleOptimization" : false
+    },
+    "C.FluxUIKitPackageTests-arm64-apple-macosx-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitPackageTests.build/sources",
+      "importPath" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitPackageTests.derived/runner.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/Modules/FluxUIKitTests.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitPackageTests.build/sources"
+        }
+      ],
+      "isLibrary" : true,
+      "moduleName" : "FluxUIKitPackageTests",
+      "moduleOutputPath" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/Modules/FluxUIKitPackageTests.swiftmodule",
+      "objects" : [
+        "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitPackageTests.build/runner.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx10.13",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-Xfrontend",
+        "-enable-cross-import-overlays",
+        "-j8",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-parse-as-library",
+        "-emit-objc-header",
+        "-emit-objc-header-path",
+        "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitPackageTests.build/include/FluxUIKitPackageTests-Swift.h",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.4.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.4.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "ui_swift"
+      ],
+      "outputFileMapPath" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitPackageTests.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitPackageTests.build/runner.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/Modules/FluxUIKitPackageTests.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitPackageTests.derived/runner.swift"
+      ],
+      "tempsPath" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitPackageTests.build",
+      "wholeModuleOptimization" : false
+    },
+    "C.FluxUIKitTests-arm64-apple-macosx-debug.module" : {
+      "executable" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "fileList" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitTests.build/sources",
+      "importPath" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/Tests/FluxUIKitTests/FluxUIKitTests.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/Modules/FluxUIKit.swiftmodule"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitTests.build/sources"
+        }
+      ],
+      "isLibrary" : true,
+      "moduleName" : "FluxUIKitTests",
+      "moduleOutputPath" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/Modules/FluxUIKitTests.swiftmodule",
+      "objects" : [
+        "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitTests.build/FluxUIKitTests.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "arm64-apple-macosx14.0",
+        "-incremental",
+        "-enable-batch-mode",
+        "-serialize-diagnostics",
+        "-index-store-path",
+        "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/index/store",
+        "-Onone",
+        "-enable-testing",
+        "-Xfrontend",
+        "-enable-cross-import-overlays",
+        "-j8",
+        "-DSWIFT_PACKAGE",
+        "-DDEBUG",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/ModuleCache",
+        "-parseable-output",
+        "-parse-as-library",
+        "-swift-version",
+        "6",
+        "-plugin-path",
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.4.sdk",
+        "-F",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-I",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-L",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.4.sdk",
+        "-Xcc",
+        "-F",
+        "-Xcc",
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g",
+        "-package-name",
+        "ui_swift"
+      ],
+      "outputFileMapPath" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitTests.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitTests.build/FluxUIKitTests.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/Modules/FluxUIKitTests.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/adm/Documents/Repos/flux/adapters/ui-swift/Tests/FluxUIKitTests/FluxUIKitTests.swift"
+      ],
+      "tempsPath" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitTests.build",
+      "wholeModuleOptimization" : false
+    }
+  },
+  "swiftFrontendCommands" : {
+
+  },
+  "swiftTargetScanArgs" : {
+    "FluxUIKit" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "FluxUIKit",
+      "-package-name",
+      "ui_swift",
+      "-c",
+      "/Users/adm/Documents/Repos/flux/adapters/ui-swift/Sources/FluxUIKit/FluxUIKit.swift",
+      "-I",
+      "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx10.13",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-j8",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-parse-as-library",
+      "-emit-objc-header",
+      "-emit-objc-header-path",
+      "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKit.build/include/FluxUIKit-Swift.h",
+      "-swift-version",
+      "6",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.4.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.4.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "ui_swift",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ],
+    "FluxUIKitPackageTests" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "FluxUIKitPackageTests",
+      "-package-name",
+      "ui_swift",
+      "-c",
+      "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitPackageTests.derived/runner.swift",
+      "-I",
+      "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx10.13",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-Xfrontend",
+      "-enable-cross-import-overlays",
+      "-j8",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-parse-as-library",
+      "-emit-objc-header",
+      "-emit-objc-header-path",
+      "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitPackageTests.build/include/FluxUIKitPackageTests-Swift.h",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.4.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.4.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "ui_swift",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ],
+    "FluxUIKitTests" : [
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc",
+      "-module-name",
+      "FluxUIKitTests",
+      "-package-name",
+      "ui_swift",
+      "-c",
+      "/Users/adm/Documents/Repos/flux/adapters/ui-swift/Tests/FluxUIKitTests/FluxUIKitTests.swift",
+      "-I",
+      "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/Modules",
+      "-target",
+      "arm64-apple-macosx14.0",
+      "-incremental",
+      "-enable-batch-mode",
+      "-serialize-diagnostics",
+      "-index-store-path",
+      "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/index/store",
+      "-Onone",
+      "-enable-testing",
+      "-Xfrontend",
+      "-enable-cross-import-overlays",
+      "-j8",
+      "-DSWIFT_PACKAGE",
+      "-DDEBUG",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/ModuleCache",
+      "-parseable-output",
+      "-parse-as-library",
+      "-swift-version",
+      "6",
+      "-plugin-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.4.sdk",
+      "-F",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-I",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-L",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.4.sdk",
+      "-Xcc",
+      "-F",
+      "-Xcc",
+      "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-package-name",
+      "ui_swift",
+      "-driver-use-frontend-path",
+      "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+    ]
+  },
+  "targetDependencyMap" : {
+    "FluxUIKit" : [
+
+    ],
+    "FluxUIKitPackageTests" : [
+      "FluxUIKitTests",
+      "FluxUIKit"
+    ],
+    "FluxUIKitTests" : [
+      "FluxUIKit"
+    ]
+  },
+  "testDiscoveryCommands" : {
+
+  },
+  "testEntryPointCommands" : {
+    "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitPackageTests.derived/runner.swift" : {
+      "inputs" : [
+
+      ],
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitPackageTests.derived/runner.swift"
+        }
+      ]
+    }
+  },
+  "traitConfiguration" : {
+    "default" : {
+
+    }
+  },
+  "writeCommands" : {
+    "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKit.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/Sources/FluxUIKit/FluxUIKit.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKit.build/sources"
+    },
+    "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitPackageTests.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitPackageTests.derived/runner.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitPackageTests.build/sources"
+    },
+    "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitPackageTests.product/Objects.LinkFileList" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<link-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKit.build/FluxUIKit.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitPackageTests.build/runner.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitTests.build/FluxUIKitTests.swift.o"
+        }
+      ],
+      "outputFilePath" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitPackageTests.product/Objects.LinkFileList"
+    },
+    "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitTests.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/Tests/FluxUIKitTests/FluxUIKitTests.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitTests.build/sources"
+    },
+    "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt" : {
+      "alwaysOutOfDate" : true,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<swift-get-version>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"
+        }
+      ],
+      "outputFilePath" : "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/swift-version--58304C5D6DBC2206.txt"
+    }
+  }
+}

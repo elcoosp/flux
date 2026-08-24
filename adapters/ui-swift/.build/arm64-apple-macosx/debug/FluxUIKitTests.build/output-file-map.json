@@ -1,0 +1,12 @@
+{
+  "": {
+    "swift-dependencies": "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitTests.build/primary.swiftdeps"
+  },
+  "/Users/adm/Documents/Repos/flux/adapters/ui-swift/Tests/FluxUIKitTests/FluxUIKitTests.swift": {
+    "dependencies": "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitTests.build/FluxUIKitTests.d",
+    "object": "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitTests.build/FluxUIKitTests.swift.o",
+    "swiftmodule": "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitTests.build/FluxUIKitTests~partial.swiftmodule",
+    "swift-dependencies": "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitTests.build/FluxUIKitTests.swiftdeps",
+    "diagnostics": "/Users/adm/Documents/Repos/flux/adapters/ui-swift/.build/arm64-apple-macosx/debug/FluxUIKitTests.build/FluxUIKitTests.dia"
+  }
+}

@@ -81,3 +81,96 @@ Added:
   manifest (`criterion`, `insta`, `proptest`, `tokio` as each crate needs), plus
   compiling criterion bench stubs under `benches/`. Agents may not edit
   manifests, so these must exist before Phase 1 starts.
+
+#### FLUX-001 — extended to boundary contract v2
+
+The boundary contract was revised to v2 mid-flight. v2 widens FLUX-001's scope,
+so the issue was reopened and the following delta implemented.
+
+Added:
+- `flux_syntax::opcode` — the VM instruction vocabulary, normative per
+  Appendix E §E.1. v2 §1.5 requires it in `flux-syntax` as the single Rust
+  source of truth for the ISA; the native Swift and Kotlin VMs declare their own
+  constants from the same table and the golden ISA vectors pin all three
+  together. All 54 opcodes with raw byte constants, a total `from_byte` decoder,
+  operand and instruction widths from the "Args (bytes)" column, and Appendix E
+  mnemonics. 18 tests written RED first; they caught a real error — Appendix E
+  defines **54** opcodes, not the 48 initially assumed. Split into
+  `opcode.rs` + `opcode/{decode,raw,width}.rs` to respect the 300-line limit.
+- Two new workspace members, taking the workspace from 10 to 12 crates:
+  `flux-vm-ref` (FLUX-005, the Rust reference VM — a test oracle that never
+  ships, since production VMs are native per ADR-0002) and `flux-parity`
+  (FLUX-023, the dev-versus-release parity harness).
+- v2-mandated cross-crate dev-dependencies that agents may not add for
+  themselves: `flux-ir` gains `flux-vm-ref` so FLUX-018's lowering tests can
+  execute emitted bytecode, and both codegen crates gain `flux-parser` +
+  `flux-types` for their full-pipeline tests. `serde_json` (ISA vector loading)
+  and `tempfile` added to the workspace dependency set.
+- **Frozen platform build manifests** (v2 §1.2 and R2 place these under
+  foundation ownership, frozen after Phase 0), all verified by a real build:
+  - `adapters/ui-swift/Package.swift` — SPM, swift-tools 6.0, iOS 16 minimum
+    (spec C-002), Swift 6 language mode. `swift build` and `swift test` pass.
+  - `runtimes/ios/project.yml` — XcodeGen 2.46.0 spec for the `FluxApp` host,
+    glob-based sources so agents never need a manifest edit, referencing
+    `adapters/ui-swift` as a local package. `xcodegen generate` then
+    `xcodebuild -destination 'generic/platform=iOS Simulator' build` succeeds.
+  - `settings.gradle.kts`, `gradle/libs.versions.toml`,
+    `adapters/ui-kotlin/build.gradle.kts`,
+    `runtimes/android/app/build.gradle.kts`, and the Gradle wrapper.
+    `./gradlew :adapters:ui-kotlin:test` passes.
+- Compiling platform source skeletons so CI and the platform agents start from a
+  green build: `FluxUIKit`, `FluxAppMain`, `FluxHostActivity`, `FluxUiKit`, an
+  `AndroidManifest.xml` and a theme.
+- **R10 wire-fixture loaders** in both runtime test suites: each reads
+  `FLUX_WIRE_FIXTURES` and skips cleanly when unset (`XCTSkip` / JUnit
+  `assumeTrue`), so FLUX-023 can drop in real fixtures without touching runtime
+  code.
+
+Dependency versions, all verified against crates.io, Google's Maven, Maven
+Central and the Gradle plugin portal on 2026-08-24 rather than assumed:
+Gradle **9.7.1** (latest; also satisfies AGP 9.3.2's 9.5.0 floor), AGP 9.3.2,
+Kotlin 2.4.10, Compose BOM 2026.08.00, core-ktx 1.19.0, activity-compose 1.13.0,
+navigation-compose 2.9.8, lifecycle 2.11.0, OkHttp 5.5.0, coroutines 1.11.0,
+JUnit Jupiter 6.1.3, MockK 1.14.11, Turbine 1.2.1, msgpack-core 0.9.12,
+ktlint plugin 14.2.0, serde_json 1.0.151, tempfile 3.27.0.
+
+Notes and deviations:
+- **AGP 9 removed the `kotlin-android` plugin** in favour of built-in Kotlin
+  support, so `runtimes/android/app/build.gradle.kts` deliberately does not apply
+  it. Applying it — as pre-AGP-9 documentation and most training data suggest —
+  breaks the build outright. Recorded here because the android-runtime and
+  kotlin-adapters agents will be tempted to add it.
+- `AGENTS.md` specifies Swift 5.10+/Xcode 15.4+ and Kotlin 2.0+. The installed
+  toolchain is far newer (Xcode 26.4, Swift 6.3, Kotlin 2.4.10, JBR 25), and the
+  latest-stable dependency policy takes precedence. The practical consequence is
+  that Swift 6 strict concurrency is enforced, which constrains FLUX-006's
+  `@MainActor` and background-executor design.
+- `compileSdk`/`targetSdk` are 36, not the API 37 maximum AGP 9.3 supports: 36 is
+  the latest *installed* platform, and 37 would not build here.
+- `adapters/ui-kotlin` is a plain Kotlin JVM library rather than an Android
+  library. The adapter contract (Appendix F) is prop-shape only and needs no
+  Android APIs, so a JVM module keeps its tests fast and runnable without an
+  emulator.
+
+Verification (real command output, not assumed):
+- `cargo nextest run --workspace` — 56 tests run, 56 passed, 0 skipped.
+- `cargo test --doc -p flux-syntax` — 8 doctests passed.
+- `cargo check --workspace` — all 12 crates compile.
+- `cargo clippy --workspace --all-targets -- -D warnings` — zero warnings.
+- `cargo fmt --check` — clean.
+- `swift build` / `swift test` in `adapters/ui-swift` — build complete, 1 test
+  passed.
+- `xcodegen generate` + `xcodebuild build` in `runtimes/ios` — BUILD SUCCEEDED.
+- `./gradlew --version` — Gradle 9.7.1 on JBR 25.
+- `./gradlew :adapters:ui-kotlin:test` — BUILD SUCCESSFUL.
+
+Toolchain probe (recorded so agents know what can actually be verified):
+- Xcode 26.4 (17E192), Swift 6.3, iOS 26.4 SDK, 1 iPhone simulator available.
+- Android Studio 2026.1 with bundled JBR 25 and Kotlin 2.3.10; SDK platforms
+  30–36, build-tools to 36.1.0, adb 1.0.41, emulator 37.1.11, AVD
+  `Medium_Phone_API_36.1`.
+- A physical device is attached (`15a3cc41de5b`, Android 13 / API 33), so
+  on-device verification is possible for FLUX-007 and FLUX-023.
+- No `gradle` or `kotlinc` on `PATH`; the committed wrapper is the supported
+  entry point. `JAVA_HOME` must point at Android Studio's JBR (the system JDK is
+  Zulu 21, which also works — AGP 9.3 requires only JDK 17+).

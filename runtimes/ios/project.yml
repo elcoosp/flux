@@ -1,0 +1,73 @@
+# Frozen build manifest — created once by the foundation pass (FLUX-001).
+# Agents may not modify this file (boundary contract R2).
+#
+# Regenerate the Xcode project with:  xcodegen generate
+# XcodeGen is a prerequisite: brew install xcodegen
+
+name: FluxApp
+
+options:
+  bundleIdPrefix: dev.flux
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    ENABLE_USER_SCRIPT_SANDBOXING: true
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: true
+
+packages:
+  FluxUIKit:
+    path: ../../adapters/ui-swift
+
+targets:
+  FluxApp:
+    type: application
+    platform: iOS
+    # Glob-based: source files added by the runtime agent are picked up with no
+    # manifest edit, which is what keeps this file frozen.
+    sources:
+      - path: Sources
+        createIntermediateGroups: true
+    dependencies:
+      - package: FluxUIKit
+    info:
+      path: Sources/Info.plist
+      properties:
+        CFBundleDisplayName: Flux
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        # Dev mode connects to the dev server over plaintext WebSocket on
+        # localhost only. Release builds ship generated code and no socket.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.flux.FluxApp
+        TARGETED_DEVICE_FAMILY: "1,2"
+
+  FluxAppTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+        createIntermediateGroups: true
+    dependencies:
+      - target: FluxApp
+      - package: FluxUIKit
+
+schemes:
+  FluxApp:
+    build:
+      targets:
+        FluxApp: all
+        FluxAppTests: [test]
+    test:
+      targets:
+        - FluxAppTests
+      gatherCoverageData: true
