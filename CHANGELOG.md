@@ -382,6 +382,51 @@ emulator not exercised here, per memory: ADB not on PATH).
 lands); per R8 the directory is write-only for the stdlib agent. **Uncommitted in
 the working tree at time of writing.**
 
+#### FLUX-008 — Swift adapter kit + dev adapters — DONE
+
+Implemented the shared adapter kit and the seven dev-mode adapters in
+`adapters/ui-swift` (no `try!`/`try?`, no force-unwraps in library code,
+every public item documented, `swift test` clean, TDD throughout):
+
+- Kit contract types the runtime (FLUX-006) consumes: `FluxValue`
+  (mirrors `flux_syntax::Value`, Appendix C.1), `Props` (flat
+  `(PropIdx, FluxValue)` map with O(1) typed accessors + stable content
+  hash), `FluxColor`/`FluxFount`/`FluxAlignment` (canonical record
+  decoders for Appendix F `Color`/`Font`/`Alignment`), `FluxEvent`
+  (handler dispatch payload), `FluxExecutor` (the executor the adapters
+  call back into via a **weak** reference), and the `FluxAdapter`
+  protocol (`create`/`update`/`setChildren`/`bindHandler`/`destroy`).
+- Seven dev adapters per Appendix F: `Text`→`UILabel`, `Button`→`UIButton`
+  (dispatches bound `onClick` via the weak executor on
+  `touchUpInside`), `Column`/`Row`→`UIStackView` (keyed-by-identity child
+  reconciliation that preserves view state across reorders),
+  `TextField`→`UITextField` (controlled value + edit dispatch to
+  `onChange`), `Router`→`UINavigationController` (push/pop reconciles
+  screens by identity, preserving a screen's view controller and state
+  while present), `Screen`→`UIViewController` (hosts its content subtree).
+- Adapters hold the executor `weak`; `TextFieldAdapter` retains itself on
+  the field via object association so its delegate survives `create()`.
+  No retain cycles; every `weak` is documented.
+
+Verification (real command output, not assumed — the package targets
+iOS 16 so it builds/tests under `xcodegen` + `xcodebuild` for the iOS
+Simulator, the path the frozen `Package.swift` documents):
+- `xcodebuild -scheme FluxUIKit -destination 'generic/platform=iOS
+  Simulator' test` — **29 tests, 0 failures, 0 warnings, TEST SUCCEEDED**.
+- Tests cover: Props accessors + order-independent hash, Color/Font
+  decode/clamp/missing-field, per-adapter create/update/destroy, button
+  tap dispatch + weak-executor no-retain, text-field edit dispatch, keyed
+  child insert/remove/preserve, router push/pop state preservation.
+
+Notes and deviations:
+- `FluxAdapter.View` is constrained to `AnyObject` (not `UIView`) so
+  `Router`/`Screen` can manage `UINavigationController`/
+  `UIViewController`; `setChildren` takes `[AnyObject]` and each adapter
+  casts to `UIView` or `UIViewController` as appropriate.
+- The frozen `Package.swift` is untouched (boundary contract R2). The
+  verification harness used an out-of-tree `xcodegen` project wrapping the
+  Sources/Tests; no manifest was modified.
+
 #### Outstanding Phase 1–4 crates (still stubs, owned by named flux-N agents)
 
 The following workspace crates remain 1-file stubs and are explicitly assigned to
