@@ -909,6 +909,43 @@ Capabilities are the escape hatch. The user declares the capability in `.flux` a
 
 ---
 
+## Appendix A — Continuation (ADR-0021 … )
+
+Agent-authored decisions after the foundation sequence (ADR-0001–0020) are recorded
+here and in `/docs/adr/`. The `ADR-NNNN` filename prefix is reserved for the sequence
+above; new agent ADRs take the next free number (ADR-0021+) or the `<scope>-<slug>.md`
+form per `agents-boundaries-contract.md` R9. Governance and enforcement:
+`docs/adr/ADR-0025-adr-naming-and-numbering.md` and `docs/scripts/check-adr-numbering.sh`.
+
+> Note: entries below use `#### ADR-NNNN —` (dash) headings, **not** the
+> `### ADR-NNNN:` (colon) form, so they are not parsed as the reserved canonical
+> sequence by `check-adr-numbering.sh`. The reserved set is ADR-0001–0020.
+
+#### ADR-0021 — Gas accounting (HALT is exempt)
+VM: every decoded instruction costs 1 gas except `HALT` (0x00) and `GAS_CHECK` (0xC0)
+is charged before its budget comparison. Entry budget `r15` = 100,000 (§E.3). Resolves
+the §E.6 vs §E.5 / FLUX-002 contradiction. Full text: `docs/adr/ADR-0021-gas-accounting.md`.
+
+#### ADR-0022 — Byte-length erratum in Appendix E §E.5
+`count = count + 1` is **27 bytes**, not the "21 bytes" prose. The §E.1 width table is
+normative. Full text: `docs/adr/ADR-0022-byte-length-erratum.md`.
+
+#### ADR-0023 — DivByZero as an explicit VM error kind
+`DIV_I64`/`MOD_I64` by zero raises `DivByZero` (carries `Span`); float `DIV_F64` by
+zero remains IEEE-754 `±inf`. `DivByZero` added to the §E.6 error table. Full text:
+`docs/adr/ADR-0023-div-by-zero-error.md`.
+
+#### ADR-0024 — GET_FIELD error discrimination (Null vs non-record)
+`GET_FIELD` on `Null` → `NullDereference`; on any other non-`Record` → `TypeMismatch`.
+`SET_FIELD` follows the same discipline. Full text: `docs/adr/ADR-0024-getfield-null.md`.
+
+#### ADR-0025 — ADR naming and numbering governance
+The `ADR-NNNN` filename prefix is reserved for the canonical sequence (ADR-0001–0020);
+agent ADRs use `<scope>-<slug>.md` or the next free `ADR-NNNN`. CI guard:
+`docs/scripts/check-adr-numbering.sh`. Full text: `docs/adr/ADR-0025-adr-naming-and-numbering.md`.
+
+---
+
 ## Appendix B — .flux Grammar Reference
 
 ### B.1 Lexer Rules (pest)
