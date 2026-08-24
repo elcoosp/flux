@@ -181,16 +181,18 @@ Before dispatching the golden ISA vector agent (FLUX-002), two internal
 contradictions in Appendix E were found and resolved via ADRs (create-only,
 orchestrator-owned):
 
-- **ADR-0006 — Gas accounting.** §E.6 says gas is "decremented per instruction,"
-  but both concrete examples (§E.5 = 4 gas for a 5-instruction sequence ending in
-  HALT; the contract's FLUX-002 vector example = 4 gas for `READ`/`LOAD`/`ADD`/
-  `WRITE`) charge 4, not 5. Resolution: every decoded instruction costs 1 gas
-  **except `HALT` (0x00)**, which terminates the handler and is free; `GAS_CHECK`
-  (0xC0) is charged 1 gas before its budget check. Entry budget in `r15` = 100,000.
-- **ADR-0007 — Byte-length erratum.** §E.5 claims the canonical `count = count + 1`
-  example is "21 bytes," but the literal encoding (6+10+4+6+1) is **27 bytes**. The
-  §E.1 operand-width table is normative; the "21 bytes" prose is an erratum. All
-  vector and VM decoders compute lengths from the width table only.
+- **ADR-0021 (gas accounting erratum)** — `docs/adr/ADR-0021-gas-accounting.md`.
+  §E.6 says gas is "decremented per instruction," but both concrete examples
+  (§E.5 = 4 gas for a 5-instruction sequence ending in HALT; the contract's
+  FLUX-002 vector example = 4 gas for `READ`/`LOAD`/`ADD`/`WRITE`) charge 4, not 5.
+  Resolution: every decoded instruction costs 1 gas **except `HALT` (0x00)**, which
+  terminates the handler and is free; `GAS_CHECK` (0xC0) is charged 1 gas before its
+  budget check. Entry budget in `r15` = 100,000.
+- **ADR-0022 (byte-length erratum)** — `docs/adr/ADR-0022-byte-length-erratum.md`.
+  §E.5 claims the canonical `count = count + 1` example is "21 bytes," but the
+  literal encoding (6+10+4+6+1) is **27 bytes**. The §E.1 operand-width table is
+  normative; the "21 bytes" prose is an erratum. All vector and VM decoders compute
+  lengths from the width table only.
 
 Both ADRs are referenced by FLUX-002 (vectors), FLUX-005 (`flux-vm-ref`),
 FLUX-006 (Swift VM), and FLUX-007 (Kotlin VM) so all three implementations agree.
@@ -210,3 +212,26 @@ says `tests/parity/` — the contract wins.
 Phase 0 will be complete when FLUX-002 lands and its vectors pass a self-review
 against Appendix E (no code exists yet to validate them, so the orchestrator
 reviews byte-exactness by hand / via the FLUX-005 oracle once that crate exists).
+
+#### Governance — ADR numbering collision fixed (process, not a numbered FLUX issue)
+
+The four VM-errata ADRs (`ADR-0006/0007/0008/0009-*.md`) were published under the
+`ADR-NNNN-` filename scheme, which **collides** with the canonical decision sequence
+embedded as `### ADR-NNNN:` headings in `mlp-appendices.md` Appendix A
+(ADR-0006 static types, ADR-0007 register VM, ADR-0008 MessagePack, ADR-0009 arena).
+A bare `grep ADR-0008` now returns two unrelated documents. This violates the
+contract's R9 naming rule (`<scope>-<slug>.md`) and is exactly the failure mode that
+rule was written to prevent.
+
+Resolution (see `docs/adr/ADR-0025-adr-naming-and-numbering.md`):
+- The four VM-errata ADRs were **renumbered** `ADR-0006/0007/0008/0009 →
+  ADR-0021/0022/0023/0024` via `git mv` (history preserved, no content edit) so they
+  no longer collide with the canonical ADR-0006–0009 in `mlp-appendices.md` Appendix A.
+  Every cross-reference (CHANGELOG, isa-vectors README, `flux-vm-ref` crate comments)
+  was updated to the new numbers.
+- Added `docs/scripts/check-adr-numbering.sh`, a CI guard that fails when any *new*
+  agent ADR reuses a reserved `ADR-NNNN`. The four renumbered files are listed as
+  exceptions so the accepted state stays green.
+- `mlp-spec.md` Appendix A no longer duplicates the canonical ADRs; it is now a
+  single pointer to `mlp-appendices.md` Appendix A. `mlp-appendices.md` gained an
+  "Appendix A — Continuation (ADR-0021…)" block recording the renumbered decisions.
