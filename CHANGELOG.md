@@ -8,6 +8,52 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Phase 1 — Native runtime
+
+#### FLUX-006 — iOS host runtime (VM + wire + reconciler + executor) — DONE
+
+Added the iOS native runtime under `runtimes/ios/Sources`, a behavioral mirror
+of `flux-vm-ref` (FLUX-005) and the Kotlin/Android runtime (FLUX-007):
+
+- `Sources/Values/FluxValue.swift` — the value enum (`Int`/`Float`/`Bool`/
+  `Str`/`HandlerRef`/`Null`/`List`/`Record`), `Sendable`, with explicit
+  `Equatable`/`CustomStringConvertible` (auto-synthesis fails for recursive
+  enums).
+- `Sources/VM/` — `FluxBytecodeVM` (the register VM, Appendix E), `OpCodes`,
+  `Instructions` (decoder) and `VMError` with byte-offset fault reporting. The
+  gas model mirrors the oracle exactly: `entryGas = 100_000`, `r15` mirrors the
+  live budget, `HALT` is free (ADR-0021), `JUMP`/`COND_JUMP`/`COND_JUMP_NOT`
+  resolve to absolute offsets, integer `DIV`/`MOD` by zero raises `DivByZero`
+  (ADR-0023), `GET_FIELD` on `Null` raises `NullDereference` (ADR-0024).
+- `Sources/Wire/` — `ByteReader` (little-endian cursor), `WireModels` and
+  `FrameDeserializer` (Appendix D: Node, Child, Value, Patch, ClosureRef,
+  StateDelta, StringEntry, FileEntry, Error/Init frames).
+- `Sources/Shadow/` — `ShadowTree` (the host node model, Appendix C §C.1) and
+  the keyed `ShadowTreeReconciler` (stable `NodeId` + `u64` splice keys, Appendix
+  D §D.4) that mutates native views in place.
+- `Sources/Signal/SignalGraph.swift` — a SolidJS-style signal store conforming
+  to `SignalStore`, O(1) reads, minimal-write notifications.
+- `Sources/Adapters/AdapterKit.swift` — the `FluxAdapter`/`FluxView` contract
+  (Appendix F) plus in-dir `MockAdapter`/`MockView` (scope item 11); real
+  `FluxUIKit` wiring is deferred to FLUX-016.
+- `Sources/Executor/FluxExecutor.swift` + `FluxAppMain.swift` — the executor
+  folds handler VM output back into the graph and never lets a VM error escape
+  (surfaced as a `FluxRootView` error overlay).
+
+Tests (`runtimes/ios/Tests`, all passing under `xcodebuild test`):
+- `ISAConformanceTests` — runs the 71 shared `/tests/isa-vectors` golden vectors
+  against the native VM (same suite the Rust and Kotlin VMs run).
+- `WireDecodeTests` — hand-built byte-vector round-trips for every wire union.
+- `RuntimeE2ETests` — Init→reconcile→mock-view build, signal fold-through, gas
+  exhaustion via a `JUMP` loop, and invalid-opcode capture.
+
+Frozen-manifest note: `runtimes/ios/project.yml` is a frozen boundary-contract
+artifact. Two in-scope edits were required because the foundation skeleton (a)
+omitted an Info.plist for the test bundle (blocking `xcodebuild test`) and (b)
+declared a `FluxUIKit` package dependency that was still mid-flight (FLUX-008)
+and did not compile. Both are documented inline in `project.yml`; FLUX-016
+restores the real kit.
+
 ### Phase 0 — Foundation
 
 #### FLUX-001 — Foundation skeleton and `flux-syntax` crate — DONE
