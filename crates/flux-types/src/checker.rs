@@ -296,7 +296,18 @@ impl Checker {
                 let then_ty = self.infer_block(then_block)?;
                 match else_branch {
                     Some(other) => {
-                        let else_ty = self.infer(other)?;
+                        // An `else { block }` is lowered as a zero-argument
+                        // lambda — the grammar's "block as expression" form
+                        // (see `block_expr` in the parser). Infer its body
+                        // block directly so its value unifies with the `then`
+                        // branch's block value. A nested `else if …` arrives as
+                        // a real `If` expression and takes the normal path.
+                        let else_ty = match &other.kind {
+                            ExprKind::Lambda { params, body } if params.is_empty() => {
+                                self.infer_block(body)?
+                            }
+                            _ => self.infer(other)?,
+                        };
                         self.expect(&then_ty, &else_ty, other.span)?;
                         Ok(then_ty)
                     }
@@ -456,18 +467,6 @@ impl Checker {
         // errors even though its result does not change the call's type.
         if let Some(block) = trailing {
             self.infer_block(block)?;
-        }
-        // Defensive handling of a degenerate node shape produced by the
-        // `flux-parser` `if/else` lowering (see orchestrator note FLUX-012-p1):
-        // an `else { ... }` block is lowered as
-        // `Call { callee: Elided, trailing: Some(block) }`. Treat it as a bare
-        // block expression — infer the trailing block and yield its type so it
-        // unifies with the `then` branch of an enclosing `if`.
-        if matches!(callee.kind, ExprKind::Elided) {
-            return match trailing {
-                Some(block) => self.infer_block(block),
-                None => Ok(TcType::Unit),
-            };
         }
         // `Numeric.zero()` / `Numeric.one()` — trait method resolution.
         if let ExprKind::Ident(ident) = &callee.kind {
