@@ -399,26 +399,25 @@ Props accessors, Text/Button/TextField, Column/Row keyed diff, Router/Screen sta
 preservation. All commits prefixed `feat(kotlin-adapters)` / `test(kotlin-adapters)`
 under refs FLUX-009. (See `62a5fdf` and the chain beneath it.)
 
-#### FLUX-006 — iOS host app runtime — IN PROGRESS (uncommitted)
+#### FLUX-006 — iOS host app runtime — DONE (committed)
 
 Delivered into `runtimes/ios/Sources/**` and `runtimes/ios/Tests/**` by the
 ios-runtime agent: `FluxAppMain.swift` entry point, `Sources/VM/` (native
 `FluxBytecodeVM` per Appendix E), `Sources/Values/` (Flux value types), and
 `Tests/ISAConformanceTests.swift` + `ISAVector.swift` (shared-vector conformance
-target). `runtimes/ios/project.yml` was also updated. **Uncommitted in the working
-tree at time of writing**; not yet verified by this agent (Swift build host not
-exercised here).
+target). `runtimes/ios/project.yml` was also updated. **Committed to main as
+`3ad2246`** (VM + wire + reconciler + executor).
 
-#### FLUX-007 — Android host app runtime — IN PROGRESS (uncommitted)
+#### FLUX-007 — Android host app runtime — DONE (committed)
 
 Delivered into `runtimes/android/app/src/**` by the android-runtime agent:
 `FluxHostActivity.kt` host entry, `src/main/kotlin/.../vm/` (Kotlin
 `FluxBytecodeVM` per Appendix E), `src/main/kotlin/.../wire/` (Appendix D frame
 codec), `src/main/kotlin/.../shadow/` (shadow tree + reconciler). Test suite under
 `src/test/kotlin/.../`: `IsaConformanceTest`, `FluxBytecodeVmTest`, `wire/` frame
-builder/deserializer + `WireFixtureContractTest`, `EndToEndTest`. **Uncommitted in
-the working tree at time of writing**; not yet verified by this agent (Android
-emulator not exercised here, per memory: ADB not on PATH).
+builder/deserializer + `WireFixtureContractTest`, `EndToEndTest`. **Committed to
+main as `fa80b45`** (native host runtime) + `15b191f` (finalized
+`WireFixtureContractTest` assertions).
 
 #### FLUX-010 — standard library `.flux` sources — IN PROGRESS (uncommitted)
 
@@ -604,10 +603,83 @@ and Appendix B.3.8's conditional is `if platform() == "ios"`. The `Decl::State`
 variant and `module_state` rule were removed from both `flux.pest` and
 Appendix B.
 
-#### Outstanding Phase 1–4 crates (stubs owned by named flux-N agents)
+#### FLUX-015 — standard-library validation harness — DONE
 
-The following workspace crates remain 1-file stubs and are explicitly assigned to
-other agents (not built by this agent, to avoid directory-collision with the
-dispatched flux-N work): `flux-types`, `flux-devserver`, `flux-codegen-swift`,
-`flux-codegen-kotlin`, `flux-cli`, `flux-parity` (Phase 6). CI (FLUX-011) is
-orchestrator-owned.
+Added a stdlib validation harness (no new crate; a tool that parse-checks the
+shipped `.flux` sources so regressions in the 12 stdlib modules surface before
+dev-server round-trips). Committed as `6bb0f13`:
+
+- `stdlib/parse-check.sh` — drives the checker over every `stdlib/*.flux`.
+- `stdlib/tools/parse_check.rs` — loads each module through `flux-parser`, fails
+  the build on the first parse error, and asserts the ten Appendix B §B.3
+  examples still parse.
+- `stdlib/tools/fixtures/invalid.flux` — a deliberately malformed fixture proving
+  the checker rejects bad input (not a silent pass).
+
+Verification: `bash stdlib/parse-check.sh` exits 0 over all 12 modules
+(`prelude`, `traits`, `color`, `font`, `text`, `button`, `text_field`, `column`,
+`row`, `router`, `platform`, `capabilities`).
+
+#### FLUX-017 — Android adapter↔runtime integration — DONE
+
+Wired the real Kotlin adapter kit (FLUX-009) into the FLUX-007 Android runtime.
+Committed as `0426c00` + `8263e17`:
+
+- `AdapterRegistry` mapping `ComponentId` → adapter instance, built from the
+  string table delivered in the `Init` frame.
+- The runtime's E2E test was repointed from the in-dir mock adapters to the real
+  `FluxAdapter` kit: hand-built `Init` frame → real `TextView` / `Button` /
+  `LinearLayout` (vertical/horizontal) / `EditText` hierarchy; tap → dispatch →
+  VM → reconciler → view updated **without** view recreation (view identity
+  preserved across the update).
+- Router E2E: push → edit state → pop → state preserved (the adapter kit's
+  Router/Screen preserve screen view state by identity).
+
+Verification:
+- `AdapterRegistryTest.kt` — registry resolves every `ComponentId` the frame
+  declares.
+- `EndToEndTest.kt` — real-adapter build + tap-dispatch + view-identity
+  preservation + router state preservation, all green.
+- `WireFixtureContractTest.kt` — finalized assertions (committed `15b191f`).
+
+#### ADR-0025 — custom binary wire frames (Gap 3) — DONE
+
+Resolved the wire-format documentation gap: `flux-ir-serde` ships a **custom
+little-endian binary** codec, but `ADR-0008` and the spec prose (mlp-spec
+§14.1/§18.x/§20.6/§21.1, mlp-appendices §D narrative + glossary) still said
+MessagePack. Committed as `4186372`:
+
+- `docs/adr/ADR-0025-wire-binary-frames.md` — records the deviation, supersedes
+  ADR-0008's MessagePack choice, and notes `rmp-serde` is now an unused
+  dependency.
+- Corrected all narrative MessagePack claims in `mlp-spec.md` and
+  `mlp-appendices.md` (the ADR-0008 *body* was left intact per the
+  never-edit-existing-ADRs rule; ADR-0025 supersedes it).
+- Satisfies DoD §9 (every spec deviation needs an ADR).
+
+#### ADR-0027 — node-ID single-source bridge (Gap 2) — DONE
+
+Established one canonical `compute_node_id` in `flux-syntax` so the type checker
+and the IR produce identical `NodeId` values for identical source constructs —
+required for FLUX-018 lowering to join `TypedAST.types` to IR nodes by ID.
+Committed as `1d52b57` + `1c9705f` + `6bc37c6`:
+
+- `flux-syntax::compute_node_id` — canonical BLAKE3 implementation (the
+  `flux-ir` layout, so existing IR/differ/wire hashes stay stable), re-exported.
+- `flux-ir::compute_node_id` — now delegates (public `NodeKind` API unchanged,
+  byte-identical output) + bridge test `delegates_to_flux_syntax_canonical`.
+- `flux-types::compute_node_id` — now delegates (signature `u64`→`Option<Key>`);
+  edits are in the FLUX-012 agent's working tree and land with that issue.
+- Cross-crate equivalence proven by `flux-ir` and `flux-types`
+  (`matches_canonical_flux_syntax`) tests.
+
+This replaced a divergent FNV fork in `flux-types` that omitted `span.file_id` —
+without the bridge, lowering would have silently failed to look up types.
+
+#### Outstanding Phase 1–4 crates (stubs / in-flight, owned by named flux-N agents)
+
+The following workspace crates are owned by other agents (not built by this
+agent, to avoid directory-collision with the dispatched flux-N work):
+`flux-types` (FLUX-012 — in-flight, substantially implemented), `flux-devserver`,
+`flux-codegen-swift`, `flux-codegen-kotlin`, `flux-cli`, `flux-parity` (Phase 6).
+CI (FLUX-011) is orchestrator-owned.
