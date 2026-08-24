@@ -85,6 +85,7 @@ Before adding any new dependency:
 | Rust | `criterion` | Benchmarking |
 | Rust | `insta` | Snapshot testing |
 | Rust | `proptest` | Property-based testing |
+| Rust | `cargo-nextest` | Test runner (tool, not a crate dependency) |
 | Swift | `Foundation` / `UIKit` / `SwiftUI` | Platform |
 | Swift | `XCTest` | Testing |
 | Kotlin | `androidx.compose.*` | UI |
@@ -146,6 +147,9 @@ If you need a dependency not on this list, you must get approval via an ADR in `
 - Use `tokio::select!` for concurrent operations, not `spawn` + channel when one will do.
 - Use `tokio::sync::mpsc` for channels (not `crossbeam` — different runtime semantics).
 - `async fn` in traits is fine (Rust 1.75+).
+- The workspace is **edition 2024** with `resolver = "3"`; `rust-version` is
+  1.85 (the edition-2024 floor). Local toolchain is rustc 1.94.1. Write
+  edition-2024 Rust — do not write edition-2021-compatible code.
 - Avoid `Box::pin` unless you have a recursive async type — use an iterative approach instead.
 
 #### Testing
@@ -154,6 +158,19 @@ If you need a dependency not on this list, you must get approval via an ADR in `
 - Property tests: `proptest` for invariant checking.
 - Snapshot tests: `insta` for codegen output.
 - Benchmarks: `criterion` in `benches/` directory.
+- **Always run tests with `cargo nextest run`, never `cargo test`.** Nextest is
+  the project's test runner: it isolates each test in its own process, so a
+  panicking or aborting test cannot take the rest of the suite with it, and it
+  reports failures in a stable, parseable form. The one exception is doctests,
+  which nextest does not support — run those with `cargo test --doc`.
+- Useful nextest invocations:
+  - `cargo nextest run` — the whole workspace.
+  - `cargo nextest run -p flux-parser` — one crate.
+  - `cargo nextest run -E 'test(/^test_span_/)'` — filter by expression.
+  - `cargo nextest run --no-capture` — see `println!`/`tracing` output.
+  - `cargo nextest list` — enumerate tests without running them.
+- Nextest exits non-zero on any failure, so never pipe it through `tail`/`head`
+  (that masks the exit code). Run it bare.
 - Every public function has at least one test.
 - Test error paths, not just happy paths.
 - Test edge cases: empty input, maximum size, boundary values, Unicode.
@@ -400,7 +417,7 @@ Example: `FLUX-002/parser-grammar-and-ast`
 - PR title = commit message subject.
 - PR description includes:
   - What changed and why.
-  - Test results (paste `cargo test` / `xcodebuild test` / `./gradlew test` output).
+  - Test results (paste `cargo nextest run` / `xcodebuild test` / `./gradlew test` output).
   - Performance results if applicable (paste `cargo bench` output).
   - Breaking changes (if any).
 
@@ -413,7 +430,8 @@ Before you `git commit`, verify:
 ### Rust
 - [ ] `cargo fmt -- --check` passes (zero changes).
 - [ ] `cargo clippy -- -D warnings` passes (zero warnings).
-- [ ] `cargo test` passes (all tests green).
+- [ ] `cargo nextest run` passes (all tests green). Never use `cargo test`.
+- [ ] `cargo test --doc` passes (doctests; nextest does not run these).
 - [ ] `cargo doc` passes (zero warnings).
 - [ ] `cargo bench` is within performance budget.
 - [ ] No `unwrap()`, `expect()`, `panic!()` in non-test code.
@@ -462,7 +480,7 @@ When you encounter a decision point not covered by the spec:
 
 | Layer | Tool | What to test |
 |---|---|---|
-| Unit | `cargo test` / `XCTest` / JUnit 5 | Every public function, edge cases, error paths |
+| Unit | `cargo nextest run` / `XCTest` / JUnit 5 | Every public function, edge cases, error paths |
 | Property | `proptest` | Invariants (node ID stability, diff minimality, round-trip serialization) |
 | Snapshot | `insta` | Codegen output (Swift and Kotlin generated code) |
 | Benchmark | `criterion` / `XCTMeasure` / JMH | Performance budgets (see §3.7) |
@@ -520,7 +538,8 @@ flux/
 ```bash
 # Rust
 cargo check                    # Type check all crates
-cargo test                    # Run all tests
+cargo nextest run              # Run all tests (ALWAYS use nextest, never `cargo test`)
+cargo test --doc               # Doctests only (nextest does not run doctests)
 cargo bench                    # Run benchmarks
 cargo clippy -- -D warnings   # Lint
 cargo doc --open               # Generate docs
