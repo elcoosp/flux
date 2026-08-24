@@ -1,5 +1,5 @@
 {
-  "bytecode_hex": "70000100710100050000",
+  "bytecode_hex": "70000100710105000000",
   "description": "GET_FIELD beyond record length raises IndexOutOfBounds.",
   "expected_error": "IndexOutOfBounds",
   "expected_gas_used": 0,

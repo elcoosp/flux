@@ -197,21 +197,48 @@ orchestrator-owned):
 Both ADRs are referenced by FLUX-002 (vectors), FLUX-005 (`flux-vm-ref`),
 FLUX-006 (Swift VM), and FLUX-007 (Kotlin VM) so all three implementations agree.
 
-#### FLUX-002 — golden ISA vectors (in flight)
+#### FLUX-002 — golden ISA vectors — DONE
 
-The second Phase-0 agent (the first was FLUX-001, now done) is dispatched and
-running: author `/tests/isa-vectors/**` as pure JSON fixtures from Appendix E
-(≥60 vectors, every opcode covered, error + boundary + register-convention
-cases), plus a `README.md` documenting the schema and a per-opcode coverage
-matrix. The agent is constrained to that directory and writes no code. Vectors
-are frozen after merge (R8); corrections thereafter route through the
-orchestrator, who re-runs all three VM conformance suites. Deviation noted: the
-directory is `/tests/isa-vectors/` per the contract, whereas AGENTS.md §9 still
-says `tests/parity/` — the contract wins.
+Author `/tests/isa-vectors/**` as pure JSON fixtures from Appendix E: **71 vectors**
+covering all 54 opcodes (happy + boundary + error + register conventions +
+`CALL_CAP` + pattern matching). Each vector's `bytecode_hex` is validated against
+the §E.1 width table and its `expected_*` fields are computed by a faithful
+reference interpreter, so the fixtures are internally self-consistent.
 
-Phase 0 will be complete when FLUX-002 lands and its vectors pass a self-review
-against Appendix E (no code exists yet to validate them, so the orchestrator
-reviews byte-exactness by hand / via the FLUX-005 oracle once that crate exists).
+Schema and a per-opcode coverage matrix are documented in
+`tests/isa-vectors/README.md`. The generator (`/tmp/gen_vectors.py`) is the
+oracle that produced them; it is kept out of the repo (it is a build-time tool,
+not shipped source).
+
+Cross-cutting spec defects surfaced and resolved by ADR while authoring the
+vectors:
+- ADR-0022 — §E.5 "21 bytes" is wrong; the normative §E.1 width table gives 27.
+- ADR-0023 — `DivByZero` added as an explicit error kind (§E.6 omits it but
+  integer DIV/MOD by zero must fail).
+- ADR-0024 — `GET_FIELD` on `Null` → `NullDereference` (per §E.6); on other
+  non-records → `TypeMismatch`.
+- ADR-0026 — `GET_FIELD` bytecode width corrected to 4 bytes `REG_U16_REG`
+  `(dst, idx, obj)`, matching `SET_FIELD`/`EXTRACT_FIELD`. The original
+  `flux-syntax` width (`REG_REG_U16`, 3 bytes) could not carry all three
+  operands and misaligned every subsequent instruction.
+
+#### FLUX-005 — `flux-vm-ref` reference VM — DONE
+
+Implemented the Appendix E reference interpreter as a test oracle (no `unsafe`,
+no `unwrap` in library code, every public item documented, clippy/`fmt`/`doc`
+clean). Structure: `error.rs` (typed `VmError` with `VmErrorKind` + optional
+span), `decode.rs` (`decode_program` over `Opcode::operand_len`), `vm.rs` (the
+interpreter, gas model per ADR-0021, `SignalStore` trait + `InMemorySignals`),
+`lib.rs` (re-exports + doctest).
+
+Verification:
+- 6 unit tests (gas accounting, error kinds, register conventions).
+- 1 doctest (LOAD + HALT).
+- **71-vector conformance test**: `tests/conformance.rs` loads every golden
+  vector, runs it through `run()`, and asserts `expected_error` /
+  `expected_signals` / `expected_registers` / `expected_gas_used`. All 71 pass.
+
+The Swift (FLUX-006) and Kotlin (FLUX-007) runtimes must pass this same suite.
 
 #### Governance — ADR numbering collision fixed (process, not a numbered FLUX issue)
 
@@ -223,7 +250,7 @@ A bare `grep ADR-0008` now returns two unrelated documents. This violates the
 contract's R9 naming rule (`<scope>-<slug>.md`) and is exactly the failure mode that
 rule was written to prevent.
 
-Resolution (see `docs/adr/ADR-0025-adr-naming-and-numbering.md`):
+Resolution (see `docs/adr/adr-naming-and-numbering.md`):
 - The four VM-errata ADRs were **renumbered** `ADR-0006/0007/0008/0009 →
   ADR-0021/0022/0023/0024` via `git mv` (history preserved, no content edit) so they
   no longer collide with the canonical ADR-0006–0009 in `mlp-appendices.md` Appendix A.

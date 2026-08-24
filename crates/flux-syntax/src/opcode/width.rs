@@ -25,9 +25,7 @@ pub(crate) const I32: u8 = 4;
 pub(crate) const U32: u8 = 4;
 /// `reg(u8), u16, reg(u8)`.
 pub(crate) const REG_U16_REG: u8 = 4;
-/// `dst(u8), obj(u8), u16`.
-pub(crate) const REG_REG_U16: u8 = 4;
-/// `reg(u8), u32, i32`.
+/// `dst(u8), u32, i32`.
 pub(crate) const REG_U32_I32: u8 = 9;
 /// `reg(u8), u32, u16, reg(u8)`.
 pub(crate) const CALL_CAP: u8 = 8;

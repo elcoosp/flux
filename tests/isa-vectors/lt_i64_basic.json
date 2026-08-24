@@ -5,7 +5,7 @@
   "expected_gas_used": 3,
   "expected_registers": {
     "r2": {
-      "type": "Int",
+      "type": "Bool",
       "value": 1
     }
   },

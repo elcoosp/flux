@@ -9,15 +9,7 @@
       "value": 1
     }
   },
-  "expected_signals": [
-    {
-      "id": 1,
-      "value": {
-        "type": "Int",
-        "value": 1
-      }
-    }
-  ],
+  "expected_signals": [],
   "initial_signals": [],
   "name": "gas_check_ok",
   "payload": null

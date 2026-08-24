@@ -134,7 +134,7 @@ impl Opcode {
             Self::LoadIntConst | Self::LoadFloatConst => width::REG_I64,
             Self::Jump => width::I32,
             Self::GasCheck => width::U32,
-            Self::GetField => width::REG_REG_U16,
+            Self::GetField => width::REG_U16_REG,
             Self::SetField | Self::ExtractField => width::REG_U16_REG,
             Self::MatchTag => width::REG_U32_I32,
             Self::CallCap => width::CALL_CAP,

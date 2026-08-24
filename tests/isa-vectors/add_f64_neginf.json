@@ -6,7 +6,7 @@
   "expected_registers": {
     "r2": {
       "type": "Float",
-      "value": -Infinity
+      "value": "-inf"
     }
   },
   "expected_signals": [],
