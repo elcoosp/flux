@@ -458,10 +458,46 @@ Verification:
 - `benches/diff.rs` criterion bench: 50-node prop-mutation diff ≈ **41.6 µs**
   (well under the 1 ms budget, §3.6).
 
-#### Outstanding Phase 1–4 crates (still stubs, owned by named flux-N agents)
+#### FLUX-003 — `flux-parser` surface parser — DONE
+
+Implemented the Flux surface parser: `.flux` source to a typed `Ast` whose
+every node carries a `flux_syntax::Span`. Built on `pest` generated from a
+grammar that now matches Appendix B §B.1–B.2 1:1 (the spec was reconciled to
+the tested grammar on 2026-08-24, so `flux.pest` and Appendix B cannot drift;
+`tests/appendix_b_examples.rs` asserts all ten §B.3 examples).
+
+Structure (every file ≤ 300 lines, no `unsafe`, no `unwrap` in library code,
+clippy/`fmt`/`doc` clean, all public items documented):
+- `flux.pest` — the grammar.
+- `ast.rs`, `ast/types.rs`, `ast/expr.rs`, `ast/pattern.rs` — typed surface tree.
+- `error.rs` — `ParseError` with message/hint/span/line-column; `render()` emits
+  the what/where/why/how format of AGENTS.md §3.7.
+- `lower.rs` + `lower/{decls,types,exprs/*}` — panic-free lowering (a malformed
+  pair returns a `ParseError`, never unwraps).
+- `prescan.rs` — lexical pre-scan so an unterminated string or unclosed brace
+  points at the opening token (pest backtracks out of a partial match), and a
+  nesting-depth guard (G6) that rejects pathological input with a diagnostic
+  instead of overflowing the stack.
+
+Coverage:
+- `tests/appendix_b_examples.rs` — every §B.3 example parses, with shape
+  assertions (not just parse success).
+- `tests/stdlib.rs` — all twelve `stdlib/*.flux` files parse (covers G1/G2/G4).
+- `tests/diagnostics.rs` — errors carry what/where/why/how.
+- `tests/edge_cases.rs` — empty input, i64 bounds, Unicode strings, span
+  fidelity, nesting limit.
+- `tests/properties.rs` — proptest: spans stay inside the source, arbitrary text
+  never panics, i64 literals round-trip, error locations are in-bounds.
+- `benches/parse.rs` — 500-line file parses in **2.25 ms** (budget 5 ms, §3.6);
+  100 lines in 459 µs.
+
+`docs/adr/parser-grammar-extensions.md` records the reconciliation and the
+remaining parser-internal concern (G6 depth limit).
+
+#### Outstanding Phase 1–4 crates (stubs owned by named flux-N agents)
 
 The following workspace crates remain 1-file stubs and are explicitly assigned to
 other agents (not built by this agent, to avoid directory-collision with the
-dispatched flux-N work): `flux-parser` (FLUX-003), `flux-types`, `flux-ir-serde`,
+dispatched flux-N work): `flux-types`, `flux-ir-serde`,
 `flux-devserver`, `flux-codegen-swift`, `flux-codegen-kotlin`, `flux-cli`,
 `flux-parity` (Phase 6). CI (FLUX-011) is orchestrator-owned.
