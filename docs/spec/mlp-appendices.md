@@ -1062,7 +1062,7 @@ record_field = { ident ~ ":" ~ expr }
 
 // ========================= Blocks & Expressions =============
 
-block       = { "{" ~ expr* ~ "}" }
+block       = { "{" ~ (state_decl | expr)* ~ "}" }
 
 expr        = { let_expr | assign_expr | if_expr | when_expr
              | match_expr | for_expr | call_expr | provide_expr
@@ -1070,6 +1070,7 @@ expr        = { let_expr | assign_expr | if_expr | when_expr
 
 let_expr    = { "let" ~ ident ~ ("=" ~ expr)? }
 assign_expr = { lvalue ~ "=" ~ expr }
+state_decl  = { "state" ~ ident ~ (":" ~ type)? ~ "=" ~ expr }
 lvalue      = { ident ~ ("." ~ ident)* }
 
 if_expr     = { "if" ~ expr ~ block ~ ("else" ~ (if_expr | block))? }
