@@ -405,21 +405,58 @@ generic parameter with a trait bound.
 Refs: FLUX-002
 ```
 
-### 4.2 Branching
+### 4.2 Branching — NONE: commit directly to `main`
 
-Branch name: `<issue-id>/<kebab-description>`
+**We run many agents in parallel, all on `main` at once. There are no
+branches and no worktrees.** Every agent commits its work straight to
+`main`. This is deliberate: branches and worktrees create merge/rebase
+friction and isolation that slows the parallel flow.
 
-Example: `FLUX-002/parser-grammar-and-ast`
+Rules:
+- **Stay on `main`.** Do not `git checkout -b`, do not create or switch
+  branches, do not `git worktree add`. If you find yourself on another
+  branch, switch back to `main` before committing.
+- **Commit only your own affected files.** Each commit must touch *only*
+  the files your issue/issue-scope owns. Never commit another agent's
+  in-progress work.
+- **Commit atomically, per logical change.** One focused change per
+  commit (e.g. one file, or one tightly-related set of files for a single
+  fix). No "everything I did" dumps. This keeps `main` bisectable and lets
+  other agents pull your work continuously.
 
-### 4.3 Pull Requests
+**Shared-index hazard (critical):** because all agents share one working
+tree and one index, the index often already contains *other* agents' staged
+files. A plain `git add <paths> && git commit` will then sweep those files
+into *your* commit — this is how a `frozen` manifest or another agent's
+file ends up wrongly attributed to you (it happened once; see
+`docs/adr/appendix-b-grammar-repairs.md`). To prevent it, commit only the
+files you intend with:
 
-- One PR per issue. No mixing.
-- PR title = commit message subject.
-- PR description includes:
+```
+git commit --only <your/file1> <your/file2> -m "..."
+```
+
+`--only` stages just the named files into a temporary index and commits
+them, leaving any other staged or unstaged work untouched. Use it for every
+commit on `main`. Never use `git commit -a` or `git commit` after a blanket
+`git add -A` / `git add .`.
+
+If you ever need to see what is staged before committing, run
+`git diff --cached --name-only` and confirm it lists *only* your files.
+
+### 4.3 Pull Requests — NONE
+
+There are no pull requests. Work is committed directly to `main` as
+described in §4.2. Do not open PRs, do not wait on review gates.
+
+- Commit title = commit message subject (same format as §4.1).
+- Commit description (when non-trivial) includes:
   - What changed and why.
-  - Test results (paste `cargo nextest run` / `xcodebuild test` / `./gradlew test` output).
-  - Performance results if applicable (paste `cargo bench` output).
+  - Test results if applicable (`cargo nextest run` / `xcodebuild test` /
+    `./gradlew test`).
   - Breaking changes (if any).
+- Keep each commit scoped to one issue. If you pick up a second issue,
+  make a second commit — do not mix issues in one commit.
 
 ---
 

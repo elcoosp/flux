@@ -391,7 +391,7 @@ After each batch merges:
 - `cargo check`, `cargo test` (flux-syntax tests), `cargo doc` all pass.
 - `flux-syntax` implements every type in §1.5 with tests.
 - All 12 crates compile as stubs; all manifests exist and are correct.
-- Platform skeleton files exist; iOS/Android build verification is explicitly deferred to Phase 1 agents (documented in the PR).
+- Platform skeleton files exist; iOS/Android build verification is explicitly deferred to Phase 1 agents (documented in the commit).
 
 ---
 
@@ -610,7 +610,7 @@ Author pure-data JSON fixtures derived **exclusively from Appendix E**. No code.
 4. Workflows must be green against the Phase 0/1 skeletons at merge time and stay green as sources land (glob-based manifests make this automatic).
 5. Helper scripts under `/scripts/` (e.g., `check-ownership.sh` verifying no tracked file under frozen manifests changed vs. `main` — best-effort guard).
 
-**Acceptance criteria:** All three workflows green on the PR that merges this issue, and remain green for the rest of Phase 1.
+**Acceptance criteria:** All three workflows green on the commit that lands this issue, and remain green for the rest of Phase 1.
 
 ---
 
