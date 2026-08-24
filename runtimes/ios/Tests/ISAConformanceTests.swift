@@ -116,22 +116,22 @@ final class ISAConformanceTests: XCTestCase {
 
 // MARK: - Vector value conversion
 
-/// Converts a vector value into a `FluxValue`. Float strings (`inf`/`-inf`/`nan`)
+/// Converts a vector value into a `VMValue`. Float strings (`inf`/`-inf`/`nan`)
 /// are parsed like the Rust oracle's `parse_float`.
-func toValue(_ v: VecValue) -> FluxValue {
+func toValue(_ v: VecValue) -> VMValue {
     switch v.type {
-    case "Int": return FluxValue.int(v.value?.asInt64 ?? 0)
-    case "Float": return FluxValue.float(v.value?.asDouble ?? 0.0)
-    case "Bool": return FluxValue.bool(v.value?.asBool ?? false)
-    case "Str": return FluxValue.str(UInt32(truncatingIfNeeded: v.value?.asInt64 ?? 0))
-    case "Null": return FluxValue.null
+    case "Int": return VMValue.int(v.value?.asInt64 ?? 0)
+    case "Float": return VMValue.float(v.value?.asDouble ?? 0.0)
+    case "Bool": return VMValue.bool(v.value?.asBool ?? false)
+    case "Str": return VMValue.str(UInt32(truncatingIfNeeded: v.value?.asInt64 ?? 0))
+    case "Null": return VMValue.null
     case "List":
         let items = v.value?.asArray ?? []
         return .list(items.map { toValue(VecValue(type: $0.asDictionaryType, value: $0)) })
     case "Record":
         let items = v.value?.asArray ?? []
         return .record(items.enumerated().map { (UInt16($0.offset), toValue(VecValue(type: $0.element.asDictionaryType, value: $0.element))) })
-    default: return FluxValue.null
+    default: return VMValue.null
     }
 }
 
@@ -144,7 +144,7 @@ private extension AnyCodable {
 }
 
 /// Approximate float comparison matching the Rust oracle's `approx_eq`.
-func valueMatches(_ actual: FluxValue, _ expected: VecValue) -> Bool {
+func valueMatches(_ actual: VMValue, _ expected: VecValue) -> Bool {
     let exp = toValue(expected)
     switch (actual, exp) {
     case let (.float(a), .float(b)): return approxEq(a, b)

@@ -2,7 +2,7 @@
 //  Unit tests for the Flux wire deserializer (Appendix D), FLUX-006 scope item 4.
 //
 //  Each test hand-builds a byte vector matching the normative layout in the
-//  spec and asserts the decoded `FluxFrame`/`FluxValue`/`ShadowNode`. There is
+//  spec and asserts the decoded `FluxFrame`/`VMValue`/`ShadowNode`. There is
 //  no shared binary fixture directory for the wire layer, so these are explicit
 //  round-trip constructions that pin the byte contract.
 
@@ -20,7 +20,7 @@ private func f64(_ v: Double) -> [UInt8] { withUnsafeBytes(of: v.bitPattern.litt
 private func cat(_ parts: [[UInt8]]) -> [UInt8] { parts.reduce([], +) }
 
 /// Encodes a `Value` the same way the dev server would (Appendix D §D.5).
-private func encValue(_ v: FluxValue) -> [UInt8] {
+private func encValue(_ v: VMValue) -> [UInt8] {
     switch v {
     case .null: return [0x00]
     case let .int(n): return cat([[0x01], i64(n)])
@@ -201,12 +201,12 @@ final class WireDecodeTests: XCTestCase {
 
     /// A list/record value round-trips through the encoder used by the tests.
     func testValueEncoding() throws {
-        let v: FluxValue = .list([.int(1), .float(2.5), .bool(true)])
+        let v: VMValue = .list([.int(1), .float(2.5), .bool(true)])
         var r = ByteReader(encValue(v))
         let decoded = try FrameDeserializer.decodeValue(&r)
         XCTAssertEqual(decoded, v)
 
-        let rec: FluxValue = .record([(0, .str(3)), (1, .int(9))])
+        let rec: VMValue = .record([(0, .str(3)), (1, .int(9))])
         var r2 = ByteReader(encValue(rec))
         XCTAssertEqual(try FrameDeserializer.decodeValue(&r2), rec)
     }
