@@ -54,6 +54,58 @@ declared a `FluxUIKit` package dependency that was still mid-flight (FLUX-008)
 and did not compile. Both are documented inline in `project.yml`; FLUX-016
 restores the real kit.
 
+#### FLUX-016 — iOS adapter↔runtime integration (real `FluxUIKit`) — DONE
+
+Replaced the in-dir `MockAdapter`/`MockView` scaffold with the real Swift
+adapter kit (`adapters/ui-swift`, FLUX-008), driving real `UILabel`,
+`UIButton`, `UIStackView` and `UINavigationController` views. No production
+code in `adapters/ui-swift` was modified; it is consumed through its public
+`FluxAdapter`/`FluxExecutor` API.
+
+- `Sources/Adapters/AdapterKit.swift` — the integration bridge between the
+  runtime's id-based `VMValue` and the kit's resolved `FluxValue`/`Props`:
+  `StringTable` (id↔name interning), `toKit`/`kitProps`/`toRuntime`
+  converters, a type-erased `AnyFluxAdapter`, and `AdapterRegistry` mapping
+  `ComponentId` → a fresh adapter instance seeded from the Init frame's string
+  table. The host `FluxExecutor` is injected into each adapter at creation
+  time via the kit's public `init(executor:)` (the kit's `executor` property
+  is `internal`, so it cannot be set after construction).
+- `Sources/Shadow/ShadowTreeReconciler.swift` — now nodes-driven and identity-
+  preserving: native views are reused across frames/patches (verified by the
+  E2E tests asserting `===` identity), and it handles `Update`/`Remove`/
+  `Replace`/`Insert`/`Reorder`/`Handler` patches. Handlers are bound once at
+  build time so a `UIButton` does not stack `UIAction`s on every reconcile.
+- `Sources/Executor/FluxExecutor.swift` — `FluxRuntime` now conforms to the
+  kit's `FluxExecutor` protocol. `apply(_:)` drives the reconciler for **both**
+  full and patch frames (a previously-broken `guard let root` early-returned
+  on patch frames with `root: nil`, so patches were silently dropped).
+  `dispatch(_:)` runs handler bytecode through the VM and re-reconciles the
+  frame.
+- `Sources/Values/FluxValue.swift` + runtime rename — renamed the runtime's
+  own `FluxValue`→`VMValue` and `FluxExecutor` class→`FluxRuntime` to break a
+  module name collision: the kit module is also named `FluxUIKit` and exports a
+  `FluxExecutor` protocol and `FluxValue` type, and `import FluxUIKit as FUI`
+  module-aliasing is not supported by this toolchain. Renaming lets the kit's
+  names be referenced unqualified.
+- `Sources/Wire/` — `FluxFrame` now carries a flat `nodes: [UInt32: ShadowNode]`
+  map (populated by `FrameDeserializer`), which the reconciler uses to resolve
+  child id references (Appendix D §D.4) without re-decoding.
+- `Sources/FluxAppMain.swift` — seeds the real `AdapterRegistry` from the Init
+  frame's string table.
+
+Tests (`runtimes/ios/Tests`):
+- `RuntimeE2ETests` rewritten to drive the real adapters (no mocks): a hand-
+  built Init frame produces a real `UILabel`/`UIButton`/`UIStackView`/
+  `UINavigationController` tree; tap→`dispatch`→VM→reconcile updates the label
+  text **without recreating the `UIView`** (identity asserted); a patch
+  `Update` reuses the view; Router push→pop→push reuses the screen
+  `UIViewController` by identity (state preserved); `AdapterRegistry` resolves
+  all 7 stdlib `ComponentId`s; gas exhaustion is reported.
+
+Verification: out-of-tree xcodegen project wrapping `Sources`/`Tests` (the
+frozen `project.yml` is untouched); `xcodebuild test` on iOS Simulator passes
+14 tests, 0 failures (2 skipped), with `SWIFT_TREAT_WARNINGS_AS_ERRORS=YES`.
+
 ### Phase 0 — Foundation
 
 #### FLUX-001 — Foundation skeleton and `flux-syntax` crate — DONE
