@@ -50,15 +50,15 @@ The dev server must ship reactive tree patches to the host app with minimal late
 - Pros: Trivial to implement. Built-in support on both platforms (`URLSessionWebSocketTask` on iOS, OkHttp on Android).
 - Cons: JSON is 5–20× larger than binary. Parsing cost on host. String keys everywhere.
 
-**Option D — WebSocket with custom binary frames (MessagePack).**
+**Option D — WebSocket with custom binary frames (custom little-endian encoding; see ADR-0025, which supersedes the originally-specified MessagePack).**
 - Pros: Persistent, bidirectional, minimal payload, zero-copy deserialization possible.
 - Cons: Custom protocol must define its own versioning. No built-in schema validation.
 
 #### Decision Outcome
 
-**Chosen: Option D — WebSocket with custom binary frames (MessagePack).**
+**Chosen: Option D — WebSocket with custom binary frames (custom little-endian encoding; ADR-0025 supersedes the originally-specified MessagePack).**
 
-Locality is localhost (1–3 ms round trip). The wire format is MessagePack with content addressing. Protocol versioning is explicit in the handshake frame.
+Locality is localhost (1–3 ms round trip). The wire format is a custom little-endian binary encoding (ADR-0025) with content addressing. Protocol versioning is explicit in the handshake frame.
 
 #### Consequences
 
@@ -69,7 +69,7 @@ Locality is localhost (1–3 ms round trip). The wire format is MessagePack with
 
 **Negative:**
 - Custom protocol must be versioned manually (see §21.4 of main spec).
-- MessagePack encoder/decoder must be shipped in the host app (~5 KB Swift, ~8 KB Kotlin).
+- A custom little-endian binary encoder/decoder must be shipped in the host app (Swift/Kotlin). `rmp-serde` is declared but currently unused (see ADR-0025).
 
 **Neutral:**
 - The WebSocket connection is localhost-only in the primary case; device testing over LAN adds 2–5 ms.
@@ -2466,7 +2466,7 @@ Image("assets/logo.png") {
 | **Tombstone** | A record of a destroyed state cell, kept for a few seconds so rapid undo/re-edit can restore state. Prevents state loss on rapid edit cycles. |
 | **Type Class** | A trait-like construct for ad-hoc polymorphism (Haskell-style). `trait Numeric[T] { fn zero() -> T; fn +(a: T, b: T) -> T }`. Resolved at type-check time. Enables generic components with trait bounds. |
 | **VM (FluxBytecodeVM)** | The embedded register-based bytecode interpreter in the host app. Evaluates `ClosureIR` against the signal graph. 16 registers, 1-byte opcodes, gas meter, memory cap. ~2k LOC per platform. |
-| **Wire Protocol** | The binary frame format between dev server and host app. MessagePack-encoded with content addressing. Frames: `Hello`, `Init`, delta patches, `Error`, heartbeat. |
+| **Wire Protocol** | The binary frame format between dev server and host app. Custom little-endian encoded (ADR-0025) with content addressing. Frames: `Hello`, `Init`, delta patches, `Error`, heartbeat. |
 | **WebSocket** | The transport protocol between dev server and host app. Default URL: `ws://localhost:7331`. Bidirectional: server pushes patches, host sends dispatch events (for capabilities in dev mode). |
 
 ---

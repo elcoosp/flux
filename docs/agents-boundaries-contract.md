@@ -647,7 +647,7 @@ Author pure-data JSON fixtures derived **exclusively from Appendix E**. No code.
 **[DoD]** applies.
 
 **Scope:**
-1. `serialize_patches(&[Patch], &StringTable) -> Vec<u8>` per Appendix D (MessagePack wire layout, content addressing via BLAKE3, string-table deltas).
+1. `serialize_patches(&[Patch], &StringTable) -> Vec<u8>` per Appendix D (custom little-endian binary wire layout, ADR-0025; content addressing via BLAKE3, string-table deltas).
 2. `Frame` construction: `Hello`/`Init`/delta/error/heartbeat; protocol version field.
 3. A Rust-side **deserializer for round-trip tests only** (production deserializers are Swift/Kotlin, coded from Appendix D).
 4. `hash_props`, `hash_closure` content addressing.
@@ -835,6 +835,46 @@ Author pure-data JSON fixtures derived **exclusively from Appendix E**. No code.
 - All parity scenarios: dev state == release state.
 - All wire fixtures pass in Swift and Kotlin deserializer suites.
 - Performance targets met and reported.
+
+---
+
+## Known Deviations & Pending Follow-ups (tracked for dispatch)
+
+These were surfaced during the FLUX-013/FLUX-018 boundary review (2026-08-24).
+They are **not** blockers for the already-merged Phase 1 work, but each must be
+resolved before or during the listed downstream issue.
+
+### Deviation D1 — wire format is custom binary, not MessagePack (RESOLVED by ADR-0025)
+`flux-ir-serde` ships a custom little-endian binary frame format; `rmp-serde`
+is declared but unused. ADR-0025 supersedes ADR-0008's MessagePack choice and
+the spec/contract prose now reference it. `rmp-serde` remains in the frozen
+workspace `Cargo.toml` (R2) — flag to foundation for pruning.
+
+### Gap G1 — handler bytecode has no transport (schedule `flux-ir-serde` 2nd pass)
+`InitFrame`/`DeltaFrame` carry patches + strings only; `wire.rs HandlerDef` is
+`#[allow(dead_code)]` and `ClosureRef { bytecode_offset, bytecode_len }` points
+into a bytecode blob no frame ships (spec §21.1 frame includes a handler
+section). **Sequence after FLUX-018** defines `ClosureIR`'s final shape, then a
+`flux-ir-serde` second pass (owned by ir-serde) adds a handler section +
+bytecode blob to `Init`/`Delta`. FLUX-019 (devserver) must not hard-code a
+handler wire shape until G1 lands.
+
+### Gap G2 — node-ID derivation has no single source (orchestrator task; BLOCKS FLUX-018)
+`flux-types/src/kind.rs:303` defines its own `compute_node_id` (u8 tag, u64 key)
+and `flux-ir/src/node_id.rs:46` is the canonical one (`NodeKind`, `Option<Key>`).
+They live in separate crates; `flux-types` does not depend on `flux-ir`. FLUX-018
+lowering keys `TypedAST.types` by `NodeId`, so the two derivations must agree.
+**This is an orchestrator pass (R5 forbids agents from editing `flux-syntax`):**
+relocate the single `compute_node_id` into `flux-syntax`, update both crates,
+add a cross-crate proptest, and write `docs/adr/ir-node-id-bridge.md`. Must
+complete **before** FLUX-018 is dispatched.
+
+### Verify-only (post-MLP unless explicitly pulled in)
+- **FR-014** `Image` adapter + asset pipeline: referenced in `mlp-spec.md` but
+  absent from the 7-adapter MLP set and the 12 stdlib files.
+- **ADR-0016** on-wire hash-reference dedup ("90%+ payload reduction"):
+  `hash_props`/`hash_closure` exist but frames ship props inline; the
+  indirection is not yet on the wire.
 
 ---
 

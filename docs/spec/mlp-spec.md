@@ -179,7 +179,7 @@ The lowering pass shall produce a Reactive Tree IR with stable node IDs derived 
 The differ shall produce a minimal `Patch[]` list comparing the previous IR to the new IR. The algorithm shall be O(n) for typical cases using keyed reconciliation (udomdiff-style).
 
 ### FR-005: Serialize patches as binary frames
-The serializer shall pack `Patch[]` into a binary frame using MessagePack encoding with content-addressed interning for props, closures, and string IDs.
+The serializer shall pack `Patch[]` into a binary frame using a custom little-endian wire encoding (ADR-0025) with content-addressed interning for props, closures, and string IDs.
 
 ### FR-006: Ship frames over WebSocket
 The dev server shall maintain a WebSocket connection to the host app on `ws://localhost:7331` (configurable). Frames shall be delivered within 2 ms on localhost.
@@ -280,7 +280,7 @@ The CLI shall support `--profile` which prints a flamegraph of the hot-swap pipe
 ### 14.1 WebSocket Protocol
 - Transport: WebSocket binary frames
 - Default URL: `ws://localhost:7331`
-- Frame encoding: MessagePack
+- Frame encoding: custom little-endian binary (ADR-0025; supersedes the originally-specified MessagePack)
 - Protocol version: u32 (in Hello frame)
 
 ### 14.2 Asset HTTP Server
@@ -412,7 +412,7 @@ graph TB
         TypeCrate[flux-types<br/>bidirectional checker]
         IRCrate[flux-ir<br/>arena-allocated]
         DifferCrate[flux-differ<br/>keyed reconciliation]
-        SerdeCrate[flux-ir-serde<br/>MessagePack]
+        SerdeCrate[flux-ir-serde<br/>custom binary · ADR-0025]
         WSCrate[flux-devserver<br/>tokio-tungstenite]
     end
 
@@ -900,7 +900,7 @@ Every IR node carries a `Span`. Every bytecode instruction carries a `Span` refe
 
 ### 20.6 Serializer
 
-- **Format:** MessagePack.
+- **Format:** custom little-endian binary (ADR-0025).
 - **Content addressing:** Props, closures, and IR nodes are interned by BLAKE3 hash. Wire protocol ships hashes for already-cached entries.
 - **String interning:** Dev server maintains string table: `HashMap<String, u32>`. All IR references use string IDs.
 - **Performance target:** < 1 ms for typical patch.
