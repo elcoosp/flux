@@ -956,7 +956,7 @@ WHITESPACE = _{ " " | "\t" | "\r" | "\n" }
 COMMENT    = { "//" ~ (!"\n" ~ ANY)* }
 
 // Identifiers
-ident      = { @{ASCII_ALPHA} ~ (ASCII_ALPHANUMERIC | "_")* }
+ident      = @{ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* }
 path       = { ident ~ ("::" ~ ident)* }
 
 // Literals
@@ -983,7 +983,13 @@ keyword    = { "component" | "fn" | "state" | "props" | "type" | "trait"
 
 file        = { SOI ~ statement* ~ EOI }
 statement   = { import_decl | use_decl | component_decl | fn_decl
-             | type_decl | trait_decl | capability_decl }
+             | type_decl | trait_decl | capability_decl | const_binding }
+
+// Module-level associated constant. `Name` is a dot-qualified type or
+// module path; the bound value is any expression. Examples (mlp-spec §18.6):
+//   Color.red = RGB(1.0, 0.0, 0.0)
+//   Font.body = Font("", 17.0, Regular, Normal)
+const_binding = { ident ~ ("." ~ ident)* ~ "=" ~ expr }
 
 // ========================= Imports ==========================
 
@@ -996,18 +1002,24 @@ component_decl
             = { annotations? ~ "component" ~ ident ~ generic_params?
                   ~ props_block? ~ block }
 
-annotations = { "@" ~ ident ~ ("(" ~ args? ~ ")")? ~ whitespace* }
+annotations = { "@" ~ ident ~ ("(" ~ args? ~ ")")? }
 
 props_block = { "(" ~ prop_decl ~ ("," ~ prop_decl?)* ~ ")" }
-prop_decl   = { ident ~ ":" ~ type }
+prop_decl   = { ident ~ ":" ~ type ~ ("=" ~ expr)? }
 
 // ========================= Functions ========================
 
-fn_decl     = { "fn" ~ ident ~ generic_params? ~ "(" ~ params? ~ ")"
+// A function/trait-method name is either an identifier or a symbolic
+// operator (mlp-spec §18.2 / B.3.2): `fn +(a: T, b: T) -> T`, `fn ==(a, b)`.
+fn_name     = { ident | operator }
+operator    = { "+" | "-" | "*" | "/" | "%" | "==" | "!=" | "<" | ">"
+             | "<=" | ">=" }
+
+fn_decl     = { "fn" ~ fn_name ~ generic_params? ~ "(" ~ params? ~ ")"
                   ~ ("->" ~ type)? ~ block }
 
 params      = { param ~ ("," ~ param)* }
-param       = { ident ~ ":" ~ type }
+param       = { ident ~ ":" ~ type ~ ("=" ~ expr)? }
 
 // ========================= Types ============================
 
@@ -1015,13 +1027,13 @@ type_decl   = { "type" ~ ident ~ generic_params? ~ "=" ~ variant+ }
 variant     = { "|" ~ ident ~ ("(" ~ type_list? ~ ")")? }
 
 trait_decl  = { "trait" ~ ident ~ generic_params? ~ "{" ~ method_decl* ~ "}" }
-method_decl = { "fn" ~ ident ~ "(" ~ params? ~ ")" ~ ("->" ~ type)? }
+method_decl = { "fn" ~ fn_name ~ "(" ~ params? ~ ")" ~ ("->" ~ type)? }
 
 // ========================= Capabilities =====================
 
 capability_decl
             = { "capability" ~ ident ~ "{" ~ cap_method* ~ "}" }
-cap_method  = { "fn" ~ ident ~ "(" ~ params? ~ ")" ~ ("->" ~ type)? }
+cap_method  = { "fn" ~ fn_name ~ "(" ~ params? ~ ")" ~ ("->" ~ type)? }
 
 // ========================= Generics =========================
 
@@ -1042,13 +1054,19 @@ field_type  = { ident ~ ":" ~ type }
 fn_type     = { "Fn" ~ "(" ~ type_list? ~ ")" ~ "->" ~ type }
 type_list   = { type ~ ("," ~ type)* }
 
+// ========================= Value Literals ====================
+// Record literal (field-name constructor) used as a value. Example
+// (mlp-spec §18.6): Font { family: "", size: 17.0, weight: Regular, style: Normal }
+record_lit  = { ident ~ "{" ~ record_field ~ ("," ~ record_field)* ~ "}" }
+record_field = { ident ~ ":" ~ expr }
+
 // ========================= Blocks & Expressions =============
 
 block       = { "{" ~ expr* ~ "}" }
 
 expr        = { let_expr | assign_expr | if_expr | when_expr
              | match_expr | for_expr | call_expr | provide_expr
-             | lifecycle_expr | literal | ident }
+             | lifecycle_expr | literal | record_lit | ident }
 
 let_expr    = { "let" ~ ident ~ ("=" ~ expr)? }
 assign_expr = { lvalue ~ "=" ~ expr }
@@ -1062,12 +1080,14 @@ match_arm   = { pattern ~ "=>" ~ expr }
 pattern     = { ident ~ ("(" ~ ident_list? ~ ")")? | "_" 
              | literal | guard_pattern }
 guard_pattern = { ident ~ "if" ~ expr }
+ident_list  = { ident ~ ("," ~ ident)* }
 
 for_expr    = { "ForEach" ~ "(" ~ expr ~ "," ~ "key:" ~ expr ~ ")"
                   ~ block }
 
 call_expr   = { ident ~ "(" ~ args? ~ ")" ~ block? }
-args        = { named_arg ~ ("," ~ named_arg)* }
+args        = { arg ~ ("," ~ arg)* }
+arg         = { named_arg | expr }
 named_arg   = { ident ~ ":" ~ expr }
 
 provide_expr = { "provide" ~ ident ~ "with" ~ expr }
@@ -1091,7 +1111,7 @@ createRef_expr = { "createRef" ~ generic_args? ~ "(" ~ ")" }
 
 // ========================= Literals =========================
 
-literal     = { int_lit | float_lit | bool_lit | string_lit | list_lit }
+literal     = { float_lit | int_lit | bool_lit | string_lit | list_lit }
 ```
 
 ### B.3 Grammar Examples
