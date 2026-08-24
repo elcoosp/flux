@@ -61,6 +61,13 @@
 3. **100% platform parity.** 95% of platform UI is the target; escape hatches are documented.
 4. **Plugin/extension system.** Adapters and capabilities are first-party only for MLP.
 5. **Animations, gestures beyond tap, virtualized lists.** Deferred to MLP v2.
+   > **Credibility note (v1 scope trade-off, not a value judgment):** These three are
+   > the features users viscerally associate with *native feel* — Flux's core wedge
+   > vs. Flutter/RN. Cutting them for v1 is a deliberate scope decision, but it is the
+   > primary credibility gap and the top candidate for the v1.1 / v2 fast-follow. The
+   > architecture does not preclude them: gestures map to native gesture recognizers,
+   > animations to native `withAnimation`/`animate*`, and virtualization to native
+   > `LazyVStack`/`LazyColumn` — all are adapter-level additions, not VM changes.
 6. **Async/await syntax.** Callbacks only for MLP.
 7. **Package management / third-party libraries.** Local files only.
 8. **i18n, RTL, dark mode theming.** Deferred.
@@ -74,7 +81,7 @@
 | **Dev server OS** | macOS, Linux, Windows (Rust) |
 | **Host app distribution** | Sideload via Xcode / direct APK; TestFlight for team sharing |
 | **Team size assumption** | 1–3 engineers for MLP build; designed for 5–50 engineers at scale |
-| **Budget** | 12–16 weeks, one strong engineer for MLP; parallelize iOS/Android at week 11 |
+| **Budget** | **MLP v1 (shippable)** ≈ 12–16 weeks, one strong engineer (parallelize iOS/Android at week 11). **Full system** (parser + bidirectional typechecker + monomorphization + arena IR + differ + MessagePack wire + devserver + Swift & Kotlin native codegen + 3-way VM parity) is a 4–6 month, multi-engineer program — see `/docs/agents-boundaries-contract.md` (23 issues, 7 phases, up to 9 parallel agents). The 12–16 week figure is the *minimum lovable* target, not the full toolchain. |
 | **License** | Open source (MIT or Apache 2.0) — TBD |
 
 ## 6. Success Metrics
@@ -253,6 +260,8 @@ The VM shall allocate from a fixed pool of 16 MB per component instance. On exha
 
 ### NFR-MAINT-001: Dev/release parity
 For any `.flux` source, the dev-mode executor and the release-mode codegen shall produce behaviorally identical output. Parity shall be verified by an automated test harness that runs the same actions in both modes and compares state.
+
+**Scope adjudication (resolves tension with ADR-0003):** The behavioral-contract parity above is binding for *all* observable node values, props, handlers, signal state, and VM execution semantics — these must match exactly between dev and release. ADR-0003 ("Dev/release layout *may* diverge in edge cases") is explicitly the **narrow exception** and applies *only* to pixel-level native layout geometry (e.g., text wrapping at different breakpoints, platform-specific spacing/margins). Where a conflict arises, the rule is: **node tree + behavior + VM semantics = identical (hard NFR); native layout rendering = best-effort, may differ in edge cases (ADR-0003).** The parity harness asserts the former; it must not over-constrain the latter.
 
 ### NFR-MAINT-002: Generated code readability
 Generated Swift and Kotlin shall be formatted with platform-standard formatters (swift-format, ktlint) and shall be readable by a developer unfamiliar with `.flux`.
@@ -1835,65 +1844,17 @@ flux build --platform android
 
 ## Appendix A — Architecture Decision Records
 
-### ADR-0001: Binary hot-swap over WebSocket (not HTTP, not gRPC)
-
-**Status:** Accepted
-
-**Context:** Need sub-100ms save-to-pixels. HTTP request/response adds latency. gRPC requires protobuf compilation.
-
-**Decision:** WebSocket with custom binary frames (MessagePack).
-
-**Consequences:** + Persistent connection, bidirectional (host can send dispatch events back). - Requires custom protocol versioning.
-
-### ADR-0002: Embedded VM in host app (not server-authoritative)
-
-**Status:** Accepted
-
-**Context:** Handler evaluation can be server-side (Design 1) or host-side (Design 2). Server-side adds round-trip latency on every tap.
-
-**Decision:** Embedded register-based bytecode VM in host app. State lives in host. No round-trip on tap.
-
-**Consequences:** + < 8ms tap-to-state-change. - Host app has interpreter (2k LOC Swift/Kotlin). - State lost on host crash (acceptable for dev).
-
-### ADR-0003: Delegate layout to native (not own layout engine)
-
-**Status:** Accepted
-
-**Context:** Own layout engine (Flutter-style) gives perfect parity but loses native feel. Native delegation (Compose Multiplatform-style) has parity risk.
-
-**Decision:** Delegate to native. Constrain the layout DSL to patterns that map cleanly to both SwiftUI and Compose.
-
-**Consequences:** + Native feel in release. + Smaller codebase. - Dev/release layout may diverge in edge cases. - Must instrument dev executor to match native semantics.
-
-### ADR-0004: Individual props, not chained modifiers
-
-**Status:** Accepted
-
-**Context:** SwiftUI uses chained view modifiers (`.bold().italic()`). Compose uses `Modifier` chains. Order matters differently on each platform.
-
-**Decision:** Flat prop map per node. Codegen translates flat props to platform-specific modifier chains.
-
-**Consequences:** + No order-sensitivity bugs. + Simpler IR. - Less expressive than chained modifiers.
-
-### ADR-0005: Monomorphization for dev bytecode
-
-**Status:** Accepted
-
-**Context:** Generics in source become either type-erased (slow, tag checks) or specialized (fast, code bloat) in bytecode.
-
-**Decision:** Monomorphize. Specialize bytecode per concrete type instantiation. Cap at 100 specializations; fall back to type-erased beyond.
-
-**Consequences:** + No runtime type dispatch. + Fast arithmetic. - Code bloat (acceptable: ~50KB typical).
-
-### ADR-0006: Static types with bidirectional checking
-
-**Status:** Accepted
-
-**Context:** Dynamic typing is 5-10x slower in VM and produces reflection-heavy codegen. Full Hindley-Milner is complex and gives poor error messages.
-
-**Decision:** Bidirectional type checking with let-polymorphism and type classes. Explicit annotations on signatures; inference on locals.
-
-**Consequences:** + Fast VM (unboxed arithmetic). + Good error messages. + LLM-friendly (explicit types). - More upfront work than dynamic.
+> **Single source of truth.** The canonical ADR set lives in
+> `/docs/spec/mlp-appendices.md` **Appendix A** (ADR-0001 … ADR-0020 and growing).
+> This document does **not** duplicate it. ADRs are governed by
+> `docs/adr/adr-naming-and-numbering.md` and enforced by
+> `docs/scripts/check-adr-numbering.sh`.
+>
+> ADR-0001–0006 (as referenced in this spec) are: (0001) binary hot-swap over
+> WebSocket, (0002) embedded VM in host app, (0003) delegate layout to native,
+> (0004) individual props not chained modifiers, (0005) monomorphization for dev
+> bytecode, (0006) static types with bidirectional checking. See the appendices for
+> the full text of every record.
 
 ## Appendix B — `.flux` Grammar Reference
 
