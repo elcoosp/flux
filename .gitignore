@@ -34,3 +34,4 @@ captures/
 # Tooling
 .hermes/
 node_modules/
+dump.txt
