@@ -1,98 +1,83 @@
-# ADR parser-grammar-extensions: productions FLUX-003 added beyond Appendix B
+# ADR parser-grammar-extensions: keeping flux.pest and Appendix B in sync
 
-**Status:** Accepted (implemented in `flux-parser`)
+**Status:** Accepted (implemented in `flux-parser`; reconciled with Appendix B)
 **Date:** 2026-08-24
 **Author:** parser agent (FLUX-003)
-**Scope:** `crates/flux-parser/` (owned per `agents-boundaries-contract.md`)
+**Scope:** `crates/flux-parser/` and `docs/spec/mlp-appendices.md` Appendix B
 **Addresses:** ASR-2 (developer velocity depends on precise parse diagnostics)
-**Relates to:** `stdlib-grammar-gaps.md` (G1–G4), `appendix-b-grammar-repairs.md`
+**Relates to:** `stdlib-grammar-gaps.md` (G1–G4)
 
 ## Context and Problem Statement
 
 FLUX-003 implements the parser against Appendix B (`docs/spec/mlp-appendices.md`
-§B.1–B.2). Appendix B's own §B.3 examples, and the twelve stdlib files authored
-under FLUX-010, use constructs for which §B.1–B.2 has no production. AGENTS.md
-§6 forbids improvising architecture and requires an ADR when the spec is
-silent. This ADR records every production `crates/flux-parser/src/flux.pest`
-carries beyond the literal text of Appendix B, so the appendix can be amended
-(or the parser corrected) in one pass.
+§B.1–B.2). The §B.3 examples and the twelve stdlib files use constructs that
+the *original* Appendix B did not spell out. At first the parser added them as
+extensions tagged `[Pn]` in `crates/flux-parser/src/flux.pest`, with this ADR
+recording the divergence. The cleaner resolution — taken on 2026-08-24 — was to
+**rewrite Appendix B.1/B.2 so it matches the tested grammar 1:1**, making the
+spec the source of truth and removing the divergence entirely.
 
-Each extension is marked in `flux.pest` with its `[Pn]` tag.
+This ADR now records that reconciliation and the one concern that remains
+parser-internal.
 
 ## Decision
 
-Accept the productions below. Every one is required by normative material
-elsewhere in the spec — an Appendix B.3 example, an Appendix F prop contract,
-or mlp-spec §18/§24 — so accepting them makes the grammar consistent with the
-rest of the specification rather than extending the language.
+1. **Appendix B is normative and complete.** `docs/spec/mlp-appendices.md` §B.1
+   and §B.2 were rewritten to contain every production the parser needs,
+   transcribed from `flux.pest`. The two are kept in sync; any future grammar
+   change must update both, and `tests/appendix_b_examples.rs` asserts every
+   §B.3 example against the parser.
 
-### Closing the FLUX-010 gaps (G1, G2, G4)
+2. **What the grammar added beyond the *original* B.2** (now folded in, recorded
+   for traceability):
 
-| Gap | Production | Required by |
-|---|---|---|
-| G1 | `const_binding = const_path ~ "=" ~ expr` | mlp-spec §18.6 `Color.red = RGB(…)` |
-| G2 | `prop_decl` / `param` gain an optional `"=" ~ expr` default | Appendix F.1–F.7 (`gap: Float = 0`) |
-| G4 | `fn_name = ident \| operator` | Appendix B.3.2 (`fn +(a: T, b: T) -> T`) |
+   | Tag | Production | Required by |
+   |---|---|---|
+   | G1 | `const_binding = const_path ~ assign_op ~ expr` | mlp-spec §18.6 `Color.red = RGB(…)` |
+   | G2 | `prop_decl`/`param` optional `assign_op ~ expr` default | Appendix F.1–F.7 (`gap: Float = 0`) |
+   | G4 | `fn_name = ident \| operator` | Appendix B.3.2 (`fn +(a, b)`) |
+   | P9 | `block_expr` — bare block as a zero-arg closure | B.3.1 `onClick: { … }` |
+   | P10 | `first_variant` — optional leading `\|` on first ADT variant | stdlib newtypes `type Ref[T] = Ref(T)` |
+   | P11 | `module_state` — module-level `state` | `stdlib/platform.flux` `state platform: String = "ios"` |
+   | — | `ellipsis`, `props_block` + `prop_entry`, `lambda`, postfix `field_access` | B.3.6–B.3.8 |
 
-G3 (record/tuple variant construction in value position) needs no new
-production: positional construction is `postfix_expr` applied to an `ident`,
-which the existing call grammar already covers.
+   G3 (positional ADT/tuple construction) needs no production: it is
+   `postfix_expr` applied to an `ident` (the call grammar).
 
-### Productions the Appendix B.3 examples require
+3. **`module_state` (formerly gap G5) is accepted into the spec.** It reuses
+   `state_decl` and lowers to `Decl::State`. It is the only production not in
+   the *original* B.2; the orchestrator ratified it by accepting this ADR's
+   reconciliation.
 
-- **[P9] `block_expr`** — a bare block in value position is a zero-argument
-  closure. B.3.1 writes `onClick: { count = count + 1 }`. Lowered to a
-  `Lambda` with no parameters.
-- **[P10] `first_variant`** — the leading `|` of a `type` declaration is
-  optional on the first variant only, so the stdlib's single-variant newtypes
-  (`type Ref[T] = Ref(T)`, prelude.flux) parse while `type T = A B` still does
-  not.
-- **`props_block`, `prop_entry`** — B.3.7 writes both a parenthesised prop
-  list (`component Avatar(url: String, size: Float)`) and a trailing prop
-  block (`Image(url) { width: size, … }`).
-- **`ellipsis`** — B.3.8 writes `onClick: { ... }` as an elided body.
-
-### Extensions the stdlib requires
-
-- **[P11] `module_state`** — `stdlib/platform.flux` declares
-  `state platform: String = "ios"` at module level: a runtime-bound module
-  value. Appendix B's `statement` has no such production. Parsed as
-  `Decl::State`. Recorded here as **gap G5**; the orchestrator should decide
-  whether Appendix B gains a `module_state` production or `platform.flux`
-  is rewritten as a `fn`.
-
-### Robustness limit
-
-- **G6 — `MAX_NESTING_DEPTH = 16`.** pest descends the whole
-  expression-precedence chain at every block nesting level (~100 KB of stack
-  per level), so unbounded nesting aborts the process rather than returning an
-  error. The parser therefore rejects input nested deeper than 16 blocks with
-  an actionable diagnostic, checked lexically before parsing. The value is the
-  depth measured to parse safely on the ~2 MB stacks test harnesses use; real
-  view trees nest far less. If deeper nesting is ever needed, the fix is to
-  parse on an explicitly-sized stack, not to raise the constant blindly.
+4. **`MAX_NESTING_DEPTH = 16` stays parser-internal (not a grammar rule).**
+   pest descends the whole expression-precedence chain at every block level
+   (~100 KB of stack per level), so unbounded nesting aborts the process
+   instead of returning an error. The parser therefore rejects input nested
+   deeper than 16 blocks with an actionable diagnostic, checked lexically
+   before parsing. The value is the depth measured to parse safely on the
+   ~2 MB stacks test harnesses use; real view trees nest far less. If deeper
+   nesting is ever needed, the fix is to parse on an explicitly-sized stack,
+   not to raise the constant blindly. This is recorded as **G6**.
 
 ## Considered Options
 
-1. **Accept the productions and record them here (chosen).** The parser
-   accepts every §B.3 example and all twelve stdlib files, so FLUX-015 can
-   validate the stdlib as authored.
-2. **Implement Appendix B literally.** Would reject all ten §B.3 examples and
-   six stdlib files — the appendix's own examples would not parse.
-3. **Amend Appendix B first.** Correct, but `mlp-appendices.md` is
-   orchestrator-owned and concurrently edited; a parser-agent edit would
-   collide. This ADR is the hand-off instead.
+1. **Reconcile Appendix B with the tested grammar (chosen).** One source of
+   truth; `flux.pest` and §B.2 cannot drift.
+2. **Keep the divergence, track it in this ADR.** Rejected: two parallel
+   grammars invite silent drift and were the reason the ADR was needed at all.
+3. **Parser diverges from the spec.** Rejected by AGENTS.md §6 (no
+   improvisation when the spec is silent — and here the spec is no longer
+   silent).
 
 ## Consequences
 
-**Positive:** All ten Appendix B.3 examples and all twelve stdlib files parse.
-Diagnostics carry what/where/why/how per AGENTS.md §3.7. Deep input fails with
-an error instead of aborting the process.
+**Positive:** Appendix B and `flux.pest` are now identical in content. All ten
+§B.3 examples and all twelve stdlib files parse. Diagnostics carry what/where/
+why/how per AGENTS.md §3.7. Deep input fails with an error instead of
+aborting.
 
-**Negative:** Until Appendix B is amended, `flux.pest` is the de-facto grammar
-of record for these constructs. Every extension is tagged `[Pn]` in the grammar
-and tested (`tests/appendix_b_examples.rs`, `tests/stdlib.rs`) to keep the
-divergence visible and enumerable.
+**Negative:** `module_state` widens the language beyond the original B.2; it is
+deliberate (required by the stdlib) and now documented in §B.2 Notes.
 
-**Follow-up for the orchestrator:** ratify G1/G2/G4, decide G5 (module-level
-`state`), and fold P9–P11 into Appendix B §B.2.
+**Follow-up:** any future grammar edit must touch both `flux.pest` and
+Appendix B, then re-run `cargo nextest run -p flux-parser`.
