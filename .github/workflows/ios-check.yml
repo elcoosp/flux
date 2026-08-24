@@ -1,0 +1,58 @@
+name: ios-check
+
+# FLUX-011 (CI pipelines) — iOS quality gate.
+# 1. Generate the Xcode project from the frozen XcodeGen manifest (runtimes/ios/project.yml).
+# 2. Build & test the FluxApp scheme in the iOS Simulator.
+# 3. Run the Swift Package Manager test suite for the ui-swift adapter (adapters/ui-swift).
+# Both targets glob their Sources/Tests, so runtime/adapter source landing in later
+# phases is picked up with no manifest edits.
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "runtimes/ios/**"
+      - "adapters/ui-swift/**"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "runtimes/ios/**"
+      - "adapters/ui-swift/**"
+
+permissions:
+  contents: read
+
+jobs:
+  ios:
+    name: xcodegen + xcodebuild test + swift test
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: runtimes/ios
+        run: xcodegen generate
+
+      - name: Resolve a simulator
+        id: sim
+        run: |
+          runtime_id=$(xcrun simctl list runtimes | grep -E 'iOS [0-9]' | tail -1 | awk '{print $NF}' | tr -d '()')
+          echo "runtime_id=$runtime_id" >> "$GITHUB_OUTPUT"
+          sim_id=$(xcrun simctl create "FluxCI" "iPhone 16" "$runtime_id")
+          echo "sim_id=$sim_id" >> "$GITHUB_OUTPUT"
+
+      - name: Build & test FluxApp
+        working-directory: runtimes/ios
+        run: xcodebuild test -scheme FluxApp -destination "id=${{ steps.sim.outputs.sim_id }}" -quiet
+
+      - name: Test ui-swift adapter (SPM)
+        working-directory: adapters/ui-swift
+        run: swift test
+
+      - name: Remove simulator
+        if: always() && steps.sim.outputs.sim_id != ''
+        run: xcrun simctl delete "${{ steps.sim.outputs.sim_id }}"
