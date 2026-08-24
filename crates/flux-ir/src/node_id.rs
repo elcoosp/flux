@@ -5,24 +5,21 @@
 //! a handler body does not shift any other node's ID, which is what makes
 //! keyed reconciliation and state preservation work.
 //!
-//! The digest is BLAKE3 over a canonical little-endian byte layout, then
-//! truncated to 32 bits. BLAKE3 is already a workspace dependency (via
-//! `flux-syntax`) and is used for every other content address in Flux, so the
-//! IR stays consistent with the wire protocol and the prop hash.
+//! The canonical derivation now lives in `flux-syntax` (see
+//! `docs/adr/ir-node-id-bridge.md`); this crate delegates to it so the IR and
+//! the type checker produce identical IDs for identical source constructs.
 
-use blake3::Hasher;
+use flux_syntax::Key;
+use flux_syntax::NodeId;
 use flux_syntax::NodeKind;
-use flux_syntax::{Key, NodeId, Span};
+use flux_syntax::Span;
 
 /// Derives the stable [`NodeId`] for a node.
 ///
-/// # Arguments
-///
-/// * `parent` — the ID of the enclosing node (`0` for a tree root).
-/// * `kind` — the [`NodeKind`] of the node being identified.
-/// * `span` — the source span this node was lowered from.
-/// * `key` — the `ForEach` iteration key, when the node is a dynamically
-///   generated child; `None` for statically-known nodes.
+/// Thin wrapper over [`flux_syntax::compute_node_id`] that accepts the
+/// [`NodeKind`] enum (converting it to its `u8` tag) so the IR's public API is
+/// unchanged. The byte layout is identical to the canonical function, so all
+/// previously-computed IR/differ/wire hashes remain stable.
 ///
 /// # Examples
 ///
@@ -44,19 +41,7 @@ use flux_syntax::{Key, NodeId, Span};
 /// there is no fallible path.
 #[must_use]
 pub fn compute_node_id(parent: NodeId, kind: NodeKind, span: Span, key: Option<Key>) -> NodeId {
-    let mut hasher = Hasher::new();
-    hasher.update(&parent.to_le_bytes());
-    hasher.update(&[kind.tag()]);
-    hasher.update(&span.file_id.to_le_bytes());
-    hasher.update(&span.start.to_le_bytes());
-    hasher.update(&span.end.to_le_bytes());
-    match key {
-        Some(k) => hasher.update(&k.to_le_bytes()),
-        None => hasher.update(&[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]),
-    };
-    let mut digest = [0_u8; 4];
-    digest.copy_from_slice(&hasher.finalize().as_bytes()[..4]);
-    u32::from_le_bytes(digest)
+    flux_syntax::compute_node_id(parent, kind.tag(), span, key)
 }
 
 #[cfg(test)]
@@ -120,5 +105,22 @@ mod tests {
             compute_node_id(0, NodeKind::Component, span, None),
             compute_node_id(0, NodeKind::Component, span, Some(0)),
         );
+    }
+
+    // Bridge test (ADR-0027): `flux-ir`'s derivation must be byte-identical to
+    // the canonical `flux-syntax::compute_node_id` so lowering can join IDs.
+    #[test]
+    fn delegates_to_flux_syntax_canonical() {
+        let span = Span::new(3, 40, 52);
+        for kind in [NodeKind::Component, NodeKind::Primitive, NodeKind::ForEach] {
+            assert_eq!(
+                compute_node_id(0, kind, span, None),
+                flux_syntax::compute_node_id(0, kind.tag(), span, None),
+            );
+            assert_eq!(
+                compute_node_id(7, kind, span, Some(99)),
+                flux_syntax::compute_node_id(7, kind.tag(), span, Some(99)),
+            );
+        }
     }
 }
