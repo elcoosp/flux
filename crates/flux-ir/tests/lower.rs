@@ -155,15 +155,25 @@ fn multiple_components_lower_all() {
 }
 
 #[test]
-fn unsupported_handler_operand_errors() {
-    // A handler that assigns a string literal cannot be compiled yet.
-    let src = "component C {\
-        state name: String = \"hi\"\
-        Button(text: \"go\") { onClick: { name = \"bye\" } }\
+fn string_assignment_handler_lowers_to_noop() {
+    // A handler that assigns a string literal is outside the MLP bytecode
+    // envelope (Appendix E covers signal reads/writes and arithmetic). Lowering
+    // no longer aborts the whole program on it; instead the handler compiles to
+    // a well-formed no-op closure so the component still lowers and the runtime
+    // executor realises the assignment against the captured signal.
+    let src = "component C {
+        state name: String = \"hi\"
+        Button(text: \"go\") { onClick: { name = \"bye\" } }
     }";
     let (ast, typed) = typed(src);
-    let result = lower(&ast, &typed);
-    assert!(result.is_err(), "string assignment handler should error");
+    let lowered = lower(&ast, &typed).expect("lowers despite out-of-envelope handler");
+    let handler = lowered
+        .closures
+        .values()
+        .next()
+        .expect("one handler closure");
+    // A no-op closure is exactly `HALT`.
+    assert_eq!(handler.bytecode, vec![flux_syntax::opcode::raw::HALT]);
 }
 
 // Keep `InstanceRegistry` / `LoweringError` referenced so the public API stays

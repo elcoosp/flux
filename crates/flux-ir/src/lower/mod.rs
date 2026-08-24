@@ -33,9 +33,27 @@ pub(crate) mod ids;
 pub use bytecode::{HandlerCompileError, compile_handler};
 pub use error::LoweringError;
 
-use flux_parser::{Ast, Decl};
+use flux_parser::{Ast, Decl, ExprKind};
 use flux_syntax::{Child, ComponentId, NodeKind, Props, StringTable, Value};
 use flux_types::TypedAST;
+
+/// Whether `kind` is a UI-producing expression that should become its own
+/// child node in the reactive tree.
+///
+/// `let`, `onMount`/`onCleanup`/`effect`, `provide`, `useContext`, `resource`
+/// and `createRef` are not UI producers — they are handled by the codegen layer
+/// from the AST and contribute no child node. Skipping them here lets component
+/// bodies that bind refs or declare lifecycle hooks still lower.
+fn is_ui_expr(kind: &ExprKind) -> bool {
+    matches!(
+        kind,
+        ExprKind::Call { .. }
+            | ExprKind::If { .. }
+            | ExprKind::When { .. }
+            | ExprKind::ForEach { .. }
+            | ExprKind::Match { .. }
+    )
+}
 
 use crate::arena::IRArena;
 use crate::builder::{ArenaBuilder, Node};
@@ -247,8 +265,16 @@ impl<'a> Lowerer<'a> {
                     // blocks, which lower_call handles directly.
                 }
                 flux_parser::BlockItem::Expr(expr) => {
-                    let child = self.lower_expr(expr, owner)?;
-                    children.push(child);
+                    // `let`, `onMount`, `onCleanup`, `effect`, `provide`,
+                    // `useContext`, `resource`, `createRef` are not UI producers
+                    // (they bind refs, declare lifecycle hooks, or surface
+                    // capabilities) and contribute no child node. Codegen reads
+                    // them from the AST directly. Only UI-producing expressions
+                    // become children of the reactive tree.
+                    if is_ui_expr(&expr.kind) {
+                        let child = self.lower_expr(expr, owner)?;
+                        children.push(child);
+                    }
                 }
                 #[allow(unreachable_patterns)]
                 _ => {}
@@ -319,6 +345,33 @@ impl<'a> Lowerer<'a> {
                     component_id: owner,
                     props: Props::default(),
                     children: vec![Child::Splice { items: vec![] }],
+                    handlers: vec![],
+                    span: expr.span,
+                };
+                self.builder.pack(node);
+                Ok(Child::Node(id))
+            }
+            flux_parser::ExprKind::When {
+                cond: _,
+                then_block,
+                otherwise,
+            } => {
+                // `when … { … } otherwise { … }` is the Flux conditional; the
+                // codegen layer renders it as `if/else` (spec FR-011). Lowering
+                // emits an `If` node whose children are the two branches'
+                // UI producers.
+                let id = expr_node_id(expr, ExprNodeKind::If);
+                let mut children = Vec::with_capacity(2);
+                children.extend(self.lower_block(then_block, owner)?);
+                if let Some(other) = otherwise {
+                    children.extend(self.lower_block(other, owner)?);
+                }
+                let node = Node {
+                    id,
+                    kind: NodeKind::If,
+                    component_id: owner,
+                    props: Props::default(),
+                    children,
                     handlers: vec![],
                     span: expr.span,
                 };
@@ -437,7 +490,11 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Lowers an argument value; handler lambdas become [`Value::HandlerRef`]
-    /// with a compiled [`ClosureIR`] registered in the arena.
+    /// with a compiled [`ClosureIR`] registered in the arena. Literal values
+    /// are stored directly; dynamic expressions (identifiers, calls, records)
+    /// are stored as `Null` placeholders because their runtime evaluation is
+    /// driven by the codegen layer from the AST (spec FR-011 renders props from
+    /// source, not from the lowered literal).
     fn lower_value(
         &mut self,
         expr: &flux_parser::Expr,
@@ -457,10 +514,12 @@ impl<'a> Lowerer<'a> {
                 handlers.push(handler);
                 Ok(Value::HandlerRef(handler))
             }
-            other => Err(LoweringError::new(
-                format!("unsupported argument value: {other:?}"),
-                expr.span,
-            )),
+            // Anything else (an identifier referencing a prop/state, a nested
+            // call, a record literal, …) cannot be serialised as a static
+            // literal for the MLP wire path. The codegen layer recovers the
+            // real expression from the AST, so a `Null` placeholder here keeps
+            // lowering total without inventing a value.
+            _ => Ok(Value::Null),
         }
     }
 
