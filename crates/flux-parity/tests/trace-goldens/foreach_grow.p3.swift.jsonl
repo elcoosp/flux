@@ -1,0 +1,4 @@
+{"event":"mark","kind":"state","node":"items","signal":"s_items","phase":3,"span":"swift://Host.swift#L1"}
+{"event":"reconcile","node":"items","dirty":["items"],"phase":3,"span":"swift://Host.swift#L1"}
+{"event":"commit","node":"row_0","op":"insert","phase":3,"span":"swift://Host.swift#L1"}
+{"event":"commit","node":"row_1","op":"insert","phase":3,"span":"swift://Host.swift#L1"}

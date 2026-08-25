@@ -1,0 +1,2 @@
+{"event":"commit","node":"branch_a","op":"remove","phase":3,"span":"kotlin://Host.kt#L1"}
+{"event":"commit","node":"branch_b","op":"insert","phase":3,"span":"kotlin://Host.kt#L1"}

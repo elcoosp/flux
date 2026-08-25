@@ -1,0 +1,2 @@
+{"event":"mark","kind":"state","node":"count","signal":"s_count","phase":1,"span":"kotlin://Host.kt#L1"}
+{"event":"reconcile","node":"count","dirty":["count"],"phase":1,"span":"kotlin://Host.kt#L1"}

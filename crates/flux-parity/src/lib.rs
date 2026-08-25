@@ -33,6 +33,7 @@ mod reduce;
 mod relation;
 mod sources;
 mod tokenize;
+pub mod trace;
 
 pub use model::{ViewNode, from_ast, normalize_view_name};
 pub use recognize_kotlin::{KotlinRecognitionError, recognize as recognize_kotlin};

@@ -1,0 +1,2 @@
+{"event":"mark","kind":"derived","node":"show_a","signal":"s_show","phase":1,"span":"swift://Host.swift#L1"}
+{"event":"reconcile","node":"show_a","dirty":["show_a"],"phase":1,"span":"swift://Host.swift#L1"}

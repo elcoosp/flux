@@ -1,0 +1,2 @@
+{"event":"mark","kind":"state","node":"pure_val","signal":"s_pure","phase":1,"span":"swift://Host.swift#L1"}
+{"event":"reconcile","node":"pure_val","dirty":["pure_val"],"phase":1,"skipped":"pure","span":"swift://Host.swift#L1"}

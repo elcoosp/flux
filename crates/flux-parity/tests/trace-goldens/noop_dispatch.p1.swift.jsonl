@@ -1,0 +1,2 @@
+{"event":"mark","kind":"effect","node":"onTap","signal":"s_tap","phase":1,"span":"swift://Host.swift#L1"}
+{"event":"reconcile","node":"onTap","dirty":[],"phase":1,"span":"swift://Host.swift#L1"}
