@@ -251,6 +251,7 @@ struct AdapterRegistry {
             "Column": { AnyFluxAdapter(ColumnAdapter(executor: $0)) },
             "Row": { AnyFluxAdapter(RowAdapter(executor: $0)) },
             "TextField": { AnyFluxAdapter(TextFieldAdapter(executor: $0)) },
+            "Image": { AnyFluxAdapter(ImageAdapter(executor: $0)) },
             "Router": { AnyFluxAdapter(RouterAdapter(executor: $0)) },
             "Screen": { AnyFluxAdapter(ScreenAdapter(executor: $0)) },
         ]

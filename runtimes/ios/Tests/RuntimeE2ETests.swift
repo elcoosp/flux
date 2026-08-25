@@ -234,6 +234,22 @@ final class RuntimeE2ETests: XCTestCase {
         XCTAssertTrue(nav.viewControllers[1] === vcB, "screen B's VC must be reused by identity on push")
     }
 
+    /// AdapterRegistry resolves the `Image` primitive (registered for P1).
+    @MainActor
+    func testRegistryResolvesImage() {
+        var table = StringTable()
+        table.intern(0, "Text")
+        table.intern(1, "Button")
+        table.intern(2, "Column")
+        table.intern(3, "Row")
+        table.intern(4, "TextField")
+        table.intern(5, "Router")
+        table.intern(6, "Screen")
+        table.intern(9, "Image")
+        let registry = AdapterRegistry(table: table)
+        XCTAssertNotNil(registry.make(for: 9, executor: nil), "Image component id 9 should resolve")
+    }
+
     /// AdapterRegistry resolves every stdlib ComponentId the Init frame declares.
     @MainActor
     func testRegistryResolvesAllStdlibComponents() {
