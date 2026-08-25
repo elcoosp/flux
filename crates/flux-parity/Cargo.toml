@@ -21,6 +21,7 @@ flux-vm-ref.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+insta.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
