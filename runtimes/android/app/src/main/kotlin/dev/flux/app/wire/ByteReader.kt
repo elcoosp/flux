@@ -8,7 +8,7 @@ package dev.flux.app.wire
  * rather than panic.
  */
 public class ByteReader(
-    private val data: ByteArray,
+    internal val data: ByteArray,
     private var pos: Int = 0,
 ) {
     /** Current read position. */

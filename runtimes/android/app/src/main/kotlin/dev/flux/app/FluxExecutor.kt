@@ -159,16 +159,18 @@ public class FluxExecutor(
             stringIndex = StringInterning.fromEntries(frame.strings)
         }
         val blob = frame.bytecodeBlob ?: return
-        if (blob.bytes.isEmpty()) return
+        if (blob.len == 0) return
         for (def in frame.handlers) {
             val start = def.closure.bytecodeOffset.toInt()
             val len = def.closure.bytecodeLen.toInt()
-            if (start < 0 || len < 0 || start + len > blob.bytes.size) {
+            // Offsets are relative to the blob window (perf task 8, P2).
+            val absStart = blob.offset + start
+            if (start < 0 || len < 0 || absStart + len > blob.data.size) {
                 onError?.invoke("handler ${def.handlerId}: bytecode range out of bounds")
                 continue
             }
             if (closures.containsKey(def.handlerId)) continue
-            closures[def.handlerId] = Closure(blob.bytes.copyOfRange(start, start + len))
+            closures[def.handlerId] = Closure(blob.data.copyOfRange(absStart, absStart + len))
         }
     }
 

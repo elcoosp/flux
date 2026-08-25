@@ -51,7 +51,7 @@ public object FrameDeserializer {
                         repeat(handlerCount) { defs.add(decodeHandlerDef(r)) }
                     }
             } else {
-                BytecodeBlob(ByteArray(0)) to emptyList<HandlerDef>()
+                BytecodeBlob(ByteArray(0), 0, 0) to emptyList<HandlerDef>()
             }
 
         val strings = ArrayList<StringEntry>(stringCount)
@@ -196,10 +196,12 @@ public object FrameDeserializer {
         return ClosureRef(hash, offset, len, signals)
     }
 
-    /** Decodes the shared handler-bytecode blob (Appendix D §D.12): a `u32` byte length followed by the raw bytecode. */
+    /** Decodes the shared handler-bytecode blob (Appendix D §D.12) as a zero-copy window over the frame buffer. */
     private fun decodeBytecodeBlob(r: ByteReader): BytecodeBlob {
         val len = r.u32().toInt()
-        return BytecodeBlob(r.bytes(len))
+        val offset = r.position
+        r.bytes(len) // advance past the blob (no copy; the window references `r.data`)
+        return BytecodeBlob(r.data, offset, len)
     }
 
     /** Decodes one `HandlerDef` (Appendix D §D.8): a `HandlerId` plus its `ClosureRef`. */

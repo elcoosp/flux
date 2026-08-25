@@ -196,10 +196,19 @@ public data class HandlerDef(
  * of it when registering handlers. An empty blob means the frame carries no
  * handlers.
  *
- * @property bytes the raw little-endian bytecode for every handler in the frame.
+ * The blob is stored as a *window* `(data, offset, len)` over the frame's
+ * backing buffer rather than a freshly copied array (perf task 8, P2), so a
+ * frame decode allocates nothing for the handler section — the executor's
+ * single `copyOfRange` per handler is the only copy.
+ *
+ * @property data the frame's backing buffer.
+ * @property offset the blob's start within [data].
+ * @property len the blob's byte length.
  */
 public data class BytecodeBlob(
-    val bytes: ByteArray,
+    val data: ByteArray,
+    val offset: Int,
+    val len: Int,
 )
 
 /** A `StringEntry` (Appendix D §D.9). */
