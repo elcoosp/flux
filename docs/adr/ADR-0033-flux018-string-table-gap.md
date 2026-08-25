@@ -1,4 +1,4 @@
-# ADR flux018-string-table-gap: lowered string literals are not yet merged into the arena string table
+# ADR-0033-flux018-string-table-gap: lowered string literals are not yet merged into the arena string table
 
 - **Status:** Proposed (created 2026-08-24 by FLUX-018 lowering agent; tracks Gap G3 from `docs/agents-boundaries-contract.md`)
 - **Related:** FLUX-018 (lowering), AGENTS.md §3.2 (Node IDs / string interning), `flux-ir` `StringTable` (`crates/flux-syntax/src/string.rs`), `ArenaBuilder` (`crates/flux-ir/src/builder.rs`)

@@ -1,4 +1,4 @@
-# ADR appendix-b-grammar-repairs: grammar defects found extending Appendix B for FLUX-010
+# ADR-0029-appendix-b-grammar-repairs: grammar defects found extending Appendix B for FLUX-010
 
 **Status:** Draft (flagged to orchestrator; do not edit)
 **Date:** 2026-08-24
@@ -9,7 +9,7 @@ extend Appendix B to cover G1–G4"
 ## Context and Problem Statement
 
 FLUX-010 authored the 12 stdlib `.flux` files and recorded (in
-`stdlib-grammar-gaps.md`) four Appendix B grammar gaps the files rely on:
+`ADR-0037-stdlib-grammar-gaps.md`) four Appendix B grammar gaps the files rely on:
 G1 top-level `Name.field = expr` constants, G2 `prop`/`param` default values,
 G3 record-literal construction, G4 symbolic operator method names. The user
 directed that FLUX-003 extend Appendix B to cover G1–G4.
@@ -81,7 +81,7 @@ files remain validated by manual review (FLUX-010 acceptance) and by
 FLUX-015 (parser) once P6 lands.
 
 ## References
-- `docs/adr/stdlib-grammar-gaps.md` — the G1–G4 inventory this ADR closes.
+- `docs/adr/ADR-0037-stdlib-grammar-gaps.md` — the G1–G4 inventory this ADR closes.
 - `docs/spec/mlp-appendices.md` Appendix B (grammar) — edited here.
 - `docs/spec/mlp-spec.md` §18.6 (Color/Font), §B.3 (examples), §18.2 (traits).
 - `agents-boundaries-contract.md` FLUX-003 (parser), FLUX-010 (stdlib).

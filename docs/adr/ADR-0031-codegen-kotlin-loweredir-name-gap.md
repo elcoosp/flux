@@ -1,8 +1,8 @@
-# ADR codegen-kotlin-loweredir-name-gap: `LoweredIr` does not carry the component names codegen needs
+# ADR-0031-codegen-kotlin-loweredir-name-gap: `LoweredIr` does not carry the component names codegen needs
 
 - **Status:** Proposed (created 2026-08-25 by the FLUX-021 codegen-kotlin agent)
 - **Blocks:** FLUX-021 (Kotlin/Compose codegen), and by symmetry FLUX-020 (Swift/SwiftUI codegen) — both are specified with the same entry point.
-- **Related:** `docs/adr/flux018-string-table-gap.md` (Gap G3), FLUX-018 (lowering),
+- **Related:** `docs/adr/ADR-0033-flux018-string-table-gap.md` (Gap G3), FLUX-018 (lowering),
   `docs/agents-boundaries-contract.md` §15 (Gap G3) and line 699 (`AdapterRegistry` maps
   `ComponentId` → adapter *"using the string table from the `Init` frame"*),
   Appendix C §C.1 (IR schema), Appendix F (adapter contracts), ADR-0003, ADR-0004.
@@ -40,7 +40,7 @@ discarded.
 
 `ArenaBuilder::finish()` yields an `IRArena` whose `string_table()` is the default, empty
 table, so every `Value::Str(id)` prop emitted by lowering is a dangling id. This is
-already recorded in `docs/adr/flux018-string-table-gap.md` and deferred to a follow-up.
+already recorded in `docs/adr/ADR-0033-flux018-string-table-gap.md` and deferred to a follow-up.
 Codegen is one of the consumers that ADR names as affected: string *content*
 (`Text("Hello")`, `Button(text: "Increment")`) cannot be rendered.
 
@@ -113,7 +113,7 @@ unreadable output (Option B); both are worse than an honest block.
 
 1. Add `ArenaBuilder::intern_string(&mut self, text: &str) -> StringId` and move the
    builder's accumulated `StringTable` into the `IRArena` at `finish()`. This closes
-   Gap G3 exactly as `flux018-string-table-gap.md` already scopes it, and makes
+   Gap G3 exactly as `ADR-0033-flux018-string-table-gap.md` already scopes it, and makes
    `Value::Str` props resolvable via `arena.string_table()`.
 2. Intern every component/primitive name during lowering and make it recoverable from
    `LoweredIr`, either by:

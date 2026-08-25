@@ -1,8 +1,8 @@
-# ADR runtime-packaging-gap: host runtimes are apps, not importable packages
+# ADR-0036-runtime-packaging-gap: host runtimes are apps, not importable packages
 
 - **Status:** Proposed (created 2026-08-25 by the `examples-e2e` agent, FLUX-022 / PE-E)
-- **Related:** ADR-0027 (node-ID bridge), `devserver-build-accessor`,
-  `codegen-input-contract`, spec §14.3, and the runtime agents (P1/P2) who own
+- **Related:** ADR-0034 (node-ID bridge), `ADR-0032-devserver-build-accessor`,
+  `ADR-0030-codegen-input-contract`, spec §14.3, and the runtime agents (P1/P2) who own
   the fix.
 
 ## Context

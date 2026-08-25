@@ -1,8 +1,8 @@
-# ADR devserver-build-accessor: devserver exposes `(LoweredIr, Ast)` per file for `flux build`
+# ADR-0032-devserver-build-accessor: devserver exposes `(LoweredIr, Ast)` per file for `flux build`
 
-- **Status:** Accepted (created 2026-08-25 by the `devserver-build-accessor` agent, FLUX-019b)
+- **Status:** Accepted (created 2026-08-25 by the `ADR-0032-devserver-build-accessor` agent, FLUX-019b)
 - **Related:** FLUX-019 (devserver), FLUX-022 (cli), FLUX-020 (codegen-swift, DONE),
-  ADR-0027 (node-ID bridge), `codegen-input-contract`, §3.1 / R2 of the
+  ADR-0034 (node-ID bridge), `ADR-0030-codegen-input-contract`, §3.1 / R2 of the
   boundary contract (frozen workspace manifest).
 
 ## Context
@@ -28,7 +28,7 @@ bundles straight into codegen.
 - **Dev server already has the pipeline:** re-running parse → type-check → lower
   in a second crate would duplicate the wire server's logic and risk drift between
   the dev and build paths. The dev server is the single owner of the pipeline.
-- **Codegen needs both structure and semantics (see `codegen-input-contract`):**
+- **Codegen needs both structure and semantics (see `ADR-0030-codegen-input-contract`):**
   `LoweredIr` carries only numeric `ComponentId`s and drops runtime values
   (string text, generics, `@pure`, prop/state types); the codegen contract is
   `codegen(&LoweredIr, &Ast)`, recovering names/semantics from the `Ast` via the
@@ -63,14 +63,14 @@ Adopt `Pipeline::compiled_sources() -> Vec<(PathBuf, LoweredIr, Ast)>` as the
 5. **Naming source of truth.** Node identities in the returned `LoweredIr` and the
    matching nodes reachable from `Ast` are derived via `flux_syntax::compute_node_id`
    per ADR-0027, so a downstream agent can join `ir.arena` and `ast` on identical
-   `NodeId`s exactly as `codegen-input-contract` requires.
+   `NodeId`s exactly as `ADR-0030-codegen-input-contract` requires.
 
 The `flux-cli` (FLUX-022) agent MUST:
 - obtain codegen inputs exclusively via `DevServer`/`Pipeline::compiled_sources()`
   (or by constructing a `Pipeline`, `set_source`, `compile`, then reading
   `compiled_sources()`) — never by re-declaring `flux-parser`/`flux-types`/`flux-ir`;
 - call `flux_codegen_swift::codegen(&ir, &ast)` (and the Kotlin twin) on each
-  returned `(path, ir, ast)` bundle, preserving the `codegen-input-contract`
+  returned `(path, ir, ast)` bundle, preserving the `ADR-0030-codegen-input-contract`
   signature.
 
 ## Consequences
@@ -92,9 +92,9 @@ The `flux-cli` (FLUX-022) agent MUST:
   12 pre-existing integration tests still pass.
 
 ## References
-- `codegen-input-contract` ADR — settles `codegen(&LoweredIr, &Ast)`, not
+- `ADR-0030-codegen-input-contract` ADR — settles `codegen(&LoweredIr, &Ast)`, not
   `&LoweredIr` alone.
-- ADR-0027 (`docs/adr/ir-node-id-bridge.md`) — single-source `compute_node_id`;
+- ADR-0027 (`docs/adr/ADR-0034-ir-node-id-bridge.md`) — single-source `compute_node_id`;
   the naming/join contract between `LoweredIr` and `Ast`.
 - Boundary contract §3.1 / R2 — frozen workspace manifest forbidding `cli` deps on
   `flux-parser`/`flux-types`/`flux-ir`.

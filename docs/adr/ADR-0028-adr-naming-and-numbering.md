@@ -31,7 +31,7 @@ decisions in `mlp-appendices.md`:
 | `ADR-0022-byte-length-erratum.md` | (was ADR-0007) — VM byte-length erratum |
 | `ADR-0023-div-by-zero-error.md` | (was ADR-0008) — DivByZero error kind |
 | `ADR-0024-getfield-null.md` | (was ADR-0009) — GET_FIELD error discrimination |
-| `ADR-0025-adr-naming-and-numbering.md` | (this ADR) — governance, reserved `ADR-NNNN` |
+| `ADR-0028-adr-naming-and-numbering.md` | (this ADR) — governance, reserved `ADR-NNNN` |
 
 A `grep -r ADR-0008` in this repo previously returned two unrelated documents
 (wire format vs. integer division) — that was the failure before the rename. The

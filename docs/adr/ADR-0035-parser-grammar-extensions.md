@@ -1,11 +1,11 @@
-# ADR parser-grammar-extensions: keeping flux.pest and Appendix B in sync
+# ADR-0035-parser-grammar-extensions: keeping flux.pest and Appendix B in sync
 
 **Status:** Accepted (implemented in `flux-parser`; reconciled with Appendix B)
 **Date:** 2026-08-24
 **Author:** parser agent (FLUX-003)
 **Scope:** `crates/flux-parser/` and `docs/spec/mlp-appendices.md` Appendix B
 **Addresses:** ASR-2 (developer velocity depends on precise parse diagnostics)
-**Relates to:** `stdlib-grammar-gaps.md` (G1–G4)
+**Relates to:** `ADR-0037-stdlib-grammar-gaps.md` (G1–G4)
 
 ## Context and Problem Statement
 
