@@ -1013,13 +1013,29 @@ stays current.
   replay `DispatchTracePlayer` (consumes the reconcile-trace-format v1 trace,
   NOT a fake web compilation). Lives in `website/`.
 
-- **FA-RENDER — host render-mount + library packaging — DONE**
+- **FA-RENDER — host render-mount + library packaging — DONE (all phases)**
   (`a412706` iOS: mount reconciled shadow tree to real UIKit views via a
   `UIViewControllerRepresentable`; `c08fbfa` Android: bind shadow tree to real
   Compose UI via `AndroidView`, replacing the `Flux host ready` placeholder).
   This closes the long-standing gap where the reconciler built an internal tree
-  that was never shown on screen. Phase B (library extraction: iOS `FluxHost`
-  SwiftPM target, Android `:host` module) is in flight.
+  that was never shown on screen.
+  - Phase B (library extraction): Android `:host` Kotlin/JVM library holds the
+    engine, app is a thin shell depending on it (`settings.gradle.kts` +
+    `app/build.gradle.kts`); iOS `FluxHost` SwiftPM package holds the engine,
+    app is a thin shell importing it. Engine sources moved verbatim (package
+    rename `dev.flux.app` → `dev.flux.host`); tests relocated with `git mv`,
+    no work lost.
+  - FR-017 (iOS reconnect): real `URLSessionWebSocketTask` transport
+    (`FluxWebSocketTransport`) feeding decoded frames into the runtime, a
+    `FluxTransport` protocol + `HostConnectionState` observable, and a
+    "Reconnecting…" banner with a 1-second retry loop. On reconnect the dev
+    server pushes a fresh `Init` frame (no client→server "request Init" opcode
+    invented — Appendix D has none).
+  Verification: Android `:host:test` + `:app:testDebugUnitTest` BUILD
+  SUCCESSFUL; iOS `xcodebuild test -scheme FluxApp` 5 passed / 1 skipped (env-
+  gated wire-fixture); `FluxHost` package 32/33 (the 1 fail is the pre-existing
+  experimental `runViaDispatchTable` VM test divergence, out of scope). On-
+  device Poco smoke is user-triggered (no device access from the agent).
 
 - **ADR renumbering + spec artifacts — DONE** (`380a55c` ADR `ADR-00XX-` prefix
   normalization via `git mv`; `61ea6df` ADR-0027 signal-node dependency tracking;
