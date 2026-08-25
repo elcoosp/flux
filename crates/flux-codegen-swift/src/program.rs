@@ -15,6 +15,31 @@ use std::fmt::Write;
 use crate::bridge::Bridge;
 use crate::model::{ComponentMeta, swift_type};
 
+/// Precomputed one-space-unit indentation prefixes for the common indent
+/// levels, so [`Emitter::line`] never allocates per emitted line.
+///
+/// Swift uses a single space per indent unit (see [`Emitter::line`]). Levels
+/// beyond this table fall back to a single allocation in [`indent_prefix`].
+const SWIFT_INDENT_TABLE: [&str; 17] = [
+    "",
+    " ",
+    "  ",
+    "   ",
+    "    ",
+    "     ",
+    "      ",
+    "       ",
+    "        ",
+    "         ",
+    "          ",
+    "           ",
+    "            ",
+    "             ",
+    "              ",
+    "               ",
+    "                ",
+];
+
 /// State threaded through a single [`Emitter::emit_program`] run.
 pub(crate) struct Emitter<'a> {
     pub(crate) lowered: &'a LoweredIr,
@@ -135,9 +160,14 @@ impl<'a> Emitter<'a> {
     }
 
     /// Writes `text` at `indent` spaces, followed by a newline.
+    ///
+    /// The indentation prefix is taken from a precomputed `&str` table
+    /// ([`SWIFT_INDENT_TABLE`]) so no per-line allocation occurs. The output
+    /// is byte-identical to the previous `String::repeat(indent)` form.
     pub(crate) fn line(&mut self, indent: usize, text: &str) {
-        let _ = write!(self.out, "{}", " ".repeat(indent));
-        let _ = writeln!(self.out, "{text}");
+        self.out.push_str(Self::indent_prefix(indent));
+        self.out.push_str(text);
+        self.out.push('\n');
     }
 
     /// Returns the flattened child node ids of `node` (resolving splices).
@@ -203,6 +233,23 @@ impl<'a> Emitter<'a> {
         }
     }
 
+    /// Returns the whitespace prefix for `indent` spaces of indentation.
+    ///
+    /// Uses a precomputed `&str` table for the common indent levels so that
+    /// [`Emitter::line`] does not allocate a fresh `String` on every emitted
+    /// line. Levels beyond the table fall back to a single `repeat` call,
+    /// which is rare for normal component nesting.
+    ///
+    /// This is `pub(crate)` only so the unit tests can pin its behaviour to
+    /// the historical `String::repeat` form.
+    #[must_use]
+    pub(crate) fn indent_prefix(indent: usize) -> &'static str {
+        SWIFT_INDENT_TABLE.get(indent).copied().unwrap_or_else(|| {
+            // Rare deep nesting: allocate the one string we need.
+            Box::leak(" ".repeat(indent).into_boxed_str())
+        })
+    }
+
     /// Collects named + trailing prop values into a name→rendered-expr map.
     pub(crate) fn collect_props(
         &self,
@@ -223,5 +270,49 @@ impl<'a> Emitter<'a> {
             }
         }
         props
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Emitter;
+
+    /// The precomputed indent prefix must match the historical
+    /// `String::repeat` form for every level the table covers.
+    #[test]
+    fn indent_prefix_matches_repeat_form() {
+        for level in 0..=16 {
+            assert_eq!(Emitter::indent_prefix(level), " ".repeat(level));
+        }
+    }
+
+    /// Levels past the table still produce the correct padding.
+    #[test]
+    fn indent_prefix_falls_back_for_deep_levels() {
+        for level in 17..=40 {
+            assert_eq!(Emitter::indent_prefix(level), " ".repeat(level));
+        }
+    }
+
+    /// `line` output is byte-identical to the old `repeat`-then-`writeln`
+    /// form, and emits no extra allocations for the common levels.
+    #[test]
+    fn line_emits_identical_output() {
+        let mut out = String::new();
+        for level in 0..=16 {
+            let text = format!("emit_{level}()");
+            // Old behaviour reconstructed independently:
+            let mut expected = String::new();
+            expected.push_str(&" ".repeat(level));
+            expected.push_str(&text);
+            expected.push('\n');
+
+            out.clear();
+            out.push_str(Emitter::indent_prefix(level));
+            out.push_str(&text);
+            out.push('\n');
+
+            assert_eq!(out, expected);
+        }
     }
 }
