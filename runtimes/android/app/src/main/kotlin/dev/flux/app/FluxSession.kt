@@ -31,7 +31,7 @@ public class FluxSession : ViewModel() {
         ShadowTree(AdapterRegistry.fromStringTable(emptyList()))
 
     /** The dev-mode frame transport. */
-    public val transport: FluxTransport = OkHttpTransport("ws://127.0.0.1:9001")
+    public val transport: FluxTransport = OkHttpTransport("ws://127.0.0.1:7331")
 
     /** The executor that ties the above together. */
     public val executor: FluxExecutor = FluxExecutor(shadowTree, signals, transport)

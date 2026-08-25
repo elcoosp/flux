@@ -55,7 +55,7 @@ struct FluxRootView: View {
         let connection = HostConnectionState()
         // Dev server runs locally; plaintext WebSocket is permitted by the app's
         // NSAppTransportSecurity (see project.yml).
-        let transport = FluxWebSocketTransport(url: URL(string: "ws://127.0.0.1:9001")!)
+        let transport = FluxWebSocketTransport(url: URL(string: "ws://127.0.0.1:7331")!)
         _executor = State(initialValue: runtime)
         _connection = StateObject(wrappedValue: connection)
         _transport = State(initialValue: transport)
