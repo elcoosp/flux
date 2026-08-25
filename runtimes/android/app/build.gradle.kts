@@ -20,7 +20,7 @@ android {
     defaultConfig {
         applicationId = "dev.flux.app"
         minSdk = 26
-        targetSdk = 36  // reviewed separately from compileSdk
+        targetSdk = 36 // reviewed separately from compileSdk
         versionCode = 1
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
