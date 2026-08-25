@@ -132,20 +132,20 @@ enum FrameDeserializer {
         case 0x05: return .handlerRef(try r.u32())
         case 0x06:
             let count = try r.u16()
-            var items: [VMValue] = []
+            var items = ContiguousArray<VMValue>()
             items.reserveCapacity(Int(count))
             for _ in 0..<count { items.append(try decodeValue(&r)) }
-            return .list(items)
+            return .list(Array(items))
         case 0x07:
             let count = try r.u16()
-            var fields: [(UInt16, VMValue)] = []
+            var fields = ContiguousArray<(UInt16, VMValue)>()
             fields.reserveCapacity(Int(count))
             for _ in 0..<count {
                 let propIdx = try r.u16()
                 let value = try decodeValue(&r)
                 fields.append((propIdx, value))
             }
-            return .record(fields)
+            return .record(Array(fields))
         case let t:
             throw WireError.unknownTag(offset: r.offset - 1, tag: t)
         }
@@ -162,7 +162,7 @@ enum FrameDeserializer {
         }
         let componentId = try r.u32()
         let propCount = try r.u16()
-        var props: [Prop] = []
+        var props = ContiguousArray<Prop>()
         props.reserveCapacity(Int(propCount))
         for _ in 0..<propCount {
             let idx = try r.u16()
@@ -170,13 +170,13 @@ enum FrameDeserializer {
             props.append(Prop(index: idx, value: value))
         }
         let childCount = try r.u16()
-        var children: [Child] = []
+        var children = ContiguousArray<Child>()
         children.reserveCapacity(Int(childCount))
         for _ in 0..<childCount {
             children.append(try decodeChild(&r))
         }
         let handlerCount = try r.u16()
-        var handlers: [UInt32] = []
+        var handlers = ContiguousArray<UInt32>()
         handlers.reserveCapacity(Int(handlerCount))
         for _ in 0..<handlerCount {
             handlers.append(try r.u32())
@@ -186,11 +186,11 @@ enum FrameDeserializer {
             id: id,
             kind: kind,
             componentId: componentId,
-            props: props,
+            props: Array(props),
             childCount: childCount,
-            children: children,
+            children: Array(children),
             handlerCount: handlerCount,
-            handlers: handlers,
+            handlers: Array(handlers),
             span: span
         )
     }
@@ -203,14 +203,14 @@ enum FrameDeserializer {
             return .node(try r.u32())
         case 0x02:
             let itemCount = try r.u16()
-            var items: [(key: UInt64, node: UInt32)] = []
+            var items = ContiguousArray<(key: UInt64, node: UInt32)>()
             items.reserveCapacity(Int(itemCount))
             for _ in 0..<itemCount {
                 let key = try r.u64()
                 let node = try r.u32()
                 items.append((key: key, node: node))
             }
-            return .splice(itemCount: itemCount, items: items)
+            return .splice(itemCount: itemCount, items: Array(items))
         case let t:
             throw WireError.unknownTag(offset: r.offset - 1, tag: t)
         }
