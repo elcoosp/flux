@@ -15,16 +15,15 @@ import androidx.compose.ui.Modifier
 /**
  * The Compose entry point for the Flux host (FLUX-007).
  *
- * Wraps a [ShadowTree] in a [androidx.compose.ui.viewinterop.AndroidView]-style
- * host on the main thread, manages [FluxExecutor] lifecycle, and renders a red
- * error overlay when the VM or wire layer faults (Appendix E §E.6: errors show a
- * red banner rather than crashing). On `onPause` the executor stops dispatching;
- * on `onResume` it resumes. When no tree has been built yet it shows a
- * launch-screen placeholder.
+ * Binds the reconciled [dev.flux.app.shadow.ShadowTree] to real Compose UI
+ * (FA-RENDER Phase A) via [FluxTreeView] once a root node exists, manages
+ * [FluxExecutor] lifecycle, and renders a red error overlay when the VM or wire
+ * layer faults (Appendix E §E.6: errors show a red banner rather than crashing).
+ * On `onPause` the executor stops dispatching; on `onResume` it resumes. When no
+ * tree has been built yet it shows a launch-screen placeholder.
  *
- * @property shadowTree the render tree the executor drives.
- * @property signals the signal graph the VM reads/writes.
- * @property transport the dev-mode frame transport.
+ * @property session the retained host session (signal graph, shadow tree,
+ *   transport, executor).
  */
 @Composable
 @Suppress("ktlint:standard:function-naming")
@@ -45,13 +44,12 @@ public fun FluxRoot(session: FluxSession) {
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        if (treeReady) {
-            // The native view subtree is owned by the shadow tree's adapters; the
-            // composable hosts it via AndroidView in the real host. For the MLP
-            // placeholder we surface readiness without a real view binding.
-            Text("Flux host ready", modifier = Modifier.align(Alignment.Center))
-        } else {
-            Text("Flux — connecting…", modifier = Modifier.align(Alignment.Center))
+        when {
+            // Real Compose UI: walk the shadow tree and render native widgets.
+            treeReady -> FluxTreeView(node = session.shadowTree.rootNode) { handlerId ->
+                executor.dispatch(dev.flux.ui.HandlerEvent(handlerId))
+            }
+            else -> Text("Flux — connecting…", modifier = Modifier.align(Alignment.Center))
         }
         errorMessage?.let { msg ->
             ErrorOverlay(message = msg, modifier = Modifier.align(Alignment.BottomCenter))
