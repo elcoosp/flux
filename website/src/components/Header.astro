@@ -24,11 +24,11 @@ const docsHref = locale === 'en' ? '/concepts/the-wire/' : `/${locale}/concepts/
   <div class="sl-flex print:hidden">
     {shouldRenderSearch && <Search />}
   </div>
-  <a class="sl-flex header-docs-link" href={docsHref}>Docs</a>
   <div class="sl-hidden md:sl-flex print:hidden right-group">
     <div class="sl-flex social-icons">
       <SocialIcons />
     </div>
+    <a class="sl-flex header-docs-link" href={docsHref}>Docs</a>
     <ThemeSelect />
     <LanguageSelect />
   </div>
@@ -43,10 +43,12 @@ const docsHref = locale === 'en' ? '/concepts/the-wire/' : `/${locale}/concepts/
     height: 100%;
   }
   .header-docs-link {
+    align-items: center;
     color: var(--sl-color-text-accent);
     font-weight: 600;
     text-decoration: none;
-    padding-inline: 0.25rem;
+    padding-inline: 0.5rem;
+    border-inline-start: 1px solid var(--sl-color-gray-5);
   }
   .header-docs-link:hover {
     text-decoration: underline;
