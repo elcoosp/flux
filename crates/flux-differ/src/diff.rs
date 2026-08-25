@@ -30,12 +30,17 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
             emit_replace(&mut patches, &n);
             continue;
         }
+        // Task 1 (FLUX-014 P3): node-level prop skip. `props_equal` short-circuits
+        // on the arena-stored `u64` hash, so identical-hash nodes emit no
+        // `Update` and we avoid deserialising either cold blob. Computed once per
+        // node and reused below (cheap, behaviour-preserving).
+        let props_equal = props_equal(&o, &n);
         let o_children = child_ids(&o);
         let n_children = child_ids(&n);
         if o_children == n_children {
             // Same child set: only order may differ.
             if child_order(&o) == child_order(&n) {
-                if props_equal(&o, &n) {
+                if props_equal {
                     if handlers_equal(&o, &n) {
                         continue; // truly identical
                     }
@@ -59,7 +64,7 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
         }
         // Child set differs (an add/remove handled by the loops below) but the
         // parent node itself may still carry prop/handler changes.
-        if props_equal(&o, &n) {
+        if props_equal {
             if handlers_equal(&o, &n) {
                 continue;
             }
@@ -196,7 +201,17 @@ fn child_ids(v: &NodeView<'_>) -> AHashSet<NodeId> {
 }
 
 /// `true` when every prop key maps to the same value in both nodes.
+///
+/// Prefers the arena-stored prop hash (an O(1) `u64` compare) over unpacking
+/// both cold blobs — see `IRArena::props_hash`. The hash is computed from all
+/// `(PropIdx, Value)` fields at pack time, so a mismatch implies the fields
+/// differ. When the hashes match we still re-check the actual fields as a
+/// belt-and-braces guard against any path that bypassed `props_equal` (and to
+/// keep behaviour byte-identical to the pre-hash baseline).
 fn props_equal(o: &NodeView<'_>, n: &NodeView<'_>) -> bool {
+    if o.props_hash() != n.props_hash() {
+        return false;
+    }
     o.props().fields() == n.props().fields()
 }
 
@@ -224,4 +239,124 @@ fn handlers_equal(o: &NodeView<'_>, n: &NodeView<'_>) -> bool {
     let o_h: AHashSet<HandlerId> = o.handlers().into_iter().collect();
     let n_h: AHashSet<HandlerId> = n.handlers().into_iter().collect();
     o_h == n_h
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flux_ir::{ArenaBuilder, Node};
+    use flux_syntax::{ComponentId, NodeKind, Props};
+
+    /// Builds a single-node arena (id 1) with the given prop.
+    fn single_prop(prop_value: Value) -> IRArena {
+        let node = Node {
+            id: NodeId::from(1u32),
+            kind: NodeKind::Primitive,
+            component_id: ComponentId::from(1u32),
+            props: Props::from_fields(vec![(PropIdx::from(0u16), prop_value)]),
+            children: vec![],
+            handlers: vec![],
+            span: Span::new(0, 0, 4),
+        };
+        let mut b = ArenaBuilder::new();
+        b.pack(node);
+        b.finish()
+    }
+
+    #[test]
+    fn identical_hash_emits_no_update() {
+        // Same prop value -> identical Props::hash -> no Update patch.
+        let a = single_prop(Value::Int(12));
+        let b = single_prop(Value::Int(12));
+        let patches = diff(&a, &b);
+        assert!(
+            patches.is_empty(),
+            "identical-hash nodes must emit no patch"
+        );
+        // The arena hash and Props::hash agree.
+        let va = a.get(NodeId::from(1u32)).unwrap();
+        let vb = b.get(NodeId::from(1u32)).unwrap();
+        assert_eq!(va.props_hash(), vb.props_hash());
+        assert_eq!(va.props_hash(), va.props().hash());
+    }
+
+    #[test]
+    fn different_hash_emits_correct_update() {
+        let a = single_prop(Value::Int(12));
+        let b = single_prop(Value::Int(99));
+        let patches = diff(&a, &b);
+        assert_eq!(
+            patches.len(),
+            1,
+            "different-hash must emit exactly one patch"
+        );
+        match &patches[0] {
+            Patch::Update { id, props_diff } => {
+                assert_eq!(*id, NodeId::from(1u32));
+                assert_eq!(
+                    props_diff.changes,
+                    vec![(PropIdx::from(0u16), Value::Int(99))]
+                );
+            }
+            other => panic!("expected Update, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn identical_props_do_not_mask_reorder() {
+        // Two children with identical props but reordered: the differ must emit a
+        // Reorder, NOT a no-op — so the prop skip must not suppress the child-set
+        // check.
+        let leaf = |id: u32| Node {
+            id: NodeId::from(id),
+            kind: NodeKind::Primitive,
+            component_id: ComponentId::from(2u32),
+            props: Props::from_fields(vec![]),
+            children: vec![],
+            handlers: vec![],
+            span: Span::new(0, 0, 4),
+        };
+        let mut b1 = ArenaBuilder::new();
+        b1.pack(Node {
+            id: NodeId::from(1u32),
+            kind: NodeKind::Component,
+            component_id: ComponentId::from(1u32),
+            props: Props::from_fields(vec![]),
+            children: vec![
+                Child::Node(NodeId::from(2u32)),
+                Child::Node(NodeId::from(3u32)),
+            ],
+            handlers: vec![],
+            span: Span::new(0, 0, 10),
+        });
+        b1.pack(leaf(2));
+        b1.pack(leaf(3));
+        let a = b1.finish();
+
+        let mut b2 = ArenaBuilder::new();
+        b2.pack(Node {
+            id: NodeId::from(1u32),
+            kind: NodeKind::Component,
+            component_id: ComponentId::from(1u32),
+            props: Props::from_fields(vec![]),
+            children: vec![
+                Child::Node(NodeId::from(3u32)),
+                Child::Node(NodeId::from(2u32)),
+            ],
+            handlers: vec![],
+            span: Span::new(0, 0, 10),
+        });
+        b2.pack(leaf(2));
+        b2.pack(leaf(3));
+        let b = b2.finish();
+
+        let patches = diff(&a, &b);
+        assert_eq!(patches.len(), 1, "identical props must not mask reorder");
+        assert!(matches!(
+            &patches[0],
+            Patch::Reorder { parent, keys }
+                if *parent == NodeId::from(1u32)
+                    && *keys == vec![NodeId::from(3u32), NodeId::from(2u32)]
+        ));
+    }
 }

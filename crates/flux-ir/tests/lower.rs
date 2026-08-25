@@ -155,25 +155,22 @@ fn multiple_components_lower_all() {
 }
 
 #[test]
-fn string_assignment_handler_lowers_to_noop() {
+fn string_assignment_handler_lowers_to_error() {
     // A handler that assigns a string literal is outside the MLP bytecode
-    // envelope (Appendix E covers signal reads/writes and arithmetic). Lowering
-    // no longer aborts the whole program on it; instead the handler compiles to
-    // a well-formed no-op closure so the component still lowers and the runtime
-    // executor realises the assignment against the captured signal.
+    // envelope (Appendix E covers signal reads/writes and arithmetic). Since the
+    // P3 addendum removed the silent no-op path, lowering now fails loudly rather
+    // than producing a do-nothing `HALT` closure — the dev server surfaces the
+    // error instead of silently dropping the handler.
     let src = "component C {
         state name: String = \"hi\"
         Button(text: \"go\") { onClick: { name = \"bye\" } }
     }";
     let (ast, typed) = typed(src);
-    let lowered = lower(&ast, &typed).expect("lowers despite out-of-envelope handler");
-    let handler = lowered
-        .closures
-        .values()
-        .next()
-        .expect("one handler closure");
-    // A no-op closure is exactly `HALT`.
-    assert_eq!(handler.bytecode, vec![flux_syntax::opcode::raw::HALT]);
+    let lowered = lower(&ast, &typed);
+    assert!(
+        lowered.is_err(),
+        "string-assignment handler must error loudly, not silently no-op"
+    );
 }
 
 // Keep `InstanceRegistry` / `LoweringError` referenced so the public API stays

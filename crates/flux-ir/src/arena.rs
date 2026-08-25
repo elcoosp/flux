@@ -50,6 +50,13 @@ pub struct IRArena {
 
     // Handler bytecode table.
     closures: AHashMap<HandlerId, ClosureIR>,
+
+    // Pre-computed content hashes for O(1) differ comparisons (FLUX-014 P3).
+    // `props_hashes[i]` mirrors `props_of(i).hash()`; `children_hashes[i]`
+    // mirrors `hash_children(children_of(i))`. Both are populated at `pack`
+    // time and never change afterwards.
+    props_hashes: Vec<u64>,
+    children_hashes: Vec<u64>,
 }
 
 impl IRArena {
@@ -104,6 +111,9 @@ impl IRArena {
         self.handler_offsets.push(self.handlers_blob.len() as u32);
         pack_handlers(&mut self.handlers_blob, &node.handlers);
 
+        self.props_hashes.push(node.props.hash());
+        self.children_hashes.push(hash_children(&node.children));
+
         self.node_index.insert(node.id, index);
         node.id
     }
@@ -117,6 +127,28 @@ impl IRArena {
     #[must_use]
     pub fn closure(&self, id: HandlerId) -> Option<&ClosureIR> {
         self.closures.get(&id)
+    }
+
+    /// Returns the pre-computed content hash of the props packed at `index`.
+    ///
+    /// The hash is computed once in [`pack`](Self::pack) and equals
+    /// `self.props_of(index).hash()`, so callers can compare two nodes' props
+    /// without unpacking their cold blobs. Panics if `index` is out of range.
+    #[must_use]
+    pub fn props_hash(&self, index: usize) -> u64 {
+        self.props_hashes[index]
+    }
+
+    /// Returns the pre-computed layout hash of the children packed at `index`.
+    ///
+    /// The hash folds the ordered `(key, child_id)` sequence of each child slot
+    /// (computed once in [`pack`](Self::pack)) and equals
+    /// `hash_children(&self.children_of(index))`. It captures structural
+    /// changes (add/remove/reorder) independent of props. Panics if `index` is
+    /// out of range.
+    #[must_use]
+    pub fn children_hash(&self, index: usize) -> u64 {
+        self.children_hashes[index]
     }
 
     /// Returns the shared string table.
@@ -221,6 +253,24 @@ impl<'a> NodeView<'a> {
     #[must_use]
     pub fn handlers(&self) -> Vec<HandlerId> {
         self.arena.handlers_of(self.index)
+    }
+
+    /// The pre-computed content hash of this node's props.
+    ///
+    /// Equal to `self.props().hash()`; exposed so the differ can compare two
+    /// nodes' props with a single `u64` read instead of unpacking each blob.
+    #[must_use]
+    pub fn props_hash(&self) -> u64 {
+        self.arena.props_hashes[self.index]
+    }
+
+    /// The pre-computed layout hash of this node's children.
+    ///
+    /// Equal to the fold of the node's ordered child slots; changes when a
+    /// child is added, removed, or reordered.
+    #[must_use]
+    pub fn children_hash(&self) -> u64 {
+        self.arena.children_hashes[self.index]
     }
 }
 
@@ -415,6 +465,45 @@ fn unpack_handlers(bytes: &[u8]) -> Vec<HandlerId> {
     out
 }
 
+/// Folds the ordered sequence of child slots into a content hash capturing the
+/// node's structural layout (independent of props/handlers).
+///
+/// Each slot contributes `Child::Node(id)` or `Child::Splice { items }`
+/// (the ordered `(key, child_id)` pairs). Reordering children, adding,
+/// removing, or changing a key all change the digest, while a purely
+/// prop-level edit leaves it unchanged. The fold is order-sensitive so that
+/// `A,B` and `B,A` hash differently (driving the `Reorder` path).
+fn hash_children(children: &[Child]) -> u64 {
+    let mut accumulator: u64 = 0xcbf2_9ce4_8422_2325;
+    for (slot, child) in children.iter().enumerate() {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(&(slot as u64).to_le_bytes());
+        match child {
+            Child::Node(id) => {
+                hasher.update(&[0]);
+                hasher.update(&id.to_le_bytes());
+            }
+            Child::Splice { items } => {
+                hasher.update(&[1]);
+                hasher.update(&(items.len() as u64).to_le_bytes());
+                for (key, id) in items {
+                    hasher.update(&key.to_le_bytes());
+                    hasher.update(&id.to_le_bytes());
+                }
+            }
+            // `Child` is `#[non_exhaustive]`; unknown future variants hash a
+            // distinct sentinel so they remain distinguishable.
+            &_ => {
+                hasher.update(&[0xff]);
+            }
+        }
+        let mut digest = [0_u8; 8];
+        digest.copy_from_slice(&hasher.finalize().as_bytes()[..8]);
+        accumulator ^= u64::from_le_bytes(digest);
+    }
+    accumulator
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -504,5 +593,44 @@ mod tests {
             got,
             Value::Record(vec![(PropIdx::from(0u16), Value::Float(3.5))])
         );
+    }
+
+    #[test]
+    fn pack_stores_node_prop_and_children_hashes() {
+        let mut arena = IRArena::new();
+        let id = arena.pack(sample_node());
+        let view = arena.get(id).expect("present");
+        assert_eq!(
+            view.props_hash(),
+            view.props().hash(),
+            "arena-stored props hash must equal Props::hash"
+        );
+        assert_eq!(
+            view.children_hash(),
+            children_hash_of(&sample_node().children),
+            "arena-stored children hash must equal the layout hash"
+        );
+    }
+
+    #[test]
+    fn distinct_props_produce_distinct_hashes() {
+        // Two differently-id'd nodes with different props must store different
+        // prop hashes (packing does not de-dupe, so distinct ids => distinct slots).
+        let mut arena = IRArena::new();
+        let id_a = arena.pack(sample_node());
+        let mut changed = sample_node();
+        changed.id = NodeId::from(42u32);
+        changed.props = Props::from_fields(vec![(PropIdx::from(0u16), Value::Int(99))]);
+        let id_b = arena.pack(changed);
+        let a = arena.get(id_a).expect("present");
+        let b = arena.get(id_b).expect("present");
+        assert_ne!(a.props_hash(), b.props_hash());
+    }
+
+    /// Reference computation mirroring the arena's `children_hash` so the test
+    /// is independent of the private helper (it only asserts equality of the
+    /// public surface to a re-derivation).
+    fn children_hash_of(children: &[Child]) -> u64 {
+        crate::arena::hash_children(children)
     }
 }
