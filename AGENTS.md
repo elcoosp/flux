@@ -429,7 +429,7 @@ tree and one index, the index often already contains *other* agents' staged
 files. A plain `git add <paths> && git commit` will then sweep those files
 into *your* commit — this is how a `frozen` manifest or another agent's
 file ends up wrongly attributed to you (it happened once; see
-`docs/adr/appendix-b-grammar-repairs.md`). To prevent it, commit only the
+`docs/adr/ADR-0029-appendix-b-grammar-repairs.md`). To prevent it, commit only the
 files you intend with:
 
 ```

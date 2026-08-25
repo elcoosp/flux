@@ -915,7 +915,7 @@ Agent-authored decisions after the foundation sequence (ADR-0001–0020) are rec
 here and in `/docs/adr/`. The `ADR-NNNN` filename prefix is reserved for the sequence
 above; new agent ADRs take the next free number (ADR-0021+) or the `<scope>-<slug>.md`
 form per `agents-boundaries-contract.md` R9. Governance and enforcement:
-`docs/adr/ADR-0025-adr-naming-and-numbering.md` and `docs/scripts/check-adr-numbering.sh`.
+`docs/adr/ADR-0025-ADR-0028-adr-naming-and-numbering.md` and `docs/scripts/check-adr-numbering.sh`.
 
 > Note: entries below use `#### ADR-NNNN —` (dash) headings, **not** the
 > `### ADR-NNNN:` (colon) form, so they are not parsed as the reserved canonical
@@ -942,7 +942,7 @@ zero remains IEEE-754 `±inf`. `DivByZero` added to the §E.6 error table. Full 
 #### ADR-0025 — ADR naming and numbering governance
 The `ADR-NNNN` filename prefix is reserved for the canonical sequence (ADR-0001–0020);
 agent ADRs use `<scope>-<slug>.md` or the next free `ADR-NNNN`. CI guard:
-`docs/scripts/check-adr-numbering.sh`. Full text: `docs/adr/ADR-0025-adr-naming-and-numbering.md`.
+`docs/scripts/check-adr-numbering.sh`. Full text: `docs/adr/ADR-0025-ADR-0028-adr-naming-and-numbering.md`.
 
 ---
 

@@ -507,7 +507,7 @@ A bare `grep ADR-0008` now returns two unrelated documents. This violates the
 contract's R9 naming rule (`<scope>-<slug>.md`) and is exactly the failure mode that
 rule was written to prevent.
 
-Resolution (see `docs/adr/adr-naming-and-numbering.md`):
+Resolution (see `docs/adr/ADR-0028-adr-naming-and-numbering.md`):
 - The four VM-errata ADRs were **renumbered** `ADR-0006/0007/0008/0009 →
   ADR-0021/0022/0023/0024` via `git mv` (history preserved, no content edit) so they
   no longer collide with the canonical ADR-0006–0009 in `mlp-appendices.md` Appendix A.
@@ -735,7 +735,7 @@ Coverage:
 - `benches/parse.rs` — 500-line file parses in **2.25 ms** (budget 5 ms, §3.6);
   100 lines in 459 µs.
 
-`docs/adr/parser-grammar-extensions.md` records the reconciliation and the
+`docs/adr/ADR-0035-parser-grammar-extensions.md` records the reconciliation and the
 remaining parser-internal concern (G6 depth limit).
 
 **Addendum (2026-08-24):** the module-level `state` form (`module_state`,

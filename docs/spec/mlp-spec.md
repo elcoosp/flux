@@ -1847,7 +1847,7 @@ flux build --platform android
 > **Single source of truth.** The canonical ADR set lives in
 > `/docs/spec/mlp-appendices.md` **Appendix A** (ADR-0001 … ADR-0020 and growing).
 > This document does **not** duplicate it. ADRs are governed by
-> `docs/adr/adr-naming-and-numbering.md` and enforced by
+> `docs/adr/ADR-0028-adr-naming-and-numbering.md` and enforced by
 > `docs/scripts/check-adr-numbering.sh`.
 >
 > ADR-0001–0006 (as referenced in this spec) are: (0001) binary hot-swap over
