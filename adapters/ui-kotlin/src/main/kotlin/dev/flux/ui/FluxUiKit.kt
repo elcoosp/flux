@@ -22,6 +22,7 @@ public object FluxUiKit {
             TextFieldAdapter().kind to TextFieldAdapter(),
             ScreenAdapter().kind to ScreenAdapter(),
             RouterAdapter().kind to RouterAdapter(),
+            ImageAdapter().kind to ImageAdapter(),
         )
 
     /** Returns the dev adapter registered for [kind], or `null`. */

@@ -46,4 +46,10 @@ public object PropsIndex {
     public const val COLOR_GREEN: UShort = 1u
     public const val COLOR_BLUE: UShort = 2u
     public const val COLOR_ALPHA: UShort = 3u
+
+    // Image (F.8)
+    public const val IMAGE_SRC: UShort = 0u
+    public const val IMAGE_WIDTH: UShort = 1u
+    public const val IMAGE_HEIGHT: UShort = 2u
+    public const val IMAGE_CONTENT_MODE: UShort = 3u
 }
