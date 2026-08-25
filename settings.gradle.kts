@@ -19,4 +19,5 @@ dependencyResolutionManagement {
 rootProject.name = "flux"
 
 include(":adapters:ui-kotlin")
+include(":runtimes:android:host")
 include(":runtimes:android:app")

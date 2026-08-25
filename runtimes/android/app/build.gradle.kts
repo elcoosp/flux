@@ -49,6 +49,7 @@ android {
 
 dependencies {
     implementation(project(":adapters:ui-kotlin"))
+    implementation(project(":runtimes:android:host"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
