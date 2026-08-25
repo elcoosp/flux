@@ -28,6 +28,8 @@ settings:
 packages:
   FluxUIKit:
     path: ../../adapters/ui-swift
+  FluxHost:
+    path: FluxHost
 
 targets:
   FluxApp:
@@ -40,6 +42,7 @@ targets:
         createIntermediateGroups: true
     dependencies:
       - package: FluxUIKit
+      - package: FluxHost
     info:
       path: Sources/Info.plist
       properties:

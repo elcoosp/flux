@@ -8,6 +8,7 @@
 //  fault captured by `FluxRuntime` (no VM error is ever allowed to escape).
 
 import SwiftUI
+import FluxHost
 
 /// The Flux dev-mode host application.
 @main
