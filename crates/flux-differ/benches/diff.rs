@@ -73,5 +73,22 @@ fn bench_diff(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_diff);
+fn bench_diff_identical_subtrees(c: &mut Criterion) {
+    // The P3 optimization is the O(1) prop-hash skip: when two subtrees are
+    // byte-identical, `props_equal` short-circuits on `props_hash` without
+    // walking fields. This benchmark locks in that path (two structurally
+    // identical trees → no patches, full hash-skip) against the §3.6 budget:
+    // diff of a 50-node tree must stay well under 1 ms.
+    let mut group = c.benchmark_group("diff_identical");
+    for n in [1usize, 10, 50] {
+        let old = chain(n as u32);
+        let new = chain(n as u32);
+        group.bench_with_input(BenchmarkId::new("no_change", n), &n, |b, _| {
+            b.iter(|| diff(black_box(&old), black_box(&new)))
+        });
+    }
+    group.finish();
+}
+
+criterion_group!(benches, bench_diff, bench_diff_identical_subtrees);
 criterion_main!(benches);
