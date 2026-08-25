@@ -12,6 +12,7 @@
 //  surfaced as an error overlay by `FluxRootView`.
 
 import Foundation
+import UIKit
 import FluxUIKit
 
 /// The outcome of dispatching one frame.
@@ -54,6 +55,17 @@ final class FluxRuntime: FluxExecutor {
     /// The report from the most recent `dispatch`'s dirty-set reconcile (R1), for
     /// test assertions; empty when the dispatch touched no signal-dependent node.
     private(set) var lastReconcile: ReconcileReport = ReconcileReport()
+    /// The root native view of the currently applied tree, or `nil` before any
+    /// `Init` frame has built one. The host mounts this on screen.
+    var rootView: UIView? {
+        guard let id = currentRootId else { return nil }
+        return reconciler.view(for: id) as? UIView
+    }
+    /// Invoked on the main actor after a successful frame application or a
+    /// dirty-set reconcile, so the host can mount/update the on-screen view
+    /// without polling. Set by the mount controller; `nil` when no host is
+    /// attached (e.g. headless tests).
+    var onTreeChanged: (@MainActor () -> Void)?
 
     /// Creates an executor backed by `graph` and an `AdapterRegistry` built from
     /// `table`.
@@ -95,6 +107,8 @@ final class FluxRuntime: FluxExecutor {
         // rebuilds the tree, while a patch frame (root == nil) applies only its
         // patches. The reconciler no-ops the tree build when root is absent.
         let report = reconciler.apply(frame)
+        // Signal the host that a new/updated native tree is ready to mount.
+        onTreeChanged?()
         return report.built + report.updated
     }
 
@@ -191,6 +205,9 @@ final class FluxRuntime: FluxExecutor {
         } else {
             lastReconcile = ReconcileReport()
         }
+        // A signal-dependent reconcile may have re-parented native views; the
+        // host should re-present the (unchanged-identity) root view.
+        onTreeChanged?()
     }
 
     /// The built native view for a node id, for test assertions (real UIKit

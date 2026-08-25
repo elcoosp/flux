@@ -21,9 +21,10 @@ struct FluxAppMain: App {
 
 /// Host view for the reconciled native tree plus the error overlay.
 ///
-/// The reconciler's `MockView`s stand in for real `UIView`s in dev mode (the
-/// live UIKit tree is wired through `FluxUIKit` in FLUX-016). The overlay shows
-/// the last VM error with its byte offset so developers see failures inline.
+/// The reconciler driving `FluxRuntime` builds real `UIView`s (FLUX-016) into a
+/// tree keyed by stable node id. This view mounts that tree inside a
+/// `FluxHostController` via `UIViewControllerRepresentable` and layers the error
+/// overlay (Appendix E §E.6: a VM fault shows a banner, never crashes) on top.
 struct FluxRootView: View {
     /// The executor owning the graph, reconciler and last error.
     @State private var executor: FluxRuntime
@@ -46,12 +47,28 @@ struct FluxRootView: View {
 
     var body: some View {
         ZStack {
-            Color.clear
+            FluxHostRepresentable(executor: executor)
                 .accessibilityLabel("Flux root")
             if let error = executor.lastError {
                 ErrorOverlay(error: error)
             }
         }
+    }
+}
+
+/// Bridges `FluxHostController` into SwiftUI, hosting the reconciler's root
+/// `UIView`. The controller is created once and retained; the reconciler still
+/// owns every per-node view (the controller only mounts the root).
+private struct FluxHostRepresentable: UIViewControllerRepresentable {
+    let executor: FluxRuntime
+
+    func makeUIViewController(context: Context) -> FluxHostController {
+        FluxHostController(executor: executor)
+    }
+
+    func updateUIViewController(_ controller: FluxHostController, context: Context) {
+        // The reconciler drives in-place view updates; nothing to sync here.
+        // Lifecycle (stop on disappear) is handled by `onDisappear` below.
     }
 }
 
