@@ -1005,7 +1005,25 @@ stays current.
   server half) — DONE** (`d68bcca`). `DependencyIndex` (signal → nodes) + minimal
   `Patch::Update` emission scoped to `dependents[S]`; degrades to coarse frame
   when `signal_deps` is absent. 32/32 tests green. Flag-gated behind an injected
-  `signal_deps` seam until FA-IRWIRE lands the real field.
+  `signal_deps` seam until FA-IRWIRE lands the real field. **(FA-IRWIRE has now
+  landed — `dec2b2e` — so the seam is replaced by reading arena `signal_deps`
+  directly.)**
+
+- **FA-IRWIRE — per-node signal_deps + prop_thunk (ADR-0027 T13/T14) — DONE**
+  (`dec2b2e`). `flux-ir` `IRArena` gained `signal_deps` / `prop_thunk` /
+  `prop_layout` side-tables with `NodeView` accessors (kept off `NodeRef` so
+  `flux-differ` keeps building). `lower/bytecode.rs` gained `compile_prop_thunk`
+  (reuses the `Emitter`; its `READ_SIGNAL` captures ARE the `signal_deps` —
+  single source of truth) and `Str` support (`LOAD_STR_CONST`), so literal-string
+  props and string-signal writes compile. `lower/mod.rs` emits metadata after
+  every node pack. `flux-ir-serde` reserved `FLAG_NODE_HAS_SIGNAL_DEPS` (bit 6,
+  provisional pending Appendix D ratification — OQ-2) and a gated `signal_meta`
+  section on Init/Delta; decode rejects a thunk with empty deps (INV-1).
+  `flux-devserver` derives `DependencyIndex` from arena `signal_deps` and ships
+  `signal_meta` when present (completes the seam FA-DEVSERVER was flag-gated
+  behind). Full workspace `cargo nextest` 329 passed; build/doc/clippy/fmt clean.
+  Also unblocked the whole-workspace build (the prior in-flight flux-ir break is
+  resolved).
 
 - **FA-DOCS — Flux documentation site (Starlight + pnpm) — DONE** (`4129b38`).
   Single Starlight project, EN/ES i18n (Starlight-native, no Lingui), ADR
