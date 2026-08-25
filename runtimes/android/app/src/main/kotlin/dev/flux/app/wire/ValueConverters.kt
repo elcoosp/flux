@@ -30,8 +30,11 @@ public fun WireValue.toKitValue(): FluxValue =
 /**
  * Converts the adapter kit's [dev.flux.ui.FluxValue] back into the VM's
  * [dev.flux.app.vm.FluxValue] for dispatch into [dev.flux.app.vm.FluxBytecodeVM].
+ *
+ * When [interning] is supplied, a resolved `Str` maps back to its canonical
+ * wire `StringId` (perf task 7, P2) instead of an unstable `hashCode()`.
  */
-public fun dev.flux.ui.FluxValue.toVmValue(): dev.flux.app.vm.FluxValue =
+public fun dev.flux.ui.FluxValue.toVmValue(interning: StringInterning? = null): dev.flux.app.vm.FluxValue =
     when (this) {
         dev.flux.ui.FluxValue.Null -> dev.flux.app.vm.FluxValue.NullVal
         is dev.flux.ui.FluxValue.Int ->
@@ -45,19 +48,19 @@ public fun dev.flux.ui.FluxValue.toVmValue(): dev.flux.app.vm.FluxValue =
                 .BoolVal(value)
         is dev.flux.ui.FluxValue.Str ->
             dev.flux.app.vm.FluxValue.StrVal(
-                value.toUIntOrNull() ?: value.hashCode().toUInt(),
+                interning?.resolve(value) ?: (value.toUIntOrNull() ?: value.hashCode().toUInt()),
             )
         is dev.flux.ui.FluxValue.HandlerRef ->
             dev.flux.app.vm.FluxValue
                 .HandlerRefVal(handlerId)
         is dev.flux.ui.FluxValue.List ->
             dev.flux.app.vm.FluxValue
-                .ListVal(items.map { it.toVmValue() })
+                .ListVal(items.map { it.toVmValue(interning) })
         is dev.flux.ui.FluxValue.Record ->
             dev.flux.app.vm.FluxValue.RecordVal(
                 fields.map {
                     dev.flux.app.vm.FluxValue
-                        .Field(it.index, it.value.toVmValue())
+                        .Field(it.index, it.value.toVmValue(interning))
                 },
             )
     }

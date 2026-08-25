@@ -10,6 +10,7 @@ import dev.flux.app.vm.TableStringResolver
 import dev.flux.app.vm.VmResult
 import dev.flux.app.wire.Frame
 import dev.flux.app.wire.FrameDeserializer
+import dev.flux.app.wire.StringInterning
 import dev.flux.app.wire.WireError
 import dev.flux.app.wire.toKitValue
 import dev.flux.app.wire.toVmValue
@@ -62,6 +63,13 @@ public class FluxExecutor(
     private var stringResolver: StringResolver = TableStringResolver(emptyMap())
 
     /**
+     * The reverse string index (perf task 7, P2): maps a resolved `String`
+     * back to its canonical wire `StringId` so native event dispatch into the
+     * VM is O(1) and stable, rather than re-hashing per event.
+     */
+    private var stringIndex: StringInterning = StringInterning.empty()
+
+    /**
      * The `(capId, methodId) → impl` capability table threaded into the VM for
      * `CALL_CAP` (spec task 4). Seeded with the oracle-faithful defaults; dev
      * mode may later register additional RPC-forwarding capabilities.
@@ -106,7 +114,7 @@ public class FluxExecutor(
 
     /** Dispatches an adapter [event] into the VM on the background dispatcher. */
     override fun dispatch(event: HandlerEvent) {
-        val payload = event.payload?.toVmValue() ?: dev.flux.app.vm.FluxValue.NullVal
+        val payload = event.payload?.toVmValue(stringIndex) ?: dev.flux.app.vm.FluxValue.NullVal
         dispatch(event.handlerId, payload)
     }
 
@@ -148,6 +156,7 @@ public class FluxExecutor(
     private fun registerFrameHandlers(frame: Frame) {
         if (frame.strings.isNotEmpty()) {
             stringResolver = TableStringResolver(frame.strings.associate { it.id to it.text })
+            stringIndex = StringInterning.fromEntries(frame.strings)
         }
         val blob = frame.bytecodeBlob ?: return
         if (blob.bytes.isEmpty()) return
