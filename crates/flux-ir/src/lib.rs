@@ -6,12 +6,12 @@
 //! Node identities are derived once, stably, from source structure via
 //! [`compute_node_id`] (ADR-0013) so that diffing and state preservation work.
 //!
-//! Lowering (`.flux` → this IR) is FLUX-018 and lives in the [`lower`] module
+//! Lowering (`.flux` → this IR) is FLUX-018 and lives in the `lower` module
 //! of this crate (it is an `flux-ir` extension, owned by the same directory as
 //! the arena core). This crate provides the data structures
 //! ([`IRArena`], [`ClosureIR`], [`InstanceRegistry`]), the stable-ID
 //! derivation ([`compute_node_id`]), the hand-construction [`ArenaBuilder`]
-//! API, and the [`lower`] pass that turns a type-checked program into the
+//! API, and the [`lower::lower`] pass that turns a type-checked program into the
 //! packed reactive tree the differ and wire codec consume.
 //!
 //! # Examples
