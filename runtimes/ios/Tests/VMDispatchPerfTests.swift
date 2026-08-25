@@ -24,7 +24,16 @@ final class VMDispatchPerfTests: XCTestCase {
             let a = try FluxBytecodeVM.run(bc, signals: &s1, payload: .null)
             let b = try FluxBytecodeVM.runViaDispatchTable(bc, signals: &s2, payload: .null)
             XCTAssertEqual(a.registers, b.registers, "register mismatch for \(bc)")
-            XCTAssertEqual(a.signals, b.signals, "signal mismatch for \(bc)")
+            // `signals` is `[(UInt32, VMValue)]` — an array of tuples, which
+            // Swift cannot compare with `==`, so compare element-wise after a
+            // stable id sort.
+            let sa = a.signals.sorted { $0.0 < $1.0 }
+            let sb = b.signals.sorted { $0.0 < $1.0 }
+            XCTAssertEqual(sa.count, sb.count, "signal count mismatch for \(bc)")
+            for (lhs, rhs) in zip(sa, sb) {
+                XCTAssertEqual(lhs.0, rhs.0, "signal id mismatch for \(bc)")
+                XCTAssertEqual(lhs.1, rhs.1, "signal value mismatch for \(bc)")
+            }
             XCTAssertEqual(a.gasUsed, b.gasUsed, "gas mismatch for \(bc)")
         }
     }
