@@ -19,6 +19,9 @@ import FluxUIKit
 struct StringTable {
     /// The id → string mapping.
     private var strings: [UInt32: String] = [:]
+    /// The string → id reverse index (Perf #7 / R4). Lets `id(for:)` resolve a
+    /// native event's string payload in O(1) instead of scanning `strings`.
+    private var reverseLookup: [String: UInt32] = [:]
 
     /// Every known string id (used to discover declared components).
     var ids: [UInt32] { Array(strings.keys) }
@@ -29,6 +32,7 @@ struct StringTable {
     /// Interns `value` under `id`, replacing any prior entry.
     mutating func intern(_ id: UInt32, _ value: String) {
         strings[id] = value
+        reverseLookup[value] = id
     }
 
     /// Resolves `id` to its string, or `nil` if unknown.
@@ -48,8 +52,11 @@ struct StringTable {
     /// high-range id (distinct from the low stdlib component ids) so native
     /// event payloads can be converted back to the runtime's id-based
     /// `VMValue` without colliding with declared strings.
+    ///
+    /// Uses the `reverseLookup` index for O(1) resolution (Perf #7 / R4); only
+    /// when the value is new does it scan for a free high-range id.
     mutating func id(for value: String) -> UInt32 {
-        if let existing = strings.first(where: { $0.value == value })?.key {
+        if let existing = reverseLookup[value] {
             return existing
         }
         // Reserve the high half for reverse-interns to avoid colliding with
@@ -57,6 +64,7 @@ struct StringTable {
         var candidate: UInt32 = 0x8000_0000
         while strings[candidate] != nil { candidate &+= 1 }
         strings[candidate] = value
+        reverseLookup[value] = candidate
         return candidate
     }
 }
