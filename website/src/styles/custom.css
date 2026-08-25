@@ -1,0 +1,138 @@
+/* Flux documentation site — custom styles. */
+
+.flux-trace-player {
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 12px;
+  padding: 1rem;
+  background: var(--sl-color-black);
+  margin: 1.5rem 0;
+}
+
+.flux-trace-player h3 {
+  margin-top: 0;
+}
+
+.flux-trace-intro {
+  color: var(--sl-color-gray-2);
+  font-size: 0.95rem;
+}
+
+.flux-trace-note {
+  color: var(--sl-color-orange-high);
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.flux-trace-controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin: 1rem 0 0.25rem;
+}
+
+.flux-trace-controls button {
+  background: var(--sl-color-gray-6);
+  color: var(--sl-color-white);
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 6px;
+  padding: 0.4rem 0.9rem;
+  cursor: pointer;
+}
+
+.flux-trace-controls button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.flux-trace-counter {
+  font-weight: 600;
+}
+
+.flux-trace-hint {
+  color: var(--sl-color-gray-3);
+  font-size: 0.8rem;
+  margin: 0;
+}
+
+.flux-trace-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+@media (max-width: 50rem) {
+  .flux-trace-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.flux-pane {
+  border: 1px solid var(--sl-color-gray-6);
+  border-radius: 8px;
+  padding: 0.75rem;
+  background: var(--sl-color-gray-7);
+}
+
+.flux-pane h4 {
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+  color: var(--sl-color-gray-2);
+}
+
+.flux-code {
+  font-family: var(--__sl-font-mono, ui-monospace, monospace);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+  max-height: 16rem;
+  overflow: auto;
+}
+
+.flux-hex {
+  word-break: break-all;
+}
+
+.flux-tree {
+  width: 100%;
+  height: auto;
+  background: var(--sl-color-gray-6);
+  border-radius: 8px;
+}
+
+.flux-native {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.flux-native-badge {
+  background: var(--sl-color-orange-low);
+  color: var(--sl-color-orange-high);
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.flux-native-body {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.flux-trace-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-top: 1rem;
+  font-size: 0.85rem;
+  color: var(--sl-color-gray-2);
+}
+
+.flux-trace-stats span {
+  background: var(--sl-color-gray-6);
+  padding: 0.25rem 0.6rem;
+  border-radius: 6px;
+}

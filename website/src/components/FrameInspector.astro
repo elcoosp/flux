@@ -1,0 +1,105 @@
+---
+import { getTranslation } from './i18n-helper';
+
+interface Props {
+  hex: string;
+}
+
+const { hex } = Astro.props;
+const locale = Astro.currentLocale ?? 'en';
+const t = getTranslation(locale);
+
+// Decode the Appendix-D frame header from the raw hex. Layout (D.1):
+//   magic(4) version(1) seq(4) flags(1) patch_count(2) handler_count(2) string_count(2)
+const bytes = Buffer.from(hex, 'hex');
+const le32 = (off: number) => bytes.readUInt32LE(off);
+const le16 = (off: number) => bytes.readUInt16LE(off);
+const magic = le32(0);
+const version = bytes[4];
+const seq = le32(5);
+const flags = bytes[9];
+const patchCount = le16(10);
+const handlerCount = le16(12);
+const stringCount = le16(14);
+
+const flagBits = [
+  ['full_tree', (flags & 0x01) !== 0],
+  ['error', (flags & 0x02) !== 0],
+  ['heartbeat', (flags & 0x04) !== 0],
+  ['has_state_delta', (flags & 0x08) !== 0],
+  ['has_src_map_delta', (flags & 0x10) !== 0],
+  ['has_string_table_delta', (flags & 0x20) !== 0],
+] as const;
+
+const rows = [
+  { offset: '0', field: 'magic', value: `0x${magic.toString(16).toUpperCase()} ("FLUX")` },
+  { offset: '4', field: 'version', value: String(version) },
+  { offset: '5', field: 'seq', value: String(seq) },
+  { offset: '9', field: 'flags', value: `0x${flags.toString(16)}` },
+  { offset: '10', field: 'patch_count', value: String(patchCount) },
+  { offset: '12', field: 'handler_count', value: String(handlerCount) },
+  { offset: '14', field: 'string_count', value: String(stringCount) },
+];
+---
+
+<div class="frame-inspector">
+  <h4>{t['tracePlayer.frameInspector.title']}</h4>
+  <table>
+    <thead>
+      <tr>
+        <th>{t['tracePlayer.frameInspector.offset']}</th>
+        <th>{t['tracePlayer.frameInspector.field']}</th>
+        <th>{t['tracePlayer.frameInspector.value']}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {rows.map((r) => (
+        <tr>
+          <td><code>{r.offset}</code></td>
+          <td>{r.field}</td>
+          <td><code>{r.value}</code></td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+  <p class="frame-flags">
+    {flagBits.map(([name, on]) => (
+      <span class:list={['flag', { 'flag--on': on }]}>{name}{on ? ' ✓' : ' ✗'}</span>
+    ))}
+  </p>
+  <details>
+    <summary>raw hex</summary>
+    <pre class="flux-code">{hex}</pre>
+  </details>
+</div>
+
+<style>
+  .frame-inspector table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+  }
+  .frame-inspector th,
+  .frame-inspector td {
+    border: 1px solid var(--sl-color-gray-5);
+    padding: 0.25rem 0.5rem;
+    text-align: left;
+  }
+  .frame-flags {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin: 0.5rem 0;
+  }
+  .flag {
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    background: var(--sl-color-gray-6);
+    color: var(--sl-color-gray-3);
+    font-size: 0.75rem;
+  }
+  .flag--on {
+    background: var(--sl-color-green-high);
+    color: var(--sl-color-black);
+  }
+</style>

@@ -1,0 +1,33 @@
+---
+title: Conformance Status
+description: CI-generated reconcile-trace conformance badge across the Swift and Kotlin hosts (ADR-0027).
+---
+
+import StatusBadge from '../../../components/StatusBadge.astro';
+
+This page is the home of the **CI-generated conformance badge**. A CI job replays
+the `reconcile-trace-format.md` golden scenarios against both hosts and emits a
+badge here confirming Swift ≡ Kotlin byte-identical traces.
+
+<StatusBadge status="pending" detail="Swift ≡ Kotlin reconcile parity (ADR-0027)" />
+
+## What is being checked
+
+| Scenario | Assertion |
+|---|---|
+| `counter_1000` | 1,000-node tree, one `Text` reads signal 1 → `dirty` = exactly that Text; 1 update, 0 builds |
+| `noop_dispatch` | handler writes signal 99, nothing reads it → `dirty: []`, all deltas zero |
+| `pure_subtree` | `@pure` subtree; sibling signal written → zero events inside the subtree |
+| `cond_flip` | `If` condition flips → build+detach = branch child counts; exactly 1 `setchildren`; mount/cleanup once each |
+| `unrelated_signal` | signal written, in no node's deps → zero update/build/detach |
+
+The general rule (from `reconcile-counters-and-budgets.md`): **all counters after
+a dispatch are bounded by `|dependents[S]|` + structural-diff size — never by tree
+size.**
+
+## Current state
+
+Until the runtime `trace-dump` feature (owned by FA-ANDROID / FLUX-023) lands,
+this badge is `PENDING`. The homepage playground already replays a hand-authored
+fixture trace matching the `counter_1000` shape so the documented behavior is
+demonstrable today.

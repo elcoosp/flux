@@ -1,0 +1,65 @@
+---
+import { getTranslation } from './i18n-helper';
+
+interface Props {
+  status: 'pass' | 'pending' | 'fail';
+  detail?: string;
+}
+
+const { status, detail } = Astro.props;
+const locale = Astro.currentLocale ?? 'en';
+const t = getTranslation(locale);
+
+const label = status === 'pass' ? 'PASS' : status === 'fail' ? 'FAIL' : 'PENDING';
+const cls = `status-badge status-badge--${status}`;
+---
+
+<div class={cls} role="status">
+  <span class="status-badge__dot" aria-hidden="true"></span>
+  <span class="status-badge__label">{t['status.badge']}: {label}</span>
+  {detail && <span class="status-badge__detail">{detail}</span>}
+</div>
+
+<style>
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 0.75rem;
+    border-radius: 999px;
+    font-weight: 600;
+    font-size: 0.85rem;
+    border: 1px solid var(--sl-color-gray-5);
+  }
+  .status-badge__dot {
+    width: 0.6rem;
+    height: 0.6rem;
+    border-radius: 50%;
+    background: var(--sl-color-gray-3);
+  }
+  .status-badge--pass {
+    background: var(--sl-color-green-low);
+    color: var(--sl-color-green-high);
+  }
+  .status-badge--pass .status-badge__dot {
+    background: var(--sl-color-green-high);
+  }
+  .status-badge--pending {
+    background: var(--sl-color-orange-low);
+    color: var(--sl-color-orange-high);
+  }
+  .status-badge--pending .status-badge__dot {
+    background: var(--sl-color-orange-high);
+  }
+  .status-badge--fail {
+    background: var(--sl-color-red-low);
+    color: var(--sl-color-red-high);
+  }
+  .status-badge--fail .status-badge__dot {
+    background: var(--sl-color-red-high);
+  }
+  .status-badge__detail {
+    opacity: 0.8;
+    font-weight: 400;
+  }
+</style>

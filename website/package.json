@@ -1,0 +1,34 @@
+{
+  "name": "website",
+  "type": "module",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "astro dev",
+    "start": "astro dev",
+    "build": "pnpm run ingest && astro build && pnpm run check:i18n",
+    "preview": "astro preview",
+    "astro": "astro",
+    "check": "astro check",
+    "ingest": "tsx scripts/ingest-adrs.ts",
+    "check:i18n": "tsx scripts/check-i18n-drift.ts",
+    "make:fixtures": "tsx scripts/make-fixtures.ts"
+  },
+  "dependencies": {
+    "@astrojs/mdx": "^7.0.8",
+    "@astrojs/react": "^6.0.4",
+    "@astrojs/sitemap": "^3.7.3",
+    "@astrojs/starlight": "^0.41.8",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "astro": "^7.1.6",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "sharp": "^0.35.3"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.10",
+    "tsx": "^4.23.12",
+    "typescript": "^6.0.3"
+  }
+}

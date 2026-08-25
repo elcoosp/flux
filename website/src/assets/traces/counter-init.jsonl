@@ -1,0 +1,8 @@
+{"full":true,"nodes":4,"patches":3,"root":1,"seq":0,"t":"frame"}
+{"patches":3,"seq":0,"t":"apply_patch"}
+{"built":4,"detached":0,"i":0,"prop_materializations":8,"skipped_pure":0,"skipped_unchanged":0,"t":"step_end","updated":0}
+{"handler":7,"seq":1,"t":"dispatch"}
+{"ids":1,"seq":1,"t":"signals"}
+{"ids":57,"seq":1,"t":"dirty"}
+{"id":57,"seq":1,"t":"update"}
+{"built":0,"detached":0,"i":1,"prop_materializations":2,"skipped_pure":0,"skipped_unchanged":0,"t":"step_end","updated":1}

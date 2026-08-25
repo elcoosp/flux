@@ -1,0 +1,33 @@
+---
+title: Estado de Conformidad
+description: Badge de conformidad de traza de reconciliación generado por CI entre los hosts Swift y Kotlin (ADR-0027).
+---
+
+import StatusBadge from '../../../components/StatusBadge.astro';
+
+Esta página es el hogar del **badge de conformidad generado por CI**. Un job de CI
+reproduce los escenarios golden de `reconcile-trace-format.md` contra ambos hosts
+y emite aquí un badge que confirma trazas idénticas byte a byte Swift ≡ Kotlin.
+
+<StatusBadge status="pending" detail="Paridad de reconciliación Swift ≡ Kotlin (ADR-0027)" />
+
+## Qué se comprueba
+
+| Escenario | Aserción |
+|---|---|
+| `counter_1000` | árbol de 1.000 nodos, un `Text` lee señal 1 → `dirty` = exactamente ese Text; 1 update, 0 builds |
+| `noop_dispatch` | manejador escribe señal 99, nadie la lee → `dirty: []`, todos los deltas cero |
+| `pure_subtree` | subtree `@pure`; señal hermana escrita → cero eventos dentro del subtree |
+| `cond_flip` | condición `If` cambia → build+detach = conteo de hijos de rama; exactamente 1 `setchildren`; mount/cleanup una vez cada uno |
+| `unrelated_signal` | señal escrita, en ningún deps de nodo → cero update/build/detach |
+
+La regla general (de `reconcile-counters-and-budgets.md`): **todos los contadores
+tras un dispatch están acotados por `|dependents[S]|` + tamaño del diff
+estructural — nunca por el tamaño del árbol.**
+
+## Estado actual
+
+Hasta que llegue el feature `trace-dump` del runtime (propiedad de FA-ANDROID /
+FLUX-023), este badge es `PENDING`. El playground de la portada ya reproduce una
+traza fixture escrita a mano que coincide con la forma `counter_1000`, así el
+comportamiento documentado es demostrable hoy.

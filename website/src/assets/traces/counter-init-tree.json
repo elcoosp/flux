@@ -1,0 +1,37 @@
+{
+  "root": 1,
+  "nodes": {
+    "1": {
+      "id": 1,
+      "kind": "column",
+      "componentId": 0,
+      "key": null,
+      "isPure": false,
+      "signalDeps": [],
+      "children": [
+        57,
+        7
+      ]
+    },
+    "7": {
+      "id": 7,
+      "kind": "button",
+      "componentId": 2,
+      "key": null,
+      "isPure": false,
+      "signalDeps": [],
+      "children": []
+    },
+    "57": {
+      "id": 57,
+      "kind": "text",
+      "componentId": 1,
+      "key": null,
+      "isPure": false,
+      "signalDeps": [
+        1
+      ],
+      "children": []
+    }
+  }
+}

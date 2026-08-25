@@ -1,0 +1,120 @@
+---
+title: Flux
+description: Flux — a write-once UI language for native iOS and Android. Specifications, ADRs, concepts, and an honest recorded-dispatch playground.
+template: splash
+hero:
+  tagline: Write once. Run native on iOS and Android.
+  actions:
+    - text: Read the concepts
+      link: /concepts/the-wire/
+      icon: right-arrow
+    - text: Try the playground
+      link: /#playground
+      icon: rocket
+      variant: minimal
+---
+
+import { Card, CardGrid, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import DispatchTracePlayer from '../../../components/DispatchTracePlayer.tsx';
+import FrameInspector from '../../../components/FrameInspector.astro';
+import ViewNodeTree from '../../../components/ViewNodeTree.astro';
+import StatusBadge from '../../../components/StatusBadge.astro';
+import { getTranslation } from '../../../components/i18n-helper';
+
+export const i18n = getTranslation('en');
+export const counterHex = (await import('../../../assets/traces/counter-init.hex?raw')).default;
+export const counterSrc = `component Counter {
+  state count: Int = 0
+
+  Column(gap: 12) {
+    Text("Count: {count}")
+    Button(text: "Increment", onClick: {
+      count = count + 1
+    })
+  }
+}`;
+export const counterTree = (await import('../../../assets/traces/counter-init-tree.json')).default;
+
+<CardGrid stagger>
+  <Card title="Single source of truth" icon="document">
+    Author your UI once in `.flux`. The dev server lowers it to a Reactive Tree
+    IR, diffs it, and ships binary patches over WebSocket to a precompiled host.
+  </Card>
+  <Card title="Native on both platforms" icon="laptop">
+    The same IR is codegen'd to idiomatic SwiftUI and Jetpack Compose in release
+    builds — no webview, no bridge tax.
+  </Card>
+  <Card title="Spec-driven" icon="open-book">
+    Read the machine-checkable specification and the Architecture Decision Records
+    that justify every non-obvious choice.
+  </Card>
+  <Card title="Honest by design" icon="puzzle">
+    Flux cannot compile to the web. The "playground" below replays a *recorded*
+    dispatch, not a live compile.
+  </Card>
+</CardGrid>
+
+<StatusBadge status="pending" detail="Reconcile parity: Swift ≡ Kotlin (ADR-0027)" />
+
+## The honest playground
+
+<DispatchTracePlayer
+  client:visible
+  i18n={i18n}
+  source={counterSrc}
+  hex={counterHex}
+/>
+
+<ViewNodeTree tree={counterTree} />
+<FrameInspector hex={counterHex} />
+
+## How a tap becomes pixels
+
+<Steps>
+
+1. **Dispatch** — a `Button` tap evaluates its handler closure in the host VM,
+   writing one or more signals (e.g. `count = count + 1`).
+
+2. **Signals** — the VM reports the written signal ids. Per ADR-0027 they are
+   sorted ascending and emitted as a `signals` trace event.
+
+3. **Dirty set** — the host intersects the written signals with each node's
+   `signal_deps` (Phase 2) or re-applies cheaply (Phase 1), emitting a `dirty`
+   list in `(depth asc, id asc)` order.
+
+4. **Update** — only the dirty nodes re-materialize their props (≤ 2
+   materializations, on genuine change) and fire `update`. Clean siblings are
+   untouched — `skip_unchanged`.
+
+5. **step_end** — cumulative counters close the step: `built`, `updated`,
+   `skipped_unchanged`, `detached`, `prop_materializations`.
+
+</Steps>
+
+<Tabs>
+  <TabItem label="Swift (release)">
+    ```swift
+    struct Counter: View {
+      @State private var count: Int = 0
+      var body: some View {
+        VStack(spacing: 12) {
+          Text("Count: \\(count)")
+          Button("Increment") { count += 1 }
+        }
+      }
+    }
+    ```
+  </TabItem>
+  <TabItem label="Kotlin (release)">
+    ```kotlin
+    @Composable
+    fun Counter() {
+      var count by remember { mutableStateOf(0) }
+      Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("Count: $count")
+        Button(onClick = { count += 1 }) { Text("Increment") }
+      }
+    }
+    ```
+  </TabItem>
+</Tabs>
