@@ -429,6 +429,282 @@ enum FluxBytecodeVM {
         )
     }
 
+    /// The opcode → contiguous integer index used by `runViaDispatchTable`.
+    /// Swift already lowers an `enum` `switch` to a jump table, so this index
+    /// map is the explicit form of the same dispatch; it exists so the perf
+    /// review's "LuaJIT-style closure table" hypothesis can be measured
+    /// directly (see Perf #9). The canonical evaluator remains `run`.
+    private static let opcodeIndex: [OpCode: Int] = Dictionary(
+        uniqueKeysWithValues: OpCode.allCases.enumerated().map { ($0.element, $0.offset) }
+    )
+
+    /// Experimental dispatch-table evaluator (Perf #9). Behaviorally identical
+    /// to `run`; dispatches through an `Int`-tagged `switch` keyed by
+    /// `opcodeIndex` rather than the enum directly, so the cost of the two
+    /// dispatch styles can be compared under a micro-benchmark. Retained only if
+    /// measurement shows it is faster than the native enum `switch`; otherwise
+    /// `run` stays canonical.
+    static func runViaDispatchTable(
+        _ bytecode: [UInt8],
+        signals: inout SignalStore,
+        payload: VMValue,
+        stringTable: any StringResolvable = EmptyStringTable(),
+        capRegistry: CapabilityRegistry = .dev
+    ) throws -> VmOutcome {
+        let program = try Instruction.decode(bytecode)
+        let offsets = program.map { $0.offset }
+        var regs = [VMValue](repeating: .null, count: 16)
+        regs[0] = payload
+        var gas = entryGas
+        regs[15] = .int(Int64(gas))
+        var allocated: UInt64 = 0
+        var stringTable = stringTable
+        var ip = 0
+
+        while ip < program.count {
+            let instr = program[ip]
+            let tag = opcodeIndex[instr.opCode]!
+            if instr.opCode == .halt { break }
+            if gas == 0 {
+                throw VMError.gasExhausted(offset: instr.offset)
+            }
+            gas -= 1
+            regs[15] = .int(Int64(gas))
+            let nextIP = ip + 1
+            let reg = { (r: UInt8) -> VMValue in regs[Int(r)] }
+
+            switch tag {
+            case opcodeIndex[.halt]!: break
+            case opcodeIndex[.nop]!: break
+            case opcodeIndex[.readSignal]!:
+                let dst = instr.u8(0); let id = instr.u32(1)
+                regs[Int(dst)] = signals.read(id) ?? .null
+            case opcodeIndex[.writeSignal]!:
+                let id = instr.u32(0); let src = instr.u8(4)
+                signals.write(id, reg(src))
+            case opcodeIndex[.addI64]!, opcodeIndex[.subI64]!, opcodeIndex[.mulI64]!, opcodeIndex[.divI64]!, opcodeIndex[.modI64]!:
+                let dst = instr.u8(0)
+                let a = try requireInt(reg(instr.u8(1)), at: instr.offset)
+                let b = try requireInt(reg(instr.u8(2)), at: instr.offset)
+                let r: Int64
+                switch instr.opCode {
+                case .addI64: r = a &+ b
+                case .subI64: r = a &- b
+                case .mulI64: r = a &* b
+                case .divI64:
+                    if b == 0 { throw VMError.divByZero(offset: instr.offset) }
+                    r = wrappingDiv(a, b)
+                case .modI64:
+                    if b == 0 { throw VMError.divByZero(offset: instr.offset) }
+                    r = wrappingRem(a, b)
+                default: fatalError("unreachable")
+                }
+                regs[Int(dst)] = .int(r)
+            case opcodeIndex[.negI64]!:
+                let dst = instr.u8(0)
+                let v = try requireInt(reg(instr.u8(1)), at: instr.offset)
+                regs[Int(dst)] = .int(0 &- v)
+            case opcodeIndex[.eqI64]!, opcodeIndex[.ltI64]!, opcodeIndex[.gtI64]!, opcodeIndex[.lteI64]!, opcodeIndex[.gteI64]!:
+                let dst = instr.u8(0)
+                let a = try requireInt(reg(instr.u8(1)), at: instr.offset)
+                let b = try requireInt(reg(instr.u8(2)), at: instr.offset)
+                let r: Bool
+                switch instr.opCode {
+                case .eqI64: r = a == b
+                case .ltI64: r = a < b
+                case .gtI64: r = a > b
+                case .lteI64: r = a <= b
+                case .gteI64: r = a >= b
+                default: fatalError("unreachable")
+                }
+                regs[Int(dst)] = .bool(r)
+            case opcodeIndex[.addF64]!, opcodeIndex[.subF64]!, opcodeIndex[.mulF64]!, opcodeIndex[.divF64]!:
+                let dst = instr.u8(0)
+                let a = try requireFloat(reg(instr.u8(1)), at: instr.offset)
+                let b = try requireFloat(reg(instr.u8(2)), at: instr.offset)
+                let r: Double
+                switch instr.opCode {
+                case .addF64: r = a + b
+                case .subF64: r = a - b
+                case .mulF64: r = a * b
+                case .divF64: r = fdiv(a, b)
+                default: fatalError("unreachable")
+                }
+                regs[Int(dst)] = .float(r)
+            case opcodeIndex[.negF64]!:
+                let dst = instr.u8(0)
+                let v = try requireFloat(reg(instr.u8(1)), at: instr.offset)
+                regs[Int(dst)] = .float(-v)
+            case opcodeIndex[.eqF64]!, opcodeIndex[.ltF64]!, opcodeIndex[.gtF64]!:
+                let dst = instr.u8(0)
+                let a = try requireFloat(reg(instr.u8(1)), at: instr.offset)
+                let b = try requireFloat(reg(instr.u8(2)), at: instr.offset)
+                let r: Bool
+                switch instr.opCode {
+                case .eqF64: r = (a == b) || (a.isNaN && b.isNaN)
+                case .ltF64: r = a < b
+                case .gtF64: r = a > b
+                default: fatalError("unreachable")
+                }
+                regs[Int(dst)] = .bool(r)
+            case opcodeIndex[.i64ToF64]!:
+                let dst = instr.u8(0)
+                let v = try requireInt(reg(instr.u8(1)), at: instr.offset)
+                regs[Int(dst)] = .float(Double(v))
+            case opcodeIndex[.f64ToI64]!:
+                let dst = instr.u8(0)
+                let v = try requireFloat(reg(instr.u8(1)), at: instr.offset)
+                regs[Int(dst)] = .int(Int64(v))
+            case opcodeIndex[.andBool]!:
+                let dst = instr.u8(0)
+                let x = try requireBool(reg(instr.u8(1)), at: instr.offset)
+                let y = try requireBool(reg(instr.u8(2)), at: instr.offset)
+                regs[Int(dst)] = .bool(x && y)
+            case opcodeIndex[.orBool]!:
+                let dst = instr.u8(0)
+                let x = try requireBool(reg(instr.u8(1)), at: instr.offset)
+                let y = try requireBool(reg(instr.u8(2)), at: instr.offset)
+                regs[Int(dst)] = .bool(x || y)
+            case opcodeIndex[.notBool]!:
+                let dst = instr.u8(0)
+                let v = try requireBool(reg(instr.u8(1)), at: instr.offset)
+                regs[Int(dst)] = .bool(!v)
+            case opcodeIndex[.strIntern]!:
+                regs[Int(instr.u8(0))] = .str(instr.u32(1))
+            case opcodeIndex[.strEq]!:
+                let dst = instr.u8(0)
+                let x = try requireStr(reg(instr.u8(1)), at: instr.offset)
+                let y = try requireStr(reg(instr.u8(2)), at: instr.offset)
+                regs[Int(dst)] = .bool(x == y)
+            case opcodeIndex[.strLen]!:
+                let dst = instr.u8(0)
+                let id = try requireStr(reg(instr.u8(1)), at: instr.offset)
+                let len: Int
+                if let resolved = stringTable.lookup(id) { len = resolved.utf8.count } else { len = digitCount(id) }
+                regs[Int(dst)] = .int(Int64(len))
+            case opcodeIndex[.strConcat]!:
+                let dst = instr.u8(0)
+                let x = try requireStr(reg(instr.u8(1)), at: instr.offset)
+                let y = try requireStr(reg(instr.u8(2)), at: instr.offset)
+                guard let a = stringTable.lookup(x), let b = stringTable.lookup(y) else {
+                    throw VMError.memoryExhausted(offset: instr.offset)
+                }
+                let combined = a + b
+                let newId = stringTable.intern(combined)
+                regs[Int(dst)] = .str(newId)
+            case opcodeIndex[.jump]!:
+                ip = try jumpTarget(instr, nextIP: nextIP, offsets: offsets, delta: instr.i32(0))
+                continue
+            case opcodeIndex[.condJump]!, opcodeIndex[.condJumpNot]!:
+                let taken = truthy(reg(instr.u8(0)))
+                let want = instr.opCode == .condJump
+                if taken == want {
+                    ip = try jumpTarget(instr, nextIP: nextIP, offsets: offsets, delta: instr.i32(1))
+                    continue
+                }
+            case opcodeIndex[.allocRecord]!:
+                let dst = instr.u8(0)
+                let count = Int(instr.u16(1))
+                allocated &+= UInt64(count) &* 16
+                if allocated > allocationBudget { throw VMError.memoryExhausted(offset: instr.offset) }
+                var fields: [(UInt16, VMValue)] = []
+                fields.reserveCapacity(count)
+                for i in 0..<count { fields.append((UInt16(i), .null)) }
+                regs[Int(dst)] = .record(fields)
+            case opcodeIndex[.getField]!:
+                let dst = instr.u8(0)
+                let idx = Int(instr.u16(1))
+                let field = try getField(reg(instr.u8(3)), idx: idx, at: instr.offset)
+                regs[Int(dst)] = field
+            case opcodeIndex[.setField]!:
+                let obj = instr.u8(0)
+                let idx = Int(instr.u16(1))
+                let val = reg(instr.u8(3))
+                try setField(&regs[Int(obj)], idx: idx, value: val, at: instr.offset)
+            case opcodeIndex[.recordEq]!:
+                let dst = instr.u8(0)
+                let x = try requireRecord(reg(instr.u8(1)), at: instr.offset)
+                let y = try requireRecord(reg(instr.u8(2)), at: instr.offset)
+                regs[Int(dst)] = .bool(recordsEqual(x, y))
+            case opcodeIndex[.allocList]!:
+                allocated &+= 8
+                if allocated > allocationBudget { throw VMError.memoryExhausted(offset: instr.offset) }
+                regs[Int(instr.u8(0))] = .list([])
+            case opcodeIndex[.listPush]!:
+                let list = instr.u8(0)
+                let val = reg(instr.u8(1))
+                allocated &+= 8
+                if allocated > allocationBudget { throw VMError.memoryExhausted(offset: instr.offset) }
+                guard case var .list(items) = regs[Int(list)] else { throw VMError.typeMismatch(offset: instr.offset) }
+                items.append(val)
+                regs[Int(list)] = .list(items)
+            case opcodeIndex[.listGet]!:
+                let dst = instr.u8(0)
+                let items = try requireList(reg(instr.u8(1)), at: instr.offset)
+                let i = Int(instr.u8(2))
+                guard i < items.count else { throw VMError.indexOutOfBounds(offset: instr.offset) }
+                regs[Int(dst)] = items[i]
+            case opcodeIndex[.listLen]!:
+                let items = try requireList(reg(instr.u8(1)), at: instr.offset)
+                regs[Int(instr.u8(0))] = .int(Int64(items.count))
+            case opcodeIndex[.listConcat]!:
+                let dst = instr.u8(0)
+                let a = try requireList(reg(instr.u8(1)), at: instr.offset)
+                let b = try requireList(reg(instr.u8(2)), at: instr.offset)
+                regs[Int(dst)] = .list(a + b)
+            case opcodeIndex[.callCap]!:
+                let resultReg = instr.u8(0)
+                let capID = instr.u32(1)
+                let methodID = instr.u16(5)
+                let argsReg = instr.u8(7)
+                guard let impl = capRegistry.lookup(capID, methodID) else {
+                    throw VMError.typeMismatch(offset: instr.offset)
+                }
+                do {
+                    let result = try impl(capID, methodID, reg(argsReg), &signals)
+                    regs[Int(resultReg)] = result
+                } catch let err as VMError { throw err } catch { throw VMError.typeMismatch(offset: instr.offset) }
+            case opcodeIndex[.matchTag]!:
+                let val = reg(instr.u8(0))
+                let tag2 = instr.u32(1)
+                var matched = false
+                if case let .record(fields) = val, let first = fields.first {
+                    if case let .int(t) = first.value, t == Int64(tag2) { matched = true }
+                }
+                if matched {
+                    ip = try jumpTarget(instr, nextIP: nextIP, offsets: offsets, delta: instr.i32(5))
+                    continue
+                }
+            case opcodeIndex[.extractField]!:
+                let dst = instr.u8(0)
+                let idx = Int(instr.u16(1))
+                let field = try getField(reg(instr.u8(3)), idx: idx, at: instr.offset)
+                regs[Int(dst)] = field
+            case opcodeIndex[.loadIntConst]!:
+                regs[Int(instr.u8(0))] = .int(instr.i64(1))
+            case opcodeIndex[.loadFloatConst]!:
+                regs[Int(instr.u8(0))] = .float(instr.f64(1))
+            case opcodeIndex[.loadBoolConst]!:
+                regs[Int(instr.u8(0))] = .bool(instr.u8(1) != 0)
+            case opcodeIndex[.loadStrConst]!:
+                regs[Int(instr.u8(0))] = .str(instr.u32(1))
+            case opcodeIndex[.loadNull]!:
+                regs[Int(instr.u8(0))] = .null
+            case opcodeIndex[.mov]!:
+                regs[Int(instr.u8(0))] = reg(instr.u8(1))
+            case opcodeIndex[.gasCheck]!:
+                let budget = instr.u32(0)
+                if gas < budget { throw VMError.gasExhausted(offset: instr.offset) }
+            default:
+                fatalError("unknown opcode tag \(tag)")
+            }
+
+            ip = nextIP
+        }
+
+        return VmOutcome(signals: signals.snapshot(), registers: regs, gasUsed: entryGas - gas)
+    }
+
     // MARK: - Helpers
 
     /// IEEE-754 division: `x/0.0` is `±inf` (ADR-0023), never an error.
