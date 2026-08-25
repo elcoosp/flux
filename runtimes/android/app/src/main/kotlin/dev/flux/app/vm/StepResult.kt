@@ -23,6 +23,13 @@ internal sealed interface StepResult {
  * thrown as a [VmError] and converted at the run boundary; jumps are reported via
  * [StepResult.JumpTo] rather than captured loop state.
  *
+ * Dispatch is a sealed `when (opcode)` over the [Opcode] enum — Kotlin lowers
+ * this to a tableswitch, i.e. O(1) with no reflection and no per-call map
+ * lookup (perf task 9, P2). The only per-call associative lookups are
+ * [StringResolver.resolve] / [CapabilityRegistry.lookup], both O(1) hash maps,
+ * so the hot per-event dispatch path is allocation-free apart from the
+ * handler's own operands.
+ *
  * @param regs the 16 VM registers (mutated in place).
  * @param instr the instruction to execute.
  * @param signals the signal graph the closure reads/writes.
