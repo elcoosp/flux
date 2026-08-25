@@ -1,3 +1,7 @@
+---
+title: "ADR-0006: Gas accounting — HALT is exempt"
+---
+
 # ADR-0006: Gas accounting — HALT is exempt
 
 **Status:** Accepted

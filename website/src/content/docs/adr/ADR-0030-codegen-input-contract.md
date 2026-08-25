@@ -1,3 +1,7 @@
+---
+title: "ADR-0030-codegen-input-contract: codegen takes `(LoweredIr, Ast)`, not `LoweredIr` alone"
+---
+
 # ADR-0030-codegen-input-contract: codegen takes `(LoweredIr, Ast)`, not `LoweredIr` alone
 
 - **Status:** Accepted (created 2026-08-25 by the orchestrator)

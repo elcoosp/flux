@@ -1,3 +1,7 @@
+---
+title: "ADR-0029-appendix-b-grammar-repairs: grammar defects found extending Appendix B for FLUX-010"
+---
+
 # ADR-0029-appendix-b-grammar-repairs: grammar defects found extending Appendix B for FLUX-010
 
 **Status:** Draft (flagged to orchestrator; do not edit)

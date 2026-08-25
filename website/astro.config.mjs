@@ -36,14 +36,17 @@ export default defineConfig({
       // Custom component overrides (see src/components/).
       components: {
         Hero: './src/components/Hero.astro',
+        // Adds a locale-aware "Docs" link to the header so the splash homepage
+        // can reach the documentation without its (intentionally hidden) sidebar.
+        Header: './src/components/Header.astro',
       },
       // The sidebar uses BOTH mechanisms documented in the design:
       //  - autogenerate groups (labels derived from each page's frontmatter `title`)
       //  - manual items (group headers / index links) with `translations` for locale variants.
       sidebar: [
         {
-          label: 'Flux',
-          translations: { es: 'Flux', fr: 'Flux' },
+          label: 'ADRs',
+          translations: { es: 'ADR', fr: 'ADR' },
           items: [{ autogenerate: { directory: 'adr' } }],
         },
         {
@@ -60,13 +63,6 @@ export default defineConfig({
           label: 'Reference',
           translations: { es: 'Referencia', fr: 'Référence' },
           items: [{ autogenerate: { directory: 'reference' } }],
-        },
-      ],
-      social: [
-        {
-          icon: 'github',
-          label: 'Flux repository',
-          href: 'https://github.com/flux-lang/flux',
         },
       ],
       customCss: ['./src/styles/custom.css'],

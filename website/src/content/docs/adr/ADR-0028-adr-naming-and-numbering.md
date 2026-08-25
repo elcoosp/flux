@@ -1,3 +1,7 @@
+---
+title: "ADR-naming-and-numbering: ADR filenames and the reserved `ADR-NNNN` sequence"
+---
+
 # ADR-naming-and-numbering: ADR filenames and the reserved `ADR-NNNN` sequence
 
 **Status:** Accepted

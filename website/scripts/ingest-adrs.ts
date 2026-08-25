@@ -13,7 +13,7 @@
  *
  * Run with: `pnpm ingest` (also invoked during `pnpm build`).
  */
-import { cp, mkdir, rm, readdir, access } from 'node:fs/promises';
+import { cp, mkdir, rm, readdir, access, readFile, writeFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -33,8 +33,35 @@ async function exists(path: string): Promise<boolean> {
 }
 
 /**
+ * Extracts the first Markdown H1 (`# Title`) from an ADR's body. ADRs carry
+ * their title as a heading, not frontmatter, so the sidebar label must be
+ * derived from it. Returns `undefined` when no H1 is present.
+ */
+function extractH1(body: string): string | undefined {
+  for (const line of body.split('\n')) {
+    const match = /^#\s+(.*\S)\s*$/.exec(line);
+    if (match) return match[1];
+  }
+  return undefined;
+}
+
+/**
+ * Copies an ADR from the repo into the site, injecting a `title` frontmatter
+ * field derived from the document's H1. The repo source is never modified; only
+ * the site copy gains frontmatter so Starlight's sidebar shows a human title
+ * instead of the file slug.
+ */
+async function ingestAdr(file: string): Promise<void> {
+  const sourcePath = join(sourceDir, file);
+  const body = await readFile(sourcePath, 'utf8');
+  const h1 = extractH1(body);
+  const frontmatter = h1 ? `---\ntitle: ${JSON.stringify(h1)}\n---\n\n` : '';
+  await writeFile(join(targetDir, file), frontmatter + body);
+}
+
+/**
  * Ingests every `ADR-*.md` file from the repo's `docs/adr` into the site's
- * `src/content/docs/en/adr`. Returns the number of files copied.
+ * `src/content/docs/adr`. Returns the number of files copied.
  *
  * @throws if the source ADR directory is missing (the repo layout changed).
  */
@@ -57,7 +84,7 @@ export async function ingestAdrs(): Promise<number> {
   }
 
   for (const file of entries) {
-    await cp(join(sourceDir, file), join(targetDir, file));
+    await ingestAdr(file);
   }
   return entries.length;
 }

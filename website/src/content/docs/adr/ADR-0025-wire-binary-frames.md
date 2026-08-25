@@ -1,3 +1,7 @@
+---
+title: "ADR-0025: Custom binary wire frames (supersedes ADR-0008's MessagePack choice)"
+---
+
 # ADR-0025: Custom binary wire frames (supersedes ADR-0008's MessagePack choice)
 
 - **Status:** Accepted

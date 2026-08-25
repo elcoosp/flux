@@ -1,3 +1,7 @@
+---
+title: "ADR-0036-runtime-packaging-gap: host runtimes are apps, not importable packages"
+---
+
 # ADR-0036-runtime-packaging-gap: host runtimes are apps, not importable packages
 
 - **Status:** Proposed (created 2026-08-25 by the `examples-e2e` agent, FLUX-022 / PE-E)

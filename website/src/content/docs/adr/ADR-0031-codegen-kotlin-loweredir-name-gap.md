@@ -1,3 +1,7 @@
+---
+title: "ADR-0031-codegen-kotlin-loweredir-name-gap: `LoweredIr` does not carry the component names codegen needs"
+---
+
 # ADR-0031-codegen-kotlin-loweredir-name-gap: `LoweredIr` does not carry the component names codegen needs
 
 - **Status:** Proposed (created 2026-08-25 by the FLUX-021 codegen-kotlin agent)

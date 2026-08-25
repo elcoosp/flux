@@ -1,3 +1,7 @@
+---
+title: "ADR-0027: Single-source `compute_node_id` in `flux-syntax`"
+---
+
 # ADR-0027: Single-source `compute_node_id` in `flux-syntax`
 
 - **Status:** Proposed (created by orchestration agent 2026-08-24; applies Gap G2

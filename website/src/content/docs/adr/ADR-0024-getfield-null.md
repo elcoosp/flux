@@ -1,3 +1,7 @@
+---
+title: "ADR-0009: GET_FIELD error discrimination (Null vs non-record)"
+---
+
 # ADR-0009: GET_FIELD error discrimination (Null vs non-record)
 
 **Status:** Accepted

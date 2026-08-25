@@ -1,3 +1,7 @@
+---
+title: "ADR-0008: DivByZero as an explicit VM error kind"
+---
+
 # ADR-0008: DivByZero as an explicit VM error kind
 
 **Status:** Accepted

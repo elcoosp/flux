@@ -1,3 +1,7 @@
+---
+title: "ADR-0037-stdlib-grammar-gaps: Appendix B gaps surfaced by the FLUX-010 stdlib"
+---
+
 # ADR-0037-stdlib-grammar-gaps: Appendix B gaps surfaced by the FLUX-010 stdlib
 
 **Status:** Draft (flagged to orchestrator; do not edit)

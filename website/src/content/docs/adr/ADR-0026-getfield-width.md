@@ -1,3 +1,7 @@
+---
+title: "ADR-0026: GET_FIELD bytecode width corrected to 4 bytes (REG_U16_REG)"
+---
+
 # ADR-0026: GET_FIELD bytecode width corrected to 4 bytes (REG_U16_REG)
 
 **Status:** Accepted

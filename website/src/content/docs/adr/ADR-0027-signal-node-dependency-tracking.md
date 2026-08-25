@@ -1,3 +1,7 @@
+---
+title: "ADR-0027: Signal→Node Dependency Tracking & Dirty-Set Reconciliation"
+---
+
 # ADR-0027: Signal→Node Dependency Tracking & Dirty-Set Reconciliation
 
 **Status:** Proposed · **Owners:** P1 (iOS host), P2 (Android host), dev-server owner (wire/lowering) · **Supersedes:** none · **Depends on:** ADR-0002 (host-authoritative state), FLUX-014 (empty splices), §18.10 (`@pure`), ADR-0034-ir-node-id-bridge.md (node-ID bridge)

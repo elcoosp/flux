@@ -1,3 +1,7 @@
+---
+title: "ADR-0032-devserver-build-accessor: devserver exposes `(LoweredIr, Ast)` per file for `flux build`"
+---
+
 # ADR-0032-devserver-build-accessor: devserver exposes `(LoweredIr, Ast)` per file for `flux build`
 
 - **Status:** Accepted (created 2026-08-25 by the `ADR-0032-devserver-build-accessor` agent, FLUX-019b)

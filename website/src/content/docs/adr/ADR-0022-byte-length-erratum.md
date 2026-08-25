@@ -1,3 +1,7 @@
+---
+title: "ADR-0007: Byte-length erratum in Appendix E §E.5"
+---
+
 # ADR-0007: Byte-length erratum in Appendix E §E.5
 
 **Status:** Accepted

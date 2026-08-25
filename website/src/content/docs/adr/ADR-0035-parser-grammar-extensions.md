@@ -1,3 +1,7 @@
+---
+title: "ADR-0035-parser-grammar-extensions: keeping flux.pest and Appendix B in sync"
+---
+
 # ADR-0035-parser-grammar-extensions: keeping flux.pest and Appendix B in sync
 
 **Status:** Accepted (implemented in `flux-parser`; reconciled with Appendix B)
