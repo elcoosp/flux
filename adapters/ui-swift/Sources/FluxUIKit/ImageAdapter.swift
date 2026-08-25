@@ -1,0 +1,125 @@
+//  ImageAdapter.swift
+//  FluxUIKit — `Image` → `UIImageView` (Appendix F.8).
+
+import UIKit
+
+/// Dev adapter mapping a Flux `Image` node to a `UIImageView`.
+///
+/// Prop fields and their `PropIdx` (Appendix F.8 contract):
+/// - `0 src: String` (required) — asset path relative to the project root,
+///   e.g. `"assets/logo.png"`.
+/// - `1 width: Option[Float]`
+/// - `2 height: Option[Float]`
+/// - `3 contentMode: Option[String]` — `"fill"` (default), `"fit"`, `"stretch"`.
+///
+/// In dev the bitmap is fetched over HTTP from the dev server's asset route
+/// (`http://localhost:7332/assets/<src>`). Load failures (missing asset,
+/// offline server, decode error) degrade to a `photo` system placeholder
+/// rather than crashing the host — see BR-003. The image view is configured on
+/// the main actor because UIKit views may only be touched from the main
+/// thread; the network callback re-dispatches to the main actor before
+/// mutating the view.
+@MainActor
+public final class ImageAdapter: FluxAdapter {
+    public typealias View = UIImageView
+    weak var executor: (any FluxExecutor)?
+
+    /// The dev-server asset base URL (FLUX-019). `<src>` is appended verbatim,
+    /// so a node with `src = "assets/logo.png"` resolves to
+    /// `…/assets/assets/logo.png`, which the server joins onto the project
+    /// root.
+    static let assetBaseURL = URL(string: "http://localhost:7332/assets/")!
+
+    /// Placeholder shown until the bitmap arrives or when loading fails. A
+    /// system symbol is used so it is always available and never `nil`.
+    private static let placeholder: UIImage = {
+        UIImage(systemName: "photo") ?? UIImage()
+    }()
+
+    /// The in-flight data task for the current `src`, if any. Cancelled when a
+    /// new `src` arrives or the view is destroyed so a stale response can never
+    /// land on a recycled image view.
+    private var loadTask: URLSessionDataTask?
+
+    public init(executor: (any FluxExecutor)? = nil) { self.executor = executor }
+
+    public func create() -> UIImageView {
+        let imageView = UIImageView()
+        imageView.contentMode = .scaleAspectFill
+        imageView.clipsToBounds = true
+        imageView.image = Self.placeholder
+        return imageView
+    }
+
+    public func update(_ view: UIImageView, from old: Props, to new: Props) {
+        if let width = new.getFloat(1), let height = new.getFloat(2) {
+            view.frame.size = CGSize(width: CGFloat(width), height: CGFloat(height))
+        }
+        if let mode = new.getString(3) {
+            view.contentMode = Self.contentMode(for: mode)
+        }
+        guard let src = new.getString(0), !src.isEmpty else {
+            // Missing/empty `src` is treated as a load failure up front: show
+            // the placeholder and clear any pending request. This is the
+            // graceful-degrade path for BR-003.
+            loadTask?.cancel()
+            loadTask = nil
+            view.image = Self.placeholder
+            return
+        }
+        load(src, onto: view)
+    }
+
+    public func setChildren(_ children: [AnyObject], on view: UIImageView) {
+        // `Image` is a leaf; the runtime never sends children.
+    }
+
+    public func bindHandler(_ handlerId: FluxHandlerId, to view: UIImageView, nodeId: FluxNodeId) {
+        // `Image` has no handlers.
+    }
+
+    public func destroy(_ view: UIImageView) {
+        loadTask?.cancel()
+        loadTask = nil
+    }
+
+    /// Fetches `src` from the dev asset server and swaps it onto `view`,
+    /// falling back to the placeholder on any failure. The data task runs off
+    /// the main actor; the completion re-dispatches to the main actor before
+    /// touching the view (UIKit requirement).
+    private func load(_ src: String, onto view: UIImageView) {
+        let url = Self.assetBaseURL.appending(path: src)
+        var request = URLRequest(url: url)
+        request.timeoutInterval = Self.loadTimeout
+        loadTask?.cancel()
+        let task = URLSession.shared.dataTask(with: request) { data, response, error in
+            MainActor.assumeIsolated {
+                defer { self.loadTask = nil }
+                if error != nil {
+                    view.image = Self.placeholder
+                    return
+                }
+                guard let data, let image = UIImage(data: data) else {
+                    view.image = Self.placeholder
+                    return
+                }
+                view.image = image
+            }
+        }
+        loadTask = task
+        task.resume()
+    }
+
+    /// Maps the `contentMode` prop string to a `UIView.ContentMode`.
+    private static func contentMode(for mode: String) -> UIView.ContentMode {
+        switch mode {
+        case "fit": .scaleAspectFit
+        case "stretch": .scaleToFill
+        default: .scaleAspectFill
+        }
+    }
+
+    /// Network timeout for an asset fetch, in seconds. The dev server is local,
+    /// so a slow response indicates a real problem rather than latent latency.
+    private static let loadTimeout: TimeInterval = 5
+}
