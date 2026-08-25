@@ -961,3 +961,70 @@ that fails to compile; this blocks the whole-workspace build and transitively
 flux-parity's dependency compile, but does not involve flux-parity code
 (verified by stashing those 3 files and confirming flux-parity is independently
 green: clippy clean + 27/27 tests). flux-ir is out of lane and was not modified.
+
+#### Recently completed (post-FLUX-023, orchestrator-tracked)
+
+The following landed after the FLUX-023 tracking entry above and were not yet
+folded into the per-issue sections. Recorded here so the `[Unreleased]` section
+stays current.
+
+- **FLUX-022 — `flux-cli` (`init` / `dev` / `build`) — DONE** (`ea4a157`).
+  The dev/build entrypoints the docs-site and examples-e2e work depend on.
+  Deviation (logged): added crate deps as `.workspace = true` (minimal,
+  owned-crate, accepted per the manifest-freeze rule).
+
+- **P1 — iOS runtime fixes (dirty-set reconcile + perf) — DONE**
+  (`2d03d78` skip-unchanged updates + lifecycle re-entrancy; `2402b37` dirty-set
+  reconcile on dispatch; `c1407df` cache decoded bytecode + generic signal store;
+  `d2d9182`/`edc4ede` further iOS perf). Reconciler now reconciles only the
+  dirty set on dispatch, reusing the ADR-0027 dependency model.
+
+- **P3 — `flux-ir` arena prop/child hashes + VM control-flow — DONE**
+  (`cb509a7` arena prop/child hashes + if/when/match bytecode emission;
+  `0e3480e` O(1) prop-hash skip bench ≈ 29 µs on identical subtrees). VM now
+  lowers `if`/`when`/`match` with control-flow opcodes (previously a silent
+  compile_handler no-op), closing the gap the parity oracle exposed.
+
+- **P4 — `Image` adapter (Appendix F.8) — DONE**
+  (`8e6c169` Swift `ImageAdapter` → `UIImageView` with HTTP asset load + graceful
+  fallback; `6f26341` Kotlin `ImageAdapter` + registry registration; `a47bd99`
+  register the Swift adapter in the component registry via FLUX-016's bridge).
+
+- **PE-C — codegen indent table — DONE** (`55a24f0`). Replaced per-line
+  `indent.repeat()` with a precomputed table in both codegen backends.
+
+- **PE-D — devserver immutable asset caching — DONE** (`a6ac4f4`). Added
+  `Cache-Control: immutable` + ETag conditional caching to the asset server.
+
+- **PE-E — examples + headless e2e + packaging ADR — DONE** (`e785200`).
+  Added `examples/counter/main.flux` and a headless full-pipeline e2e test that
+  drives `flux-devserver` → wire → host. Recorded the runtime-packaging gap in
+  `docs/adr/ADR-0036-runtime-packaging-gap.md`.
+
+- **FA-DEVSERVER — signal_deps-aware minimal-patch dispatch (ADR-0027 Phase 2,
+  server half) — DONE** (`d68bcca`). `DependencyIndex` (signal → nodes) + minimal
+  `Patch::Update` emission scoped to `dependents[S]`; degrades to coarse frame
+  when `signal_deps` is absent. 32/32 tests green. Flag-gated behind an injected
+  `signal_deps` seam until FA-IRWIRE lands the real field.
+
+- **FA-DOCS — Flux documentation site (Starlight + pnpm) — DONE** (`4129b38`).
+  Single Starlight project, EN/ES i18n (Starlight-native, no Lingui), ADR
+  ingestion from `docs/adr`, Swift/Kotlin `<Tabs>`, and a recorded-dispatch
+  replay `DispatchTracePlayer` (consumes the reconcile-trace-format v1 trace,
+  NOT a fake web compilation). Lives in `website/`.
+
+- **FA-RENDER — host render-mount + library packaging — DONE**
+  (`a412706` iOS: mount reconciled shadow tree to real UIKit views via a
+  `UIViewControllerRepresentable`; `c08fbfa` Android: bind shadow tree to real
+  Compose UI via `AndroidView`, replacing the `Flux host ready` placeholder).
+  This closes the long-standing gap where the reconciler built an internal tree
+  that was never shown on screen. Phase B (library extraction: iOS `FluxHost`
+  SwiftPM target, Android `:host` module) is in flight.
+
+- **ADR renumbering + spec artifacts — DONE** (`380a55c` ADR `ADR-00XX-` prefix
+  normalization via `git mv`; `61ea6df` ADR-0027 signal-node dependency tracking;
+  `e2b7eb2` reconcile-trace-format / wire-signal-deps / reconcile-counters spec
+  artifacts). All cross-references updated.
+
+- **i18n — French locale — DONE** (`252d3dd`). Added `fr` locale + locale-aware
+  root redirect.
