@@ -4,8 +4,8 @@
 //! parser. [`ArenaBuilder`] is a thin, fallible-free front end that accepts
 //! fully-formed [`Node`] inputs and packs them in declaration order.
 
-use flux_syntax::{Child, ComponentId, HandlerId, NodeId, Span};
-use flux_syntax::{NodeKind, Props};
+use flux_syntax::{Child, ComponentId, HandlerId, NodeId, Span, StringId};
+use flux_syntax::{NodeKind, Props, StringTable};
 
 use crate::arena::{IRArena, NodeView};
 use crate::closure::ClosureIR;
@@ -35,6 +35,12 @@ pub struct Node {
 
 /// Front end for packing nodes (and their closures) into an [`IRArena`].
 ///
+/// The builder owns a [`StringTable`] that is threaded into the finished
+/// [`IRArena`] (see [`ArenaBuilder::intern_string`] and
+/// [`ArenaBuilder::finish`]). This closes the "string-table gap" (Gap G3):
+/// identifiers interned during construction remain resolvable from the packed
+/// arena, so downstream wire codec / adapters can recover `Value::Str` text.
+///
 /// # Examples
 ///
 /// ```
@@ -58,6 +64,9 @@ pub struct Node {
 #[derive(Debug, Default)]
 pub struct ArenaBuilder {
     arena: IRArena,
+    /// Caller-supplied interner, threaded into the finished arena so that
+    /// `Value::Str` ids emitted during construction stay resolvable (Gap G3).
+    strings: StringTable,
 }
 
 impl ArenaBuilder {
@@ -77,6 +86,15 @@ impl ArenaBuilder {
         self.arena.add_closure(closure);
     }
 
+    /// Interns `text`, returning its [`StringId`].
+    ///
+    /// The accumulated table is moved into the finished [`IRArena`] by
+    /// [`finish`](Self::finish), so identifiers produced here resolve from
+    /// `IRArena::string_table`.
+    pub fn intern_string(&mut self, text: &str) -> StringId {
+        self.strings.intern(text)
+    }
+
     /// Returns a read-only view of a packed node.
     #[must_use]
     pub fn get(&self, id: NodeId) -> Option<NodeView<'_>> {
@@ -84,9 +102,12 @@ impl ArenaBuilder {
     }
 
     /// Consumes the builder, yielding the packed [`IRArena`].
+    ///
+    /// The interner accumulated via [`intern_string`](Self::intern_string) is
+    /// moved into the arena, closing Gap G3.
     #[must_use]
     pub fn finish(self) -> IRArena {
-        self.arena
+        self.arena.with_string_table(self.strings)
     }
 }
 

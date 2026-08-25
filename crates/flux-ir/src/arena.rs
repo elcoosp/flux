@@ -125,6 +125,17 @@ impl IRArena {
         &self.string_table
     }
 
+    /// Replaces the arena's string table.
+    ///
+    /// Used by [`ArenaBuilder::finish`](crate::builder::ArenaBuilder::finish),
+    /// which threads a caller-supplied interner into the packed tree so that
+    /// every `Value::Str(id)` emitted during lowering resolves against the
+    /// arena (Gap G3 — see `docs/adr/flux018-string-table-gap.md`).
+    pub(crate) fn with_string_table(mut self, table: StringTable) -> Self {
+        self.string_table = table;
+        self
+    }
+
     fn props_of(&self, index: usize) -> Props {
         let start = self.props_offsets[index] as usize;
         let end = self

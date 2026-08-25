@@ -3,9 +3,9 @@
 //! This module walks a [`flux_parser::Ast`] that has already been type-checked
 //! into a [`flux_types::TypedAST`] and emits the packed [`IRArena`] that the
 //! differ and wire codec consume. Every emitted node carries the *same*
-//! [`NodeId`] that the type checker used to key `typed.types`, so downstream
+//! [`flux_syntax::NodeId`] that the type checker used to key `typed.types`, so downstream
 //! code can look up the inferred type for an IR node by ID (ADR-0027 — the
-//! "node-ID bridge").
+//! "node-ID bridge"). The shared identifier type is [`flux_syntax::NodeId`].
 //!
 //! # The ADR-0027 bridge
 //!
@@ -34,7 +34,7 @@ pub use bytecode::{HandlerCompileError, compile_handler};
 pub use error::LoweringError;
 
 use flux_parser::{Ast, Decl, ExprKind};
-use flux_syntax::{Child, ComponentId, NodeKind, Props, StringTable, Value};
+use flux_syntax::{Child, ComponentId, NodeKind, Props, Value};
 use flux_types::TypedAST;
 
 /// Whether `kind` is a UI-producing expression that should become its own
@@ -64,13 +64,13 @@ use ids::{ExprNodeKind, decl_node_id, expr_node_id};
 /// The fully lowered program.
 ///
 /// Returned by [`lower`]; bundles the packed [`IRArena`], the handler closure
-/// table (keyed by [`HandlerId`]), and the per-component [`InstanceRegistry`]
+/// table (keyed by [`flux_syntax::HandlerId`]), and the per-component [`InstanceRegistry`]
 /// that lets the host app preserve state across hot swaps.
 #[derive(Clone, Debug)]
 pub struct LoweredIr {
     /// The packed reactive tree.
     pub arena: IRArena,
-    /// Handler closures, keyed by their [`HandlerId`].
+    /// Handler closures, keyed by their [`flux_syntax::HandlerId`].
     pub closures: std::collections::HashMap<flux_syntax::HandlerId, ClosureIR>,
     /// Live component-instance registry.
     pub instances: InstanceRegistry,
@@ -88,13 +88,13 @@ impl LoweredIr {
 ///
 /// `lower` walks `ast` in declaration order and packs a [`Node`] per
 /// runtime-relevant surface construct. The returned [`LoweredIr::arena`] carries
-/// exactly the [`NodeId`]s the type checker assigned (see the bridge note on
+/// exactly the [`flux_syntax::NodeId`]s the type checker assigned (see the bridge note on
 /// this module), so `typed.types.keys()` and `arena.all_ids()` are the same set
 /// for every node the type checker typed.
 ///
 /// # Errors
 ///
-/// Returns [`LoweringError`] (carrying a [`Span`]) when lowering cannot proceed
+/// Returns [`LoweringError`] (carrying a [`flux_syntax::Span`]) when lowering cannot proceed
 /// on well-typed input — for example a component the type checker typed but
 /// lowering cannot resolve, or a handler whose body uses an unsupported form.
 /// Malformed-*but-typed* input never panics.
@@ -128,8 +128,6 @@ struct Lowerer<'a> {
     name_to_component: std::collections::HashMap<String, ComponentId>,
     /// Next [`ComponentId`] to assign.
     next_component: ComponentId,
-    /// String interning table shared with the arena.
-    strings: StringTable,
     /// All compiled closures, keyed by [`HandlerId`].
     closures: std::collections::HashMap<flux_syntax::HandlerId, ClosureIR>,
     /// Signals owned by the enclosing component, named for handler capture.
@@ -147,7 +145,6 @@ impl<'a> Lowerer<'a> {
             builder: ArenaBuilder::new(),
             name_to_component: std::collections::HashMap::new(),
             next_component: ComponentId::from(0u32),
-            strings: StringTable::new(),
             closures: std::collections::HashMap::new(),
             signal_scope: Vec::new(),
             signal_counter: flux_syntax::SignalId::from(0u32),
@@ -176,8 +173,12 @@ impl<'a> Lowerer<'a> {
     }
 
     /// Interns a string value, returning its [`Value::Str`] handle.
+    ///
+    /// Interning flows through the [`ArenaBuilder`] so the accumulated table is
+    /// carried into the finished arena (Gap G3 — every `Value::Str(id)` stays
+    /// resolvable from `arena.string_table()`).
     fn intern_str(&mut self, text: &str) -> Value {
-        let id = self.strings.intern(text);
+        let id = self.builder.intern_string(text);
         Value::Str(id)
     }
 
@@ -548,7 +549,7 @@ impl<'a> Lowerer<'a> {
     }
 }
 
-/// Maps a prop name to a stable [`PropIdx`] so the wire layout is identical
+/// Maps a prop name to a stable [`flux_syntax::PropIdx`] so the wire layout is identical
 /// across edits (deterministic, not a hash of editable text that could shift).
 #[must_use]
 pub fn prop_index_for_name(name: &str) -> flux_syntax::PropIdx {
