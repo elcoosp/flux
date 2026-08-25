@@ -33,6 +33,10 @@ public class OkHttpTransport(
     private var connected = false
 
     override fun connect(onFrame: (ByteArray) -> Unit) {
+        // Replace any prior listener set (roast fix 1): a previous connect's
+        // listeners are cleared first so pause/resume or re-connect cannot
+        // accumulate duplicate frame sinks and leak sockets.
+        listeners.clear()
         listeners.add(onFrame)
         val request = Request.Builder().url(url).build()
         socket =
@@ -83,34 +87,24 @@ public class OkHttpTransport(
         socket?.close(1000, "host shutdown")
         socket = null
         connected = false
+        // Roast fix 1: drop the listener set so a later connect starts clean and a
+        // lingering frame sink cannot outlive its executor (no duplicate delivery
+        // on resume).
+        listeners.clear()
     }
 
     /** Suspends until the underlying socket reports open (for lifecycle await). */
     public suspend fun awaitOpen() {
         if (connected) return
         suspendCancellableCoroutine { cont ->
-            val probe = Request.Builder().url(url).build()
-            client.newWebSocket(
-                probe,
-                object : WebSocketListener() {
-                    override fun onOpen(
-                        webSocket: WebSocket,
-                        response: Response,
-                    ) {
-                        connected = true
-                        webSocket.close(1000, null)
-                        if (cont.isActive) cont.resume(Unit)
-                    }
-
-                    override fun onFailure(
-                        webSocket: WebSocket,
-                        t: Throwable,
-                        response: Response?,
-                    ) {
-                        if (cont.isActive) cont.resume(Unit)
-                    }
-                },
-            )
+            // Roast fix 4: do NOT open a second probe socket to check the first.
+            // Wait on the real socket's own state; if it is already mid-connect
+            // the `connected` flag flips via onOpen and this coroutine resumes.
+            if (connected) {
+                if (cont.isActive) cont.resume(Unit)
+                return@suspendCancellableCoroutine
+            }
+            cont.invokeOnCancellation { /* no probe socket to tear down */ }
         }
     }
 }

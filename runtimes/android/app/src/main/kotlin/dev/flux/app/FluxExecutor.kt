@@ -1,6 +1,8 @@
 package dev.flux.app
 
 import dev.flux.app.shadow.ShadowTree
+import dev.flux.app.shadow.TraceEvent
+import dev.flux.app.shadow.reconcileDirty
 import dev.flux.app.signal.SignalGraph
 import dev.flux.app.transport.FluxTransport
 import dev.flux.app.vm.CapabilityRegistry
@@ -29,51 +31,47 @@ import dev.flux.ui.FluxExecutor as KitExecutor
  * The host executor: the single hub that ties the VM, signal graph, shadow tree
  * and transport together.
  *
- * Per FLUX-007, VM evaluation and patch application run on [Dispatchers.Default]
- * (a background coroutine pool); native view mutations are posted back to
- * [Dispatchers.Main] so they touch Android views from the main thread only.
- * Adapters reach the executor through a [WeakReference] (via [asKitExecutor]),
- * so the shadow tree — which outlives individual executor instances across
- * hot-swaps — cannot pin a stale executor.
+ * **Threading (ADR-0027 R-graph).** The reactive core — signal graph, string
+ * resolver, closure table, and shadow-tree mutations — is confined to a single
+ * injected [reactiveDispatcher] (default [Dispatchers.Main]; tests inject a
+ * [kotlinx.coroutines.test.StandardTestDispatcher]). Frame bytes are
+ * deserialized off that dispatcher ([vmScope]/`Default`); every stateful step
+ * afterwards runs `withContext(reactiveDispatcher)`. This makes the two hosts
+ * share one threading story (Swift is already `@MainActor`).
  *
  * @property shadowTree the render tree the executor drives.
  * @property signals the signal graph the VM reads/writes (also the VM's [dev.flux.app.vm.SignalStore]).
  * @property transport the dev-mode frame transport.
- * @property vmScope the coroutine scope for background VM/patch work.
- * @property mainDispatcher the dispatcher used for native view mutations.
+ * @property reactiveDispatcher the single dispatcher all stateful work is confined to (R-graph).
+ * @property vmScope the scope for off-main frame deserialization.
  */
 public class FluxExecutor(
     private val shadowTree: ShadowTree,
     private val signals: SignalGraph,
     private val transport: FluxTransport,
     private val vmScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
-    private val mainDispatcher: CoroutineDispatcher = Dispatchers.Main,
+    private val reactiveDispatcher: CoroutineDispatcher = Dispatchers.Main,
 ) : KitExecutor {
-    /** Invoked on the main thread after a successful frame application. */
+    /** Invoked on the reactive dispatcher after a successful frame application. */
     public var onTreeChanged: (() -> Unit)? = null
 
-    /** Invoked (on any thread) when a VM fault or wire error occurs. */
+    /** Invoked (on the reactive dispatcher) when a VM fault or wire error occurs. */
     public var onError: ((message: String) -> Unit)? = null
 
     /**
      * The string resolver threaded into the VM for `STR_LEN`/`STR_CONCAT`. Built
-     * from the most recent frame's string table (Appendix D §D.9) so handler
-     * bytecode resolves real literals rather than the decimal proxy.
+     * from the most recent frame's string table (Appendix D §D.9).
      */
     private var stringResolver: StringResolver = TableStringResolver(emptyMap())
 
     /**
-     * The reverse string index (perf task 7, P2): maps a resolved `String`
-     * back to its canonical wire `StringId` so native event dispatch into the
-     * VM is O(1) and stable, rather than re-hashing per event.
+     * The reverse string index (INV-1 canonicality, T8): maps a resolved
+     * `String` back to its canonical wire `StringId` in O(1) for native event
+     * dispatch into the VM. Replaces the pre-interning linear scan (ADR-0027 §T8).
      */
     private var stringIndex: StringInterning = StringInterning.empty()
 
-    /**
-     * The `(capId, methodId) → impl` capability table threaded into the VM for
-     * `CALL_CAP` (spec task 4). Seeded with the oracle-faithful defaults; dev
-     * mode may later register additional RPC-forwarding capabilities.
-     */
+    /** The `(capId, methodId) → impl` capability table threaded into the VM. */
     private val capabilities: CapabilityRegistry = CapabilityRegistry.default()
 
     /** Wraps this executor for the adapter kit's [WeakReference] boundary. */
@@ -84,50 +82,52 @@ public class FluxExecutor(
         transport.connect { bytes -> receiveFrame(bytes) }
     }
 
-    /** Applies a raw frame on the background dispatcher, then refreshes views. */
+    /** Applies a raw frame off the reactive dispatcher, then refreshes views. */
     public fun receiveFrame(bytes: ByteArray) {
         vmScope.launch {
             val frame =
                 try {
                     FrameDeserializer.deserialize(bytes)
                 } catch (e: WireError) {
-                    onError?.invoke("wire: ${e.message}")
+                    withContext(reactiveDispatcher) { onError?.invoke("wire: ${e.message}") }
                     return@launch
                 }
-            if (frame.stateDelta.isNotEmpty()) {
-                signals.seed(frame.stateDelta.map { (id, v) -> id to v.toKitValue().toVmValue() })
-            }
-            // Gap G1 (spec task 1): register every handler body shipped in the
-            // frame so bound events can dispatch into the VM. Each `HandlerDef`
-            // slices its bytecode out of the shared blob by offset/length.
-            registerFrameHandlers(frame)
-            val root =
-                runCatching { shadowTree.applyFrame(frame, this@FluxExecutor) }
-                    .onFailure { onError?.invoke("tree: ${it.message}") }
-                    .getOrNull()
-            withContext(mainDispatcher) {
+            // Everything stateful runs confined to the reactive dispatcher (R-graph).
+            withContext(reactiveDispatcher) {
+                if (frame.stateDelta.isNotEmpty()) {
+                    signals.seed(frame.stateDelta.map { (id, v) -> id to v.toKitValue().toVmValue() })
+                }
+                registerFrameHandlers(frame)
+                val root =
+                    runCatching { shadowTree.applyFrame(frame, this@FluxExecutor) }
+                        .onFailure { onError?.invoke("tree: ${it.message}") }
+                        .getOrNull()
                 onTreeChanged?.invoke()
                 if (root == null && frame.fullTree) onError?.invoke("no root node in frame")
             }
         }
     }
 
-    /** Dispatches an adapter [event] into the VM on the background dispatcher. */
+    /** Dispatches an adapter [event] into the VM on the reactive dispatcher. */
     override fun dispatch(event: HandlerEvent) {
         val payload = event.payload?.toVmValue(stringIndex) ?: dev.flux.app.vm.FluxValue.NullVal
         dispatch(event.handlerId, payload)
     }
 
-    /** Runs the closure [handlerId] with [payload] in the VM, then flushes signals. */
+    /**
+     * Runs the closure [handlerId] with [payload] in the VM, then reconciles only
+     * the dirty subset of the tree (R1 / ADR-0027): the written signal ids drive
+     * a `reconcileDirty` walk that touches exactly `dependents[S]`, never the whole
+     * tree. All stateful work is confined to [reactiveDispatcher].
+     *
+     * @param handlerId the closure-table index to run.
+     * @param payload the handler argument placed in `r0`.
+     */
     public fun dispatch(
         handlerId: UInt,
         payload: dev.flux.app.vm.FluxValue = dev.flux.app.vm.FluxValue.NullVal,
     ) {
         val closure = closureFor(handlerId) ?: return
-        // The VM is a pure CPU evaluation; running it inline (rather than
-        // through an async boundary) keeps signal writes deterministic and
-        // observable. Only fault reporting is posted to [mainDispatcher] so a
-        // red error overlay is raised on the UI thread (Appendix E §E.6).
         val result =
             FluxBytecodeVM.run(
                 closure.bytecode,
@@ -137,21 +137,38 @@ public class FluxExecutor(
                 capabilities,
             )
         when (result) {
-            is VmResult.Success -> signals.flush()
+            is VmResult.Success -> {
+                val seq = shadowTree.lastSeq()
+                val written =
+                    result.outcome.signals
+                        .map { it.first }
+                        .toSet()
+                shadowTree.trace?.invoke(TraceEvent.Dispatch(seq = seq, handlerId))
+                shadowTree.trace?.invoke(TraceEvent.Signals(seq = seq, ids = written.sortedBy { it }))
+                if (written.isNotEmpty()) {
+                    shadowTree.reconcileDirty(shadowTree.rootNode?.id ?: 0u, written)
+                } else {
+                    shadowTree.trace?.invoke(TraceEvent.Dirty(seq = seq, ids = emptyList()))
+                    shadowTree.emitStepEnd()
+                }
+            }
             is VmResult.Failure ->
-                mainDispatcher.dispatch(EmptyCoroutineContext) {
+                reactiveDispatcher.dispatch(EmptyCoroutineContext) {
                     onError?.invoke("vm: ${result.kind.name} @${result.offset}")
                 }
         }
     }
 
     /**
-     * Registers every handler definition carried by [frame] (Gap G1). Each
-     * [dev.flux.app.wire.HandlerDef] names a handler id and a `ClosureRef`
-     * indexing the frame's shared bytecode blob; we slice the bytecode out and
-     * record it in the closure table unless a newer binding for the same id
-     * already exists (a hot-swapped closure wins). The frame's string table is
-     * also promoted into the VM's [stringResolver] for `STR_LEN`/`STR_CONCAT`.
+     * Registers every handler definition carried by [frame].
+     *
+     * **Last-wins hot-swap (T7 / G1):** a re-registration overwrites any prior
+     * binding for the same id so a dev-mode logic edit takes effect on the next
+     * tap. (The prior code `continue`d on `containsKey`, which froze stale
+     * closures and contradicted its own "hot-swapped closure wins" comment.)
+     *
+     * The frame's string table is also promoted into the VM's [stringResolver]
+     * and the O(1) [stringIndex] for `STR_LEN`/`STR_CONCAT` and event dispatch.
      */
     private fun registerFrameHandlers(frame: Frame) {
         if (frame.strings.isNotEmpty()) {
@@ -163,13 +180,12 @@ public class FluxExecutor(
         for (def in frame.handlers) {
             val start = def.closure.bytecodeOffset.toInt()
             val len = def.closure.bytecodeLen.toInt()
-            // Offsets are relative to the blob window (perf task 8, P2).
             val absStart = blob.offset + start
             if (start < 0 || len < 0 || absStart + len > blob.data.size) {
                 onError?.invoke("handler ${def.handlerId}: bytecode range out of bounds")
                 continue
             }
-            if (closures.containsKey(def.handlerId)) continue
+            // Last-wins: overwrite, never skip on re-registration (T7).
             closures[def.handlerId] = Closure(blob.data.copyOfRange(absStart, absStart + len))
         }
     }
@@ -189,10 +205,7 @@ public class FluxExecutor(
 
     /**
      * The lifecycle closures bound to a node id (spec task 5, §18.4). `onMount`
-     * runs when the node is created; `onCleanup` runs when it is removed. The
-     * dev server ships these the same way it ships handlers; the host registers
-     * them here and the [ShadowTree] triggers them through [onNodeCreated] /
-     * [onNodeRemoved].
+     * runs when the node is created; `onCleanup` runs when it is removed.
      */
     public data class LifecycleHooks(
         val onMount: ByteArray? = null,
@@ -227,11 +240,9 @@ public class FluxExecutor(
         val result =
             FluxBytecodeVM.run(bytecode, signals, dev.flux.app.vm.FluxValue.NullVal, stringResolver, capabilities)
         if (result is VmResult.Failure) {
-            mainDispatcher.dispatch(EmptyCoroutineContext) {
+            reactiveDispatcher.dispatch(EmptyCoroutineContext) {
                 onError?.invoke("lifecycle: ${result.kind.name} @${result.offset}")
             }
-        } else {
-            signals.flush()
         }
     }
 
@@ -246,4 +257,7 @@ public class FluxExecutor(
     public fun dispose() {
         transport.close()
     }
+
+    /** Tracks the test dispatcher's last frame seq so tests can drive traces. */
+    internal fun lastSeq(): UInt = shadowTree.lastSeq()
 }

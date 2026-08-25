@@ -4,15 +4,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import dev.flux.app.shadow.ShadowTree
-import dev.flux.app.signal.SignalGraph
-import dev.flux.app.transport.FluxTransport
 
 /**
  * The Compose entry point for the Flux host (FLUX-007).
@@ -30,25 +28,20 @@ import dev.flux.app.transport.FluxTransport
  */
 @Composable
 @Suppress("ktlint:standard:function-naming")
-public fun FluxRoot(
-    shadowTree: ShadowTree,
-    signals: SignalGraph,
-    transport: FluxTransport,
-) {
+public fun FluxRoot(session: FluxSession) {
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var treeReady by remember { mutableStateOf(false) }
 
-    val executor =
-        remember(shadowTree, signals, transport) {
-            FluxExecutor(shadowTree, signals, transport).also { ex ->
-                ex.onTreeChanged = { treeReady = shadowTree.rootNode != null }
-                ex.onError = { errorMessage = it }
-            }
-        }
-
-    androidx.compose.runtime.DisposableEffect(executor) {
-        executor.start()
-        onDispose { executor.dispose() }
+    val executor = session.executor
+    DisposableEffect(executor) {
+        // Roast fix 2: actually (re)bind the executor to the transport on (re)compose
+        // instead of an empty resume lambda. `start()` is idempotent, so rotation /
+        // recomposition rebinds without duplicating listeners (OkHttpTransport clears
+        // them on connect).
+        session.start()
+        executor.onTreeChanged = { treeReady = session.shadowTree.rootNode != null }
+        executor.onError = { errorMessage = it }
+        onDispose { /* session is retained by the ViewModel; not disposed here */ }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
