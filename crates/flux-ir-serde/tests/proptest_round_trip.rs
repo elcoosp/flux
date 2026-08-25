@@ -110,7 +110,7 @@ proptest! {
             .into_iter()
             .map(|(id, s)| (StringId::from(id), s))
             .collect();
-        let frame = Frame::delta(0, 0, &patches, &deltas, &[]);
+        let frame = Frame::delta(0, 0, &patches, &deltas, &[], &[]);
         let bytes = frame.to_bytes();
         let decoded = Frame::from_delta_bytes(&bytes).expect("delta decode");
         prop_assert_eq!(

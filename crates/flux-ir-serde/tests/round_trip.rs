@@ -233,6 +233,7 @@ fn init_frame_round_trips() {
         &[(0u32, "src/main.flux".to_string())],
         &table,
         &[],
+        &[],
     );
     let bytes = frame.to_bytes();
     let decoded = Frame::from_init_bytes(&bytes).expect("init decodes");
@@ -274,6 +275,7 @@ fn delta_frame_round_trips() {
         0,
         &patches,
         &[(StringId::from(1u32), "hello".to_string())],
+        &[],
         &[],
     );
     let bytes = frame.to_bytes();
@@ -365,6 +367,7 @@ fn init_frame_carries_handlers_round_trip() {
         &[(0u32, "src/main.flux".to_string())],
         &table,
         &closures,
+        &[],
     );
     let bytes = frame.to_bytes();
     let decoded = Frame::from_init_bytes(&bytes).expect("init decodes with handlers");
@@ -398,7 +401,7 @@ fn init_frame_carries_handlers_round_trip() {
 fn delta_frame_carries_handlers_round_trip() {
     let patches = vec![Patch::Remove { id: 7 }];
     let closures = sample_closures();
-    let frame = Frame::delta(0x1234, 0, &patches, &[], &closures);
+    let frame = Frame::delta(0x1234, 0, &patches, &[], &closures, &[]);
     let bytes = frame.to_bytes();
     let decoded = Frame::from_delta_bytes(&bytes).expect("delta decodes with handlers");
     assert_eq!(decoded.closures.len(), 2);
@@ -409,7 +412,7 @@ fn delta_frame_carries_handlers_round_trip() {
     );
     // The closure bytecode must index a stable offset in the shared blob, so
     // serialization is byte-deterministic.
-    let again = Frame::delta(0x1234, 0, &patches, &[], &closures).to_bytes();
+    let again = Frame::delta(0x1234, 0, &patches, &[], &closures, &[]).to_bytes();
     assert_eq!(again, bytes);
 }
 
@@ -417,7 +420,7 @@ fn delta_frame_carries_handlers_round_trip() {
 fn empty_handler_section_is_zero_length_blob() {
     // A frame with no closures must still encode a valid (empty) handler
     // section so the decoder's blob read never underflows.
-    let frame = Frame::delta(0, 0, &[Patch::Remove { id: 1 }], &[], &[]);
+    let frame = Frame::delta(0, 0, &[Patch::Remove { id: 1 }], &[], &[], &[]);
     let bytes = frame.to_bytes();
     let decoded = Frame::from_delta_bytes(&bytes).unwrap();
     assert!(decoded.closures.is_empty());
@@ -451,6 +454,7 @@ fn init_frame_under_20kb() {
         &[(0u32, "src/main.flux".to_string())],
         &table,
         &[],
+        &[],
     );
     let bytes = frame.to_bytes();
     assert!(
@@ -458,4 +462,93 @@ fn init_frame_under_20kb() {
         "Init frame is {} bytes, budget is 20480",
         bytes.len()
     );
+}
+
+#[test]
+fn init_frame_signal_meta_round_trips() {
+    use flux_ir_serde::NodeSignalMeta;
+
+    let root = flux_syntax::NodeRef {
+        id: 1,
+        kind: NodeKind::Primitive,
+        component_id: 1,
+        props: Props::default(),
+        children: vec![],
+        handlers: vec![],
+        span: Span::new(0, 0, 0),
+    };
+    let closure = ClosureRef {
+        hash: 0xABCD,
+        bytecode_offset: 0,
+        bytecode_len: 4,
+        captured_signals: vec![SignalId::from(2u32)],
+        span: Span::new(0, 0, 0),
+    };
+    let signal_meta = vec![NodeSignalMeta {
+        node_id: flux_syntax::NodeId::from(1u32),
+        deps: vec![SignalId::from(2u32), SignalId::from(3u32)],
+        thunk: Some(closure),
+        layout: vec![0u16, 1u16],
+    }];
+    let frame = Frame::init(&root, &[], &[], &StringTable::new(), &[], &signal_meta);
+    let bytes = frame.to_bytes();
+    let decoded = Frame::from_init_bytes(&bytes).expect("decode Init with signal_meta");
+    assert_eq!(
+        decoded.signal_meta.len(),
+        1,
+        "one node's metadata round-tripped"
+    );
+    let meta = &decoded.signal_meta[0];
+    assert_eq!(meta.node_id, flux_syntax::NodeId::from(1u32));
+    assert_eq!(
+        meta.deps,
+        vec![SignalId::from(2u32), SignalId::from(3u32)],
+        "deps are sorted/unique and round-trip"
+    );
+    let thunk = meta.thunk.as_ref().expect("thunk present");
+    assert_eq!(thunk.bytecode_len, 4);
+    assert_eq!(thunk.captured_signals, vec![SignalId::from(2u32)]);
+    assert_eq!(meta.layout, vec![0u16, 1u16]);
+}
+
+#[test]
+fn delta_frame_signal_meta_requires_flag() {
+    use flux_ir_serde::{FLAG_NODE_HAS_SIGNAL_DEPS, NodeSignalMeta};
+
+    let patch = Patch::Replace {
+        id: 1,
+        node: flux_syntax::NodeRef {
+            id: 1,
+            kind: NodeKind::Primitive,
+            component_id: 1,
+            props: Props::default(),
+            children: vec![],
+            handlers: vec![],
+            span: Span::new(0, 0, 0),
+        },
+    };
+    // Without the flag, the decoder must not read a `signal_meta` section even
+    // though the encoder skipped it — back-compatible decode.
+    let frame = Frame::delta(1, 0, std::slice::from_ref(&patch), &[], &[], &[]);
+    let decoded = Frame::from_delta_bytes(&frame.to_bytes()).expect("decode delta");
+    assert!(decoded.signal_meta.is_empty(), "no flag ⇒ no signal_meta");
+
+    // With the flag, the section is emitted and round-trips.
+    let signal_meta = vec![NodeSignalMeta {
+        node_id: flux_syntax::NodeId::from(1u32),
+        deps: vec![SignalId::from(5u32)],
+        thunk: None,
+        layout: vec![],
+    }];
+    let flagged = Frame::delta(
+        2,
+        FLAG_NODE_HAS_SIGNAL_DEPS,
+        &[patch],
+        &[],
+        &[],
+        &signal_meta,
+    );
+    let decoded = Frame::from_delta_bytes(&flagged.to_bytes()).expect("decode flagged delta");
+    assert_eq!(decoded.signal_meta.len(), 1);
+    assert_eq!(decoded.signal_meta[0].deps, vec![SignalId::from(5u32)]);
 }

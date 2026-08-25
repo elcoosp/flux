@@ -20,12 +20,32 @@ use flux_parser::{
     BinOp, Block, BlockItem, Expr, ExprKind, MatchArm, MatchPattern, MatchPatternKind,
 };
 use flux_syntax::opcode::raw;
-use flux_syntax::{SignalId, Span, Value};
+use flux_syntax::{PropIdx, SignalId, Span, StringId, Value};
 
 use crate::lower::error::LoweringError;
 
+/// A string interner callback: maps a literal's concatenated text to its
+/// content-addressed [`StringId`]. The emitter stays decoupled from the arena
+/// owner by taking this rather than a concrete `StringTable` borrow.
+type StringInterner<'a> = &'a mut dyn FnMut(&str) -> StringId;
+
 /// A signal name paired with its assigned [`SignalId`].
 type SignalScope = Vec<(String, SignalId)>;
+
+/// Content-addressed hash of a thunk/handler closure body, used for
+/// `ClosureRef` interning. Mirrors `flux_ir_serde::hash_closure` so the two
+/// crates agree on identity; kept local to avoid a dependency cycle.
+#[must_use]
+pub(crate) fn hash_closure_placeholder(bytecode: &[u8], captured: &[flux_syntax::SignalId]) -> u64 {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(bytecode);
+    for id in captured {
+        hasher.update(&id.to_le_bytes());
+    }
+    let mut digest = [0_u8; 8];
+    digest.copy_from_slice(&hasher.finalize().as_bytes()[..8]);
+    u64::from_le_bytes(digest)
+}
 
 /// Compiles `body` to `(bytecode, captured_signals)`.
 ///
@@ -55,8 +75,9 @@ pub fn compile_handler(
     body: &Block,
     scope: &SignalScope,
     span: Span,
+    str_interner: StringInterner<'_>,
 ) -> Result<(Vec<u8>, Vec<SignalId>), HandlerCompileError> {
-    let mut emitter = Emitter::new(scope);
+    let mut emitter = Emitter::new(scope, str_interner);
     for item in &body.items {
         match item {
             BlockItem::State(decl) => {
@@ -86,6 +107,176 @@ pub fn compile_handler(
     emitter.finish()
 }
 
+/// Result of compiling a node's prop expressions into a thunk (ADR-0027 T14):
+/// `(bytecode, captured_signal_ids, prop_layout)`. See [`compile_prop_thunk`].
+pub(crate) type PropThunk = Result<(Vec<u8>, Vec<SignalId>, Vec<u16>), HandlerCompileError>;
+
+/// Compiles a node's prop expressions into a prop thunk (ADR-0027 T14).
+///
+/// The thunk allocates an `ALLOC_RECORD` of `props.len()` fields into `r1`,
+/// fills each field `i` (in `props` order) with the value of prop `i`, and
+/// `HALT`s — so `r1` holds the record of prop values at exit (the thunk
+/// contract). `prop_layout` maps record-field position → prop index in the
+/// same order.
+///
+/// The returned `captured` signal ids are exactly the `READ_SIGNAL` operands
+/// the thunk emits — the single source of truth for the node's `signal_deps`
+/// (T13). The caller must attach the same `captured` set as `signal_deps`.
+///
+/// # Errors
+///
+/// Returns [`HandlerCompileError`] when a prop value uses a form the MLP
+/// bytecode envelope cannot express (e.g. a capability call, a string
+/// assignment). Callers fall back to emitting `signal_deps` from a plain walk
+/// and shipping no thunk in that case.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// // The thunk shape is exercised in the crate's integration tests
+/// // (`crates/flux-ir/tests/lower.rs`): a node with props `text`, `width`
+/// // compiles to a closure whose bytecode leaves an `ALLOC_RECORD` of prop
+/// // values in register `r1` at `HALT`.
+/// let _ = 0u32;
+/// ```
+pub(crate) fn compile_prop_thunk(
+    props: &[(PropIdx, &Expr)],
+    scope: &SignalScope,
+    str_interner: StringInterner<'_>,
+) -> PropThunk {
+    let mut emitter = Emitter::for_thunk(scope, str_interner);
+    let count = props.len() as u16;
+    emitter.emit_alloc_record(1, count);
+    let mut layout = Vec::with_capacity(props.len());
+    for (position, (prop_idx, expr)) in props.iter().enumerate() {
+        let value_reg = emitter.compile_value(expr)?;
+        emitter.emit_set_field(1, position as u16, value_reg);
+        layout.push(*prop_idx);
+    }
+    let (code, captured) = emitter.finish()?;
+    Ok((code, captured, layout))
+}
+
+/// Walks `exprs`, collecting the distinct `READ_SIGNAL` ids that appear as
+/// signal references (identifiers resolving to a signal in `scope`).
+///
+/// This is the fallback source of a node's `signal_deps` (T13) for nodes whose
+/// prop/control expressions cannot be compiled into a thunk (see
+/// [`compile_prop_thunk`]). It never errors and never allocates registers.
+#[must_use]
+pub(crate) fn collect_read_signals(exprs: &[&Expr], scope: &SignalScope) -> Vec<SignalId> {
+    let mut found: Vec<SignalId> = Vec::new();
+    for expr in exprs {
+        collect_in_expr(expr, scope, &mut found);
+    }
+    found.sort_unstable();
+    found.dedup();
+    found
+}
+
+/// Recursively gathers signal ids referenced by name in `expr`.
+fn collect_in_expr(expr: &Expr, scope: &SignalScope, found: &mut Vec<SignalId>) {
+    match &expr.kind {
+        ExprKind::Ident(ident) => {
+            if let Some((_, id)) = scope.iter().find(|(n, _)| n == &ident.name) {
+                if !found.contains(id) {
+                    found.push(*id);
+                }
+            }
+        }
+        ExprKind::Binary { lhs, rhs, .. } => {
+            collect_in_expr(lhs, scope, found);
+            collect_in_expr(rhs, scope, found);
+        }
+        ExprKind::If {
+            cond,
+            then_block,
+            else_branch,
+        } => {
+            collect_in_expr(cond, scope, found);
+            collect_in_block(then_block, scope, found);
+            if let Some(other) = else_branch {
+                collect_in_expr(other, scope, found);
+            }
+        }
+        ExprKind::When {
+            cond,
+            then_block,
+            otherwise,
+        } => {
+            collect_in_expr(cond, scope, found);
+            collect_in_block(then_block, scope, found);
+            if let Some(block) = otherwise {
+                collect_in_block(block, scope, found);
+            }
+        }
+        ExprKind::Match { scrutinee, arms } => {
+            collect_in_expr(scrutinee, scope, found);
+            for arm in arms {
+                collect_in_expr(&arm.body, scope, found);
+            }
+        }
+        ExprKind::Call {
+            args,
+            trailing,
+            callee,
+        } => {
+            collect_in_expr(callee, scope, found);
+            for arg in args {
+                collect_in_expr(arg.value(), scope, found);
+            }
+            if let Some(block) = trailing {
+                collect_in_block(block, scope, found);
+            }
+        }
+        ExprKind::Record { fields, .. } => {
+            for (_, field_expr) in fields {
+                collect_in_expr(field_expr, scope, found);
+            }
+        }
+        ExprKind::List(items) => {
+            for item in items {
+                collect_in_expr(item, scope, found);
+            }
+        }
+        ExprKind::Field { base, .. } => collect_in_expr(base, scope, found),
+        ExprKind::Let { value: Some(v), .. } => collect_in_expr(v, scope, found),
+        ExprKind::Assign { value, .. } => collect_in_expr(value, scope, found),
+        _ => {}
+    }
+}
+
+/// Collects signal references inside a block body.
+fn collect_in_block(block: &flux_parser::Block, scope: &SignalScope, found: &mut Vec<SignalId>) {
+    for item in &block.items {
+        match item {
+            flux_parser::BlockItem::Expr(expr) => collect_in_expr(expr, scope, found),
+            flux_parser::BlockItem::State(decl) => collect_in_expr(&decl.init, scope, found),
+            _ => {}
+        }
+    }
+}
+
+/// Concatenates a string-literal's parts into a single text buffer, mirroring
+/// the wire/codegen convention (interpolations render as their `{…}` source
+/// placeholder, since the runtime re-evaluates them). The thunk's
+/// `LOAD_STR_CONST` interns this exact text, so it must match the
+/// [`Value::Str`] the host resolves against `arena.string_table()`.
+fn concat_str(parts: &[flux_parser::StrPart]) -> String {
+    let mut text = String::new();
+    for part in parts {
+        match part {
+            flux_parser::StrPart::Text(t) => text.push_str(t),
+            // Interpolations are runtime-evaluated; we keep the source shape
+            // faithful so the same text interns to the same `StringId`.
+            flux_parser::StrPart::Interp(_) => text.push_str("{…}"),
+            #[allow(unreachable_patterns)]
+            _ => text.push_str("{…}"),
+        }
+    }
+    text
+}
+
 /// Bytecode emitter: walks expressions, appends raw opcode bytes, and records
 /// captured signal IDs.
 struct Emitter<'a> {
@@ -93,16 +284,38 @@ struct Emitter<'a> {
     code: Vec<u8>,
     captured: Vec<SignalId>,
     reg: u8,
+    /// Interns a string literal, returning its content-addressed [`StringId`].
+    /// The type is a `dyn FnMut` so the emitter stays decoupled from the arena
+    /// owner; callers supply `|s| self.intern_str(s).as_str_id()` (the
+    /// [`Value::Str`] carries the same `StringId` the host resolves).
+    str_interner: StringInterner<'a>,
 }
 
 impl<'a> Emitter<'a> {
-    fn new(scope: &'a SignalScope) -> Self {
+    fn new(scope: &'a SignalScope, str_interner: StringInterner<'a>) -> Self {
         Self {
             scope,
             code: Vec::new(),
             captured: Vec::new(),
             // r0 = payload, r15 = gas; start allocating at r1.
             reg: 1,
+            str_interner,
+        }
+    }
+
+    /// Creates an emitter for a prop thunk (ADR-0027 T14).
+    ///
+    /// A thunk's `r1` holds the `ALLOC_RECORD` of prop values at `HALT`, so
+    /// value registers must not clobber `r1`. We therefore allocate working
+    /// registers from `r2` upward and emit the record into `r1` explicitly via
+    /// [`emit_alloc_record`].
+    fn for_thunk(scope: &'a SignalScope, str_interner: StringInterner<'a>) -> Self {
+        Self {
+            scope,
+            code: Vec::new(),
+            captured: Vec::new(),
+            reg: 2,
+            str_interner,
         }
     }
 
@@ -118,6 +331,22 @@ impl<'a> Emitter<'a> {
         r
     }
 
+    /// Emits `ALLOC_RECORD dst, count` — allocates a record with `count` fields
+    /// (all `Null` initially), used as the thunk's result container.
+    fn emit_alloc_record(&mut self, dst: u8, count: u16) {
+        self.code.push(raw::ALLOC_RECORD);
+        self.code.push(dst);
+        self.code.extend_from_slice(&count.to_le_bytes());
+    }
+
+    /// Emits `SET_FIELD dst, idx, src` — writes `src` into field `idx` of the
+    /// record in `dst` (Appendix E §E.1: `REG_U16_REG`, 4 operand bytes).
+    fn emit_set_field(&mut self, dst: u8, idx: u16, src: u8) {
+        self.code.push(raw::SET_FIELD);
+        self.code.push(dst);
+        self.code.extend_from_slice(&idx.to_le_bytes());
+        self.code.push(src);
+    }
     fn signal_of(&mut self, name: &str, span: Span) -> Result<SignalId, HandlerCompileError> {
         match self.scope.iter().find(|(n, _)| n == name) {
             Some((_, id)) => {
@@ -479,6 +708,16 @@ impl<'a> Emitter<'a> {
                 self.code.push(u8::from(*b));
                 Ok(r)
             }
+            ExprKind::Str(parts) => {
+                let text = concat_str(parts);
+                let id = (self.str_interner)(&text);
+                let r = self.alloc_reg();
+                // LOAD_STR_CONST dst(u8), str_id(u32)
+                self.code.push(raw::LOAD_STR_CONST);
+                self.code.push(r);
+                self.code.extend_from_slice(&id.to_le_bytes());
+                Ok(r)
+            }
             ExprKind::Ident(ident) => {
                 let id = self.signal_of(&ident.name, ident.span)?;
                 let r = self.alloc_reg();
@@ -585,7 +824,7 @@ mod tests {
     use super::*;
     use flux_parser::{BinOp, Block, BlockItem, Expr, ExprKind, Ident};
     use flux_syntax::opcode::raw;
-    use flux_syntax::{SignalId, Span, Value};
+    use flux_syntax::{SignalId, Span, StringTable, Value};
     use flux_vm_ref::{InMemorySignals, SignalStore, run};
 
     fn span() -> Span {
@@ -674,8 +913,10 @@ mod tests {
             span: span(),
         };
 
-        let (bytecode, captured) =
-            compile_handler(&body, &count_scope(), span()).expect("compiles");
+        let (bytecode, captured) = compile_handler(&body, &count_scope(), span(), &mut |_s| {
+            StringTable::new().intern(_s)
+        })
+        .expect("compiles");
         assert!(
             captured.contains(&SignalId::from(1u32)),
             "count is captured"
@@ -764,7 +1005,10 @@ mod tests {
             span: span(),
         };
 
-        let (bytecode, _) = compile_handler(&body, &scope, span()).expect("compiles match");
+        let (bytecode, _) = compile_handler(&body, &scope, span(), &mut |_s| {
+            StringTable::new().intern(_s)
+        })
+        .expect("compiles match");
         let match_tags = bytecode.iter().filter(|&&b| b == raw::MATCH_TAG).count();
         assert_eq!(match_tags, 2, "one MATCH_TAG per arm in {bytecode:?}");
 
@@ -819,7 +1063,9 @@ mod tests {
             })],
             span: span(),
         };
-        let result = compile_handler(&body, &count_scope(), span());
+        let result = compile_handler(&body, &count_scope(), span(), &mut |_s| {
+            StringTable::new().intern(_s)
+        });
         assert!(
             result.is_err(),
             "out-of-envelope handler must error, not silently no-op"

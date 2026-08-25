@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use flux_ir::{IRArena, LoweredIr, lower};
-use flux_ir_serde::{Frame, InitFrame};
+use flux_ir_serde::{Frame, InitFrame, NodeSignalMeta};
 use flux_parser::Ast;
 use flux_syntax::{FileId, Patch};
 
@@ -155,21 +155,42 @@ impl Pipeline {
         self.rebuild_index();
     }
 
-    /// Rebuilds the reverse index from the injected `signal_deps`, if any.
+    /// Rebuilds the reverse index from the lowered tree's real `signal_deps`
+    /// (FA-IRWIRE T13), or from the injected set when one was supplied via
+    /// [`set_signal_deps`](Self::set_signal_deps) (legacy / test hook). When no
+    /// dependency data is available the index is cleared and the server
+    /// degrades to coarse-frame behaviour.
     fn rebuild_index(&mut self) {
-        match &self.signal_deps {
-            Some(deps) => {
-                self.index.rebuild(deps);
-                tracing::debug!(
-                    edges = self.index.edge_count(),
-                    active = self.index.is_active(),
-                    "rebuilt signal→node dependency index"
-                );
-            }
-            None => {
-                self.index = DependencyIndex::default();
-            }
+        // Prefer the injected set (test harness / file-watch path); otherwise
+        // derive from the retained lowered tree's per-node `signal_deps_of`.
+        if let Some(deps) = &self.signal_deps {
+            self.index.rebuild(deps);
+        } else if let Some(last) = &self.last_good {
+            let deps: Vec<NodeSignalDeps> = last
+                .arena
+                .all_ids()
+                .filter_map(|id| {
+                    let deps = last.arena.signal_deps_of(id);
+                    if deps.is_empty() {
+                        None
+                    } else {
+                        Some(NodeSignalDeps {
+                            id,
+                            signal_deps: deps.to_vec(),
+                        })
+                    }
+                })
+                .collect();
+            self.index.rebuild(&deps);
+        } else {
+            self.index = DependencyIndex::default();
+            return;
         }
+        tracing::debug!(
+            edges = self.index.edge_count(),
+            active = self.index.is_active(),
+            "rebuilt signal→node dependency index"
+        );
     }
 
     /// Handles a host dispatch report, returning the minimal `Delta` frame to
@@ -233,6 +254,7 @@ impl Pipeline {
             patches,
             &strings,
             &closures,
+            &[],
         )
         .to_bytes()
     }
@@ -299,6 +321,7 @@ impl Pipeline {
         self.last_good = Some(LoweredIr {
             arena,
             closures: closures.iter().map(|c| (c.id, c.clone())).collect(),
+            prop_thunks: std::collections::HashMap::new(),
             instances: flux_ir::InstanceRegistry::new(),
         });
         self.last_sources = sources;
@@ -396,8 +419,15 @@ impl Pipeline {
     fn build_init(&mut self, arena: &IRArena, closures: &[flux_ir::ClosureIR]) -> Vec<u8> {
         let root = root_node(arena);
         let source_map = self.source_map();
-        let mut frame: InitFrame =
-            Frame::init(&root, &[], &source_map, arena.string_table(), closures);
+        let signal_meta = signal_meta_for(arena);
+        let mut frame: InitFrame = Frame::init(
+            &root,
+            &[],
+            &source_map,
+            arena.string_table(),
+            closures,
+            &signal_meta,
+        );
         self.seq = self.seq.wrapping_add(1);
         frame.seq = self.seq;
         frame.to_bytes()
@@ -415,15 +445,16 @@ impl Pipeline {
             .iter()
             .map(|(id, text)| (id, text.to_owned()))
             .collect();
+        let signal_meta = signal_meta_for(arena);
+        // Set the ADR-0027 flag only when this frame actually carries metadata,
+        // so hosts without the gate still read a valid (metadata-less) frame.
+        let flags = if signal_meta.is_empty() {
+            flux_ir_serde::FLAG_HAS_STRING_DELTA
+        } else {
+            flux_ir_serde::FLAG_HAS_STRING_DELTA | flux_ir_serde::FLAG_NODE_HAS_SIGNAL_DEPS
+        };
         self.seq = self.seq.wrapping_add(1);
-        Frame::delta(
-            self.seq,
-            flux_ir_serde::FLAG_HAS_STRING_DELTA,
-            patches,
-            &strings,
-            closures,
-        )
-        .to_bytes()
+        Frame::delta(self.seq, flags, patches, &strings, closures, &signal_meta).to_bytes()
     }
 
     /// Rebuilds the `Init` frame from the retained good tree, for a
@@ -445,6 +476,30 @@ impl Pipeline {
         self.seq = self.seq.wrapping_add(1);
         Frame::error(self.seq, &diagnostic.message, diagnostic.span).to_bytes()
     }
+}
+
+/// Builds the ADR-0027 (FA-IRWIRE) per-node `signal_meta` section for `arena`:
+/// one [`NodeSignalMeta`] per node that carries `signal_deps` (T13), including
+/// its optional `prop_thunk` (T14) and `prop_layout` (T14). Only nodes with
+/// non-empty metadata are emitted, keeping the frame compact when no node reads
+/// a signal.
+fn signal_meta_for(arena: &IRArena) -> Vec<NodeSignalMeta> {
+    let mut metas = Vec::new();
+    for id in arena.all_ids() {
+        let deps = arena.signal_deps_of(id);
+        if deps.is_empty() {
+            continue;
+        }
+        let thunk = arena.prop_thunk_of(id).cloned();
+        let layout = arena.prop_layout_of(id).to_vec();
+        metas.push(NodeSignalMeta {
+            node_id: id,
+            deps: deps.to_vec(),
+            thunk,
+            layout,
+        });
+    }
+    metas
 }
 
 #[cfg(test)]

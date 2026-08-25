@@ -101,6 +101,19 @@ impl ArenaBuilder {
         self.arena.get(id)
     }
 
+    /// Attaches a node's ADR-0027 Phase 2/3 signal-graph metadata (T13/T14)
+    /// after packing it: its `signal_deps`, optional `prop_thunk` closure
+    /// reference, and `prop_layout`. See [`IRArena::set_signal_metadata`].
+    pub fn signal_metadata(
+        &mut self,
+        id: NodeId,
+        deps: Vec<flux_syntax::SignalId>,
+        thunk: Option<flux_syntax::ClosureRef>,
+        layout: Vec<u16>,
+    ) {
+        self.arena.set_signal_metadata(id, deps, thunk, layout);
+    }
+
     /// Consumes the builder, yielding the packed [`IRArena`].
     ///
     /// The interner accumulated via [`intern_string`](Self::intern_string) is

@@ -59,6 +59,7 @@ fn bench_init_frame_size(c: &mut Criterion) {
                 std::hint::black_box(&[(0u32, "src/main.flux".to_string())]),
                 std::hint::black_box(&table),
                 &[],
+                &[],
             );
             let bytes = frame.to_bytes();
             assert!(bytes.len() < 20 * 1024, "Init frame over 20 KB");

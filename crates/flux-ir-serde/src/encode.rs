@@ -49,7 +49,7 @@ pub fn serialize_patches(
     _table: &StringTable,
     closures: &[ClosureIR],
 ) -> Vec<u8> {
-    Frame::delta(0, 0, patches, &[], closures).to_bytes()
+    Frame::delta(0, 0, patches, &[], closures, &[]).to_bytes()
 }
 
 /// Round-trip decoder for tests only (production decoders are Swift/Kotlin).

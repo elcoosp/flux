@@ -18,9 +18,10 @@
 //! transport.
 
 use crate::wire::{
-    Reader, WireError, Writer, decode_bytecode_blob, decode_handler_def, decode_node, decode_patch,
-    decode_string_entry, decode_value, encode_bytecode_blob, encode_handler_def, encode_node,
-    encode_patch, encode_string_entry, encode_value,
+    NodeSignalMeta, Reader, WireError, Writer, decode_bytecode_blob, decode_handler_def,
+    decode_node, decode_patch, decode_signal_meta_section, decode_string_entry, decode_value,
+    encode_bytecode_blob, encode_handler_def, encode_node, encode_patch,
+    encode_signal_meta_section, encode_string_entry, encode_value,
 };
 use flux_ir::ClosureIR;
 use flux_syntax::{
@@ -66,6 +67,16 @@ pub const FLAG_HAS_SRC_MAP_DELTA: u8 = 1 << 4;
 /// Carries a `StringEntry` delta (otherwise `string_count` is 0).
 #[allow(dead_code)]
 pub const FLAG_HAS_STRING_DELTA: u8 = 1 << 5;
+/// **ADR-0027 (FA-IRWIRE):** carries a `signal_meta` section — the per-node
+/// `signal_deps` / `prop_thunk` / `prop_layout` metadata (T13/T14).
+///
+/// **Bit assignment is provisional** — reserved here pending Appendix D
+/// ratification by the wire-spec owner. Do not assume this exact bit in the
+/// production host decoders. See `docs/spawn/fresh/FA-IRWIRE-signal-deps-thunks.md`
+/// (OQ-2) and flag the chosen index (`1 << 6`, the first free bit after the
+/// D.1 layout's `1<<5`) to the orchestrator for ratification.
+#[allow(dead_code)]
+pub const FLAG_NODE_HAS_SIGNAL_DEPS: u8 = 1 << 6;
 
 /// The kind of a wire frame, derived from the `frame_type` byte (Appendix D §D.12).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -355,6 +366,10 @@ pub struct InitFrame {
     /// Handler closures shipped with the tree (Gap G1). Empty when the tree
     /// carries no handlers.
     pub closures: Vec<ClosureIR>,
+    /// ADR-0027 (FA-IRWIRE) per-node signal-graph metadata (T13/T14), present
+    /// only when the frame carries `FLAG_NODE_HAS_SIGNAL_DEPS`. Empty
+    /// otherwise (back-compatible decode).
+    pub signal_meta: Vec<NodeSignalMeta>,
 }
 
 impl Frame {
@@ -366,6 +381,7 @@ impl Frame {
         source_map: &[(FileId, String)],
         table: &StringTable,
         closures: &[ClosureIR],
+        signal_meta: &[NodeSignalMeta],
     ) -> InitFrame {
         InitFrame {
             version: PROTOCOL_VERSION,
@@ -376,6 +392,7 @@ impl Frame {
             source_map: source_map.to_vec(),
             string_table: table.clone(),
             closures: closures.to_vec(),
+            signal_meta: signal_meta.to_vec(),
         }
     }
 
@@ -427,6 +444,15 @@ impl Frame {
         // D.12 handler section (Gap G1): a shared bytecode blob followed by a
         // `HandlerDef` stream; each `ClosureRef` indexes the blob.
         let closures = decode_closures(&mut r)?;
+        // ADR-0027 (FA-IRWIRE): trailing `signal_meta` section. A 1-byte
+        // presence marker ends the Init payload so old decoders (which would
+        // otherwise misread the bytes as the next field) know whether the
+        // section follows. Back-compatible: absent ⇒ empty `signal_meta`.
+        let signal_meta = if r.remaining() > 0 && r.u8("init.signal_meta.present")? != 0 {
+            decode_signal_meta_section(&mut r)?
+        } else {
+            Vec::new()
+        };
         Ok(InitFrame {
             version,
             seq,
@@ -436,6 +462,7 @@ impl Frame {
             source_map,
             string_table,
             closures,
+            signal_meta,
         })
     }
 }
@@ -506,6 +533,15 @@ impl InitFrame {
         }
         // D.12 handler section (Gap G1): shared blob, then HandlerDef stream.
         write_closures(&mut w, &self.closures);
+        // ADR-0027 (FA-IRWIRE): trailing `signal_meta` section. A 1-byte
+        // presence marker lets old decoders skip (or stop at) the section.
+        // Gated by whether this frame actually carries metadata.
+        if !self.signal_meta.is_empty() {
+            w.u8(1);
+            encode_signal_meta_section(&mut w, &self.signal_meta);
+        } else {
+            w.u8(0);
+        }
         w.into_vec()
     }
 }
@@ -530,6 +566,10 @@ pub struct DeltaFrame {
     /// Handler closures carried by this frame (Gap G1). Empty when the delta
     /// introduces no new handlers.
     pub closures: Vec<ClosureIR>,
+    /// ADR-0027 (FA-IRWIRE) per-node signal-graph metadata (T13/T14), present
+    /// only when `flags` carries `FLAG_NODE_HAS_SIGNAL_DEPS`. Empty otherwise
+    /// (back-compatible decode).
+    pub signal_meta: Vec<NodeSignalMeta>,
 }
 
 impl Frame {
@@ -542,6 +582,7 @@ impl Frame {
         patches: &[Patch],
         strings: &[(StringId, String)],
         closures: &[ClosureIR],
+        signal_meta: &[NodeSignalMeta],
     ) -> DeltaFrame {
         DeltaFrame {
             version: PROTOCOL_VERSION,
@@ -551,6 +592,7 @@ impl Frame {
             patches: patches.to_vec(),
             strings: strings.to_vec(),
             closures: closures.to_vec(),
+            signal_meta: signal_meta.to_vec(),
         }
     }
 
@@ -588,6 +630,13 @@ impl Frame {
         }
         // D.12 handler section (Gap G1): shared blob, then HandlerDef stream.
         let closures = decode_closures(&mut r)?;
+        // ADR-0027 (FA-IRWIRE): `signal_meta` section, present only when the
+        // Delta `flags` carry `FLAG_NODE_HAS_SIGNAL_DEPS`.
+        let signal_meta = if flags & FLAG_NODE_HAS_SIGNAL_DEPS != 0 {
+            decode_signal_meta_section(&mut r)?
+        } else {
+            Vec::new()
+        };
         Ok(DeltaFrame {
             version,
             seq,
@@ -596,6 +645,7 @@ impl Frame {
             patches,
             strings,
             closures,
+            signal_meta,
         })
     }
 }
@@ -619,6 +669,11 @@ impl DeltaFrame {
             encode_string_entry(&mut w, *id, text);
         }
         write_closures(&mut w, &self.closures);
+        // ADR-0027 (FA-IRWIRE): `signal_meta` section, present only when the
+        // Delta `flags` carry `FLAG_NODE_HAS_SIGNAL_DEPS`.
+        if self.flags & FLAG_NODE_HAS_SIGNAL_DEPS != 0 {
+            encode_signal_meta_section(&mut w, &self.signal_meta);
+        }
         w.into_vec()
     }
 }

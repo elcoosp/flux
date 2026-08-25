@@ -19,7 +19,7 @@ fn magic_bytes() -> [u8; 4] {
 #[test]
 fn delta_frame_header_matches_d1() {
     let patches = vec![Patch::Remove { id: 7 }];
-    let bytes = Frame::delta(0x1234, 0, &patches, &[], &[]).to_bytes();
+    let bytes = Frame::delta(0x1234, 0, &patches, &[], &[], &[]).to_bytes();
     // D.1: magic(4) version(1) frame_type(1)=0x04 seq(4) flags(1) patch_count(2)
     // handler_count(2) string_count(2).
     assert_eq!(&bytes[0..4], &magic_bytes());
@@ -71,7 +71,7 @@ fn init_frame_type_byte_is_0x02_and_string_count_is_u32() {
     };
     let table = StringTable::new();
 
-    let frame = Frame::init(&root_ref, &[], &[], &table, &[]);
+    let frame = Frame::init(&root_ref, &[], &[], &table, &[], &[]);
     let bytes = frame.to_bytes();
     assert_eq!(&bytes[0..4], &magic_bytes());
     assert_eq!(bytes[4], PROTOCOL_VERSION);
@@ -130,7 +130,7 @@ fn value_int_tag_and_payload_match_d5() {
         id: 1,
         props_diff: prop_diff,
     };
-    let bytes = Frame::delta(0, 0, &[patch], &[], &[]).to_bytes();
+    let bytes = Frame::delta(0, 0, &[patch], &[], &[], &[]).to_bytes();
     // Walk to the value: D.2 Update tag 0x02, id u32, then PropDiff
     // (change_count u16, [(u16 prop_idx, Value)]).
     // header(17) + 0x02 + id(4) = 22; change_count u16 at 22; prop_idx u16 at 24;
@@ -201,7 +201,7 @@ fn patch_tags_match_d2() {
         ),
     ];
     for (patch, tag) in samples {
-        let bytes = Frame::delta(0, 0, &[patch], &[], &[]).to_bytes();
+        let bytes = Frame::delta(0, 0, &[patch], &[], &[], &[]).to_bytes();
         assert_eq!(bytes[17], tag, "patch tag for {tag:#x}");
     }
 }

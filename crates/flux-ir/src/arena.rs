@@ -13,7 +13,7 @@
 //!    path) rather than in a blob, avoiding an offset indirection for hot reads.
 
 use ahash::AHashMap;
-use flux_syntax::{Child, ComponentId, HandlerId, NodeId, Span};
+use flux_syntax::{Child, ClosureRef, ComponentId, HandlerId, NodeId, SignalId, Span};
 use flux_syntax::{NodeKind, Props, StringTable, Value};
 
 use crate::builder::Node;
@@ -50,6 +50,23 @@ pub struct IRArena {
 
     // Handler bytecode table.
     closures: AHashMap<HandlerId, ClosureIR>,
+
+    // ── ADR-0027 Phase 2/3 per-node signal-graph metadata ──────────────────
+    // These side-tables mirror the wire `signal_deps` / `prop_thunk` /
+    // `prop_layout` sections (docs/spec/wire-signal-deps-and-thunks.md) without
+    // changing the `builder::Node` field set, so off-limits consumers that
+    // construct `Node { .. }` literals (e.g. `flux-differ`) keep compiling.
+    // Each map is keyed by the node's `NodeId`; entries are populated by the
+    // lowering pass right after `pack`ing the node.
+    /// Distinct `READ_SIGNAL` ids read by a node's prop and control
+    /// expressions, sorted ascending (T13). Empty when the node reads none.
+    signal_deps_map: AHashMap<NodeId, Vec<SignalId>>,
+    /// Per-node prop thunk closure reference (T14). `None` means no thunk was
+    /// emitted for this node (e.g. a node with no props).
+    prop_thunk_map: AHashMap<NodeId, Option<ClosureRef>>,
+    /// Record-field position → prop index, in the order the thunk fills the
+    /// `ALLOC_RECORD` (T14). Empty when the node has no thunk.
+    prop_layout_map: AHashMap<NodeId, Vec<u16>>,
 
     // Pre-computed content hashes for O(1) differ comparisons (FLUX-014 P3).
     // `props_hashes[i]` mirrors `props_of(i).hash()`; `children_hashes[i]`
@@ -155,6 +172,55 @@ impl IRArena {
     #[must_use]
     pub fn string_table(&self) -> &StringTable {
         &self.string_table
+    }
+
+    /// Attaches the ADR-0027 Phase 2/3 signal-graph metadata for `id` (T13/T14).
+    ///
+    /// Called by the lowering pass immediately after `pack`ing a node. `deps`
+    /// is the sorted, distinct set of `READ_SIGNAL` ids the node's prop and
+    /// control expressions read; `thunk` is the optional prop-thunk closure
+    /// reference; `layout` maps record-field position → prop index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `id` was not packed, which would be a lowering bug.
+    pub fn set_signal_metadata(
+        &mut self,
+        id: NodeId,
+        deps: Vec<SignalId>,
+        thunk: Option<ClosureRef>,
+        layout: Vec<u16>,
+    ) {
+        self.signal_deps_map.insert(id, deps);
+        self.prop_thunk_map.insert(id, thunk);
+        self.prop_layout_map.insert(id, layout);
+    }
+
+    /// The distinct `READ_SIGNAL` ids `id`'s prop/control expressions read,
+    /// sorted ascending (T13). Empty slice when the node reads none.
+    #[must_use]
+    pub fn signal_deps_of(&self, id: NodeId) -> &[SignalId] {
+        static EMPTY: [SignalId; 0] = [];
+        self.signal_deps_map
+            .get(&id)
+            .map(Vec::as_slice)
+            .unwrap_or(&EMPTY)
+    }
+
+    /// The prop thunk closure reference for `id`, if one was emitted (T14).
+    #[must_use]
+    pub fn prop_thunk_of(&self, id: NodeId) -> Option<&ClosureRef> {
+        self.prop_thunk_map.get(&id).and_then(Option::as_ref)
+    }
+
+    /// The record-field → prop-index layout for `id`'s prop thunk (T14).
+    #[must_use]
+    pub fn prop_layout_of(&self, id: NodeId) -> &[u16] {
+        static EMPTY: [u16; 0] = [];
+        self.prop_layout_map
+            .get(&id)
+            .map(Vec::as_slice)
+            .unwrap_or(&EMPTY)
     }
 
     /// Replaces the arena's string table.
@@ -271,6 +337,27 @@ impl<'a> NodeView<'a> {
     #[must_use]
     pub fn children_hash(&self) -> u64 {
         self.arena.children_hashes[self.index]
+    }
+
+    /// The distinct `READ_SIGNAL` ids this node's prop/control expressions
+    /// read, sorted ascending (ADR-0027 T13). Empty when the node reads none.
+    #[must_use]
+    pub fn signal_deps(&self) -> &[SignalId] {
+        self.arena.signal_deps_of(self.id())
+    }
+
+    /// The prop thunk closure reference for this node, if one was emitted
+    /// (ADR-0027 T14). `None` when the node has no props to materialise.
+    #[must_use]
+    pub fn prop_thunk(&self) -> Option<&ClosureRef> {
+        self.arena.prop_thunk_of(self.id())
+    }
+
+    /// The record-field → prop-index layout for this node's prop thunk
+    /// (ADR-0027 T14).
+    #[must_use]
+    pub fn prop_layout(&self) -> &[u16] {
+        self.arena.prop_layout_of(self.id())
     }
 }
 

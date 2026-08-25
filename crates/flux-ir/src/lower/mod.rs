@@ -33,8 +33,8 @@ pub(crate) mod ids;
 pub use bytecode::{HandlerCompileError, compile_handler};
 pub use error::LoweringError;
 
-use flux_parser::{Ast, Decl, ExprKind};
-use flux_syntax::{Child, ComponentId, NodeKind, Props, Value};
+use flux_parser::{Ast, Decl, Expr, ExprKind};
+use flux_syntax::{Child, ComponentId, NodeId, NodeKind, Props, Span, Value};
 use flux_types::TypedAST;
 
 /// Whether `kind` is a UI-producing expression that should become its own
@@ -59,19 +59,26 @@ use crate::arena::IRArena;
 use crate::builder::{ArenaBuilder, Node};
 use crate::closure::ClosureIR;
 use crate::instance::InstanceRegistry;
+use crate::lower::bytecode::{collect_read_signals, compile_prop_thunk};
 use ids::{ExprNodeKind, decl_node_id, expr_node_id};
 
 /// The fully lowered program.
 ///
 /// Returned by [`lower`]; bundles the packed [`IRArena`], the handler closure
-/// table (keyed by [`flux_syntax::HandlerId`]), and the per-component [`InstanceRegistry`]
-/// that lets the host app preserve state across hot swaps.
+/// table (keyed by [`flux_syntax::HandlerId`]), the per-node prop thunks
+/// (ADR-0027 T14, keyed by [`flux_syntax::NodeId`]), and the per-component
+/// [`InstanceRegistry`] that lets the host app preserve state across hot swaps.
 #[derive(Clone, Debug)]
 pub struct LoweredIr {
     /// The packed reactive tree.
     pub arena: IRArena,
     /// Handler closures, keyed by their [`flux_syntax::HandlerId`].
     pub closures: std::collections::HashMap<flux_syntax::HandlerId, ClosureIR>,
+    /// Prop thunks, keyed by the [`flux_syntax::NodeId`] of the node they
+    /// materialise. Each thunk's bytecode is the body of one `ClosureIR`
+    /// (reusing the handler-closure machinery) and is referenced from the
+    /// node's `prop_thunk` closure reference on the wire.
+    pub prop_thunks: std::collections::HashMap<flux_syntax::NodeId, ClosureIR>,
     /// Live component-instance registry.
     pub instances: InstanceRegistry,
 }
@@ -130,6 +137,9 @@ struct Lowerer<'a> {
     next_component: ComponentId,
     /// All compiled closures, keyed by [`HandlerId`].
     closures: std::collections::HashMap<flux_syntax::HandlerId, ClosureIR>,
+    /// Compiled prop thunks (ADR-0027 T14), keyed by the node id they
+    /// materialise.
+    prop_thunks: std::collections::HashMap<flux_syntax::NodeId, ClosureIR>,
     /// Signals owned by the enclosing component, named for handler capture.
     signal_scope: Vec<(String, flux_syntax::SignalId)>,
     /// Per-component signal allocator (resets each component).
@@ -146,6 +156,7 @@ impl<'a> Lowerer<'a> {
             name_to_component: std::collections::HashMap::new(),
             next_component: ComponentId::from(0u32),
             closures: std::collections::HashMap::new(),
+            prop_thunks: std::collections::HashMap::new(),
             signal_scope: Vec::new(),
             signal_counter: flux_syntax::SignalId::from(0u32),
             handler_counter: flux_syntax::HandlerId::from(0u32),
@@ -157,6 +168,7 @@ impl<'a> Lowerer<'a> {
         LoweredIr {
             arena,
             closures: self.closures,
+            prop_thunks: self.prop_thunks,
             instances: InstanceRegistry::new(),
         }
     }
@@ -192,6 +204,63 @@ impl<'a> Lowerer<'a> {
     fn next_handler(&mut self) -> flux_syntax::HandlerId {
         self.handler_counter = flux_syntax::HandlerId::from(self.handler_counter + 1);
         self.handler_counter
+    }
+
+    /// Emits the ADR-0027 Phase 2/3 signal-graph metadata for `node_id`
+    /// (T13 `signal_deps`, T14 `prop_thunk`/`prop_layout`).
+    ///
+    /// `prop_exprs` are the node's prop value expressions (primitives only);
+    /// `control_exprs` are the node's control expressions (cond / collection /
+    /// key / scrutinee). The signal-set is the single source of truth derived
+    /// from this same walk (never computed twice): when the prop expressions
+    /// compile into a thunk, its captured `READ_SIGNAL` set *is* `signal_deps`;
+    /// otherwise a plain recursive walk yields the same set as a fallback.
+    fn emit_signal_metadata(
+        &mut self,
+        node_id: NodeId,
+        prop_exprs: &[(flux_syntax::PropIdx, &Expr)],
+        control_exprs: &[&Expr],
+    ) -> Result<(), LoweringError> {
+        let scope = &self.signal_scope;
+        if !prop_exprs.is_empty() {
+            let mut intern = |s: &str| self.builder.intern_string(s);
+            match compile_prop_thunk(prop_exprs, scope, &mut intern) {
+                Ok((bytecode, deps, layout)) => {
+                    let thunk_id = self.next_handler();
+                    let closure =
+                        ClosureIR::new(thunk_id, bytecode, deps.clone(), Span::new(0, 0, 0));
+                    self.prop_thunks.insert(node_id, closure);
+                    let closure_ref = flux_syntax::ClosureRef {
+                        hash: crate::lower::bytecode::hash_closure_placeholder(
+                            &self.prop_thunks[&node_id].bytecode,
+                            &deps,
+                        ),
+                        bytecode_offset: 0,
+                        bytecode_len: self.prop_thunks[&node_id].bytecode.len() as u16,
+                        captured_signals: deps.clone(),
+                        span: Span::new(0, 0, 0),
+                    };
+                    self.builder
+                        .signal_metadata(node_id, deps, Some(closure_ref), layout);
+                    return Ok(());
+                }
+                Err(_) => {
+                    // Prop form cannot be compiled to the MLP envelope (e.g. a
+                    // capability call); fall through to the control-only path so
+                    // `signal_deps` still records every read, just without a thunk.
+                }
+            }
+        }
+        // Control-only nodes (If/When/ForEach/Match) or thunk-compile failure:
+        // collect reads from control + prop exprs and emit no thunk.
+        let mut all: Vec<&Expr> = control_exprs.to_vec();
+        for (_, expr) in prop_exprs {
+            all.push(*expr);
+        }
+        let deps = collect_read_signals(&all, scope);
+        self.builder
+            .signal_metadata(node_id, deps, None, Vec::new());
+        Ok(())
     }
 
     fn lower_decl(&mut self, decl: &Decl) -> Result<(), LoweringError> {
@@ -238,6 +307,9 @@ impl<'a> Lowerer<'a> {
             span,
         };
         self.builder.pack(node);
+        // Components carry no props or control expressions, so their
+        // `signal_deps` is empty and they have no prop thunk (ADR-0027 §T13).
+        self.emit_signal_metadata(id, &[], &[])?;
         Ok(())
     }
 
@@ -297,7 +369,7 @@ impl<'a> Lowerer<'a> {
                 trailing,
             } => self.lower_call(expr, callee, args, trailing.as_deref(), owner),
             flux_parser::ExprKind::If {
-                cond: _,
+                cond,
                 then_block,
                 else_branch,
             } => {
@@ -327,19 +399,19 @@ impl<'a> Lowerer<'a> {
                     span: expr.span,
                 };
                 self.builder.pack(node);
+                self.emit_signal_metadata(id, &[], &[cond])?;
                 Ok(Child::Node(id))
             }
             flux_parser::ExprKind::ForEach {
-                items: _,
-                key: _,
-                body,
+                items,
+                key,
+                body: _,
             } => {
                 let id = expr_node_id(expr, ExprNodeKind::ForEach);
                 // The items are produced at runtime by the host (keyed
                 // reconciliation, FLUX-014); we emit the ForEach node with an
                 // empty splice. Body is type-checked but not statically
                 // expanded.
-                let _ = body;
                 let node = Node {
                     id,
                     kind: NodeKind::ForEach,
@@ -350,10 +422,11 @@ impl<'a> Lowerer<'a> {
                     span: expr.span,
                 };
                 self.builder.pack(node);
+                self.emit_signal_metadata(id, &[], &[items, key])?;
                 Ok(Child::Node(id))
             }
             flux_parser::ExprKind::When {
-                cond: _,
+                cond,
                 then_block,
                 otherwise,
             } => {
@@ -377,9 +450,10 @@ impl<'a> Lowerer<'a> {
                     span: expr.span,
                 };
                 self.builder.pack(node);
+                self.emit_signal_metadata(id, &[], &[cond])?;
                 Ok(Child::Node(id))
             }
-            flux_parser::ExprKind::Match { scrutinee: _, arms } => {
+            flux_parser::ExprKind::Match { scrutinee, arms } => {
                 let id = expr_node_id(expr, ExprNodeKind::Match);
                 let mut children = Vec::with_capacity(arms.len());
                 for arm in arms {
@@ -395,6 +469,7 @@ impl<'a> Lowerer<'a> {
                     span: expr.span,
                 };
                 self.builder.pack(node);
+                self.emit_signal_metadata(id, &[], &[scrutinee])?;
                 Ok(Child::Node(id))
             }
             other => Err(LoweringError::new(
@@ -432,6 +507,10 @@ impl<'a> Lowerer<'a> {
         // named args map to a stable PropIdx derived from their name so the
         // prop layout is stable across edits.
         let mut fields: Vec<(flux_syntax::PropIdx, Value)> = Vec::new();
+        // Original prop value expressions, retained for the ADR-0027 T14 prop
+        // thunk (the compiled thunk reads the same expressions the props came
+        // from — single source of truth with `signal_deps`).
+        let mut prop_exprs: Vec<(flux_syntax::PropIdx, &flux_parser::Expr)> = Vec::new();
         let mut next_positional: u16 = 0;
         let mut handlers: Vec<flux_syntax::HandlerId> = Vec::new();
 
@@ -457,6 +536,7 @@ impl<'a> Lowerer<'a> {
                     ));
                 }
             };
+            prop_exprs.push((idx, arg.value()));
             fields.push((idx, value));
         }
 
@@ -465,6 +545,7 @@ impl<'a> Lowerer<'a> {
                 if let flux_parser::BlockItem::Prop { name, value } = item {
                     let idx = prop_index_for_name(&name.name);
                     let v = self.lower_value(value, owner, &mut handlers)?;
+                    prop_exprs.push((idx, value));
                     fields.push((idx, v));
                 }
             }
@@ -487,6 +568,7 @@ impl<'a> Lowerer<'a> {
             span: expr.span,
         };
         self.builder.pack(node);
+        self.emit_signal_metadata(id, &prop_exprs, &[])?;
         Ok(Child::Node(id))
     }
 
@@ -509,7 +591,9 @@ impl<'a> Lowerer<'a> {
             flux_parser::ExprKind::Str(parts) => self.lower_str(parts, owner, handlers),
             flux_parser::ExprKind::Lambda { params: _, body } => {
                 let handler = self.next_handler();
-                let (bytecode, captured) = compile_handler(body, &self.signal_scope, expr.span)?;
+                let mut intern = |s: &str| self.builder.intern_string(s);
+                let (bytecode, captured) =
+                    compile_handler(body, &self.signal_scope, expr.span, &mut intern)?;
                 let closure = ClosureIR::new(handler, bytecode, captured, expr.span);
                 self.closures.insert(handler, closure);
                 handlers.push(handler);
