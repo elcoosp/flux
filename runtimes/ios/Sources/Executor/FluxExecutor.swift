@@ -49,6 +49,9 @@ final class FluxRuntime: FluxExecutor {
     private var currentRootId: UInt32?
     /// The most recent VM error, surfaced to the UI overlay.
     private(set) var lastError: VMError?
+    /// The report from the most recent `dispatch`'s dirty-set reconcile (R1), for
+    /// test assertions; empty when the dispatch touched no signal-dependent node.
+    private(set) var lastReconcile: ReconcileReport = ReconcileReport()
 
     /// Creates an executor backed by `graph` and an `AdapterRegistry` built from
     /// `table`.
@@ -120,9 +123,10 @@ final class FluxRuntime: FluxExecutor {
     }
 
     /// Evaluates a handler closure against the current graph. Mirrors
-    /// `flux-vm-ref`: runs the bytecode, then folds the written signals back into
-    /// the graph and reconciles the affected views.
-    /// - Returns: a `DispatchResult` describing what changed.
+    /// `flux-vm-ref`: runs the bytecode and folds the written signals back into
+    /// the graph. It does NOT re-reconcile — that is driven by the dispatch path
+    /// via the dirty-set (R1) so only signal-dependent subtrees are touched.
+    /// - Returns: a `DispatchResult` describing what changed (signals written).
     func dispatch(
         bytecode: [UInt8],
         closure: ClosureRef,
@@ -136,18 +140,16 @@ final class FluxRuntime: FluxExecutor {
         // Fold VM-written signals back into the live graph.
         let written = outcome.signals
         for (id, value) in written { graph.write(id, value) }
-        // Re-reconcile the current tree so any view whose props read a changed
-        // signal is updated in place (never recreated).
-        let report = reconciler.apply(currentFrame())
         return DispatchResult(
-            builtOrUpdated: report.built + report.updated,
+            builtOrUpdated: [],
             signals: written,
             error: nil
         )
     }
 
     /// `FluxRuntime` entry point: evaluate the handler bound to
-    /// `event.handlerId` against the current signal graph, then reconcile.
+    /// `event.handlerId` against the current signal graph, then reconcile only the
+    /// dirty subset of the tree (Perf R1).
     ///
     /// The event is always delivered on the main actor (the kit's
     /// `HandlerTarget` asserts isolation), so dispatching a handler — which
@@ -155,10 +157,20 @@ final class FluxRuntime: FluxExecutor {
     func dispatch(_ event: FluxEvent) {
         guard let (closure, bytecode) = handlerClosures[event.handlerId] else {
             lastError = VMError(kind: .invalidDispatch, offset: 0)
+            lastReconcile = ReconcileReport()
             return
         }
         let payload: VMValue = event.payload.map { toRuntime($0, table: &table) } ?? .null
-        _ = dispatch(bytecode: bytecode, closure: closure, payload: payload)
+        let result = dispatch(bytecode: bytecode, closure: closure, payload: payload)
+        // R1: re-reconcile only the nodes whose signal dependencies were just
+        // written, instead of re-walking the whole tree on every tap.
+        let dirty = Set(result.signals.map { $0.0 })
+        if !dirty.isEmpty, let rootId = currentRootId {
+            let report = reconciler.reconcileDirty(rootId: rootId, nodes: currentNodes, signalIds: dirty)
+            lastReconcile = report
+        } else {
+            lastReconcile = ReconcileReport()
+        }
     }
 
     /// The built native view for a node id, for test assertions (real UIKit
@@ -200,18 +212,5 @@ final class FluxRuntime: FluxExecutor {
         guard let outcome else { return }
         // Fold written signals back into the live graph without re-reconciling.
         for (id, value) in outcome.signals { graph.write(id, value) }
-    }
-
-    /// Reconstructs a frame carrying the last full tree so the reconciler can
-    /// re-apply it after a signal write (without re-decoding).
-    private func currentFrame() -> FluxFrame {
-        let root = currentRootId.flatMap { currentNodes[$0] }
-        return FluxFrame(
-            version: 1, seq: 0, flags: 0,
-            root: root, nodes: currentNodes,
-            patches: [], handlers: [],
-            strings: [], state: [],
-            files: []
-        )
     }
 }

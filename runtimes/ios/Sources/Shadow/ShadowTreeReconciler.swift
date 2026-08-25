@@ -48,6 +48,11 @@ struct ShadowTreeReconciler {
     /// The most recent full node table, used to resolve a removed node's
     /// `cleanupHandler` (§18.4) at removal time.
     private var nodeTable: [UInt32: ShadowNode] = [:]
+    /// Per-node signal dependencies recorded from the node's props (R1). A prop
+    /// whose value is `.int(s)` is treated as a read of signal `s`, so a write to
+    /// `s` marks the node dirty. Populated during reconcile and consulted by
+    /// `reconcileDirty`.
+    private var signalDeps: [UInt32: Set<UInt32>] = [:]
 
     /// The interning string table for this reconciler. Kept in sync from every
     /// applied frame's `strings` so prop resolution never depends on reaching
@@ -98,7 +103,10 @@ struct ShadowTreeReconciler {
     /// parent adapter.
     private mutating func reconcile(nodeId: UInt32, nodes: [UInt32: ShadowNode], report: inout ReconcileReport) {
         guard let node = nodes[nodeId] else { return }
-
+        // Record which signals this node's props read, so a later signal write can
+        // mark it dirty without walking the whole tree (R1). A prop whose value is a
+        // signal reference (`.int(s)`) is treated as a read of signal `s`.
+        signalDeps[nodeId] = Set(node.props.compactMap { $0.value.asInt }.compactMap { UInt32(exactly: $0) })
         if let existing = built[nodeId] {
             // A `@pure` node whose props' content hash is unchanged depends on
             // nothing else, so its entire subtree is stable: skip re-reconciling
@@ -142,6 +150,76 @@ struct ShadowTreeReconciler {
         if let owner = built[nodeId] {
             owner.adapter.setChildren(childViews, on: owner.view)
         }
+    }
+
+    /// Re-reconciles only the nodes whose recorded signal dependencies intersect
+    /// `signalIds` — the signals a handler just wrote — plus their ancestors, so a
+    /// changed view is re-parented into its parent (Perf R1). This replaces the
+    /// per-dispatch whole-tree re-walk: on a tap only the signal-dependent
+    /// subtrees are touched.
+    ///
+    /// A node whose own dependencies changed is always re-applied (even if its raw
+    /// prop bytes are unchanged, because the signal(s) behind them may carry new
+    /// values). A node that is merely an ancestor of a dirty descendant only
+    /// re-attaches its children; a fully clean subtree is never visited.
+    @discardableResult
+    mutating func reconcileDirty(rootId: UInt32, nodes: [UInt32: ShadowNode], signalIds: Set<UInt32>) -> ReconcileReport {
+        var report = ReconcileReport()
+        _ = reconcileDirty(nodeId: rootId, signalIds: signalIds, nodes: nodes, report: &report)
+        return report
+    }
+
+    /// Recursive worker for `reconcileDirty`. Returns whether this subtree contains
+    /// a dirty node, so ancestors know to re-attach their children.
+    private mutating func reconcileDirty(
+        nodeId: UInt32,
+        signalIds: Set<UInt32>,
+        nodes: [UInt32: ShadowNode],
+        report: inout ReconcileReport
+    ) -> Bool {
+        guard let node = nodes[nodeId] else { return false }
+        let deps = signalDeps[nodeId, default: []]
+        let isDirty = !deps.intersection(signalIds).isEmpty
+
+        // Visit children first to find dirty descendants and collect their views.
+        var childViews: [AnyObject] = []
+        var anyChildDirty = false
+        for child in node.children {
+            let childIds: [UInt32]
+            switch child {
+            case let .node(id):
+                childIds = [id]
+            case let .splice(_, items):
+                childIds = items.map { $0.node }
+            }
+            for cid in childIds {
+                let childDirty = reconcileDirty(nodeId: cid, signalIds: signalIds, nodes: nodes, report: &report)
+                anyChildDirty = anyChildDirty || childDirty
+                if let v = built[cid]?.view { childViews.append(v) }
+            }
+        }
+
+        let affected = isDirty || anyChildDirty
+        guard affected else { return false }
+
+        if let owner = built[nodeId] {
+            // Re-materialize a node whose own dependencies changed (R1).
+            if isDirty {
+                let oldKit = kitProps(owner.runtimeProps, table: currentTable())
+                let newKit = kitProps(node.props, table: currentTable())
+                owner.adapter.update(owner.view, from: oldKit, to: newKit)
+                owner.runtimeProps = node.props
+                owner.lastPropHash = propHash(node.props)
+                report.updated.append(nodeId)
+            }
+            // Re-parent children so a dirty descendant lands in this view.
+            owner.adapter.setChildren(childViews, on: owner.view)
+        } else if isDirty {
+            // A dirty node that was never built (shouldn't happen on dispatch, but
+            // be safe): fall back to a full reconcile of this subtree.
+            reconcile(nodeId: nodeId, nodes: nodes, report: &report)
+        }
+        return true
     }
 
     /// Builds (or refreshes) the children of `node` and returns their views,

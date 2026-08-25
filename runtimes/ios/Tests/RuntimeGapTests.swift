@@ -359,3 +359,47 @@ final class GapG6PureSkipTests: XCTestCase {
         XCTAssertTrue(third.contains(20), "non-@pure node must be re-reconciled when its props change")
     }
 }
+
+// MARK: - R1: dirty-set reconciliation
+
+/// R1 — `dispatch` reconciles ONLY nodes whose signal dependencies were just
+/// written, not the whole tree.
+final class GapR1DirtySetTests: XCTestCase {
+    /// Bytecode: LOAD_INT_CONST r0,1 ; WRITE_SIGNAL 5, r0 ; HALT.
+    private let writeSignal5: [UInt8] = [
+        0xB0, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x11, 0x05, 0x00, 0x00, 0x00, 0x00,
+        0x00,
+    ]
+
+    @MainActor
+    func testDispatchReconcilesOnlySignalDependentNode() {
+        // Node 10 reads signal 5 via an int prop; node 11 is static. Both live
+        // under a Column (20).
+        let dependent = gapNode(10, componentId: 0, props: [Prop(index: 0, value: .int(5))])
+        let unrelated = gapNode(11, componentId: 0, props: [Prop(index: 0, value: .str(7))])
+        let root = gapNode(20, componentId: 2, children: [.node(10), .node(11)])
+        let frame = gapFrame(
+            root: root,
+            descendantNodes: [dependent, unrelated],
+            strings: [StringEntry(stringId: 7, value: "unrelated")]
+        )
+        let executor = FluxRuntime(graph: SignalGraph(), registry: gapRegistry())
+        _ = executor.apply(frame)
+
+        executor.registerHandler(
+            1,
+            closure: ClosureRef(hash: [], bytecodeOffset: 0, bytecodeLen: UInt16(writeSignal5.count),
+                                signalCount: 0, signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0)),
+            bytecode: writeSignal5
+        )
+
+        executor.dispatch(FluxEvent(handlerId: 1, nodeId: 20))
+
+        // Only the signal-dependent node (10) must have been reconciled; the
+        // unrelated node (11) must be untouched (R1).
+        let reconciled = executor.lastReconcile.built + executor.lastReconcile.updated
+        XCTAssertTrue(reconciled.contains(10), "dependent node must be reconciled")
+        XCTAssertFalse(reconciled.contains(11), "unrelated node must NOT be reconciled (R1)")
+    }
+}
