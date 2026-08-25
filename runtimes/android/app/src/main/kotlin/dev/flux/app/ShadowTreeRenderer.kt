@@ -10,7 +10,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import dev.flux.app.shadow.ShadowNode
+import dev.flux.host.shadow.ShadowNode
 import dev.flux.ui.FluxValue
 import dev.flux.ui.PropsIndex
 
@@ -116,12 +116,3 @@ private fun gapOf(node: ShadowNode): androidx.compose.ui.unit.Dp {
     val gap = node.props.getFloat(PropsIndex.STACK_GAP) ?: 0.0
     return gap.dp
 }
-
-/** Reads the text string prop off a node, for test assertions. */
-internal fun ShadowNode.displayText(): String? = props.getString(PropsIndex.TEXT_TEXT)
-
-/** Reads the bound handler id off a button node, for test assertions. */
-internal fun ShadowNode.buttonHandlerId(): UInt = props.getHandler(PropsIndex.BUTTON_ON_CLICK)
-
-/** `true` when [value] is a resolved (non-id) string, used by tests. */
-internal fun FluxValue.isResolvedString(): Boolean = this is FluxValue.Str

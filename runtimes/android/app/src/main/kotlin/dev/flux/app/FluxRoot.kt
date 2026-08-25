@@ -11,11 +11,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import dev.flux.host.shadow.ShadowTree
 
 /**
  * The Compose entry point for the Flux host (FLUX-007).
  *
- * Binds the reconciled [dev.flux.app.shadow.ShadowTree] to real Compose UI
+ * Binds the reconciled [ShadowTree] to real Compose UI
  * (FA-RENDER Phase A) via [FluxTreeView] once a root node exists, manages
  * [FluxExecutor] lifecycle, and renders a red error overlay when the VM or wire
  * layer faults (Appendix E §E.6: errors show a red banner rather than crashing).

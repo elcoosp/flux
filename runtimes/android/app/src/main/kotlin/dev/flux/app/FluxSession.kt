@@ -1,10 +1,12 @@
 package dev.flux.app
 
 import androidx.lifecycle.ViewModel
-import dev.flux.app.shadow.ShadowTree
-import dev.flux.app.signal.SignalGraph
-import dev.flux.app.transport.FluxTransport
-import dev.flux.app.transport.OkHttpTransport
+import dev.flux.host.AdapterRegistry
+import dev.flux.host.FluxExecutor
+import dev.flux.host.shadow.ShadowTree
+import dev.flux.host.signal.SignalGraph
+import dev.flux.host.transport.FluxTransport
+import dev.flux.host.transport.OkHttpTransport
 
 /**
  * Retained host session (roast fix 3 / ADR-0027 lifecycle).
@@ -21,7 +23,7 @@ import dev.flux.app.transport.OkHttpTransport
  * truly finishing (roast fix 5: teardown is explicit, never implicit on pause).
  */
 public class FluxSession : ViewModel() {
-    /** The live signal graph (also the VM's [dev.flux.app.vm.SignalStore]). */
+    /** The live signal graph (also the VM's [dev.flux.host.vm.SignalStore]). */
     public val signals: SignalGraph = SignalGraph()
 
     /** The render tree the executor drives. */
