@@ -93,6 +93,32 @@ final class FluxRuntime: FluxExecutor {
         return report.built + report.updated
     }
 
+    /// Evaluates `bytecode` against a copy of the live graph and returns the
+    /// outcome (or the `VMError` that faulted). Does NOT reconcile — shared by
+    /// both event dispatch and lifecycle hooks.
+    private func evaluate(
+        bytecode: [UInt8],
+        closure: ClosureRef,
+        payload: VMValue
+    ) -> (outcome: VmOutcome?, error: VMError?) {
+        var store: any SignalStore = graph
+        do {
+            let outcome = try FluxBytecodeVM.run(
+                bytecode,
+                signals: &store,
+                payload: payload,
+                stringTable: table,
+                capRegistry: .dev
+            )
+            return (outcome, nil)
+        } catch let err as VMError {
+            return (nil, err)
+        } catch {
+            // Should be unreachable: run only throws VMError.
+            return (nil, VMError(kind: .invalidDispatch, offset: 0))
+        }
+    }
+
     /// Evaluates a handler closure against the current graph. Mirrors
     /// `flux-vm-ref`: runs the bytecode, then folds the written signals back into
     /// the graph and reconciles the affected views.
@@ -102,23 +128,10 @@ final class FluxRuntime: FluxExecutor {
         closure: ClosureRef,
         payload: VMValue
     ) -> DispatchResult {
-        var store: any SignalStore = graph
-        let outcome: VmOutcome
-        do {
-            outcome = try FluxBytecodeVM.run(
-                bytecode,
-                signals: &store,
-                payload: payload,
-                stringTable: table,
-                capRegistry: .dev
-            )
-        } catch let err as VMError {
-            lastError = err
-            return DispatchResult(builtOrUpdated: [], signals: [], error: err)
-        } catch {
-            // Should be unreachable: run only throws VMError.
-            lastError = VMError(kind: .invalidDispatch, offset: 0)
-            return DispatchResult(builtOrUpdated: [], signals: [], error: lastError)
+        let (outcome, error) = evaluate(bytecode: bytecode, closure: closure, payload: payload)
+        guard let outcome else {
+            lastError = error
+            return DispatchResult(builtOrUpdated: [], signals: [], error: error)
         }
         // Fold VM-written signals back into the live graph.
         let written = outcome.signals
@@ -164,15 +177,29 @@ final class FluxRuntime: FluxExecutor {
     /// node is created or removed. A missing or unregistered id is a no-op
     /// (lifecycle blocks are optional); a VM fault is captured into `lastError`
     /// like any other dispatch.
+    ///
+    /// Crucially this does **not** re-reconcile: it is invoked *from within* a
+    /// `reconciler.apply` pass, so re-entering the reconciler would be a
+    /// re-entrant `inout self` access (a fatal "access conflict" in Swift's
+    /// exclusive-access model). It folds any signal writes back into the graph
+    /// (a mount/cleanup block may seed state) and returns.
     func runLifecycle(_ handlerId: UInt32) {
         guard let (_, bytecode) = handlerClosures[handlerId] else {
             // No body registered for this lifecycle hook; nothing to run.
             return
         }
-        _ = dispatch(bytecode: bytecode, closure: ClosureRef(
-            hash: [], bytecodeOffset: 0, bytecodeLen: UInt16(bytecode.count),
-            signalCount: 0, signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0)
-        ), payload: .null)
+        let (outcome, error) = evaluate(
+            bytecode: bytecode,
+            closure: ClosureRef(
+                hash: [], bytecodeOffset: 0, bytecodeLen: UInt16(bytecode.count),
+                signalCount: 0, signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0)
+            ),
+            payload: .null
+        )
+        if let error { lastError = error; return }
+        guard let outcome else { return }
+        // Fold written signals back into the live graph without re-reconciling.
+        for (id, value) in outcome.signals { graph.write(id, value) }
     }
 
     /// Reconstructs a frame carrying the last full tree so the reconciler can

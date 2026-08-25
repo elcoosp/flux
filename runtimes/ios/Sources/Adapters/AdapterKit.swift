@@ -131,6 +131,56 @@ func kitProps(_ props: [Prop], table: StringTable) -> Props {
     return Props(fields)
 }
 
+/// Content hash of raw runtime props (Perf R2), computed WITHOUT resolving
+/// interned strings through the string table. It folds each prop's index and the
+/// raw `VMValue` payload, so two prop sets that differ only in string *resolution*
+/// but share the same `VMValue` ids hash identically — which is the correct
+/// comparison domain for "did this node's props change": the adapter ultimately
+/// renders the `VMValue`, not the resolved Swift string. Hashing the raw values
+/// also avoids the per-prop string-table walk that `kitProps(_:).hash` would do.
+func propHash(_ props: [Prop]) -> UInt64 {
+    var h: UInt64 = 0xcbf2_9ce4_8422_2325
+    for p in props {
+        h = fnv1aMix(h, UInt64(p.index))
+        h = fnv1aMix(h, rawValueHash(p.value))
+    }
+    return h
+}
+
+/// One FNV-1a mixing step.
+private func fnv1aMix(_ h: UInt64, _ v: UInt64) -> UInt64 {
+    (h ^ v) &* 0x0000_0100_0000_01b3
+}
+
+/// Stable raw hash of a `VMValue` that does not consult the string table (R2).
+private func rawValueHash(_ v: VMValue) -> UInt64 {
+    switch v {
+    case .null:
+        return 0
+    case let .int(n):
+        return fnv1aMix(1, UInt64(bitPattern: n))
+    case let .float(d):
+        return fnv1aMix(2, d.bitPattern)
+    case let .bool(b):
+        return fnv1aMix(3, b ? 1 : 0)
+    case let .str(id):
+        return fnv1aMix(4, UInt64(id))
+    case let .handlerRef(id):
+        return fnv1aMix(5, UInt64(id))
+    case let .list(items):
+        var h: UInt64 = 6
+        for item in items { h = fnv1aMix(h, rawValueHash(item)) }
+        return h
+    case let .record(fields):
+        var h: UInt64 = 7
+        for field in fields {
+            h = fnv1aMix(h, UInt64(field.propIndex))
+            h = fnv1aMix(h, rawValueHash(field.value))
+        }
+        return h
+    }
+}
+
 /// Converts a kit `FluxValue` (resolved strings) back to the runtime's
 /// id-based `VMValue`, interning any resolved string through `table`. Used to
 /// hand a native event's payload to the VM, which speaks id-based values.

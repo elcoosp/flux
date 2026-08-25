@@ -98,6 +98,26 @@ final class RuntimeE2ETests: XCTestCase {
         XCTAssertEqual(label.text, "Hello, Flux")
     }
 
+    /// Re-applying an identical Init frame must not push `adapter.update` to nodes
+    /// whose props are unchanged (Perf R2): the reconciler computes the prop
+    /// content hash once and skips the update when it matches. The second apply
+    /// should produce neither `built` (views already exist) nor `updated`.
+    @MainActor
+    func testReapplyingUnchangedFrameSkipsUpdates() {
+        let textNode = node(10, componentId: 0, props: [Prop(index: 0, value: .str(7))])
+        let frame = initFrame(
+            root: textNode,
+            strings: [StringEntry(stringId: 7, value: "Hello, Flux")]
+        )
+        var reconciler = ShadowTreeReconciler(registry: buildRegistry())
+        let first = reconciler.apply(frame)
+        XCTAssertEqual(Set(first.built), [10])
+
+        let second = reconciler.apply(frame) // identical frame
+        XCTAssertEqual(second.built, [], "no node should be rebuilt")
+        XCTAssertEqual(second.updated, [], "unchanged nodes must not be re-updated (R2)")
+    }
+
     /// Registering a handler and tapping its button drives VM -> signal write.
     /// The dev server then pushes an `Update` patch carrying the new text; the
     /// reconciler applies it in place and reuses the SAME `UILabel` instance

@@ -348,11 +348,14 @@ final class GapG6PureSkipTests: XCTestCase {
         XCTAssertFalse(second.contains(10), "@pure parent must be skipped on stable props")
         XCTAssertFalse(second.contains(11), "@pure child must be skipped on stable props")
 
-        // A non-@pure control node IS re-reconciled.
+        // A non-@pure control node IS re-reconciled when its props change (R2
+        // only skips the update when the props are unchanged).
         let plain = gapNode(20, componentId: 0, props: [Prop(index: 0, value: .str(8))])
         let plainFrame = gapFrame(root: plain, strings: [StringEntry(stringId: 8, value: "x")])
         _ = executor.apply(plainFrame)
-        let third = executor.apply(plainFrame)
-        XCTAssertTrue(third.contains(20), "non-@pure node must be re-reconciled")
+        let plainChanged = gapNode(20, componentId: 0, props: [Prop(index: 0, value: .str(99))])
+        let plainFrameChanged = gapFrame(root: plainChanged, strings: [StringEntry(stringId: 99, value: "y")])
+        let third = executor.apply(plainFrameChanged)
+        XCTAssertTrue(third.contains(20), "non-@pure node must be re-reconciled when its props change")
     }
 }

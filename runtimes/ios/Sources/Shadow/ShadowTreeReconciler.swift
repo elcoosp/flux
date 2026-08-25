@@ -103,22 +103,27 @@ struct ShadowTreeReconciler {
             // A `@pure` node whose props' content hash is unchanged depends on
             // nothing else, so its entire subtree is stable: skip re-reconciling
             // it (G6). We still update the recorded hash below.
-            let newHash = kitProps(node.props, table: currentTable()).hash
+            let newHash = propHash(node.props)
             if node.isPure, existing.lastPropHash == newHash {
                 return
             }
-            // Existing node: apply any prop changes in place (no recreation).
-            let oldKit = kitProps(existing.runtimeProps, table: currentTable())
-            let newKit = kitProps(node.props, table: currentTable())
-            existing.adapter.update(existing.view, from: oldKit, to: newKit)
-            existing.runtimeProps = node.props
-            existing.lastPropHash = newHash
-            report.updated.append(nodeId)
+            // Only push an `update` when the props actually changed (R2). When the
+            // hash matches we skip `adapter.update` entirely — the view already
+            // reflects these props — but still recurse into children below, since
+            // a descendant may have changed via a patch.
+            if existing.lastPropHash != newHash {
+                let oldKit = kitProps(existing.runtimeProps, table: currentTable())
+                let newKit = kitProps(node.props, table: currentTable())
+                existing.adapter.update(existing.view, from: oldKit, to: newKit)
+                existing.runtimeProps = node.props
+                existing.lastPropHash = newHash
+                report.updated.append(nodeId)
+            }
         } else if let adapter = registry.make(for: node.componentId, executor: executorRef) {
-            let view = adapter.create()
             let kit = kitProps(node.props, table: currentTable())
+            let view = adapter.create()
             adapter.update(view, from: Props(), to: kit)
-            let hash = kitProps(node.props, table: currentTable()).hash
+            let hash = propHash(node.props)
             built[nodeId] = BuiltNode(adapter: adapter, view: view, runtimeProps: node.props, lastPropHash: hash)
             report.built.append(nodeId)
             // Bind handlers once, at build time — re-binding on every frame
