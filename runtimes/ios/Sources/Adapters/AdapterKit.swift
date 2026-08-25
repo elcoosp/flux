@@ -16,7 +16,6 @@ import FluxUIKit
 /// The Init frame interns every string — including each component's *name*
 /// under its own `ComponentId` — so the runtime resolves a node's
 /// `component_id` to its adapter by looking the id up here.
-@MainActor
 struct StringTable {
     /// The id → string mapping.
     private var strings: [UInt32: String] = [:]
@@ -37,6 +36,14 @@ struct StringTable {
         strings[id]
     }
 
+    /// Interns `value` (or returns the id of an existing equal string) under a
+    /// fresh high-range id, mirroring `id(for:)` but returning the raw id so the
+    /// VM can place it into a register. Used by `STR_CONCAT` to publish a newly
+    /// concatenated string for later `STR_LEN` / prop resolution.
+    mutating func intern(_ value: String) -> UInt32 {
+        id(for: value)
+    }
+
     /// Resolves `value` to an existing id, or interns it under a fresh,
     /// high-range id (distinct from the low stdlib component ids) so native
     /// event payloads can be converted back to the runtime's id-based
@@ -52,6 +59,26 @@ struct StringTable {
         strings[candidate] = value
         return candidate
     }
+}
+
+/// Read/append access to an interned string table, abstracting over the concrete
+/// `StringTable` so the VM can resolve `STR_LEN` / `STR_CONCAT` without depending
+/// on the runtime's concrete type (Appendix E §E.1).
+protocol StringResolvable {
+    /// Resolves an interned `StringId` to its text, or `nil` if unknown.
+    func lookup(_ id: UInt32) -> String?
+    /// Interns `value`, returning the id it was stored under.
+    mutating func intern(_ value: String) -> UInt32
+}
+
+extension StringTable: StringResolvable {}
+
+/// A `StringResolvable` that holds nothing: lookups miss and interning yields
+/// the id `0`. Used by offline VM evaluation (the ISA conformance vectors),
+/// where `STR_LEN` / `STR_CONCAT` are not exercised, so resolution is a no-op.
+struct EmptyStringTable: StringResolvable {
+    func lookup(_ id: UInt32) -> String? { nil }
+    mutating func intern(_ value: String) -> UInt32 { 0 }
 }
 
 /// Translates a runtime `VMValue` (id-based, interned strings) into the

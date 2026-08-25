@@ -61,6 +61,45 @@ struct ShadowNode: Equatable, Sendable {
     let handlerCount: UInt16
     let handlers: [UInt32]
     let span: FluxSpan
+    /// Handler id bound to this node's `onMount` block (§18.4), evaluated once
+    /// when the node is first built. `nil` when the component declares none.
+    let mountHandler: UInt32?
+    /// Handler id bound to this node's `onCleanup` block (§18.4), evaluated when
+    /// the node is removed from the tree. `nil` when none is declared.
+    let cleanupHandler: UInt32?
+    /// Marks the node as `@pure` (§18.10): its subtree depends only on its own
+    /// resolved props, so when those props' content hash is unchanged the
+    /// reconciler skips re-reconciling the subtree entirely.
+    let isPure: Bool
+
+    /// Creates a node, defaulting lifecycle hooks and purity to absent.
+    init(
+        id: UInt32,
+        kind: NodeKind,
+        componentId: UInt32,
+        props: [Prop],
+        childCount: UInt16,
+        children: [Child],
+        handlerCount: UInt16,
+        handlers: [UInt32],
+        span: FluxSpan,
+        mountHandler: UInt32? = nil,
+        cleanupHandler: UInt32? = nil,
+        isPure: Bool = false
+    ) {
+        self.id = id
+        self.kind = kind
+        self.componentId = componentId
+        self.props = props
+        self.childCount = childCount
+        self.children = children
+        self.handlerCount = handlerCount
+        self.handlers = handlers
+        self.span = span
+        self.mountHandler = mountHandler
+        self.cleanupHandler = cleanupHandler
+        self.isPure = isPure
+    }
 }
 
 extension ShadowNode {

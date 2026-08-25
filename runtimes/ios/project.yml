@@ -20,17 +20,14 @@ settings:
     ENABLE_USER_SCRIPT_SANDBOXING: true
     SWIFT_TREAT_WARNINGS_AS_ERRORS: true
 
-# NOTE (FLUX-006): the `FluxUIKit` package dependency normally declared here has
-# been removed because FLUX-008 (the adapter kit) was still mid-flight when this
-# issue started and its sources did not compile, which would block the runtime's
-# `xcodebuild test` gate (FLUX-006 acceptance) entirely. FLUX-006 defines its own
-# in-dir mock adapters (scope item 11) and leaves real-kit wiring to FLUX-016.
-# If this project is regenerated after FLUX-008 has merged a compiling kit,
-# restore these lines:
-#
-# packages:
-#   FluxUIKit:
-#     path: ../../adapters/ui-swift
+# The `FluxUIKit` package dependency is restored: FLUX-008 (the adapter kit)
+# merged a compiling kit and FLUX-016 (iOS adapter↔runtime integration) wired it
+# into the runtime, verified green via `xcodebuild test` on iOS Simulator. The
+# dependency was commented out only while the kit did not compile (FLUX-006
+# foundation window); per this file's own guidance it is restored now.
+packages:
+  FluxUIKit:
+    path: ../../adapters/ui-swift
 
 targets:
   FluxApp:
@@ -41,6 +38,8 @@ targets:
     sources:
       - path: Sources
         createIntermediateGroups: true
+    dependencies:
+      - package: FluxUIKit
     info:
       path: Sources/Info.plist
       properties:

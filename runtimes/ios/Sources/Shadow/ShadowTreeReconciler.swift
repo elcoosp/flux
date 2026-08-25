@@ -22,11 +22,16 @@ final class BuiltNode {
     let view: AnyObject
     /// The most recent runtime props, so subsequent updates can compute a diff.
     var runtimeProps: [Prop]
+    /// Content hash of `runtimeProps` from the last reconciliation, used by the
+    /// `@pure` subtree skip (G6) to detect unchanged props without re-walking
+    /// the children.
+    var lastPropHash: UInt64
 
-    init(adapter: AnyFluxAdapter, view: AnyObject, runtimeProps: [Prop]) {
+    init(adapter: AnyFluxAdapter, view: AnyObject, runtimeProps: [Prop], lastPropHash: UInt64 = 0) {
         self.adapter = adapter
         self.view = view
         self.runtimeProps = runtimeProps
+        self.lastPropHash = lastPropHash
     }
 }
 
@@ -40,6 +45,9 @@ struct ShadowTreeReconciler {
     /// Built views keyed by node id. Persists across frames so identities are
     /// stable and view state survives updates/pushes/pops.
     private var built: [UInt32: BuiltNode]
+    /// The most recent full node table, used to resolve a removed node's
+    /// `cleanupHandler` (§18.4) at removal time.
+    private var nodeTable: [UInt32: ShadowNode] = [:]
 
     /// The interning string table for this reconciler. Kept in sync from every
     /// applied frame's `strings` so prop resolution never depends on reaching
@@ -66,7 +74,12 @@ struct ShadowTreeReconciler {
     mutating func apply(_ frame: FluxFrame) -> ReconcileReport {
         var report = ReconcileReport()
         for str in frame.strings { table.intern(str.stringId, str.value) }
+        // Keep the latest full node table so removal can resolve a node's
+        // `cleanupHandler` (§18.4) even from a patch frame that only lists deltas.
+        // Only a full-tree frame (root != nil) carries the authoritative table;
+        // a patch frame has an empty `nodes` and must not clobber it.
         if let root = frame.root {
+            nodeTable = frame.nodes
             reconcile(nodeId: root.id, nodes: frame.nodes, report: &report)
         }
         for patch in frame.patches {
@@ -87,22 +100,35 @@ struct ShadowTreeReconciler {
         guard let node = nodes[nodeId] else { return }
 
         if let existing = built[nodeId] {
+            // A `@pure` node whose props' content hash is unchanged depends on
+            // nothing else, so its entire subtree is stable: skip re-reconciling
+            // it (G6). We still update the recorded hash below.
+            let newHash = kitProps(node.props, table: currentTable()).hash
+            if node.isPure, existing.lastPropHash == newHash {
+                return
+            }
             // Existing node: apply any prop changes in place (no recreation).
             let oldKit = kitProps(existing.runtimeProps, table: currentTable())
             let newKit = kitProps(node.props, table: currentTable())
             existing.adapter.update(existing.view, from: oldKit, to: newKit)
             existing.runtimeProps = node.props
+            existing.lastPropHash = newHash
             report.updated.append(nodeId)
         } else if let adapter = registry.make(for: node.componentId, executor: executorRef) {
             let view = adapter.create()
             let kit = kitProps(node.props, table: currentTable())
             adapter.update(view, from: Props(), to: kit)
-            built[nodeId] = BuiltNode(adapter: adapter, view: view, runtimeProps: node.props)
+            let hash = kitProps(node.props, table: currentTable()).hash
+            built[nodeId] = BuiltNode(adapter: adapter, view: view, runtimeProps: node.props, lastPropHash: hash)
             report.built.append(nodeId)
             // Bind handlers once, at build time — re-binding on every frame
             // would stack UIControl actions (ButtonAdapter adds one per call).
             for handlerId in node.handlers {
                 adapter.bindHandler(handlerId, to: view, nodeId: nodeId)
+            }
+            // Run the node's `onMount` block exactly once, on first build (G5).
+            if let mount = node.mountHandler {
+                (executorRef as? FluxRuntime)?.runLifecycle(mount)
             }
         }
 
@@ -155,6 +181,11 @@ struct ShadowTreeReconciler {
             report.updated.append(id)
 
         case let .remove(id):
+            // Run the node's `onCleanup` block (§18.4) before tearing down its
+            // native view, so resources it acquired in `onMount` are released.
+            if let node = nodeTable[id], let cleanup = node.cleanupHandler {
+                (executorRef as? FluxRuntime)?.runLifecycle(cleanup)
+            }
             if let existing = built.removeValue(forKey: id) {
                 existing.adapter.destroy(existing.view)
                 report.detached.append(id)

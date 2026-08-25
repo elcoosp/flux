@@ -55,9 +55,15 @@ enum FrameDeserializer {
         for _ in 0..<patchCount {
             patches.append(try decodePatch(&r))
         }
+        // The frame carries a handler section (Appendix D §D.12) — a shared
+        // bytecode blob followed by a stream of `(handlerId, ClosureRef)` entries
+        // (Gap G1). When the header `handlerCount` is 0 the section is empty (an
+        // encoded zero-length blob) and no handlers are produced. Each decoded
+        // `HandlerDef` is resolved to its concrete bytecode body here (the body
+        // the executor must register so native controls can fire it later).
         var handlers: [HandlerDef] = []
-        for _ in 0..<handlerCount {
-            handlers.append(try decodeHandlerDef(&r))
+        if handlerCount > 0 {
+            handlers = try decodeHandlerSection(&r)
         }
         var strings: [StringEntry] = []
         for _ in 0..<stringCount {
@@ -286,7 +292,39 @@ enum FrameDeserializer {
     static func decodeHandlerDef(_ r: inout ByteReader) throws -> HandlerDef {
         let handlerId = try r.u32()
         let closure = try decodeClosureRef(&r)
-        return HandlerDef(handlerId: handlerId, closure: closure)
+        return HandlerDef(handlerId: handlerId, closure: closure, bytecode: nil)
+    }
+
+    /// Resolves handler definitions from the frame's shared handler section
+    /// (Appendix D §D.12), producing `HandlerDef`s that carry their concrete
+    /// bytecode. The section is a `u32` blob length followed by the raw
+    /// bytecode, then a `u16` count of `(handlerId, ClosureRef)` entries whose
+    /// `bytecode_offset`/`bytecode_len` index the blob. The caller only invokes
+    /// this when the header declared `handlerCount > 0`.
+    private static func decodeHandlerSection(
+        _ r: inout ByteReader
+    ) throws -> [HandlerDef] {
+        let blobLen = try r.u32()
+        let blob = try r.bytes(Int(blobLen))
+        guard !blob.isEmpty else {
+            // A zero-length blob with `handlerCount > 0` is contradictory; emit
+            // no runnable handlers rather than fabricating bodies.
+            return []
+        }
+        let count = try r.u16()
+        var resolved: [HandlerDef] = []
+        resolved.reserveCapacity(Int(count))
+        for _ in 0..<count {
+            let handlerId = try r.u32()
+            let closure = try decodeClosureRef(&r)
+            let start = Int(closure.bytecodeOffset)
+            let end = start + Int(closure.bytecodeLen)
+            guard let slice = blob[safe: start..<end] else {
+                throw WireError.unexpectedEnd(offset: start, needed: end - start, available: blob.count)
+            }
+            resolved.append(HandlerDef(handlerId: handlerId, closure: closure, bytecode: Array(slice)))
+        }
+        return resolved
     }
 
     // MARK: - String / File / Span

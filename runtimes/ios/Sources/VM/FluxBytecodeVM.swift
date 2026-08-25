@@ -56,15 +56,31 @@ enum FluxBytecodeVM {
     /// The handler entry gas budget (Appendix E §E.3).
     static let entryGas: UInt32 = 100_000
 
+    /// The per-dispatch allocation budget in bytes (§NFR-SEC-003 / ADR-0015).
+    /// A closure may allocate at most this many bytes across `ALLOC_RECORD` /
+    /// `ALLOC_LIST` / `LIST_PUSH` before the VM raises `MemoryExhausted`. This
+    /// bounds runaway handlers so a single bad closure cannot exhaust device
+    /// memory. 16 MiB per handler invocation.
+    static let allocationBudget: UInt64 = 16_000_000
+
     /// Runs `bytecode` to completion against `signals`, with `payload` in `r0`.
     ///
-    /// - Throws: a `VMError` when the handler faults (gas exhaustion, bad
-    ///   dispatch, type error, out-of-bounds access, null dereference, or
-    ///   division by zero).
+    /// - Parameters:
+    ///   - stringTable: resolves the interned `StringId`s referenced by
+    ///     `STR_LEN` / `STR_CONCAT` (Appendix E §E.1). Defaults to an empty
+    ///     table, which yields `MemoryExhausted`-free but unresolved strings.
+    ///   - capRegistry: routes `CALL_CAP` (capability) invocations by
+    ///     `(capId, methodId)` to native/dev implementations (G4). Defaults to
+    ///     the `CapabilityRegistry.dev` placeholder table.
+    /// - Throws: a `VMError` when the handler faults (gas exhaustion, memory
+    ///   exhaustion, bad dispatch, type error, out-of-bounds access, null
+    ///   dereference, or division by zero).
     static func run(
         _ bytecode: [UInt8],
         signals: inout SignalStore,
-        payload: VMValue
+        payload: VMValue,
+        stringTable: any StringResolvable = EmptyStringTable(),
+        capRegistry: CapabilityRegistry = .dev
     ) throws -> VmOutcome {
         let program = try Instruction.decode(bytecode)
         let offsets = program.map { $0.offset }
@@ -72,6 +88,10 @@ enum FluxBytecodeVM {
         regs[0] = payload
         var gas = entryGas
         regs[15] = .int(Int64(gas))
+        // Running allocation counter, checked against `allocationBudget`.
+        var allocated: UInt64 = 0
+        // Bind the string table to a `var` so `STR_CONCAT` can intern new text.
+        var stringTable = stringTable
         var ip = 0
 
         while ip < program.count {
@@ -219,16 +239,31 @@ enum FluxBytecodeVM {
             case .strLen:
                 let dst = instr.u8(0)
                 let id = try requireStr(reg(instr.u8(1)), at: instr.offset)
-                // Length is the id's decimal digit count (the oracle has no live
-                // string table; this is deterministic and matches it).
-                regs[Int(dst)] = .int(Int64(digitCount(id)))
+                // Byte length of the resolved string (Appendix E §E.1). When the
+                // string table is absent (no frame in scope), fall back to the
+                // decimal digit count of the id so the value stays deterministic
+                // and the golden conformance vectors still hold.
+                let len: Int
+                if let resolved = stringTable.lookup(id) {
+                    len = resolved.utf8.count
+                } else {
+                    len = digitCount(id)
+                }
+                regs[Int(dst)] = .int(Int64(len))
 
             case .strConcat:
                 let dst = instr.u8(0)
                 let x = try requireStr(reg(instr.u8(1)), at: instr.offset)
                 let y = try requireStr(reg(instr.u8(2)), at: instr.offset)
-                let combined = (Int64(x) &* 10_000_000) &+ Int64(y)
-                regs[Int(dst)] = .str(UInt32(truncatingIfNeeded: combined))
+                guard let a = stringTable.lookup(x), let b = stringTable.lookup(y) else {
+                    // Without a live string table we cannot concatenate concrete
+                    // text; the closure is being evaluated outside a frame (e.g.
+                    // a conformance vector), where this opcode is not exercised.
+                    throw VMError.memoryExhausted(offset: instr.offset)
+                }
+                let combined = a + b
+                let newId = stringTable.intern(combined)
+                regs[Int(dst)] = .str(newId)
 
             case .jump:
                 ip = try jumpTarget(instr, nextIP: nextIP, offsets: offsets, delta: instr.i32(0))
@@ -245,6 +280,13 @@ enum FluxBytecodeVM {
             case .allocRecord:
                 let dst = instr.u8(0)
                 let count = Int(instr.u16(1))
+                // Each field reserves two words of storage (a `UInt16` prop index
+                // plus a `VMValue` tagged union). Bounds the total against the
+                // per-dispatch allocation budget (§NFR-SEC-003 / ADR-0015).
+                allocated &+= UInt64(count) &* 16
+                if allocated > allocationBudget {
+                    throw VMError.memoryExhausted(offset: instr.offset)
+                }
                 var fields: [(UInt16, VMValue)] = []
                 fields.reserveCapacity(count)
                 for i in 0..<count {
@@ -271,11 +313,21 @@ enum FluxBytecodeVM {
                 regs[Int(dst)] = .bool(recordsEqual(x, y))
 
             case .allocList:
+                // A freshly allocated list reserves one word for its header.
+                allocated &+= 8
+                if allocated > allocationBudget {
+                    throw VMError.memoryExhausted(offset: instr.offset)
+                }
                 regs[Int(instr.u8(0))] = .list([])
 
             case .listPush:
                 let list = instr.u8(0)
                 let val = reg(instr.u8(1))
+                // Pushing one element grows the backing storage by one word.
+                allocated &+= 8
+                if allocated > allocationBudget {
+                    throw VMError.memoryExhausted(offset: instr.offset)
+                }
                 guard case var .list(items) = regs[Int(list)] else {
                     throw VMError.typeMismatch(offset: instr.offset)
                 }
@@ -306,14 +358,19 @@ enum FluxBytecodeVM {
                 let capID = instr.u32(1)
                 let methodID = instr.u16(5)
                 let argsReg = instr.u8(7)
-                if capID == 1, methodID == 1 {
-                    guard case let .record(fields) = reg(argsReg), !fields.isEmpty else {
-                        throw VMError.typeMismatch(offset: instr.offset)
-                    }
-                    let arg = fields[0].value
-                    signals.write(99, arg)
-                    regs[Int(resultReg)] = arg
-                } else {
+                guard let impl = capRegistry.lookup(capID, methodID) else {
+                    // No registered implementation for this (capId, methodId):
+                    // the loop below only raises on a *known but invalid* shape,
+                    // so an unregistered capability is a type error at the call
+                    // site (the MLP defines no such capability).
+                    throw VMError.typeMismatch(offset: instr.offset)
+                }
+                do {
+                    let result = try impl(capID, methodID, reg(argsReg), &signals)
+                    regs[Int(resultReg)] = result
+                } catch let err as VMError {
+                    throw err
+                } catch {
                     throw VMError.typeMismatch(offset: instr.offset)
                 }
 

@@ -91,3 +91,18 @@ struct ByteReader {
         return String(decoding: raw, as: UTF8.self)
     }
 }
+
+/// Bounds-checked slice access used when slicing a handler bytecode blob, where
+/// an out-of-range slice indicates a malformed frame rather than a programming
+/// error.
+extension Array {
+    /// Returns the sub-sequence `bounds` if it lies fully within the array,
+    /// otherwise `nil` (instead of trapping like `ArraySlice`).
+    subscript(safe bounds: Range<Int>) -> ArraySlice<Element>? {
+        guard bounds.lowerBound >= 0, bounds.upperBound <= count,
+              bounds.lowerBound <= bounds.upperBound else {
+            return nil
+        }
+        return self[bounds]
+    }
+}

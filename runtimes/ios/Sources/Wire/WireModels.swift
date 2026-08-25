@@ -19,6 +19,11 @@ enum Patch: Equatable, Sendable {
 struct HandlerDef: Equatable, Sendable {
     let handlerId: UInt32
     let closure: ClosureRef
+    /// The handler's bytecode, sliced from the frame's shared handler blob
+    /// (Appendix D §D.12 handler section). `nil` only when the frame carried no
+    /// handler section (e.g. a delta with `handler_count == 0`); such handlers
+    /// cannot be dispatched.
+    let bytecode: [UInt8]?
 }
 
 /// An interned string entry (Appendix D §D.9).

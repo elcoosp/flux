@@ -75,6 +75,17 @@ final class FluxRuntime: FluxExecutor {
             currentNodes = frame.nodes
             currentRootId = root.id
         }
+        // Register every handler carried by the frame so native controls can
+        // fire them later (G1 — logic hot-swap). The handler section on the wire
+        // ships each handler's bytecode alongside its id; without it a decoded
+        // `HandlerDef` has no body to run, so we register only those that carry
+        // one and surface the gap through `lastError` when a control fires an
+        // unregistered id.
+        for def in frame.handlers {
+            if let bytecode = def.bytecode {
+                registerHandler(def.handlerId, closure: def.closure, bytecode: bytecode)
+            }
+        }
         // Drive the reconciler unconditionally: a full frame (root != nil)
         // rebuilds the tree, while a patch frame (root == nil) applies only its
         // patches. The reconciler no-ops the tree build when root is absent.
@@ -94,7 +105,13 @@ final class FluxRuntime: FluxExecutor {
         var store: any SignalStore = graph
         let outcome: VmOutcome
         do {
-            outcome = try FluxBytecodeVM.run(bytecode, signals: &store, payload: payload)
+            outcome = try FluxBytecodeVM.run(
+                bytecode,
+                signals: &store,
+                payload: payload,
+                stringTable: table,
+                capRegistry: .dev
+            )
         } catch let err as VMError {
             lastError = err
             return DispatchResult(builtOrUpdated: [], signals: [], error: err)
@@ -140,6 +157,22 @@ final class FluxRuntime: FluxExecutor {
     /// Registers handler bytecode so native controls can fire it later.
     func registerHandler(_ id: UInt32, closure: ClosureRef, bytecode: [UInt8]) {
         handlerClosures[id] = (closure: closure, bytecode: bytecode)
+    }
+
+    /// Evaluates a lifecycle handler (e.g. `onMount`/`onCleanup`, §18.4) by its
+    /// handler id, without a native event payload. Used by the reconciler when a
+    /// node is created or removed. A missing or unregistered id is a no-op
+    /// (lifecycle blocks are optional); a VM fault is captured into `lastError`
+    /// like any other dispatch.
+    func runLifecycle(_ handlerId: UInt32) {
+        guard let (_, bytecode) = handlerClosures[handlerId] else {
+            // No body registered for this lifecycle hook; nothing to run.
+            return
+        }
+        _ = dispatch(bytecode: bytecode, closure: ClosureRef(
+            hash: [], bytecodeOffset: 0, bytecodeLen: UInt16(bytecode.count),
+            signalCount: 0, signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0)
+        ), payload: .null)
     }
 
     /// Reconstructs a frame carrying the last full tree so the reconciler can

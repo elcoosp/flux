@@ -22,6 +22,10 @@ enum VMErrorKind: Equatable {
     case typeMismatch
     /// Integer division or remainder by zero (ADR-0023).
     case divByZero
+    /// A handler exceeded the per-dispatch allocation budget (§NFR-SEC-003 /
+    /// ADR-0015). The VM bounds total heap it may allocate (records, lists)
+    /// so a runaway closure cannot exhaust device memory.
+    case memoryExhausted
 }
 
 extension VMErrorKind {
@@ -34,6 +38,7 @@ extension VMErrorKind {
         case .invalidDispatch: "InvalidDispatch"
         case .typeMismatch: "TypeMismatch"
         case .divByZero: "DivByZero"
+        case .memoryExhausted: "MemoryExhausted"
         }
     }
 }
@@ -51,4 +56,5 @@ struct VMError: Error, Equatable {
     static func invalidDispatch(offset: Int) -> VMError { VMError(kind: .invalidDispatch, offset: offset) }
     static func typeMismatch(offset: Int) -> VMError { VMError(kind: .typeMismatch, offset: offset) }
     static func divByZero(offset: Int) -> VMError { VMError(kind: .divByZero, offset: offset) }
+    static func memoryExhausted(offset: Int) -> VMError { VMError(kind: .memoryExhausted, offset: offset) }
 }
