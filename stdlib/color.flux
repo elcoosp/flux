@@ -8,7 +8,7 @@
 // The constant bindings (`Color.red = RGB(..)`) use the
 // top-level `Name.field = expr` form shown in §18.6. That form is now a
 // grammar production (`const_binding`, Appendix B.2): the gap recorded as G1
-// in ADR stdlib-grammar-gaps was closed by FLUX-003 and is verified by
+// in ADR-0037-stdlib-grammar-gaps was closed by FLUX-003 and is verified by
 // FLUX-015's parse check. The values themselves are fully within Appendix B
 // (a 3-tuple variant constructor).
 

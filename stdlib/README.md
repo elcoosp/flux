@@ -42,10 +42,10 @@ works without touching the parser crate.
 
 ### Grammar gaps G1–G4
 
-`docs/adr/stdlib-grammar-gaps.md` recorded four constructs the stdlib needed
+`docs/adr/ADR-0037-stdlib-grammar-gaps.md` recorded four constructs the stdlib needed
 that the original Appendix B did not spell out. All four are now grammar
 productions, reconciled into Appendix B by
-`docs/adr/parser-grammar-extensions.md`:
+`docs/adr/ADR-0035-parser-grammar-extensions.md`:
 
 | Gap | Construct | Production | Used by |
 |---|---|---|---|

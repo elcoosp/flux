@@ -4,7 +4,7 @@
 // a point size, a weight, and a slant. The constants use positional variant
 // construction `Font(family, size, weight, style)`, the form the §18.6
 // examples show for `RGB(..)`. The record-literal alternative recorded as G3
-// in ADR stdlib-grammar-gaps is also a grammar production now (`record_lit`,
+// in ADR-0037-stdlib-grammar-gaps is also a grammar production now (`record_lit`,
 // Appendix B.2), so the choice here is stylistic rather than forced. The three
 // presets (`Font.body`, `Font.title`, `Font.caption`) map onto the platform's
 // built-in text styles per §18.6.
