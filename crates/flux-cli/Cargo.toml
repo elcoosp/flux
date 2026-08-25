@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[lib]
+path = "src/lib.rs"
+
 [[bin]]
 name = "flux"
 path = "src/main.rs"
@@ -14,8 +17,22 @@ path = "src/main.rs"
 flux-devserver.workspace = true
 flux-codegen-swift.workspace = true
 flux-codegen-kotlin.workspace = true
+flux-ir.workspace = true
+flux-parser.workspace = true
 clap.workspace = true
 anyhow.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+
+# Dev-dependencies the FLUX-022 acceptance criteria require (a real tungstenite
+# client for `flux dev`, `flux-ir-serde` to decode the served `Init` frame, and
+# `tempfile` to isolate the integration tests) that the foundation manifest did
+# not pre-wire. They are test-only and do not affect the production binary.
+[dev-dependencies]
+tokio-tungstenite.workspace = true
+flux-ir-serde.workspace = true
+tempfile.workspace = true
+futures-util = "^0.3"
