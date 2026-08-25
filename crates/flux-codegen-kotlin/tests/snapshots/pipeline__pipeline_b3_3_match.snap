@@ -1,0 +1,16 @@
+---
+source: crates/flux-codegen-kotlin/tests/pipeline.rs
+expression: "codegen_example(name, src)"
+---
+@Composable fun AreaView(
+     shape: Shape
+) {
+    Column {
+        when (shape) {
+            Circle(r) ->
+                Text("circle")
+            Rect(w, h) ->
+                Text("rect")
+        }
+    }
+}

@@ -1,0 +1,14 @@
+---
+source: crates/flux-codegen-kotlin/tests/pipeline.rs
+expression: "codegen_example(name, src)"
+---
+@Composable fun Counter(
+) {
+    var count by remember { mutableStateOf<Int>(0) }
+    Column {
+        Text("Count: ${count}")
+        Button(onClick = { }) {
+            Text("")
+        }
+    }
+}

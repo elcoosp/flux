@@ -1,0 +1,15 @@
+---
+source: crates/flux-codegen-kotlin/tests/pipeline.rs
+expression: "codegen_example(name, src)"
+---
+@Composable fun App(
+) {
+    var show by remember { mutableStateOf<Boolean>(false) }
+    Column {
+        if (show) {
+            Text("visible")
+        } else {
+            Text("hidden")
+        }
+    }
+}

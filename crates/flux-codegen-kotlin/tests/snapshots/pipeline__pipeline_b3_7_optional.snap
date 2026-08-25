@@ -1,0 +1,11 @@
+---
+source: crates/flux-codegen-kotlin/tests/pipeline.rs
+expression: "codegen_example(name, src)"
+---
+@Composable fun Detail(
+     model: Model
+) {
+    Column {
+        Text(model.title)
+    }
+}
