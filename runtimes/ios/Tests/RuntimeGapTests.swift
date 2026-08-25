@@ -403,3 +403,53 @@ final class GapR1DirtySetTests: XCTestCase {
         XCTAssertFalse(reconciled.contains(11), "unrelated node must NOT be reconciled (R1)")
     }
 }
+
+// MARK: - R3: cached decoded bytecode
+
+/// R3 — handler bytecode is decoded once at registration and reused on every
+/// dispatch; re-registering a handler invalidates the cache.
+final class GapR3CacheTests: XCTestCase {
+    /// Bytecode: LOAD_INT_CONST r0, `value` ; WRITE_SIGNAL `id`, r0 ; HALT.
+    private func writeSignal(_ id: UInt32, _ value: Int64) -> [UInt8] {
+        var v = value
+        let vBytes = withUnsafeBytes(of: &v) { Array($0) }
+        return [
+            0xB0, 0x00, vBytes[0], vBytes[1], vBytes[2], vBytes[3], vBytes[4], vBytes[5], vBytes[6], vBytes[7],
+            0x11, UInt8(id & 0xFF), 0x00, 0x00, 0x00,
+            0x00,
+        ]
+    }
+
+    @MainActor
+    func testReRegistrationInvalidatesDecodeCache() {
+        let executor = FluxRuntime(graph: SignalGraph(), registry: gapRegistry())
+
+        // First registration: handler 1 writes signal 5 = 2.
+        executor.registerHandler(
+            1,
+            closure: ClosureRef(hash: [], bytecodeOffset: 0, bytecodeLen: 0, signalCount: 0, signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0)),
+            bytecode: writeSignal(5, 2)
+        )
+        executor.dispatch(FluxEvent(handlerId: 1, nodeId: 0))
+        XCTAssertEqual(executor.graph.read(5), .int(2), "first handler must write signal 5 = 2")
+
+        // Re-registering the same id with different bytecode must invalidate the
+        // cached decode and run the new body (signal 5 = 3, not 2).
+        executor.registerHandler(
+            1,
+            closure: ClosureRef(hash: [], bytecodeOffset: 0, bytecodeLen: 0, signalCount: 0, signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0)),
+            bytecode: writeSignal(5, 3)
+        )
+        executor.dispatch(FluxEvent(handlerId: 1, nodeId: 0))
+        XCTAssertEqual(executor.graph.read(5), .int(3), "re-registered handler must run NEW bytecode (R3 cache invalidation)")
+
+        // A different handler id keeps its own cached decode (signal 6 = 9).
+        executor.registerHandler(
+            2,
+            closure: ClosureRef(hash: [], bytecodeOffset: 0, bytecodeLen: 0, signalCount: 0, signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0)),
+            bytecode: writeSignal(6, 9)
+        )
+        executor.dispatch(FluxEvent(handlerId: 2, nodeId: 0))
+        XCTAssertEqual(executor.graph.read(6), .int(9), "independent handler keeps its own cached decode")
+    }
+}

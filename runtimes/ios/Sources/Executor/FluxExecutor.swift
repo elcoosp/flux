@@ -39,9 +39,11 @@ final class FluxRuntime: FluxExecutor {
     private var reconciler: ShadowTreeReconciler
     /// The interned string table from the most recent Init frame.
     private(set) var table: StringTable
-    /// Handler id → (closure descriptor + bytecode blob), registered by
-    /// Init/delta frames so native controls can fire them later.
-    private var handlerClosures: [UInt32: (closure: ClosureRef, bytecode: [UInt8])]
+    /// Handler id → (closure descriptor + bytecode blob + pre-decoded instruction
+    /// stream). The decoded `[Instruction]` is produced once at registration (R3)
+    /// and reused on every dispatch, so the per-tap hot path never re-decodes. A
+    /// re-registration replaces the entry and invalidates the cache.
+    private var handlerClosures: [UInt32: (closure: ClosureRef, bytecode: [UInt8], decoded: [Instruction]?)]
     /// The most recent full frame's node table, kept so handler dispatches can
     /// re-reconcile the affected views after a signal write.
     private var currentNodes: [UInt32: ShadowNode]
@@ -96,18 +98,19 @@ final class FluxRuntime: FluxExecutor {
         return report.built + report.updated
     }
 
-    /// Evaluates `bytecode` against a copy of the live graph and returns the
-    /// outcome (or the `VMError` that faulted). Does NOT reconcile — shared by
-    /// both event dispatch and lifecycle hooks.
+    /// Evaluates a pre-decoded instruction stream against the live graph and
+    /// returns the outcome (or the `VMError` that faulted). Does NOT reconcile —
+    /// shared by both event dispatch and lifecycle hooks. Uses the concrete
+    /// `SignalGraph` by reference (R3) so the dispatch hot path never boxes it into
+    /// an `any SignalStore` existential.
     private func evaluate(
-        bytecode: [UInt8],
-        closure: ClosureRef,
+        instructions: [Instruction],
         payload: VMValue
     ) -> (outcome: VmOutcome?, error: VMError?) {
-        var store: any SignalStore = graph
+        var store = graph
         do {
             let outcome = try FluxBytecodeVM.run(
-                bytecode,
+                instructions,
                 signals: &store,
                 payload: payload,
                 stringTable: table,
@@ -126,13 +129,27 @@ final class FluxRuntime: FluxExecutor {
     /// `flux-vm-ref`: runs the bytecode and folds the written signals back into
     /// the graph. It does NOT re-reconcile — that is driven by the dispatch path
     /// via the dirty-set (R1) so only signal-dependent subtrees are touched.
+    ///
+    /// This overload decodes `bytecode` on the fly (used by callers/tests that
+    /// hold raw bytes, e.g. conformance vectors); the `dispatch(event:)` hot path
+    /// uses `dispatch(instructions:payload:)` with the registration-time cache (R3).
     /// - Returns: a `DispatchResult` describing what changed (signals written).
     func dispatch(
         bytecode: [UInt8],
         closure: ClosureRef,
         payload: VMValue
     ) -> DispatchResult {
-        let (outcome, error) = evaluate(bytecode: bytecode, closure: closure, payload: payload)
+        let instructions = (try? Instruction.decode(bytecode)) ?? []
+        return dispatch(instructions: instructions, payload: payload)
+    }
+
+    /// Evaluates a pre-decoded instruction stream (R3) against the current graph.
+    /// - Returns: a `DispatchResult` describing what changed (signals written).
+    func dispatch(
+        instructions: [Instruction],
+        payload: VMValue
+    ) -> DispatchResult {
+        let (outcome, error) = evaluate(instructions: instructions, payload: payload)
         guard let outcome else {
             lastError = error
             return DispatchResult(builtOrUpdated: [], signals: [], error: error)
@@ -155,13 +172,16 @@ final class FluxRuntime: FluxExecutor {
     /// `HandlerTarget` asserts isolation), so dispatching a handler — which
     /// evaluates bytecode and mutates UIKit views — is safe here.
     func dispatch(_ event: FluxEvent) {
-        guard let (closure, bytecode) = handlerClosures[event.handlerId] else {
+        guard let entry = handlerClosures[event.handlerId] else {
             lastError = VMError(kind: .invalidDispatch, offset: 0)
             lastReconcile = ReconcileReport()
             return
         }
+        // Reuse the cached decode from registration (R3); fall back to a one-off
+        // decode only if caching was impossible.
+        let instructions = entry.decoded ?? (try? Instruction.decode(entry.bytecode)) ?? []
         let payload: VMValue = event.payload.map { toRuntime($0, table: &table) } ?? .null
-        let result = dispatch(bytecode: bytecode, closure: closure, payload: payload)
+        let result = dispatch(instructions: instructions, payload: payload)
         // R1: re-reconcile only the nodes whose signal dependencies were just
         // written, instead of re-walking the whole tree on every tap.
         let dirty = Set(result.signals.map { $0.0 })
@@ -179,9 +199,12 @@ final class FluxRuntime: FluxExecutor {
         reconciler.view(for: nodeId)
     }
 
-    /// Registers handler bytecode so native controls can fire it later.
+    /// Registers handler bytecode so native controls can fire it later. The
+    /// bytecode is decoded once into `[Instruction]` and cached (R3) so dispatch
+    /// never re-decodes; re-registering invalidates the prior cache entry.
     func registerHandler(_ id: UInt32, closure: ClosureRef, bytecode: [UInt8]) {
-        handlerClosures[id] = (closure: closure, bytecode: bytecode)
+        let decoded = try? Instruction.decode(bytecode)
+        handlerClosures[id] = (closure: closure, bytecode: bytecode, decoded: decoded)
     }
 
     /// Evaluates a lifecycle handler (e.g. `onMount`/`onCleanup`, §18.4) by its
@@ -196,18 +219,13 @@ final class FluxRuntime: FluxExecutor {
     /// exclusive-access model). It folds any signal writes back into the graph
     /// (a mount/cleanup block may seed state) and returns.
     func runLifecycle(_ handlerId: UInt32) {
-        guard let (_, bytecode) = handlerClosures[handlerId] else {
+        guard let entry = handlerClosures[handlerId] else {
             // No body registered for this lifecycle hook; nothing to run.
             return
         }
-        let (outcome, error) = evaluate(
-            bytecode: bytecode,
-            closure: ClosureRef(
-                hash: [], bytecodeOffset: 0, bytecodeLen: UInt16(bytecode.count),
-                signalCount: 0, signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0)
-            ),
-            payload: .null
-        )
+        // Reuse the cached decode (R3); fall back to a one-off decode if needed.
+        let instructions = entry.decoded ?? (try? Instruction.decode(entry.bytecode)) ?? []
+        let (outcome, error) = evaluate(instructions: instructions, payload: .null)
         if let error { lastError = error; return }
         guard let outcome else { return }
         // Fold written signals back into the live graph without re-reconciling.

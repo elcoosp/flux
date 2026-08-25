@@ -75,14 +75,33 @@ enum FluxBytecodeVM {
     /// - Throws: a `VMError` when the handler faults (gas exhaustion, memory
     ///   exhaustion, bad dispatch, type error, out-of-bounds access, null
     ///   dereference, or division by zero).
-    static func run(
+    /// Runs `bytecode` to completion against `signals`, with `payload` in `r0`.
+    ///
+    /// Generic over `S: SignalStore` so the host can pass its concrete signal
+    /// graph by reference and avoid re-boxing into an `any SignalStore` existential
+    /// on the dispatch hot path (R3 / Perf review). Decodes the bytecode then runs
+    /// the already-decoded instruction stream.
+    static func run<S: SignalStore>(
         _ bytecode: [UInt8],
-        signals: inout SignalStore,
+        signals: inout S,
         payload: VMValue,
         stringTable: any StringResolvable = EmptyStringTable(),
         capRegistry: CapabilityRegistry = .dev
     ) throws -> VmOutcome {
         let program = try Instruction.decode(bytecode)
+        return try run(program, signals: &signals, payload: payload, stringTable: stringTable, capRegistry: capRegistry)
+    }
+
+    /// Runs an already-decoded instruction stream (R3). The executor caches the
+    /// `[Instruction]` per handler at registration time and reuses it across
+    /// dispatches, so this is the hot path that avoids re-decoding every tap.
+    static func run<S: SignalStore>(
+        _ program: [Instruction],
+        signals: inout S,
+        payload: VMValue,
+        stringTable: any StringResolvable = EmptyStringTable(),
+        capRegistry: CapabilityRegistry = .dev
+    ) throws -> VmOutcome {
         let offsets = program.map { $0.offset }
         var regs = [VMValue](repeating: .null, count: 16)
         regs[0] = payload
@@ -366,7 +385,13 @@ enum FluxBytecodeVM {
                     throw VMError.typeMismatch(offset: instr.offset)
                 }
                 do {
-                    let result = try impl(capID, methodID, reg(argsReg), &signals)
+                    // The capability signature is `inout any SignalStore`, so box
+                    // the concrete store only for the duration of the call (R3:
+                    // the rest of the loop uses `S` directly, avoiding the
+                    // existential on the hot path), then copy the writes back.
+                    var boxed: any SignalStore = signals
+                    let result = try impl(capID, methodID, reg(argsReg), &boxed)
+                    signals = boxed as! S
                     regs[Int(resultReg)] = result
                 } catch let err as VMError {
                     throw err
