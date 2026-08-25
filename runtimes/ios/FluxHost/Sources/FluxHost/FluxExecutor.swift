@@ -80,6 +80,17 @@ public final class FluxRuntime: FluxExecutor {
         self.reconciler.setExecutor(self)
     }
 
+    /// Applies a raw wire frame (decoding it first) and drives the reconciler.
+    /// Convenience for the transport path: the app shell hands received bytes to
+    /// this method instead of importing the decoder directly.
+    /// - Throws: `WireError` on malformed input (the fault is also captured into
+    ///   `lastError` so the UI can surface it).
+    @discardableResult
+    public func applyFrame(_ bytes: Data) throws -> [UInt32] {
+        let frame = try FrameDeserializer.decode([UInt8](bytes))
+        return apply(frame)
+    }
+
     /// Applies an Init/full frame: seeds state, builds the string table, builds
     /// the view tree.
     /// - Returns: the node ids built or updated.

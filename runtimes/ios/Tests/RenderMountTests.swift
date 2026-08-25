@@ -11,6 +11,7 @@ import XCTest
 import UIKit
 import FluxUIKit
 
+@testable import FluxHost
 @testable import FluxApp
 
 /// Builds a primitive `ShadowNode` for the mount tests.
