@@ -21,6 +21,7 @@ use parking_lot::Mutex;
 use tokio::task::JoinHandle;
 
 use crate::config::ServerConfig;
+use crate::dispatch::NodeSignalDeps;
 use crate::error::DevServerError;
 use crate::pipeline::Pipeline;
 use crate::watch::{Watcher, collect_flux_sources};
@@ -250,6 +251,14 @@ impl RunningServer {
     #[must_use]
     pub fn has_tree(&self) -> bool {
         self.shared.pipeline.lock().has_tree()
+    }
+
+    /// Injects the per-node `signal_deps` the server's minimal-patch index is
+    /// built from (ADR-0027 Phase 2). Exposed for the file-watch path and for
+    /// integration tests; in production FA-IRWIRE will populate this directly
+    /// from the lowered IR.
+    pub fn set_signal_deps(&self, deps: Option<Vec<NodeSignalDeps>>) {
+        self.shared.pipeline.lock().set_signal_deps(deps);
     }
 }
 

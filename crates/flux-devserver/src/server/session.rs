@@ -15,6 +15,7 @@ use tokio_tungstenite::tungstenite::{
     Error as WsError, HandshakeError, Message, WebSocket, accept,
 };
 
+use crate::dispatch::FRAME_DISPATCH_REPORT;
 use crate::error::Diagnostic;
 use crate::server::Shared;
 
@@ -77,6 +78,13 @@ fn handle_host_frame(
     socket: &mut WebSocket<TcpStream>,
     shared: &Arc<Shared>,
 ) -> Result<bool, WsError> {
+    // A host dispatch report is a separate frame type from `Hello`; route it
+    // before the handshake check because a host may report dispatches at any
+    // time after connecting.
+    if bytes.get(5).copied() == Some(FRAME_DISPATCH_REPORT) {
+        handle_dispatch_report(bytes, shared);
+        return Ok(false);
+    }
     use flux_ir_serde::{FRAME_HELLO, Frame};
     if bytes.get(5).copied() != Some(FRAME_HELLO) {
         // Heartbeats and unknown host frames are ignored; the host drives the
@@ -100,6 +108,27 @@ fn handle_host_frame(
         socket.send(Message::Binary(frame.into()))?;
     }
     Ok(true)
+}
+
+/// Handles a host→server dispatch report (ADR-0027 Phase 2).
+///
+/// Decodes the report and asks the pipeline for the minimal-patch `Delta`. When
+/// the pipeline returns `None` (index inactive → degrade to coarse frame, or the
+/// written signal has no dependents → `noop_dispatch`), nothing is shipped.
+/// Otherwise the `Delta` is fanned out to every connected host.
+fn handle_dispatch_report(bytes: &[u8], shared: &Arc<Shared>) {
+    let report = match crate::dispatch::DispatchReport::from_bytes(bytes) {
+        Some(report) => report,
+        None => {
+            tracing::warn!(bytes = bytes.len(), "dropped malformed dispatch report");
+            return;
+        }
+    };
+    let frame = shared.pipeline.lock().handle_dispatch_report(report);
+    if let Some(frame) = frame {
+        shared.broadcast(frame);
+        tracing::debug!(handler = ?report.handler_id, "shipped minimal dispatch delta");
+    }
 }
 
 /// Builds the handshake reply: the retained tree's `Init`, or an `Error` frame

@@ -45,10 +45,16 @@
 
 mod assets;
 mod config;
+mod dispatch;
 mod error;
 mod pipeline;
 mod server;
 mod watch;
+
+pub use dispatch::{
+    DependencyIndex, DispatchReport, FRAME_DISPATCH_REPORT, MinimalPatchError, NodeSignalDeps,
+    emit_minimal_updates,
+};
 
 pub use config::{
     DEFAULT_COALESCE, DEFAULT_DEBOUNCE, DEFAULT_HTTP_PORT, DEFAULT_WS_PORT, ServerConfig,

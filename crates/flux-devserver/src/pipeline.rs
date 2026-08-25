@@ -1,9 +1,11 @@
 //! The compile pipeline: source → parse → type check → lower → diff → frame.
 //!
-//! [`Pipeline`] owns the last-good [`LoweredIr`] for the project. Compiling a
-//! source snapshot either advances that state and yields the frame to ship, or
-//! returns a [`Diagnostic`] — in which case the previous good tree is retained
-//! and no `Delta` is produced (spec §D.12.3).
+//! [`Pipeline`] owns the last-good [`LoweredIr`] for the project plus the
+//! server-side [`DependencyIndex`] derived from each tree's `signal_deps`
+//! (ADR-0027 Phase 2, server half). Compiling a source snapshot either advances
+//! that state and yields the frame to ship, or returns a [`Diagnostic`] — in
+//! which case the previous good tree is retained and no `Delta` is produced
+//! (spec §D.12.3).
 
 /// The result of compiling all source snapshots at once: the merged wire arena,
 /// the handler closure table, and the per-file `(path, LoweredIr, Ast)` bundles
@@ -27,6 +29,7 @@ use flux_ir_serde::{Frame, InitFrame};
 use flux_parser::Ast;
 use flux_syntax::{FileId, Patch};
 
+use crate::dispatch::{DependencyIndex, DispatchReport, NodeSignalDeps, emit_minimal_updates};
 use crate::error::Diagnostic;
 use tree::{display_path, merge_arenas, root_node};
 
@@ -81,6 +84,15 @@ pub struct Pipeline {
     profile: bool,
     /// Timings of the most recent compile.
     timings: PhaseTimings,
+    /// Reverse `SignalId → {NodeId}` index used to scope dispatch patches to the
+    /// nodes that actually read a written signal (ADR-0027 Phase 2). Inactive
+    /// until the lowered tree carries `signal_deps` (injected via
+    /// [`set_signal_deps`](Self::set_signal_deps) until FA-IRWIRE lands T13).
+    index: DependencyIndex,
+    /// Per-node `signal_deps` for the last good tree. `None` before the first
+    /// compile or when no dependency data is available, which leaves `index`
+    /// inactive and degrades the server to coarse frames.
+    signal_deps: Option<Vec<NodeSignalDeps>>,
 }
 
 impl Pipeline {
@@ -96,6 +108,8 @@ impl Pipeline {
             seq: 0,
             profile,
             timings: PhaseTimings::default(),
+            index: DependencyIndex::default(),
+            signal_deps: None,
         }
     }
 
@@ -125,6 +139,102 @@ impl Pipeline {
             .iter()
             .map(|(path, ir, ast)| (path.clone(), ir.clone(), ast.clone()))
             .collect()
+    }
+
+    /// Injects the per-node `signal_deps` for the current tree (ADR-0027 Phase 2).
+    ///
+    /// The lowered IR (FA-IRWIRE, T13) will eventually carry `signal_deps` on
+    /// every node; until then the server-side index is fed by this method, which
+    /// the file-watch path and the integration harness both call. Passing `None`
+    /// clears the dependency data and forces the server back to coarse-frame
+    /// behaviour (the degradation path). The index is rebuilt immediately so a
+    /// subsequent [`handle_dispatch_report`](Self::handle_dispatch_report) sees
+    /// the new mapping.
+    pub fn set_signal_deps(&mut self, deps: Option<Vec<NodeSignalDeps>>) {
+        self.signal_deps = deps;
+        self.rebuild_index();
+    }
+
+    /// Rebuilds the reverse index from the injected `signal_deps`, if any.
+    fn rebuild_index(&mut self) {
+        match &self.signal_deps {
+            Some(deps) => {
+                self.index.rebuild(deps);
+                tracing::debug!(
+                    edges = self.index.edge_count(),
+                    active = self.index.is_active(),
+                    "rebuilt signal→node dependency index"
+                );
+            }
+            None => {
+                self.index = DependencyIndex::default();
+            }
+        }
+    }
+
+    /// Handles a host dispatch report, returning the minimal `Delta` frame to
+    /// ship, or `None` when the report should not produce a server patch.
+    ///
+    /// Returns `None` in two cases, both of which mean "the caller must not ship
+    /// a minimal patch":
+    /// * the index is inactive (no `signal_deps` in the tree) — degrade to the
+    ///   coarse-frame path;
+    /// * the written signal has no dependents — zero patches would be sent, and
+    ///   the ADR-0027 `noop_dispatch` budget requires *nothing* to leave the
+    ///   server.
+    ///
+    /// The released patch set is addressed only to `dependents[written]`; nodes
+    /// outside that set receive nothing (the bounded-by-`|dependents[S]|`
+    /// guarantee).
+    #[must_use]
+    pub fn handle_dispatch_report(&mut self, report: DispatchReport) -> Option<Vec<u8>> {
+        let last = self.last_good.as_ref()?;
+        let arena = &last.arena;
+        let written = report.written;
+        match emit_minimal_updates(written, arena, &self.index) {
+            Ok(patches) if patches.is_empty() => None,
+            Ok(patches) => {
+                let frame = self.build_dispatch_delta(&patches);
+                tracing::debug!(
+                    handler = ?report.handler_id,
+                    written = written,
+                    patches = patches.len(),
+                    "emitted minimal-patch delta for dispatch"
+                );
+                Some(frame)
+            }
+            // Inactive index (no signal_deps yet) → fall back to coarse frame.
+            Err(_) => None,
+        }
+    }
+
+    /// Builds a `Delta` frame carrying `patches`, addressed from the report.
+    fn build_dispatch_delta(&mut self, patches: &[Patch]) -> Vec<u8> {
+        let strings: Vec<(flux_syntax::StringId, String)> = self
+            .last_good
+            .as_ref()
+            .map(|last| {
+                last.arena
+                    .string_table()
+                    .iter()
+                    .map(|(id, text)| (id, text.to_owned()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let closures = self
+            .last_good
+            .as_ref()
+            .map(|last| last.closures.values().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
+        self.seq = self.seq.wrapping_add(1);
+        Frame::delta(
+            self.seq,
+            flux_ir_serde::FLAG_HAS_STRING_DELTA,
+            patches,
+            &strings,
+            &closures,
+        )
+        .to_bytes()
     }
 
     /// Assigns (or reuses) the dense [`FileId`] for `path`.
@@ -192,6 +302,11 @@ impl Pipeline {
             instances: flux_ir::InstanceRegistry::new(),
         });
         self.last_sources = sources;
+        // The dependency index is a pure function of the tree's `signal_deps`. The
+        // real source will be the lowered nodes (FA-IRWIRE T13); until then the
+        // injected set (see `set_signal_deps`) describes this same tree, so
+        // re-derive the index whenever the tree advances.
+        self.rebuild_index();
         if self.profile {
             let t = self.timings;
             tracing::info!(
