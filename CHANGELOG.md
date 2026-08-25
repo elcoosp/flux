@@ -8,6 +8,57 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### FLUX-019 — dev server (`flux-devserver`) — DONE
+
+Implemented the hot-reload dev server: the full
+`parse → type_check → lower → diff → serialize → send` pipeline behind a
+WebSocket patch channel, an HTTP asset server, and a debounced file watcher
+(`crates/flux-devserver`).
+
+- `config.rs` — `ServerConfig` builder: WebSocket `:7331` (`DEFAULT_WS_PORT`),
+  HTTP `:7332` (`DEFAULT_HTTP_PORT`), 50 ms watch debounce, 16 ms frame
+  coalescing, `--profile` phase timings. Port `0` binds an ephemeral port (used
+  by the tests).
+- `pipeline.rs` (+ `pipeline/tree.rs`) — `Pipeline` owns the project's last-good
+  `LoweredIr`. Each compile runs `flux_parser::parse` → `flux_types::type_check`
+  → `flux_ir::lower` per file, merges the per-file arenas, then either builds the
+  first `Init` (§D.12.2) or diffs against the retained tree via
+  `flux_differ::diff` and builds a `Delta` (§D.1). A compile failure returns a
+  `Diagnostic` and **retains the previous good tree** — no `Delta` is emitted.
+  All wire strings come from `IRArena::string_table()` (Gap G3, now populated).
+- `server.rs` (+ `server/session.rs`) — `DevServer::start` binds both listeners,
+  compiles once, and returns a `RunningServer` carrying the resolved addresses
+  plus a shutdown switch. One connection per blocking task: `Hello` → `Init`
+  (§D.12.1/§D.12.2), then frames fan out from a per-client queue. A reconnect
+  repeats the handshake and gets a fresh `Init` (§D.13). A malformed handshake
+  gets an `Error` frame (§D.12.3).
+- `watch.rs` — `notify` watcher, debounced then coalesced; re-reads only `.flux`
+  files, recompiles, and broadcasts (or ships an `Error` frame).
+- `assets.rs` — axum asset server under `/assets/{*path}` with `..`-traversal
+  rejection, extension-derived content types, and a `/health` probe.
+
+Acceptance (`tests/integration.rs`, real sockets + a `tungstenite` client):
+Hello→Init < 10 ms, save → `Delta` with a non-empty patch stream, reconnect
+resends `Init`, malformed source → `Error` with the good tree retained (the next
+good save still ships a `Delta`, not a fresh `Init`), and asset serving/404.
+`cargo nextest run -p flux-devserver`: 12/12 green (RED first — the four
+acceptance tests failed against the placeholder `lib.rs`); workspace 258/258.
+`cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
+`cargo test --doc`, `cargo doc` all clean.
+
+**Deviation (documented):** the WebSocket side drives the *synchronous*
+`tungstenite` state machine on Tokio's blocking pool rather than the async
+`WebSocketStream` adapters. `tokio-tungstenite`'s async `Sink`/`Stream` impls
+require naming `futures_util` traits, and `futures-util` is not a pre-wired
+dependency of this crate (manifests are frozen, AGENTS.md §1.3/§3.1). One
+blocking task per connection is equivalent in behaviour and keeps the manifest
+untouched.
+
+**Spec note:** §D.12.2 carries exactly one root node. A project whose arena has
+several roots (several top-level components — the common case) ships a synthetic
+`Component` wrapper node whose children are those roots; the host renders the
+wrapper's children in declaration order.
+
 ### Gap G1 — handler transport on the wire (ADR-0028) — DONE
 
 Resolved "Gap G1" from the boundary contract: handler closures (`ClosureIR`
