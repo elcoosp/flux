@@ -11,12 +11,14 @@
  */
 import en from '../content/i18n/en.json';
 import es from '../content/i18n/es.json';
+import fr from '../content/i18n/fr.json';
 
 export type TranslationKey = keyof typeof en;
 
 const dictionaries: Record<string, Record<string, string>> = {
   en,
   es,
+  fr,
 };
 
 /** Returns the UI string dictionary for a locale, falling back to English. */

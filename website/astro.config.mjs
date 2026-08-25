@@ -33,6 +33,7 @@ export default defineConfig({
       locales: {
         en: { label: 'English', lang: 'en' },
         es: { label: 'Español', lang: 'es' },
+        fr: { label: 'Français', lang: 'fr' },
       },
       // Custom component overrides (see src/components/).
       components: {
@@ -44,22 +45,22 @@ export default defineConfig({
       sidebar: [
         {
           label: 'Flux',
-          translations: { es: 'Flux' },
+          translations: { es: 'Flux', fr: 'Flux' },
           items: [{ autogenerate: { directory: 'adr' } }],
         },
         {
           label: 'Concepts',
-          translations: { es: 'Conceptos' },
+          translations: { es: 'Conceptos', fr: 'Concepts' },
           items: [{ autogenerate: { directory: 'concepts' } }],
         },
         {
           label: 'Guides',
-          translations: { es: 'Guías' },
+          translations: { es: 'Guías', fr: 'Guides' },
           items: [{ autogenerate: { directory: 'guides' } }],
         },
         {
           label: 'Reference',
-          translations: { es: 'Referencia' },
+          translations: { es: 'Referencia', fr: 'Référence' },
           items: [{ autogenerate: { directory: 'reference' } }],
         },
       ],

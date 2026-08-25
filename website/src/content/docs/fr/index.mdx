@@ -1,0 +1,121 @@
+---
+title: Flux
+description: Flux — un langage UI écrit une fois pour iOS et Android natifs. Spécifications, ADR, concepts, et un terrain de jeu honnête de dispatch enregistré.
+template: splash
+hero:
+  tagline: Écrivez une fois. Exécutez en natif sur iOS et Android.
+  actions:
+    - text: Lire les concepts
+      link: /fr/concepts/the-wire/
+      icon: right-arrow
+    - text: Essayer le terrain de jeu
+      link: /fr/#playground
+      icon: rocket
+      variant: minimal
+---
+
+import { Card, CardGrid, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import DispatchTracePlayer from '../../../components/DispatchTracePlayer.tsx';
+import FrameInspector from '../../../components/FrameInspector.astro';
+import ViewNodeTree from '../../../components/ViewNodeTree.astro';
+import StatusBadge from '../../../components/StatusBadge.astro';
+import { getTranslation } from '../../../components/i18n-helper';
+
+export const i18n = getTranslation('fr');
+export const counterHex = (await import('../../../assets/traces/counter-init.hex?raw')).default;
+export const counterSrc = `component Counter {
+  state count: Int = 0
+
+  Column(gap: 12) {
+    Text("Count: {count}")
+    Button(text: "Increment", onClick: {
+      count = count + 1
+    })
+  }
+}`;
+export const counterTree = (await import('../../../assets/traces/counter-init-tree.json')).default;
+
+<CardGrid stagger>
+  <Card title="Source de vérité unique" icon="document">
+    Authorisez votre UI une fois en `.flux`. Le serveur de dev l'abaisse en IR
+    Reactive Tree, le diffère, et envoie des patches binaires via WebSocket à une
+    app hôte précompilée.
+  </Card>
+  <Card title="Natif sur les deux plateformes" icon="laptop">
+    Le même IR est généré en SwiftUI et Jetpack Compose idiomatiques en release —
+    pas de webview, pas de taxe de bridge.
+  </Card>
+  <Card title="Piloté par la spec" icon="open-book">
+    Lisez la spécification vérifiable par machine et les Architecture Decision
+    Records qui justifient chaque choix non évident.
+  </Card>
+  <Card title="Honnête par conception" icon="puzzle">
+    Flux ne peut pas être compilé pour le web. Le « terrain de jeu » ci-dessous
+    rejoue un dispatch *enregistré*, pas une compilation en direct.
+  </Card>
+</CardGrid>
+
+<StatusBadge status="pending" detail="Parité de réconciliation : Swift ≡ Kotlin (ADR-0027)" />
+
+## Le terrain de jeu honnête
+
+<DispatchTracePlayer
+  client:visible
+  i18n={i18n}
+  source={counterSrc}
+  hex={counterHex}
+/>
+
+<ViewNodeTree tree={counterTree} />
+<FrameInspector hex={counterHex} />
+
+## Comment un tap devient des pixels
+
+<Steps>
+
+1. **Dispatch** — un tap `Button` évalue la closure de son handler dans la VM hôte,
+   écrivant un ou plusieurs signaux (ex. `count = count + 1`).
+
+2. **Signals** — la VM rapporte les ids de signaux écrits. Selon l'ADR-0027 ils sont
+   triés ascendants et émis comme événement de trace `signals`.
+
+3. **Dirty set** — l'hôte intersecte les signaux écrits avec le `signal_deps` de
+   chaque nœud (Phase 2) ou ré-applique à bas coût (Phase 1), émettant une liste
+   `dirty` dans l'ordre `(depth asc, id asc)`.
+
+4. **Update** — seuls les nœuds sales re-matérialisent leurs props (≤ 2
+   matérialisations, sur changement réel) et déclenchent `update`. Les frères
+   propres sont intacts — `skip_unchanged`.
+
+5. **step_end** — les compteurs cumulatifs ferment l'étape : `built`, `updated`,
+   `skipped_unchanged`, `detached`, `prop_materializations`.
+
+</Steps>
+
+<Tabs>
+  <TabItem label="Swift (release)">
+    ```swift
+    struct Counter: View {
+      @State private var count: Int = 0
+      var body: some View {
+        VStack(spacing: 12) {
+          Text("Count: \\(count)")
+          Button("Increment") { count += 1 }
+        }
+      }
+    }
+    ```
+  </TabItem>
+  <TabItem label="Kotlin (release)">
+    ```kotlin
+    @Composable
+    fun Counter() {
+      var count by remember { mutableStateOf(0) }
+      Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("Count: $count")
+        Button(onClick = { count += 1 }) { Text("Increment") }
+      }
+    }
+    ```
+  </TabItem>
+</Tabs>
