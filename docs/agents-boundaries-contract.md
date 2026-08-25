@@ -772,7 +772,7 @@ Author pure-data JSON fixtures derived **exclusively from Appendix E**. No code.
 **[DoD]** applies.
 
 **Scope:**
-1. `pub fn codegen(lowered: &LoweredIr) -> String` — idiomatic SwiftUI per Appendix F / ADR-0003 / ADR-0004: components → `struct …: View`, `state` → `@State`, `Column/Row` → `VStack/HStack(spacing:)`, flat props → deterministic modifier chains, `when/otherwise` → `if/else` in `@ViewBuilder`, `ForEach` with keys, `Router` → `NavigationStack(path:)`, `match` → `switch`, generics → Swift generics, `@pure` → stateless struct.
+1. `pub fn codegen(lowered: &LoweredIr, ast: &flux_parser::Ast) -> String` — idiomatic SwiftUI per Appendix F / ADR-0003 / ADR-0004. **The two-input signature is normative** (settled by `docs/adr/codegen-input-contract.md`): `LoweredIr` supplies tree *structure*; the `Ast` (reached via the ADR-0027 node-ID bridge, recovering names/generics/`@pure`/prop+state types/string interpolations through a `bridge` module) supplies *semantics*. Mapping rules: components → `struct …: View`, `state` → `@State`, `Column/Row` → `VStack/HStack(spacing:)`, flat props → deterministic modifier chains, `when/otherwise` → `if/else` in `@ViewBuilder`, `ForEach` with keys, `Router` → `NavigationStack(path:)`, `match` → `switch`, generics → Swift generics, `@pure` → stateless struct.
 2. Full-pipeline tests: parse → typecheck → lower → codegen over the 10 grammar examples; **snapshot tests via `insta`**.
 3. Syntax check: `swiftc -parse` on generated output where a toolchain is present; full compile happens in CI/parity.
 
@@ -788,7 +788,7 @@ Author pure-data JSON fixtures derived **exclusively from Appendix E**. No code.
 **Estimated effort:** 3 days  
 **[DoD]** applies.
 
-**Scope:** Mirror of FLUX-020 targeting Compose: `@Composable fun`, `remember { mutableStateOf }`, `Column(spacing = N.dp)`, `Button(onClick) { Text(…) }`, `items(list, key)`, `NavHost`. Snapshot tests via `insta`; `kotlinc` parse check where available.
+**Scope:** Mirror of FLUX-020 targeting Compose, **with the same two-input signature** `codegen(lowered: &LoweredIr, ast: &flux_parser::Ast) -> String` and the same `bridge`/ADR-0027 approach (see `docs/adr/codegen-input-contract.md` — FLUX-021 is NOT blocked by the `LoweredIr` name gap; codegen recovers names from the `Ast`). Compose mapping: `@Composable fun`, `remember { mutableStateOf }`, `Column(spacing = N.dp)`, `Button(onClick) { Text(…) }`, `items(list, key)`, `NavHost`. Snapshot tests via `insta`; `kotlinc` parse check where available.
 
 **Acceptance criteria:** Mirror of FLUX-020 (BR-002 readability).
 
