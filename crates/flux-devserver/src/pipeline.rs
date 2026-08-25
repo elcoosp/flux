@@ -5,12 +5,26 @@
 //! returns a [`Diagnostic`] — in which case the previous good tree is retained
 //! and no `Delta` is produced (spec §D.12.3).
 
+/// The result of compiling all source snapshots at once: the merged wire arena,
+/// the handler closure table, and the per-file `(path, LoweredIr, Ast)` bundles
+/// used by the release codegen path.
+#[derive(Debug)]
+struct TreeCompilation {
+    /// Merged arena for the wire frame.
+    arena: IRArena,
+    /// Handler closures across all files.
+    closures: Vec<flux_ir::ClosureIR>,
+    /// Per-source lowered programs for the codegen path.
+    sources: Vec<(PathBuf, LoweredIr, Ast)>,
+}
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use flux_ir::{IRArena, LoweredIr, lower};
 use flux_ir_serde::{Frame, InitFrame};
+use flux_parser::Ast;
 use flux_syntax::{FileId, Patch};
 
 use crate::error::Diagnostic;
@@ -59,6 +73,9 @@ pub struct Pipeline {
     /// The last successfully lowered program, or `None` before the first
     /// successful compile.
     last_good: Option<LoweredIr>,
+    /// Per-source lowered programs from the last good compile, for the release
+    /// codegen path. Empty before the first successful compile.
+    last_sources: Vec<(PathBuf, LoweredIr, Ast)>,
     /// Monotonic wire sequence number.
     seq: u32,
     profile: bool,
@@ -75,6 +92,7 @@ impl Pipeline {
             sources: BTreeMap::new(),
             file_ids: BTreeMap::new(),
             last_good: None,
+            last_sources: Vec::new(),
             seq: 0,
             profile,
             timings: PhaseTimings::default(),
@@ -91,6 +109,22 @@ impl Pipeline {
     #[must_use]
     pub fn has_tree(&self) -> bool {
         self.last_good.is_some()
+    }
+
+    /// One lowered program per source file from the last good compile, for the
+    /// release codegen path (`flux build`).
+    ///
+    /// Each entry pairs a source file's path with its lowered IR and parsed AST,
+    /// exactly as a downstream codegen crate needs it (see the
+    /// `codegen-input-contract` ADR, which settles the `(LoweredIr, Ast)`
+    /// signature). Returns an empty vector before the first successful compile.
+    /// Cloning is acceptable: MLP trees are small.
+    #[must_use]
+    pub fn compiled_sources(&self) -> Vec<(PathBuf, LoweredIr, Ast)> {
+        self.last_sources
+            .iter()
+            .map(|(path, ir, ast)| (path.clone(), ir.clone(), ast.clone()))
+            .collect()
     }
 
     /// Assigns (or reuses) the dense [`FileId`] for `path`.
@@ -127,7 +161,11 @@ impl Pipeline {
     ///
     /// Returns a [`Diagnostic`] when parsing, type checking or lowering fails.
     pub fn compile(&mut self) -> Result<Compiled, Diagnostic> {
-        let (arena, closures) = self.compile_tree()?;
+        let TreeCompilation {
+            arena,
+            closures,
+            sources,
+        } = self.compile_tree()?;
         let started = Instant::now();
         let outcome = match self.last_good.as_ref() {
             None => {
@@ -153,6 +191,7 @@ impl Pipeline {
             closures: closures.iter().map(|c| (c.id, c.clone())).collect(),
             instances: flux_ir::InstanceRegistry::new(),
         });
+        self.last_sources = sources;
         if self.profile {
             let t = self.timings;
             tracing::info!(
@@ -168,8 +207,9 @@ impl Pipeline {
     }
 
     /// Runs parse → type check → lower over every source snapshot, merging the
-    /// per-file arenas into a single tree.
-    fn compile_tree(&mut self) -> Result<(IRArena, Vec<flux_ir::ClosureIR>), Diagnostic> {
+    /// per-file arenas into a single tree for the wire path and retaining each
+    /// file's `(path, LoweredIr, Ast)` for the codegen path.
+    fn compile_tree(&mut self) -> Result<TreeCompilation, Diagnostic> {
         let snapshots: Vec<(FileId, PathBuf, String)> = self
             .sources
             .iter()
@@ -177,10 +217,12 @@ impl Pipeline {
             .collect();
         let mut merged: Option<IRArena> = None;
         let mut closures: Vec<flux_ir::ClosureIR> = Vec::new();
+        let mut sources: Vec<(PathBuf, LoweredIr, Ast)> = Vec::with_capacity(snapshots.len());
         for (file_id, path, source) in snapshots {
             let display = display_path(&self.root, &path);
-            let lowered = self.compile_one(&source, file_id, &display)?;
+            let (lowered, ast) = self.compile_one(&source, file_id, &display)?;
             closures.extend(lowered.closures.values().cloned());
+            sources.push((path.clone(), lowered.clone(), ast));
             merged = Some(match merged {
                 None => lowered.arena,
                 // Multi-file projects merge by packing the later file's nodes
@@ -189,16 +231,23 @@ impl Pipeline {
                 Some(base) => merge_arenas(base, &lowered.arena),
             });
         }
-        Ok((merged.unwrap_or_default(), closures))
+        Ok(TreeCompilation {
+            arena: merged.unwrap_or_default(),
+            closures,
+            sources,
+        })
     }
 
     /// Compiles one file through parse → type check → lower.
+    ///
+    /// Returns the lowered IR and the original parsed AST (the AST is needed by
+    /// the release codegen path, which recovers names and semantics from it).
     fn compile_one(
         &mut self,
         source: &str,
         file_id: FileId,
         display: &str,
-    ) -> Result<LoweredIr, Diagnostic> {
+    ) -> Result<(LoweredIr, Ast), Diagnostic> {
         let started = Instant::now();
         let ast = flux_parser::parse(source, file_id, display).map_err(|e| {
             Diagnostic::new(
@@ -225,7 +274,7 @@ impl Pipeline {
             ),
         })?;
         self.timings.lower = started.elapsed();
-        Ok(lowered)
+        Ok((lowered, ast))
     }
 
     /// Builds the `Init` frame bytes for `arena` (spec §D.12.2).
@@ -280,5 +329,77 @@ impl Pipeline {
     pub fn error_frame(&mut self, diagnostic: &Diagnostic) -> Vec<u8> {
         self.seq = self.seq.wrapping_add(1);
         Frame::error(self.seq, &diagnostic.message, diagnostic.span).to_bytes()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flux_parser::Decl;
+
+    #[test]
+    fn compiled_sources_is_empty_before_first_compile() {
+        let pipeline = Pipeline::new("/tmp/project", false);
+        assert!(pipeline.compiled_sources().is_empty());
+    }
+
+    #[test]
+    fn compiled_sources_returns_one_entry_per_file_with_consistent_ir_and_ast() {
+        let mut pipeline = Pipeline::new("/tmp/project", false);
+        pipeline.set_source(
+            Path::new("/tmp/project/main.flux"),
+            "component Hello { state count: Int = 0 Button(text: \"tap\") }".to_owned(),
+        );
+
+        let outcome = pipeline.compile().expect("well-formed source compiles");
+        assert!(matches!(outcome, Compiled::Init(_)));
+
+        let sources = pipeline.compiled_sources();
+        assert_eq!(sources.len(), 1, "one entry per tracked .flux file");
+
+        let (path, ir, ast) = &sources[0];
+        assert_eq!(path, Path::new("/tmp/project/main.flux"));
+        assert!(
+            !ir.arena.is_empty(),
+            "lowered arena must carry at least one node"
+        );
+        assert_eq!(
+            ast.decls.len(),
+            1,
+            "ast must retain the parsed component declaration"
+        );
+        assert!(
+            matches!(ast.decls[0], Decl::Component(_)),
+            "ast must carry the expected component"
+        );
+    }
+
+    #[test]
+    fn compiled_sources_is_cleared_on_failed_compile_retaining_previous_wire_tree() {
+        let mut pipeline = Pipeline::new("/tmp/project", false);
+        pipeline.set_source(
+            Path::new("/tmp/project/main.flux"),
+            "component Hello { Text(\"hi\") }".to_owned(),
+        );
+        pipeline.compile().expect("first compile succeeds");
+        assert_eq!(pipeline.compiled_sources().len(), 1);
+
+        // A broken recompile leaves the wire tree intact but the codegen store
+        // must reflect that no new good sources were produced this round.
+        pipeline.set_source(
+            Path::new("/tmp/project/main.flux"),
+            "component Broken {".to_owned(),
+        );
+        let result = pipeline.compile();
+        assert!(result.is_err(), "malformed source fails to compile");
+        assert!(
+            pipeline.has_tree(),
+            "previous good tree is retained for the wire"
+        );
+        assert_eq!(
+            pipeline.compiled_sources().len(),
+            1,
+            "codegen store keeps the last good sources"
+        );
     }
 }
