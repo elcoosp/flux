@@ -1,0 +1,103 @@
+---
+source: crates/flux-parity/tests/parity.rs
+expression: serialized
+---
+verdict: lowerer-unsupported
+status: LowererUnsupported
+
+dev    == [
+    Component {
+        name: "App",
+        children: [
+            Router {
+                children: [
+                    Screen {
+                        route: "",
+                        children: [
+                            Primitive {
+                                name: "Home",
+                                props: [],
+                                children: [],
+                            },
+                        ],
+                    },
+                    Screen {
+                        route: "",
+                        children: [
+                            Primitive {
+                                name: "Profile",
+                                props: [],
+                                children: [],
+                            },
+                        ],
+                    },
+                    Screen {
+                        route: "",
+                        children: [
+                            Primitive {
+                                name: "Settings",
+                                props: [],
+                                children: [],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    },
+    Component {
+        name: "Home",
+        children: [
+            Primitive {
+                name: "Column",
+                props: [],
+                children: [
+                    Primitive {
+                        name: "Text",
+                        props: [],
+                        children: [],
+                    },
+                    Primitive {
+                        name: "Button",
+                        props: [],
+                        children: [],
+                    },
+                ],
+            },
+        ],
+    },
+    Component {
+        name: "Profile",
+        children: [
+            Primitive {
+                name: "Column",
+                props: [],
+                children: [
+                    Primitive {
+                        name: "Text",
+                        props: [],
+                        children: [],
+                    },
+                ],
+            },
+        ],
+    },
+    Component {
+        name: "Settings",
+        children: [
+            Primitive {
+                name: "Column",
+                props: [],
+                children: [
+                    Primitive {
+                        name: "Text",
+                        props: [],
+                        children: [],
+                    },
+                ],
+            },
+        ],
+    },
+]
+swift  == []
+kotlin == []

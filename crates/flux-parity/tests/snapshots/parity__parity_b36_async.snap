@@ -1,0 +1,43 @@
+---
+source: crates/flux-parity/tests/parity.rs
+expression: serialized
+---
+verdict: lowerer-unsupported
+status: LowererUnsupported
+
+dev    == [
+    Component {
+        name: "UserList",
+        children: [
+            Primitive {
+                name: "Column",
+                props: [],
+                children: [
+                    If {
+                        cond: "users.is_loading",
+                        then_branch: [
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                        ],
+                        else_branch: [
+                            ForEach {
+                                collection: "users.value",
+                                key_path: "key:.id",
+                            },
+                        ],
+                    },
+                    Primitive {
+                        name: "Button",
+                        props: [],
+                        children: [],
+                    },
+                ],
+            },
+        ],
+    },
+]
+swift  == []
+kotlin == []

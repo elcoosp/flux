@@ -1,0 +1,46 @@
+---
+source: crates/flux-parity/tests/parity.rs
+expression: serialized
+---
+verdict: equivalent
+status: Supported
+
+dev    == [
+    Component {
+        name: "Chat",
+        children: [
+            Primitive {
+                name: "Column",
+                props: [],
+                children: [
+                    ForEach {
+                        collection: "messages",
+                        key_path: "key:.self",
+                    },
+                ],
+            },
+        ],
+    },
+]
+swift  == [
+    Component {
+        name: "Chat",
+        children: [
+            ForEach {
+                collection: "messages",
+                key_path: "key:.self",
+            },
+        ],
+    },
+]
+kotlin == [
+    Component {
+        name: "Chat",
+        children: [
+            ForEach {
+                collection: "messages",
+                key_path: "{it}",
+            },
+        ],
+    },
+]
