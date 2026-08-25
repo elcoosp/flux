@@ -26,9 +26,10 @@ const TRANSLATION_LOCALES = ['es', 'fr'];
 /** Directories excluded from the parity requirement (English-only by design). */
 const EXEMPT_DIRS = new Set(['adr']);
 
-/** Returns the slug-relative set of doc paths (without extension) for a locale. */
+/** Returns the slug-relative set of doc paths (without extension) for a locale.
+ * An empty `locale` refers to the root (default English) content directory. */
 async function slugSet(locale: string): Promise<Set<string>> {
-  const localeDir = join(docsDir, locale);
+  const localeDir = locale ? join(docsDir, locale) : docsDir;
   const slugs = new Set<string>();
   const walk = async (dir: string) => {
     let entries: import('node:fs').Dirent[];
@@ -56,7 +57,7 @@ async function slugSet(locale: string): Promise<Set<string>> {
  * Returns a map of locale -> missing slug list (empty when clean).
  */
 export async function findMissingTranslations(): Promise<Record<string, string[]>> {
-  const en = await slugSet('en');
+  const en = await slugSet('');
   const result: Record<string, string[]> = {};
   for (const locale of TRANSLATION_LOCALES) {
     const target = await slugSet(locale);

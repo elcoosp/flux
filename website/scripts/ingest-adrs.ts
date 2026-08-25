@@ -20,7 +20,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, '..', '..');
 const sourceDir = join(repoRoot, 'docs', 'adr');
-const targetDir = join(__dirname, '..', 'src', 'content', 'docs', 'en', 'adr');
+const targetDir = join(__dirname, '..', 'src', 'content', 'docs', 'adr');
 
 /** True when `path` exists and is accessible. */
 async function exists(path: string): Promise<boolean> {

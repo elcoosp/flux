@@ -15,14 +15,14 @@ hero:
 ---
 
 import { Card, CardGrid, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
-import DispatchTracePlayer from '../../../components/DispatchTracePlayer.tsx';
-import FrameInspector from '../../../components/FrameInspector.astro';
-import ViewNodeTree from '../../../components/ViewNodeTree.astro';
-import StatusBadge from '../../../components/StatusBadge.astro';
-import { getTranslation } from '../../../components/i18n-helper';
+import DispatchTracePlayer from '../../components/DispatchTracePlayer.tsx';
+import FrameInspector from '../../components/FrameInspector.astro';
+import ViewNodeTree from '../../components/ViewNodeTree.astro';
+import StatusBadge from '../../components/StatusBadge.astro';
+import { getTranslation } from '../../components/i18n-helper';
 
 export const i18n = getTranslation('en');
-export const counterHex = (await import('../../../assets/traces/counter-init.hex?raw')).default;
+export const counterHex = (await import('../../assets/traces/counter-init.hex?raw')).default;
 export const counterSrc = `component Counter {
   state count: Int = 0
 
@@ -33,7 +33,7 @@ export const counterSrc = `component Counter {
     })
   }
 }`;
-export const counterTree = (await import('../../../assets/traces/counter-init-tree.json')).default;
+export const counterTree = (await import('../../assets/traces/counter-init-tree.json')).default;
 
 <CardGrid stagger>
   <Card title="Single source of truth" icon="document">

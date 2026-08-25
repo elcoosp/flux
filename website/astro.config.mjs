@@ -15,8 +15,6 @@ import { fluxGrammar } from './src/flux-grammar.mjs';
 // buttons, frame-inspector headers) live in `src/content/i18n/{en,es}.json` and
 // are read by the React island via `Astro.currentLocale`.
 export default defineConfig({
-  // Required by @astrojs/sitemap; replace with the production origin when deployed.
-  site: 'https://flux-lang.dev',
   // Register the Flux language so ```flux code blocks highlight across the
   // markdown pipeline (astro-expressive-code reads `markdown.shikiConfig.langs`).
   markdown: {
@@ -29,9 +27,9 @@ export default defineConfig({
       title: 'Flux',
       description:
         'Flux — a write-once UI language for native iOS and Android. Specs, ADRs, concepts, and an honest recorded-dispatch playground.',
-      defaultLocale: 'en',
+      defaultLocale: 'root',
       locales: {
-        en: { label: 'English', lang: 'en' },
+        root: { label: 'English', lang: 'en' },
         es: { label: 'Español', lang: 'es' },
         fr: { label: 'Français', lang: 'fr' },
       },
