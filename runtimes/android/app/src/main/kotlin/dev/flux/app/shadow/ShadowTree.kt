@@ -14,6 +14,7 @@ import dev.flux.ui.FluxExecutor
 import dev.flux.ui.FluxNativeView
 import dev.flux.ui.Props
 import java.lang.ref.WeakReference
+import dev.flux.app.FluxExecutor as HostExecutor
 
 /**
  * The host render tree: a map of [ShadowNode]s keyed by id, plus the adapter
@@ -41,11 +42,22 @@ public class ShadowTree(
     private var root: ShadowNode? = null
     private var executorRef: FluxExecutor? = null
 
+    // How many times each node's view has been reconciled (built or updated).
+    // Used by the `@pure` skip (§18.10) and observable in tests.
+    private val reconciled = LinkedHashMap<UInt, Int>()
+
     /** The current root node, or `null` before an Init frame is applied. */
     public val rootNode: ShadowNode? get() = root
 
     /** All nodes currently in the tree, in insertion order. */
     public fun allNodes(): List<ShadowNode> = nodes.values.toList()
+
+    /**
+     * How many times [id]'s view has been reconciled (built or updated). A
+     * `@pure` node whose props are unchanged is never re-reconciled, so its
+     * count stays put even as siblings change (§18.10).
+     */
+    public fun reconcileCount(id: UInt): Int = reconciled[id] ?: 0
 
     /** Looks up a shadow node by id. */
     public fun node(id: UInt): ShadowNode? = nodes[id]
@@ -105,7 +117,15 @@ public class ShadowTree(
                 val node = nodes[patch.id] ?: return
                 val diff = patch.diff ?: return
                 val merged = mergeProps(node.props, diff)
+                // `@pure` skip (§18.10): a pure node is a function of its props,
+                // so when the merged props are referentially equal to the prior
+                // props there is nothing to reconcile — skip the adapter update
+                // and its subtree entirely. This is what lets an unrelated
+                // signal update elsewhere in the tree leave a stable `@pure`
+                // subtree untouched.
+                if (node.isPure && merged.fields == node.props.fields) return
                 node.props = merged
+                reconciled[patch.id] = (reconciled[patch.id] ?: 0) + 1
                 withAdapter(node.kind, node.componentId, node.view) { adapter, view ->
                     adapter.update(view, merged)
                 }
@@ -125,6 +145,10 @@ public class ShadowTree(
             0x04 -> { // Remove
                 val node = nodes.remove(patch.id) ?: return
                 parentOf(patch.id)?.children?.removeIf { it.id == patch.id }
+                // Fire the node's `onCleanup` lifecycle hook (§18.4) before the
+                // view is torn down, so teardown side effects (close socket,
+                // unsubscribe) run against a still-live node.
+                (executor as? HostExecutor)?.onNodeRemoved(patch.id)
                 withAdapter(node.kind, node.componentId, node.view) { adapter, view -> adapter.destroy(view) }
             }
             0x06 -> { // Handler
@@ -178,7 +202,8 @@ public class ShadowTree(
             adapter?.create(wire.id)
                 ?: error("no adapter registered for component ${wire.componentId} (kind \"${wire.kind}\", node ${wire.id})")
         withAdapter(wire.kind, wire.componentId, view) { a, v -> a.update(v, props) }
-        val node = ShadowNode(wire.id, wire.kind, wire.componentId, key = null, props, view)
+        val node = ShadowNode(wire.id, wire.kind, wire.componentId, key = null, isPure = wire.isPure, props, view)
+        reconciled[wire.id] = (reconciled[wire.id] ?: 0) + 1
         for (child in wire.children) {
             val childId =
                 when (child) {
@@ -192,6 +217,7 @@ public class ShadowTree(
             a.setChildren(v, node.children.map { it.id }, node.children.map { it.view })
         }
         withAdapter(wire.kind, wire.componentId, view) { a, v -> a.bindHandler(v, props, WeakReference(executor)) }
+        (executor as? HostExecutor)?.onNodeCreated(wire.id)
         return node
     }
 

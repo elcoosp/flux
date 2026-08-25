@@ -32,36 +32,54 @@ public object FrameDeserializer {
         val seq = r.u32().toUInt()
         val flags = r.u8()
         val fullTree = (flags and 0x01) != 0
+        val pureEncoded = (flags and 0x20) != 0
         val patchCount = r.u16()
         val handlerCount = r.u16()
         val stringCount = r.u16()
 
         val patches = ArrayList<Patch>(patchCount)
-        repeat(patchCount) { patches.add(decodePatch(r)) }
-        // handler_count reserves space for closure defs; in the MLP host the
-        // handler bodies arrive via Patch 0x06 (ClosureRef), so the header's
-        // handler_count entries carry no body and are skipped here.
-        repeat(handlerCount) { /* no body in this frame layout */ }
+        repeat(patchCount) { patches.add(decodePatch(r, pureEncoded)) }
+
+        // Handler section (Gap G1, Appendix D §D.8 + §D.12): a shared bytecode
+        // blob followed by a `HandlerDef` stream whose `ClosureRef`s index the
+        // blob by offset/length. The MLP host previously dropped these bytes; we
+        // now decode them so [FluxExecutor.receiveFrame] can register handlers.
+        val (blob, handlers) =
+            if (handlerCount > 0) {
+                decodeBytecodeBlob(r) to
+                    ArrayList<HandlerDef>(handlerCount).also { defs ->
+                        repeat(handlerCount) { defs.add(decodeHandlerDef(r)) }
+                    }
+            } else {
+                BytecodeBlob(ByteArray(0)) to emptyList<HandlerDef>()
+            }
 
         val strings = ArrayList<StringEntry>(stringCount)
         repeat(stringCount) { strings.add(decodeStringEntry(r)) }
 
         val stateDelta = if ((flags and 0x08) != 0) decodeStateDelta(r) else emptyList()
 
+        // Full-tree node block (§D.3) is decoded LAST: the root node, then the
+        // flat extras list that follows it until end of frame. Both the patches
+        // above and any handler/string/state bytes have been consumed first, so
+        // the `while (r.has(1))` scan only reaches genuine node bytes.
         val (root, extraNodes) =
             if (fullTree) {
-                val rootNode = decodeNode(r)
+                val rootNode = decodeNode(r, pureEncoded)
                 val extras = ArrayList<WireNode>()
-                while (r.has(1)) extras.add(decodeNode(r))
+                while (r.has(1)) extras.add(decodeNode(r, pureEncoded))
                 rootNode to extras
             } else {
                 null to emptyList<WireNode>()
             }
 
-        return Frame(version, seq, fullTree, patches, root, strings, stateDelta, extraNodes)
+        return Frame(version, seq, fullTree, patches, root, strings, stateDelta, handlers, blob, extraNodes)
     }
 
-    private fun decodePatch(r: ByteReader): Patch {
+    private fun decodePatch(
+        r: ByteReader,
+        pureEncoded: Boolean,
+    ): Patch {
         val tag = r.u8().toUByte()
         return when (tag.toInt()) {
             0x01 ->
@@ -70,7 +88,7 @@ public object FrameDeserializer {
                     id = r.u32().toUInt(),
                     parentId = 0u,
                     index = 0u,
-                    node = decodeNode(r),
+                    node = decodeNode(r, pureEncoded),
                     diff = null,
                     keyCount = 0u,
                     keys = emptyList(),
@@ -98,7 +116,7 @@ public object FrameDeserializer {
                     id = 0u,
                     parentId = parent,
                     index = index,
-                    node = decodeNode(r),
+                    node = decodeNode(r, pureEncoded),
                     diff = null,
                     keyCount = 0u,
                     keys = emptyList(),
@@ -178,6 +196,19 @@ public object FrameDeserializer {
         return ClosureRef(hash, offset, len, signals)
     }
 
+    /** Decodes the shared handler-bytecode blob (Appendix D §D.12): a `u32` byte length followed by the raw bytecode. */
+    private fun decodeBytecodeBlob(r: ByteReader): BytecodeBlob {
+        val len = r.u32().toInt()
+        return BytecodeBlob(r.bytes(len))
+    }
+
+    /** Decodes one `HandlerDef` (Appendix D §D.8): a `HandlerId` plus its `ClosureRef`. */
+    private fun decodeHandlerDef(r: ByteReader): HandlerDef {
+        val id = r.u32().toUInt()
+        val closure = decodeClosureRef(r)
+        return HandlerDef(id, closure)
+    }
+
     private fun decodeStringEntry(r: ByteReader): StringEntry {
         val id = r.u32().toUInt()
         val len = r.u16()
@@ -195,7 +226,10 @@ public object FrameDeserializer {
         return cells
     }
 
-    private fun decodeNode(r: ByteReader): WireNode {
+    private fun decodeNode(
+        r: ByteReader,
+        pureEncoded: Boolean,
+    ): WireNode {
         val id = r.u32().toUInt()
         val kindByte = r.u8()
         // Resolve the wire kind byte to an adapter registry key. The MLP host
@@ -220,7 +254,11 @@ public object FrameDeserializer {
         val spanFile = r.u32().toUInt()
         val spanStart = r.u32().toUInt()
         val spanEnd = r.u32().toUInt()
-        return WireNode(id, kind, componentId, props, children, handlerIds, spanFile, spanStart, spanEnd)
+        // MLP host extension: when the frame set the 0x20 flag, a purity byte
+        // follows the span. We thread it into `WireNode.isPure` so the
+        // reconciler can apply the §18.10 skip.
+        val isPure = if (pureEncoded) r.u8() != 0 else false
+        return WireNode(id, kind, componentId, props, children, handlerIds, isPure, spanFile, spanStart, spanEnd)
     }
 
     /**

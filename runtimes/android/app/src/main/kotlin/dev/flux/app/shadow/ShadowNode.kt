@@ -27,6 +27,8 @@ public data class ShadowNode(
     val kind: String,
     val componentId: UInt,
     val key: UInt?,
+    /** True when the component was declared `@pure` (§18.10): a pure function of props. */
+    val isPure: Boolean = false,
     /** The decoded component props. Reassigned on patch updates. */
     var props: Props,
     val view: FluxNativeView,

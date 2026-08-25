@@ -25,12 +25,15 @@ class FrameBuilder {
         error: Boolean = false,
         heartbeat: Boolean = false,
         hasState: Boolean = false,
+        hasPure: Boolean = false,
     ) {
         var f = 0
         if (fullTree) f = f or 0x01
         if (error) f = f or 0x02
         if (heartbeat) f = f or 0x04
         if (hasState) f = f or 0x08
+        if (hasPure) f = f or 0x20 // nodes carry an explicit @pure byte (MLP host extension)
+        pureFlag = hasPure
         out.add(f.toByte())
     }
 
@@ -107,6 +110,7 @@ class FrameBuilder {
         component: UInt,
         props: List<Pair<UShort, WireValue>>,
         childIds: List<UInt>,
+        pure: Boolean = false,
     ) {
         u32(id.toInt())
         out.add(kind.toByte())
@@ -125,6 +129,36 @@ class FrameBuilder {
         u32(0)
         u32(0)
         u32(0) // span
+        // MLP host extension: when the frame sets the 0x20 flag, nodes carry an
+        // explicit @pure byte so the reconciler can skip their subtrees (§18.10).
+        if (pureFlag) u8(if (pure) 1 else 0)
+    }
+
+    /** Tracks whether [flags] was called with `hasPure = true` for this frame. */
+    private var pureFlag: Boolean = false
+
+    /** Writes the handler section (Appendix D §D.8 + §D.12): a shared bytecode blob followed by `HandlerDef` entries. */
+    fun handlerSection(
+        blob: ByteArray,
+        handlers: List<Pair<UInt, ClosureRef>>,
+    ) {
+        // Shared blob: u32 length + raw bytecode (encode_bytecode_blob).
+        u32(blob.size)
+        out.addAll(blob.toList())
+        // HandlerDef stream: each entry is a `u32 handlerId` + `ClosureRef`
+        // (Appendix D §D.8). The frame header's `handlerCount` tells the
+        // deserializer how many to read, so no inline count is written here.
+        for ((id, closure) in handlers) {
+            u32(id.toInt())
+            out.addAll(closure.hash.toList())
+            u32(closure.bytecodeOffset.toInt())
+            u16(closure.bytecodeLen.toInt())
+            u16(closure.signals.size)
+            for (s in closure.signals) u32(s.toInt())
+            u32(0) // span file
+            u32(0) // span start
+            u32(0) // span end
+        }
     }
 
     fun build(): ByteArray = out.toByteArray()

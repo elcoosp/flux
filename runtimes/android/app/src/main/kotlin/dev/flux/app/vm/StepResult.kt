@@ -23,6 +23,15 @@ internal sealed interface StepResult {
  * thrown as a [VmError] and converted at the run boundary; jumps are reported via
  * [StepResult.JumpTo] rather than captured loop state.
  *
+ * @param regs the 16 VM registers (mutated in place).
+ * @param instr the instruction to execute.
+ * @param signals the signal graph the closure reads/writes.
+ * @param offsets the byte offset of every decoded instruction (for jumps).
+ * @param nextIndex the program index after [instr] (jump anchor).
+ * @param strings resolves interned `StringId`s for `STR_LEN`/`STR_CONCAT`.
+ * @param capabilities the `(capId, methodId) → impl` table for `CALL_CAP`.
+ * @param allocated the running per-dispatch allocation counter; `ALLOC_*` and
+ *   `LIST_PUSH` increment it and fault `MEMORY_EXHAUSTED` past the cap.
  * @return [StepResult.Proceed] to advance, or [StepResult.JumpTo] to branch.
  */
 internal fun executeInstruction(
@@ -31,6 +40,9 @@ internal fun executeInstruction(
     signals: SignalStore,
     offsets: List<UInt>,
     nextIndex: Int,
+    strings: StringResolver,
+    capabilities: CapabilityRegistry,
+    allocated: FluxBytecodeVM.AllocationCounter,
 ): StepResult {
     val op = instr.opcode
     return when (op) {
@@ -147,14 +159,27 @@ internal fun executeInstruction(
             StepResult.Proceed
         }
         Opcode.STR_LEN -> {
+            // `STR_LEN` resolves the interned id to text and reports its UTF-8
+            // byte length (Appendix E §E.1). The golden ISA vectors assume the
+            // oracle proxy "no live table → length is the id's digit count", so
+            // the default [DecimalStringResolver] reproduces that exactly; a real
+            // frame table (via [TableStringResolver]) yields genuine length.
             val id = requireStr(regs[instr.u8(1)], instr.offset)
-            regs[instr.u8(0)] = FluxValue.IntVal(id.toString().length.toLong())
+            val text = strings.resolve(id)
+            regs[instr.u8(0)] = FluxValue.IntVal(text.length.toLong())
             StepResult.Proceed
         }
         Opcode.STR_CONCAT -> {
+            // `STR_CONCAT` resolves both ids to text, joins them, and interns the
+            // result (Appendix E §E.1). Dynamic interning at runtime is out of
+            // MLP scope (ADR-flux-0028); the default [DecimalStringResolver]
+            // reproduces the oracle's `x*10_000_000 + y` proxy so the golden
+            // vectors stay green, while a real frame table widens the proxy to
+            // the joined text's hashed id so downstream ops observe the result.
             val x = requireStr(regs[instr.u8(1)], instr.offset)
             val y = requireStr(regs[instr.u8(2)], instr.offset)
-            regs[instr.u8(0)] = FluxValue.StrVal((x.toLong() * 10_000_000L + y.toLong()).toUInt())
+            val resultId = strings.concat(x, y)
+            regs[instr.u8(0)] = FluxValue.StrVal(resultId)
             StepResult.Proceed
         }
         Opcode.JUMP -> StepResult.JumpTo(jumpTarget(instr, nextIndex, offsets, instr.i32(0)))
@@ -168,6 +193,11 @@ internal fun executeInstruction(
         }
         Opcode.ALLOC_RECORD -> {
             val count = instr.u16(1)
+            // Each field slot reserves 8 bytes (Appendix E §E.1); past the cap we
+            // fault rather than allocate (ADR-0015 / §NFR-SEC-003).
+            if (allocated.add(count.toLong() * 8L)) {
+                throw VmError(VmErrorKind.MEMORY_EXHAUSTED, instr.offset)
+            }
             val fields = ArrayList<FluxValue.Field>(count)
             for (i in 0 until count) {
                 fields.add(FluxValue.Field(i.toUShort(), FluxValue.NullVal))
@@ -191,10 +221,16 @@ internal fun executeInstruction(
         }
         Opcode.ALLOC_LIST -> {
             val cap = instr.u16(1)
+            if (allocated.add(cap.toLong() * 8L)) {
+                throw VmError(VmErrorKind.MEMORY_EXHAUSTED, instr.offset)
+            }
             regs[instr.u8(0)] = FluxValue.ListVal(ArrayList(cap))
             StepResult.Proceed
         }
         Opcode.LIST_PUSH -> {
+            if (allocated.add(8L)) {
+                throw VmError(VmErrorKind.MEMORY_EXHAUSTED, instr.offset)
+            }
             val items = requireList(regs[instr.u8(0)], instr.offset).toMutableList()
             items.add(regs[instr.u8(1)])
             regs[instr.u8(0)] = FluxValue.ListVal(items)
@@ -225,22 +261,19 @@ internal fun executeInstruction(
             val capId = instr.u32(1).toUInt()
             val methodId = instr.u16(5).toUShort()
             val argsReg = instr.u8(7)
-            if (capId == 1u && methodId == 1u.toUShort()) {
-                val arg =
-                    when (val args = regs[argsReg]) {
-                        is FluxValue.RecordVal -> {
-                            if (args.fields.isEmpty()) {
-                                throw VmError(VmErrorKind.TYPE_MISMATCH, instr.offset)
-                            }
-                            args.fields[0].value
-                        }
-                        else -> throw VmError(VmErrorKind.TYPE_MISMATCH, instr.offset)
-                    }
-                signals.write(99u, arg)
-                regs[resultReg] = arg
-            } else {
+            // Data-driven capability dispatch (G4): route through the injected
+            // registry instead of a hardcoded `(1,1)` test. An unregistered
+            // `(capId, methodId)` is a `TYPE_MISMATCH` fault, matching the
+            // oracle's "capability must exist" contract.
+            val impl = capabilities.lookup(capId, methodId)
+            if (impl == null) {
                 throw VmError(VmErrorKind.TYPE_MISMATCH, instr.offset)
             }
+            val result = impl.call(regs[argsReg], signals)
+            if (result == null) {
+                throw VmError(VmErrorKind.TYPE_MISMATCH, instr.offset)
+            }
+            regs[resultReg] = result
             StepResult.Proceed
         }
         Opcode.MATCH_TAG -> {

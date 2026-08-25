@@ -58,6 +58,8 @@ public sealed interface WireValue {
  * @property props decoded props as `(prop_idx, WireValue)` pairs.
  * @property children decoded child encodings.
  * @property handlerIds handler closure ids bound on this node.
+ * @property isPure `true` when the component was declared `@pure` (§18.10);
+ *   the reconciler skips the subtree when its props are referentially equal.
  * @property spanFile source file id for diagnostics.
  * @property spanStart byte offset of the node in source.
  * @property spanEnd byte offset of the node end in source.
@@ -69,6 +71,7 @@ public data class WireNode(
     val props: List<Pair<UShort, WireValue>>,
     val children: List<WireChild>,
     val handlerIds: List<UInt>,
+    val isPure: Boolean = false,
     val spanFile: UInt,
     val spanStart: UInt,
     val spanEnd: UInt,
@@ -109,6 +112,9 @@ public sealed interface WireChild {
  * @property root the root node (full-tree Init frames only).
  * @property strings newly interned strings (string-table delta).
  * @property stateDelta initial/updated signal cells.
+ * @property handlers frame-level handler definitions (Appendix D §D.8, Gap G1).
+ * @property bytecodeBlob the shared handler-bytecode blob (Appendix D §D.12)
+ *   that [handlers]' closures index into.
  * @property extraNodes descendant nodes of [root], flat after the root in a
  *   full-tree frame. Children are referenced by id; the runtime resolves them
  *   from `root + extraNodes` (Appendix D §D.12.2 Init carries the whole tree).
@@ -121,6 +127,8 @@ public data class Frame(
     val root: WireNode?,
     val strings: List<StringEntry>,
     val stateDelta: List<Pair<UInt, WireValue>>,
+    val handlers: List<HandlerDef> = emptyList(),
+    val bytecodeBlob: BytecodeBlob? = null,
     val extraNodes: List<WireNode> = emptyList(),
 )
 
@@ -160,6 +168,38 @@ public data class ClosureRef(
     val bytecodeOffset: UInt,
     val bytecodeLen: UShort,
     val signals: List<UInt>,
+)
+
+/**
+ * A decoded handler definition (Appendix D §D.8): a handler id plus the
+ * closure whose bytecode is sliced from the frame's shared blob by
+ * `bytecodeOffset`/`bytecodeLen`.
+ *
+ * Unlike a patch-bound `ClosureRef` (which the shadow tree attaches to a node),
+ * a `HandlerDef` is the frame-level transport for handler bodies: the executor
+ * slices each one out of [Frame.bytecodeBlob] and registers it for dispatch
+ * (Gap G1, §3.1 task 1).
+ *
+ * @property handlerId the closure-table index this definition populates.
+ * @property closure the closure descriptor indexing [Frame.bytecodeBlob].
+ */
+public data class HandlerDef(
+    val handlerId: UInt,
+    val closure: ClosureRef,
+)
+
+/**
+ * The shared handler-bytecode blob (Appendix D §D.12 handler section).
+ *
+ * Every [HandlerDef.closure] indexes this single buffer by `bytecodeOffset`
+ * (u32) / `bytecodeLen` (u16); the executor slices each handler's bytecode out
+ * of it when registering handlers. An empty blob means the frame carries no
+ * handlers.
+ *
+ * @property bytes the raw little-endian bytecode for every handler in the frame.
+ */
+public data class BytecodeBlob(
+    val bytes: ByteArray,
 )
 
 /** A `StringEntry` (Appendix D §D.9). */
