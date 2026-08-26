@@ -73,6 +73,7 @@ impl Opcode {
             raw::LOAD_NULL => Self::LoadNull,
             raw::MOV => Self::Mov,
             raw::GAS_CHECK => Self::GasCheck,
+            raw::TO_STRING => Self::ToString,
             _ => return None,
         };
         Some(opcode)
@@ -100,6 +101,7 @@ impl Opcode {
             | Self::NotBool
             | Self::StrLen
             | Self::Mov
+            | Self::ToString
             | Self::ListLen => width::REG_REG,
             Self::AddI64
             | Self::SubI64
@@ -205,6 +207,7 @@ impl Opcode {
             Self::LoadNull => "LOAD_NULL",
             Self::Mov => "MOV",
             Self::GasCheck => "GAS_CHECK",
+            Self::ToString => "TO_STRING",
         }
     }
 }

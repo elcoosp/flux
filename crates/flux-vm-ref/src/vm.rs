@@ -239,6 +239,10 @@ pub fn run(
                 regs[usize::from(instr.u8(0))] =
                     Value::Str(x.wrapping_mul(10_000_000).wrapping_add(y));
             }
+            Opcode::ToString => {
+                let rendered = render_value(reg!(instr.u8(1)));
+                regs[usize::from(instr.u8(0))] = Value::Str(synthetic_str_id(&rendered));
+            }
             Opcode::Jump => {
                 ip_index = jump_target(instr, next_index, &offsets, instr.i32(0))?;
                 continue;
@@ -395,6 +399,59 @@ fn fdiv(x: f64, y: f64) -> f64 {
         };
     }
     x / y
+}
+
+/// Renders `value` as the text `TO_STRING` (0xD0) produces. The production
+/// runtimes render the same shapes; only `Value::Str` differs, because the
+/// oracle has no live string table and therefore cannot resolve an id back to
+/// its text (it renders the id, which the vectors pin).
+fn render_value(value: Value) -> String {
+    match value {
+        Value::Int(i) => i.to_string(),
+        Value::Float(f) => format_float(f),
+        Value::Bool(b) => b.to_string(),
+        Value::Str(id) => id.to_string(),
+        Value::Null => "null".to_owned(),
+        Value::HandlerRef(id) => format!("handler({id})"),
+        Value::List(items) => {
+            let rendered: Vec<String> = items.into_iter().map(render_value).collect();
+            format!("[{}]", rendered.join(", "))
+        }
+        Value::Record(fields) => {
+            let rendered: Vec<String> = fields
+                .into_iter()
+                .map(|(idx, v)| format!("{idx}: {}", render_value(v)))
+                .collect();
+            format!("{{{}}}", rendered.join(", "))
+        }
+        // `Value` is `#[non_exhaustive]`: a variant added later has no agreed
+        // rendering across the three runtimes yet, so it renders as `null`
+        // rather than silently inventing text the hosts would not reproduce.
+        _ => "null".to_owned(),
+    }
+}
+
+/// Formats a float the way every runtime must: an integral value keeps a single
+/// fractional digit (`1.0`), so Rust, Swift and Kotlin agree byte for byte.
+fn format_float(f: f64) -> String {
+    if f.is_finite() && f.fract() == 0.0 {
+        format!("{f:.1}")
+    } else {
+        f.to_string()
+    }
+}
+
+/// Derives the [`flux_syntax::StringId`] the oracle assigns to text it had to
+/// synthesise. The oracle owns no string table, so it interns into the reserved
+/// high half (mirroring the hosts' reverse-intern range) via FNV-1a. This keeps
+/// `TO_STRING` deterministic and self-consistent within one program run.
+fn synthetic_str_id(text: &str) -> flux_syntax::StringId {
+    let mut hash: u32 = 0x811c_9dc5;
+    for &byte in text.as_bytes() {
+        hash ^= u32::from(byte);
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    0x8000_0000 | (hash & 0x7FFF_FFFF)
 }
 
 fn truthy(v: &Value) -> bool {

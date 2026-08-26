@@ -15,9 +15,22 @@ struct TreeCompilation {
     /// Merged arena for the wire frame.
     arena: IRArena,
     /// Handler closures across all files.
+    ///
+    /// This includes each node's compiled prop thunk (ADR-0027 T14 / ADR-0043):
+    /// a thunk is a closure like any other, and shipping it in the frame's
+    /// shared handler blob is what lets the host resolve a node's `prop_thunk`
+    /// `ClosureRef` to real bytecode and evaluate it on dirty reconciliation.
     closures: Vec<flux_ir::ClosureIR>,
+    /// Initial state-signal values, gathered from every source's lowered IR.
+    state_seed: Vec<(flux_syntax::SignalId, flux_syntax::Value)>,
     /// Per-source lowered programs for the codegen path.
     sources: Vec<(PathBuf, LoweredIr, Ast)>,
+    /// Per-node prop thunks, merged across files, retained so the last-good
+    /// tree can be re-serialised into an `Init` frame for a reconnecting host.
+    prop_thunks: std::collections::HashMap<flux_syntax::NodeId, flux_ir::ClosureIR>,
+    /// Component-id → name pairs, merged across files, shipped in the `Init`
+    /// frame so a host resolves each node's adapter from its `ComponentId`.
+    component_names: Vec<(flux_syntax::ComponentId, String)>,
 }
 
 use std::collections::BTreeMap;
@@ -27,11 +40,11 @@ use std::time::Instant;
 use flux_ir::{IRArena, LoweredIr, lower};
 use flux_ir_serde::{Frame, InitFrame, NodeSignalMeta};
 use flux_parser::Ast;
-use flux_syntax::{FileId, Patch};
+use flux_syntax::{FileId, Patch, SignalId, Value};
 
 use crate::dispatch::{DependencyIndex, DispatchReport, NodeSignalDeps, emit_minimal_updates};
 use crate::error::Diagnostic;
-use tree::{display_path, merge_arenas, root_node};
+use tree::{display_path, flatten_extra_nodes, merge_arenas, root_node};
 
 pub(crate) mod tree;
 
@@ -296,12 +309,15 @@ impl Pipeline {
         let TreeCompilation {
             arena,
             closures,
+            state_seed,
             sources,
+            prop_thunks,
+            component_names,
         } = self.compile_tree()?;
         let started = Instant::now();
         let outcome = match self.last_good.as_ref() {
             None => {
-                let frame = self.build_init(&arena, &closures);
+                let frame = self.build_init(&arena, &closures, &state_seed, &component_names);
                 self.timings.serialize = started.elapsed();
                 Compiled::Init(frame)
             }
@@ -321,7 +337,9 @@ impl Pipeline {
         self.last_good = Some(LoweredIr {
             arena,
             closures: closures.iter().map(|c| (c.id, c.clone())).collect(),
-            prop_thunks: std::collections::HashMap::new(),
+            prop_thunks: prop_thunks.clone(),
+            component_names: component_names.clone(),
+            state_seed: state_seed.clone(),
             instances: flux_ir::InstanceRegistry::new(),
         });
         self.last_sources = sources;
@@ -355,11 +373,24 @@ impl Pipeline {
             .collect();
         let mut merged: Option<IRArena> = None;
         let mut closures: Vec<flux_ir::ClosureIR> = Vec::new();
+        let mut state_seed: Vec<(SignalId, Value)> = Vec::new();
         let mut sources: Vec<(PathBuf, LoweredIr, Ast)> = Vec::with_capacity(snapshots.len());
+        let mut prop_thunks: std::collections::HashMap<flux_syntax::NodeId, flux_ir::ClosureIR> =
+            std::collections::HashMap::new();
+        let mut component_names: Vec<(flux_syntax::ComponentId, String)> = Vec::new();
         for (file_id, path, source) in snapshots {
             let display = display_path(&self.root, &path);
             let (lowered, ast) = self.compile_one(&source, file_id, &display)?;
             closures.extend(lowered.closures.values().cloned());
+            closures.extend(lowered.prop_thunks.values().cloned());
+            prop_thunks.extend(
+                lowered
+                    .prop_thunks
+                    .iter()
+                    .map(|(id, thunk)| (*id, thunk.clone())),
+            );
+            component_names.extend(lowered.component_names.iter().cloned());
+            state_seed.extend(lowered.state_seed.iter().cloned());
             sources.push((path.clone(), lowered.clone(), ast));
             merged = Some(match merged {
                 None => lowered.arena,
@@ -372,7 +403,10 @@ impl Pipeline {
         Ok(TreeCompilation {
             arena: merged.unwrap_or_default(),
             closures,
+            state_seed,
             sources,
+            prop_thunks,
+            component_names,
         })
     }
 
@@ -416,15 +450,27 @@ impl Pipeline {
     }
 
     /// Builds the `Init` frame bytes for `arena` (spec §D.12.2).
-    fn build_init(&mut self, arena: &IRArena, closures: &[flux_ir::ClosureIR]) -> Vec<u8> {
+    fn build_init(
+        &mut self,
+        arena: &IRArena,
+        closures: &[flux_ir::ClosureIR],
+        state_seed: &[(SignalId, Value)],
+        component_names: &[(flux_syntax::ComponentId, String)],
+    ) -> Vec<u8> {
         let root = root_node(arena);
+        // Appendix D §D.12.2: the Init frame carries `root` followed by every
+        // descendant node, flat, so a host rebuilds the full node table from one
+        // frame. Gather the descendants (children first, breadth-first) here.
+        let extra_nodes = flatten_extra_nodes(&root, arena);
         let source_map = self.source_map();
         let signal_meta = signal_meta_for(arena);
         let mut frame: InitFrame = Frame::init(
             &root,
-            &[],
+            &extra_nodes,
+            state_seed,
             &source_map,
             arena.string_table(),
+            component_names,
             closures,
             &signal_meta,
         );
@@ -461,14 +507,19 @@ impl Pipeline {
     /// (re)connecting host. Returns `None` before the first good compile.
     #[must_use]
     pub fn init_frame(&mut self) -> Option<Vec<u8>> {
-        let (arena, closures) = {
+        let (arena, closures, state_seed, component_names) = {
             let last = self.last_good.as_ref()?;
+            // The retained closure table already includes the prop thunks (they
+            // are folded in when the tree advances), so a reconnecting host gets
+            // the same handler blob the original `Init` carried.
             (
                 last.arena.clone(),
                 last.closures.values().cloned().collect::<Vec<_>>(),
+                last.state_seed.clone(),
+                last.component_names.clone(),
             )
         };
-        Some(self.build_init(&arena, &closures))
+        Some(self.build_init(&arena, &closures, &state_seed, &component_names))
     }
 
     /// Builds an `Error` frame from `diagnostic` (spec §D.12.3).

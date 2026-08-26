@@ -33,12 +33,19 @@ type StringInterner<'a> = &'a mut dyn FnMut(&str) -> StringId;
 type SignalScope = Vec<(String, SignalId)>;
 
 /// Content-addressed hash of a thunk/handler closure body, used for
-/// `ClosureRef` interning. Mirrors `flux_ir_serde::hash_closure` so the two
-/// crates agree on identity; kept local to avoid a dependency cycle.
+/// `ClosureRef` interning. This must stay byte-identical to
+/// `flux_ir_serde::hash_closure` (same blake3 input framing, including the two
+/// length prefixes) so a thunk hashed here matches the `HandlerDef` the frame
+/// writer emits for the same bytecode — that hash is how the host pairs a
+/// node's `prop_thunk` with the bytecode in the frame's shared blob. It is
+/// duplicated rather than imported to avoid a `flux-ir` → `flux-ir-serde`
+/// dependency cycle; `crates/flux-ir/tests/lower.rs` pins the two together.
 #[must_use]
 pub(crate) fn hash_closure_placeholder(bytecode: &[u8], captured: &[flux_syntax::SignalId]) -> u64 {
     let mut hasher = blake3::Hasher::new();
+    hasher.update(&(bytecode.len() as u32).to_le_bytes());
     hasher.update(bytecode);
+    hasher.update(&(captured.len() as u32).to_le_bytes());
     for id in captured {
         hasher.update(&id.to_le_bytes());
     }
@@ -255,26 +262,6 @@ fn collect_in_block(block: &flux_parser::Block, scope: &SignalScope, found: &mut
             _ => {}
         }
     }
-}
-
-/// Concatenates a string-literal's parts into a single text buffer, mirroring
-/// the wire/codegen convention (interpolations render as their `{…}` source
-/// placeholder, since the runtime re-evaluates them). The thunk's
-/// `LOAD_STR_CONST` interns this exact text, so it must match the
-/// [`Value::Str`] the host resolves against `arena.string_table()`.
-fn concat_str(parts: &[flux_parser::StrPart]) -> String {
-    let mut text = String::new();
-    for part in parts {
-        match part {
-            flux_parser::StrPart::Text(t) => text.push_str(t),
-            // Interpolations are runtime-evaluated; we keep the source shape
-            // faithful so the same text interns to the same `StringId`.
-            flux_parser::StrPart::Interp(_) => text.push_str("{…}"),
-            #[allow(unreachable_patterns)]
-            _ => text.push_str("{…}"),
-        }
-    }
-    text
 }
 
 /// Bytecode emitter: walks expressions, appends raw opcode bytes, and records
@@ -708,16 +695,7 @@ impl<'a> Emitter<'a> {
                 self.code.push(u8::from(*b));
                 Ok(r)
             }
-            ExprKind::Str(parts) => {
-                let text = concat_str(parts);
-                let id = (self.str_interner)(&text);
-                let r = self.alloc_reg();
-                // LOAD_STR_CONST dst(u8), str_id(u32)
-                self.code.push(raw::LOAD_STR_CONST);
-                self.code.push(r);
-                self.code.extend_from_slice(&id.to_le_bytes());
-                Ok(r)
-            }
+            ExprKind::Str(parts) => self.compile_str(parts, expr.span),
             ExprKind::Ident(ident) => {
                 let id = self.signal_of(&ident.name, ident.span)?;
                 let r = self.alloc_reg();
@@ -772,6 +750,69 @@ impl<'a> Emitter<'a> {
                 expr.span,
             )),
         }
+    }
+    /// Compiles a string literal, including interpolations (ADR-0043).
+    ///
+    /// A literal with no interpolation collapses to a single `LOAD_STR_CONST`
+    /// (the previous behaviour, byte-for-byte). Each interpolation compiles its
+    /// expression, converts it with `TO_STRING`, and folds it into the running
+    /// result with `STR_CONCAT`, so `"tapped {count} times"` evaluates against
+    /// the live signal graph instead of collapsing to a placeholder.
+    fn compile_str(
+        &mut self,
+        parts: &[flux_parser::StrPart],
+        span: Span,
+    ) -> Result<u8, HandlerCompileError> {
+        let mut result: Option<u8> = None;
+        for part in parts {
+            let piece = match part {
+                flux_parser::StrPart::Text(text) => self.emit_str_const(text),
+                flux_parser::StrPart::Interp(inner) => {
+                    let value = self.compile_value(inner)?;
+                    let rendered = self.alloc_reg();
+                    // TO_STRING dst(u8), src(u8)
+                    self.code.push(raw::TO_STRING);
+                    self.code.push(rendered);
+                    self.code.push(value);
+                    rendered
+                }
+                // `StrPart` is `#[non_exhaustive]`: an unknown part cannot be
+                // rendered, so the caller falls back to a thunk-less node
+                // rather than emitting bytecode with a hole in it.
+                _ => {
+                    return Err(HandlerCompileError::new(
+                        "unsupported string part in interpolated literal".to_owned(),
+                        span,
+                    ));
+                }
+            };
+            result = Some(match result {
+                None => piece,
+                Some(left) => {
+                    let dst = self.alloc_reg();
+                    // STR_CONCAT dst(u8), a(u8), b(u8)
+                    self.code.push(raw::STR_CONCAT);
+                    self.code.push(dst);
+                    self.code.push(left);
+                    self.code.push(piece);
+                    dst
+                }
+            });
+        }
+        // An empty literal (`""`) has no parts at all; it still needs a value.
+        let _ = span;
+        Ok(result.unwrap_or_else(|| self.emit_str_const("")))
+    }
+
+    /// Emits `LOAD_STR_CONST` for `text`, interning it, and returns its register.
+    fn emit_str_const(&mut self, text: &str) -> u8 {
+        let id = (self.str_interner)(text);
+        let r = self.alloc_reg();
+        // LOAD_STR_CONST dst(u8), str_id(u32)
+        self.code.push(raw::LOAD_STR_CONST);
+        self.code.push(r);
+        self.code.extend_from_slice(&id.to_le_bytes());
+        r
     }
 }
 
@@ -1044,6 +1085,85 @@ mod tests {
             signals.read(SignalId::from(1u32)),
             Some(Value::Int(1)),
             "Ready arm set count = 1"
+        );
+    }
+
+    #[test]
+    fn interpolated_prop_thunk_evaluates_signal_into_the_string() {
+        // `Text("tapped {count} times")` where `count` is signal 1.
+        let literal = Expr {
+            kind: ExprKind::Str(vec![
+                flux_parser::StrPart::Text("tapped ".to_owned()),
+                flux_parser::StrPart::Interp(ident("count")),
+                flux_parser::StrPart::Text(" times".to_owned()),
+            ]),
+            span: span(),
+        };
+        let prop_idx = flux_syntax::PropIdx::from(0u16);
+        let mut table = StringTable::new();
+        let (bytecode, deps, layout) =
+            compile_prop_thunk(&[(prop_idx, &literal)], &count_scope(), &mut |s| {
+                table.intern(s)
+            })
+            .expect("interpolated prop compiles to a thunk");
+
+        assert_eq!(
+            deps,
+            vec![SignalId::from(1u32)],
+            "the interpolation's signal read is the node's only dependency"
+        );
+        assert_eq!(layout, vec![prop_idx]);
+        assert_eq!(
+            bytecode.iter().filter(|&&b| b == raw::TO_STRING).count(),
+            1,
+            "one TO_STRING per interpolation in {bytecode:?}"
+        );
+        assert_eq!(
+            bytecode.iter().filter(|&&b| b == raw::STR_CONCAT).count(),
+            2,
+            "two STR_CONCATs fold three parts in {bytecode:?}"
+        );
+        assert_eq!(
+            bytecode.iter().filter(|&&b| b == raw::READ_SIGNAL).count(),
+            1,
+            "the interpolation reads `count` in {bytecode:?}"
+        );
+
+        // The thunk must actually run and leave a record in r1.
+        let mut signals = InMemorySignals::from_signals([(SignalId::from(1u32), Value::Int(3))]);
+        let out = run(&bytecode, &mut signals, Value::Null).expect("thunk runs");
+        match &out.registers[1] {
+            Value::Record(fields) => {
+                assert_eq!(fields.len(), 1, "one prop field");
+                assert!(
+                    matches!(fields[0].1, Value::Str(_)),
+                    "the interpolated prop materialises as a string, got {:?}",
+                    fields[0].1
+                );
+            }
+            other => panic!("thunk must leave an ALLOC_RECORD in r1, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn static_string_prop_thunk_emits_no_to_string() {
+        // A literal with no interpolation must keep its single LOAD_STR_CONST
+        // shape: no TO_STRING, no STR_CONCAT, no signal dependency.
+        let literal = Expr {
+            kind: ExprKind::Str(vec![flux_parser::StrPart::Text("hello".to_owned())]),
+            span: span(),
+        };
+        let mut table = StringTable::new();
+        let (bytecode, deps, _) = compile_prop_thunk(
+            &[(flux_syntax::PropIdx::from(0u16), &literal)],
+            &count_scope(),
+            &mut |s| table.intern(s),
+        )
+        .expect("static prop compiles");
+        assert!(deps.is_empty(), "a static literal reads no signal");
+        assert!(
+            !bytecode.contains(&raw::TO_STRING) && !bytecode.contains(&raw::STR_CONCAT),
+            "static literal must stay a single LOAD_STR_CONST: {bytecode:?}"
         );
     }
 

@@ -149,13 +149,15 @@ pub enum Opcode {
     Mov = raw::MOV,
     /// `GAS_CHECK` — assert remaining gas covers a budget.
     GasCheck = raw::GAS_CHECK,
+    /// `TO_STRING` — convert any value to its interned string form (ADR-0043).
+    ToString = raw::TO_STRING,
 }
 
 impl Opcode {
     /// Every opcode defined by Appendix E §E.1, in ascending byte order.
     ///
     /// Useful for exhaustive conformance tests and disassembler tables.
-    pub const ALL: [Self; 54] = [
+    pub const ALL: [Self; 55] = [
         Self::Halt,
         Self::Nop,
         Self::ReadSignal,
@@ -210,5 +212,6 @@ impl Opcode {
         Self::LoadNull,
         Self::Mov,
         Self::GasCheck,
+        Self::ToString,
     ];
 }

@@ -25,7 +25,7 @@ use crate::wire::{
 };
 use flux_ir::ClosureIR;
 use flux_syntax::{
-    FileId, HandlerId, NodeRef, Patch, SignalId, Span, StringId, StringTable, Value,
+    ComponentId, FileId, HandlerId, NodeRef, Patch, SignalId, Span, StringId, StringTable, Value,
 };
 
 /// Magic bytes `"FLUX"` in little-endian (`0x465C5558`).
@@ -357,12 +357,23 @@ pub struct InitFrame {
     pub kind: FrameKind,
     /// The full root node of the reactive tree.
     pub root: NodeRef,
+    /// The remaining nodes of the reactive tree, flat after `root` (Appendix
+    /// D §D.12.2: "Children are referenced by id; the runtime resolves them
+    /// from `root + extraNodes`"). The dev server flattens the whole arena into
+    /// `root` followed by every descendant, so a host rebuilds the full node
+    /// table and renders the tree without a second round-trip.
+    pub extra_nodes: Vec<NodeRef>,
     /// Initial signal-graph values.
     pub state_seed: Vec<(SignalId, Value)>,
     /// Source-file path mappings.
     pub source_map: Vec<(FileId, String)>,
     /// The string table the tree resolves against.
     pub string_table: StringTable,
+    /// Component-name interning: `(ComponentId, name)` pairs shipped so a host
+    /// can resolve each node's adapter from its `ComponentId` (Appendix D §D.9).
+    /// Emitted as string-table entries keyed by the `ComponentId` (so the wire
+    /// `id` equals the node's `component_id`), distinct from literal-string ids.
+    pub component_names: Vec<(ComponentId, String)>,
     /// Handler closures shipped with the tree (Gap G1). Empty when the tree
     /// carries no handlers.
     pub closures: Vec<ClosureIR>,
@@ -377,9 +388,11 @@ impl Frame {
     #[must_use]
     pub fn init(
         root: &NodeRef,
+        extra_nodes: &[NodeRef],
         state_seed: &[(SignalId, Value)],
         source_map: &[(FileId, String)],
         table: &StringTable,
+        component_names: &[(ComponentId, String)],
         closures: &[ClosureIR],
         signal_meta: &[NodeSignalMeta],
     ) -> InitFrame {
@@ -388,9 +401,11 @@ impl Frame {
             seq: 0,
             kind: FrameKind::Init,
             root: root.clone(),
+            extra_nodes: extra_nodes.to_vec(),
             state_seed: state_seed.to_vec(),
             source_map: source_map.to_vec(),
             string_table: table.clone(),
+            component_names: component_names.to_vec(),
             closures: closures.to_vec(),
             signal_meta: signal_meta.to_vec(),
         }
@@ -409,6 +424,14 @@ impl Frame {
         let mut r = Reader::new(payload);
         let seq = r.u32("init.seq")?;
         let root = decode_node(&mut r)?;
+        // Appendix D §D.12.2: `root` is followed by a `u32` count then every
+        // descendant node, flat. The host rebuilds the full node table from these
+        // so it can resolve the root's child ids without a second round-trip.
+        let extra_count = r.u32("init.extra_count")? as usize;
+        let mut extra_nodes = Vec::with_capacity(extra_count);
+        for _ in 0..extra_count {
+            extra_nodes.push(decode_node(&mut r)?);
+        }
         let seed_count = r.u16("init.seed")?;
         let mut state_seed = Vec::with_capacity(seed_count as usize);
         for _ in 0..seed_count {
@@ -441,6 +464,23 @@ impl Frame {
         for (_, text) in &entries {
             string_table.intern(text);
         }
+        // Appendix D §D.9: component-name interning, separate `u16` count then
+        // `(u32 ComponentId, utf8 name)` pairs. Mirrors the encoder exactly so
+        // the two id spaces never collide on the wire.
+        let component_count = r.u16("init.component_names.count")? as usize;
+        let mut component_names = Vec::with_capacity(component_count);
+        for _ in 0..component_count {
+            let cid: ComponentId = r.u32("init.component_names.cid")?;
+            let name_len = r.u16("init.component_names.name_len")? as usize;
+            let name_bytes = r.bytes(name_len, "init.component_names.name")?;
+            let name = String::from_utf8(name_bytes.to_vec())
+                .map_err(|_| WireError::InvalidTag {
+                    tag: 0,
+                    context: "init.component_names.name",
+                    at: r.pos(),
+                })?;
+            component_names.push((cid, name));
+        }
         // D.12 handler section (Gap G1): a shared bytecode blob followed by a
         // `HandlerDef` stream; each `ClosureRef` indexes the blob.
         let closures = decode_closures(&mut r)?;
@@ -458,9 +498,11 @@ impl Frame {
             seq,
             kind,
             root,
+            extra_nodes,
             state_seed,
             source_map,
             string_table,
+            component_names,
             closures,
             signal_meta,
         })
@@ -511,6 +553,13 @@ impl InitFrame {
         w.u8(self.kind.type_byte());
         w.u32(self.seq);
         encode_node(&mut w, &self.root);
+        // Appendix D §D.12.2: the full tree is `root` followed by every
+        // descendant, flat, so the host rebuilds the complete node table from
+        // one frame. A `u32` count prefixes the extras.
+        w.u32(self.extra_nodes.len() as u32);
+        for node in &self.extra_nodes {
+            encode_node(&mut w, node);
+        }
         w.u16(self.state_seed.len() as u16);
         for (sig, val) in &self.state_seed {
             w.u32(*sig);
@@ -526,10 +575,22 @@ impl InitFrame {
             .iter()
             .map(|(id, text)| (id, text.to_owned()))
             .collect();
-        // D.12.2: `string_count` is a u32.
+        // D.12.2: `string_count` is a u32. Only literal strings live here; the
+        // component-name → `ComponentId` map is a SEPARATE section (below) so
+        // the two id spaces never collide on the wire (a literal `StringId` and
+        // a `ComponentId` can share a numeric value, which would corrupt host
+        // adapter resolution if merged).
         w.u32(entries.len() as u32);
         for (id, text) in &entries {
             encode_string_entry(&mut w, *id, text);
+        }
+        // Appendix D §D.9: component-name interning, separate `u16` count then
+        // `(u32 ComponentId, utf8 name)` pairs. The host resolves each node's
+        // adapter from `byComponent[component_id]`.
+        w.u16(self.component_names.len() as u16);
+        for (cid, name) in &self.component_names {
+            w.u32((*cid).into());
+            encode_str(&mut w, name);
         }
         // D.12 handler section (Gap G1): shared blob, then HandlerDef stream.
         write_closures(&mut w, &self.closures);

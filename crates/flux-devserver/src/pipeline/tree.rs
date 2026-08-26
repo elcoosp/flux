@@ -84,6 +84,37 @@ fn root_ids(arena: &IRArena) -> Vec<NodeId> {
         .collect()
 }
 
+/// Collects every descendant of `root` (excluding `root` itself) into a flat
+/// list for the Init frame's `extra_nodes` section (spec §D.12.2: the frame
+/// carries `root` followed by all descendants so a host rebuilds the full
+/// node table from one frame). Order is breadth-first so a parent always
+/// precedes its children, matching the decoder's id-index rebuild.
+pub(crate) fn flatten_extra_nodes(root: &NodeRef, arena: &IRArena) -> Vec<NodeRef> {
+    let mut out: Vec<NodeRef> = Vec::new();
+    let mut queue: Vec<NodeId> = root.children.iter().flat_map(Child::node_ids).collect();
+    let mut seen: Vec<NodeId> = queue.clone();
+    while let Some(id) = queue.pop() {
+        if let Some(view) = arena.get(id) {
+            out.push(NodeRef {
+                id: view.id(),
+                kind: view.kind(),
+                component_id: view.component_id(),
+                props: view.props(),
+                children: view.children(),
+                handlers: view.handlers(),
+                span: view.span(),
+            });
+            for child in view.children().iter().flat_map(Child::node_ids) {
+                if !seen.contains(&child) {
+                    seen.push(child);
+                    queue.push(child);
+                }
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

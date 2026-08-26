@@ -110,9 +110,17 @@ fn test_instruction_len_includes_the_opcode_byte() {
 fn test_every_opcode_in_appendix_e_is_declared() {
     assert_eq!(
         Opcode::ALL.len(),
-        54,
-        "Appendix E §E.1 defines 54 opcodes; update both together"
+        55,
+        "Appendix E §E.1 plus ADR-0043 `TO_STRING` define 55 opcodes; update both together"
     );
+}
+
+#[test]
+fn test_to_string_decodes_from_its_byte_with_one_register_operand() {
+    let op = Opcode::from_byte(0xD0).expect("TO_STRING is assigned byte 0xD0 (ADR-0043)");
+    assert_eq!(op, Opcode::ToString);
+    assert_eq!(op.mnemonic(), "TO_STRING");
+    assert_eq!(op.operand_len(), 2, "TO_STRING takes dst(u8), src(u8)");
 }
 
 #[test]

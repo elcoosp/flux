@@ -124,3 +124,6 @@ pub const MOV: u8 = 0xB5;
 
 /// Fail with `GasExhausted` unless the remaining gas covers the budget.
 pub const GAS_CHECK: u8 = 0xC0;
+
+/// Convert any value to its interned string representation (ADR-0043).
+pub const TO_STRING: u8 = 0xD0;
