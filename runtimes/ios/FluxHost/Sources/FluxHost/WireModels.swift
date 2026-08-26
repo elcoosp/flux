@@ -44,6 +44,19 @@ struct StateCell: Equatable, Sendable {
     let value: VMValue
 }
 
+/// Signal-graph metadata for a single node (ADR-0027 §T13/T14).
+///
+/// Captured by `emit_signal_metadata` during lowering: `deps` is the set of
+/// signals the node reads, and `thunk` (when present) is the bytecode body that
+/// re-materialises the node's dynamic props against the live signal graph. The
+/// `layout` maps each prop expression's ordinal position in the thunk's result
+/// `Record` to the on-wire `PropIdx` it must be stored under.
+struct NodeSignalMeta: Equatable, Sendable {
+    let deps: [UInt32]
+    let thunk: ClosureRef?
+    let layout: [UInt16]
+}
+
 /// A fully decoded frame. `full` frames (Init) carry a root node; patch frames
 /// carry `patches`/`handlers`/`strings` deltas.
 ///
@@ -62,4 +75,8 @@ struct FluxFrame: Equatable, Sendable {
     let strings: [StringEntry]
     let state: [StateCell]
     let files: [FileEntry]
+    /// Per-node signal-graph metadata (ADR-0027 §T13/T14): the signals each node
+    /// reads and, for dynamic nodes, the prop-thunk closure that re-materialises
+    /// its props against the live signal graph.
+    let signalMeta: [UInt32: NodeSignalMeta]
 }

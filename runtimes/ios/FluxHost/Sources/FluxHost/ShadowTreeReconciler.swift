@@ -59,6 +59,14 @@ struct ShadowTreeReconciler {
     /// back into the executor.
     private var table: StringTable = StringTable()
 
+    /// Per-node signal-graph metadata (ADR-0027 §T13/T14), captured from the
+    /// most recently applied frame. Drives thunk materialisation on reconcile.
+    private var signalMeta: [UInt32: NodeSignalMeta] = [:]
+    /// Lookup of prop-thunk bytecode by closure hash (the 8-byte BLAKE3), sliced
+    /// from the frame's shared handler blob. Populated on every applied frame so
+    /// a dirty node can re-run its thunk against the live signal graph.
+    private var thunkBlobs: [Data: [UInt8]] = [:]
+
     /// Creates a reconciler bound to `registry` and `executor`.
     init(registry: AdapterRegistry, executor: (any FluxExecutor)? = nil) {
         self.registry = registry
@@ -79,6 +87,17 @@ struct ShadowTreeReconciler {
     mutating func apply(_ frame: FluxFrame) -> ReconcileReport {
         var report = ReconcileReport()
         for str in frame.strings { table.intern(str.stringId, str.value) }
+        // Cache the ADR-0027 signal metadata + thunk bytecode so subsequent
+        // dirty reconciliations can re-materialise dynamic props without the
+        // full frame.
+        signalMeta = frame.signalMeta
+        var blobs: [Data: [UInt8]] = [:]
+        for handler in frame.handlers {
+            if let bytecode = handler.bytecode {
+                blobs[Data(handler.closure.hash)] = bytecode
+            }
+        }
+        thunkBlobs = blobs
         // Keep the latest full node table so removal can resolve a node's
         // `cleanupHandler` (§18.4) even from a patch frame that only lists deltas.
         // Only a full-tree frame (root != nil) carries the authoritative table;
@@ -103,15 +122,22 @@ struct ShadowTreeReconciler {
     /// parent adapter.
     private mutating func reconcile(nodeId: UInt32, nodes: [UInt32: ShadowNode], report: inout ReconcileReport) {
         guard let node = nodes[nodeId] else { return }
+        // Materialise dynamic props (ADR-0027 T14): for a node with a prop thunk
+        // this runs the thunk against the live signal graph; for static nodes it
+        // returns the shipped props unchanged. Reused everywhere below so the
+        // signal deps, kit props, and stored runtime props stay consistent.
+        let effectiveProps = materializeProps(for: nodeId, node: node)
         // Record which signals this node's props read, so a later signal write can
-        // mark it dirty without walking the whole tree (R1). A prop whose value is a
-        // signal reference (`.int(s)`) is treated as a read of signal `s`.
-        signalDeps[nodeId] = Set(node.props.compactMap { $0.value.asInt }.compactMap { UInt32(exactly: $0) })
+        // mark it dirty without walking the whole tree (R1). A dynamic node uses
+        // its thunk's captured `deps`; a static node reads whatever signal refs
+        // survive in its shipped props.
+        let metaDeps = signalMeta[nodeId]?.deps ?? []
+        signalDeps[nodeId] = Set(metaDeps).union(effectiveProps.compactMap { $0.value.asInt }.compactMap { UInt32(exactly: $0) })
         if let existing = built[nodeId] {
             // A `@pure` node whose props' content hash is unchanged depends on
             // nothing else, so its entire subtree is stable: skip re-reconciling
             // it (G6). We still update the recorded hash below.
-            let newHash = propHash(node.props)
+            let newHash = propHash(effectiveProps)
             if node.isPure, existing.lastPropHash == newHash {
                 return
             }
@@ -121,18 +147,34 @@ struct ShadowTreeReconciler {
             // a descendant may have changed via a patch.
             if existing.lastPropHash != newHash {
                 let oldKit = kitProps(existing.runtimeProps, table: currentTable())
-                let newKit = kitProps(node.props, table: currentTable())
+                let newKit = kitProps(effectiveProps, table: currentTable())
                 existing.adapter.update(existing.view, from: oldKit, to: newKit)
-                existing.runtimeProps = node.props
+                existing.runtimeProps = effectiveProps
                 existing.lastPropHash = newHash
                 report.updated.append(nodeId)
             }
-        } else if let adapter = registry.make(for: node.componentId, executor: executorRef) {
-            let kit = kitProps(node.props, table: currentTable())
+        } else {
+            // A `Component` node (Appendix C) is a host-side container: it has no
+            // primitive adapter of its own, so it hosts its children in a plain
+            // `UIView`. Its `componentId` is the interned component name, which
+            // collides with primitive ids on the wire, so we must branch on `kind`
+            // rather than resolving `componentId` through the registry. Primitives
+            // resolve through the registry by id; any still-unbound id degrades to
+            // a container rather than crashing (B8).
+            let adapter: AnyFluxAdapter
+            if node.kind == .component {
+                adapter = AnyFluxAdapter(ContainerAdapter(executor: executorRef))
+            } else if let name = currentTable().lookup(node.componentId),
+                      let prim = registry.make(named: name, executor: executorRef) {
+                adapter = prim
+            } else {
+                adapter = AnyFluxAdapter(ContainerAdapter(executor: executorRef))
+            }
+            let kit = kitProps(effectiveProps, table: currentTable())
             let view = adapter.create()
             adapter.update(view, from: Props(), to: kit)
-            let hash = propHash(node.props)
-            built[nodeId] = BuiltNode(adapter: adapter, view: view, runtimeProps: node.props, lastPropHash: hash)
+            let hash = propHash(effectiveProps)
+            built[nodeId] = BuiltNode(adapter: adapter, view: view, runtimeProps: effectiveProps, lastPropHash: hash)
             report.built.append(nodeId)
             // Bind handlers once, at build time — re-binding on every frame
             // would stack UIControl actions (ButtonAdapter adds one per call).
@@ -181,6 +223,11 @@ struct ShadowTreeReconciler {
         let deps = signalDeps[nodeId, default: []]
         let isDirty = !deps.intersection(signalIds).isEmpty
 
+        // Materialise dynamic props (ADR-0027 T14) so a signal write re-evaluates
+        // interpolations against the new graph value. For static nodes this is the
+        // shipped props unchanged.
+        let effectiveProps = materializeProps(for: nodeId, node: node)
+
         // Visit children first to find dirty descendants and collect their views.
         var childViews: [AnyObject] = []
         var anyChildDirty = false
@@ -206,10 +253,10 @@ struct ShadowTreeReconciler {
             // Re-materialize a node whose own dependencies changed (R1).
             if isDirty {
                 let oldKit = kitProps(owner.runtimeProps, table: currentTable())
-                let newKit = kitProps(node.props, table: currentTable())
+                let newKit = kitProps(effectiveProps, table: currentTable())
                 owner.adapter.update(owner.view, from: oldKit, to: newKit)
-                owner.runtimeProps = node.props
-                owner.lastPropHash = propHash(node.props)
+                owner.runtimeProps = effectiveProps
+                owner.lastPropHash = propHash(effectiveProps)
                 report.updated.append(nodeId)
             }
             // Re-parent children so a dirty descendant lands in this view.
@@ -247,6 +294,50 @@ struct ShadowTreeReconciler {
     /// never depends on reaching back into the executor.
     private func currentTable() -> StringTable {
         table
+    }
+
+    /// Materialises the props of `node` by running its ADR-0027 prop thunk
+    /// against the live signal graph, falling back to the shipped static props
+    /// when the node has no thunk or the thunk cannot be evaluated.
+    ///
+    /// For a dynamic node the lowering compiled every prop expression into a
+    /// single closure whose result `Record` (in `r1`) holds each prop value at
+    /// its field position; `meta.layout` maps that position to the on-wire
+    /// `PropIdx`. A node with no thunk (pure literals / control-only) returns its
+    /// shipped props unchanged.
+    private func materializeProps(for nodeId: UInt32, node: ShadowNode) -> [Prop] {
+        guard let meta = signalMeta[nodeId], let thunk = meta.thunk else {
+            return node.props
+        }
+        guard let bytecode = thunkBlobs[Data(thunk.hash)],
+              let runtime = executorRef as? FluxRuntime else {
+            return node.props
+        }
+        do {
+            // The thunk only reads signals; run it against a copy of the live
+            // graph so materialisation never mutates graph state.
+            var store = runtime.graph
+            let outcome = try FluxBytecodeVM.run(
+                bytecode,
+                signals: &store,
+                payload: .null,
+                stringTable: currentTable()
+            )
+            guard case let .record(fields) = outcome.registers[1] else {
+                return node.props
+            }
+            var props: [Prop] = []
+            props.reserveCapacity(meta.layout.count)
+            for (position, propIdx) in meta.layout.enumerated() {
+                guard position < fields.count else { break }
+                props.append(Prop(index: propIdx, value: fields[position].value))
+            }
+            return props
+        } catch {
+            // Materialisation is best-effort: degrade to shipped props rather
+            // than leaving the view stale or crashing the reconcile.
+            return node.props
+        }
     }
 
     /// Applies a single patch to the built views.

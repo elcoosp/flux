@@ -6,12 +6,37 @@
 //  rule for `Str` values (Appendix D §D.5). A corrupt or truncated frame raises
 //  `WireError` with the failing byte offset rather than panicking.
 
+/// Frame kind and flag constants mirroring the Rust wire protocol
+/// (`crates/flux-ir-serde/src/frame.rs`, Appendix D §D.1).
+private enum FrameKind {
+    /// `Init` (full-tree) frame type byte.
+    static let initByte: UInt8 = 0x02
+    /// `Delta` (patch) frame type byte.
+    static let deltaByte: UInt8 = 0x04
+    /// `Delta` flag bit indicating a trailing `signal_meta` section.
+    static let flagNodeHasSignalDeps: UInt8 = 0x40
+}
+
 /// Decodes Flux binary frames (Appendix D) into host-side `FluxFrame` models.
 enum FrameDeserializer {
-    /// The 4-byte frame magic: `0x465C5558` ("FLUX" in little-endian).
+    /// The 4-byte frame magic: `0x465C5558` (FLUX in little-endian).
     static let magic: UInt32 = 0x465C_5558
 
     /// Decodes a frame from raw bytes.
+    ///
+    /// The 6-byte header is `magic(4) | version(1) | kind(1)`; the remaining
+    /// layout depends on `kind` (Appendix D §D.1):
+    /// - `FRAME_INIT` (0x02): `seq`, `root`, a `u32` count of `extraNodes`
+    ///   (the remaining descendants, flat), the signal `state_seed`, the
+    ///   `source_map`, the `string_count` (u32) + string table, the handler
+    ///   (closure) section, and an optional `signal_meta` marker.
+    /// - `FRAME_DELTA` (0x04): `seq`, `flags`, `patch_count`, `handler_count`,
+    ///   `string_count` (all u16), then the patch stream, the string delta, the
+    ///   handler section, and an optional `signal_meta` (gated by
+    ///   `FLAG_NODE_HAS_SIGNAL_DEPS` in `flags`).
+    ///
+    /// Every node in an Init frame — root and extras — is registered in `nodes`
+    /// so the reconciler resolves child ids without a second round-trip.
     /// - Throws: `WireError` on malformed input, or a caller-supplied error from
     ///   the value/closure decoders.
     static func decode(_ bytes: [UInt8]) throws -> FluxFrame {
@@ -21,101 +46,124 @@ enum FrameDeserializer {
             throw WireError.badMagic(offset: 0, value: rawMagic)
         }
         let version = try r.u8()
+        let kind = try r.u8()
+        switch kind {
+        case FrameKind.initByte:
+            return try decodeInit(&r, version: version)
+        case FrameKind.deltaByte:
+            return try decodeDelta(&r, version: version)
+        default:
+            throw WireError.unknownTag(offset: 5, tag: kind)
+        }
+    }
+
+    /// Decodes an `Init` frame (Appendix D §D.12.2).
+    private static func decodeInit(_ r: inout ByteReader, version: UInt8) throws -> FluxFrame {
+        // Payload begins after the 6-byte header (magic + version + kind).
         let seq = try r.u32()
-        let flags = try r.u8()
-
-        // delta frames (full_tree bit clear) have the patch/handler/string
-        // structure; full frames (Init) carry a root node in the same layout but
-        // with patch_count/handler_count/string_count still encoded at the same
-        // offset. We always parse the delta header; for full frames the root node
-        // follows the header and `root` is populated.
-        let patchCount = try r.u16()
-        let handlerCount = try r.u16()
-        let stringCount = try r.u16()
-
-        // For full (Init) frames, the root node is encoded here (Appendix D §D.12.2).
-        // For delta frames the body begins with patches, so peek the next tag to
-        // decide: a full frame carries a Node whose first field is the 4-byte id,
-        // and there is no leading patch tag.
-        let root: ShadowNode?
-        if flags & 0x01 != 0 {
-            // full_tree: decode the root node now.
-            root = try decodeNode(&r)
-        } else {
-            root = nil
+        let root = try decodeNode(&r)
+        // Appendix D §D.12.2: `root` is followed by a `u32` count then every
+        // descendant node, flat. Register each in the node table.
+        let extraCount = try r.u32()
+        var nodes: [UInt32: ShadowNode] = [root.id: root]
+        for _ in 0..<extraCount {
+            let node = try decodeNode(&r)
+            nodes[node.id] = node
         }
-        // Build the flat id → node table from the reachable tree so the
-        // reconciler can resolve child ids (Appendix D §D.4) anywhere below.
-        var nodes: [UInt32: ShadowNode] = [:]
-        if let root {
-            nodes[root.id] = root
+        // signal `state_seed`: u16 count of (u32 signalId, value).
+        let seedCount = try r.u16()
+        var state: [StateCell] = []
+        for _ in 0..<seedCount {
+            let signalId = try r.u32()
+            let value = try decodeValue(&r)
+            state.append(StateCell(signalId: signalId, value: value))
         }
-
-        var patches: [Patch] = []
-        for _ in 0..<patchCount {
-            patches.append(try decodePatch(&r))
+        // `source_map`: u16 count of (u32 fileId, u16 len + utf8 path).
+        let smCount = try r.u16()
+        var files: [FileEntry] = []
+        for _ in 0..<smCount {
+            let fileId = try r.u32()
+            let len = try r.u16()
+            let path = try r.utf8(Int(len))
+            files.append(FileEntry(fileId: fileId, path: path))
         }
-        // The frame carries a handler section (Appendix D §D.12) — a shared
-        // bytecode blob followed by a stream of `(handlerId, ClosureRef)` entries
-        // (Gap G1). When the header `handlerCount` is 0 the section is empty (an
-        // encoded zero-length blob) and no handlers are produced. Each decoded
-        // `HandlerDef` is resolved to its concrete bytecode body here (the body
-        // the executor must register so native controls can fire it later).
-        var handlers: [HandlerDef] = []
-        if handlerCount > 0 {
-            handlers = try decodeHandlerSection(&r)
-        }
+        // `string_count` is a u32 (Appendix D §D.12.2).
+        let strCount = try r.u32()
         var strings: [StringEntry] = []
-        for _ in 0..<stringCount {
+        for _ in 0..<strCount {
             strings.append(try decodeStringEntry(&r))
         }
-        var state: [StateCell] = []
-        if flags & 0x08 != 0 {
-            let cellCount = try r.u16()
-            for _ in 0..<cellCount {
-                let signalId = try r.u32()
-                let value = try decodeValue(&r)
-                state.append(StateCell(signalId: signalId, value: value))
-            }
-        }
-        var files: [FileEntry] = []
-        if flags & 0x10 != 0 {
-            let fileCount = try r.u16()
-            for _ in 0..<fileCount {
-                files.append(try decodeFileEntry(&r))
+        // Handler (closure) section (Appendix D §D.12, Gap G1).
+        let handlers = try decodeHandlerSection(&r)
+        // ADR-0027 (FA-IRWIRE): optional `signal_meta` section, gated by a
+        // 1-byte presence marker so back-compatible decoders skip it. The counter
+        // ADR-0027 (FA-IRWIRE): `signal_meta` trails every `Init` frame after
+        // `files`. The section is gated by a `1` marker byte; a `0` marker means
+        // it is absent (no dynamic nodes), which keeps `signalMeta` empty.
+        var signalMeta: [UInt32: NodeSignalMeta] = [:]
+        if r.remaining > 0 {
+            let marker = try r.u8()
+            if marker == 1 {
+                signalMeta = try decodeSignalMetaSection(&r)
             }
         }
         return FluxFrame(
             version: version,
             seq: seq,
-            flags: flags,
+            flags: FrameKind.initByte,
             root: root,
             nodes: nodes,
-            patches: patches,
+            patches: [],
             handlers: handlers,
             strings: strings,
             state: state,
-            files: files
+            files: files,
+            signalMeta: signalMeta
         )
     }
 
-    /// Walks `node` and every reachable descendant, registering each in `table`
-    /// by its `NodeId`. Children are referenced by id (Appendix D §D.4), so we
-    /// resolve each child through `decodeNode`'s side table — but since the wire
-    /// flattens the tree, we instead recurse the already-decoded parent's
-    /// `childCount`/`children` by re-decoding is not possible; the host reads
-    /// children lazily via the `nodes` table built here from `root`.
-    private static func indexTree(_ node: ShadowNode, into table: inout [UInt32: ShadowNode]) {
-        table[node.id] = node
-        for child in node.children {
-            switch child {
-            case let .node(id):
-                // Child ids are resolved against the full tree by the consumer.
-                _ = id
-            case let .splice(_, items):
-                for (_, id) in items { _ = id }
-            }
+    /// Decodes a `Delta` (patch) frame (Appendix D §D.1 + §D.2).
+    private static func decodeDelta(_ r: inout ByteReader, version: UInt8) throws -> FluxFrame {
+        // Payload after the 6-byte header: seq, flags, then three u16 counts.
+        let seq = try r.u32()
+        let flags = try r.u8()
+        let patchCount = try r.u16()
+        let handlerCount = try r.u16()
+        let strCount = try r.u16()
+        var patches: [Patch] = []
+        patches.reserveCapacity(Int(patchCount))
+        for _ in 0..<patchCount {
+            patches.append(try decodePatch(&r))
         }
+        var strings: [StringEntry] = []
+        strings.reserveCapacity(Int(strCount))
+        for _ in 0..<strCount {
+            strings.append(try decodeStringEntry(&r))
+        }
+        // Handler (closure) section (Appendix D §D.12, Gap G1) — present when
+        // `handlerCount > 0`; `decodeHandlerSection` tolerates a zero blob.
+        let handlers = try decodeHandlerSection(&r)
+        // ADR-0027 (FA-IRWIRE): `signal_meta` trails a Delta directly (no marker
+        // byte, unlike Init) only when its `flags` carry
+        // `FLAG_NODE_HAS_SIGNAL_DEPS`; the encoder emits the section immediately
+        // after the handler blob in that case (Appendix D §T13).
+        var signalMeta: [UInt32: NodeSignalMeta] = [:]
+        if (flags & FrameKind.flagNodeHasSignalDeps) != 0 {
+            signalMeta = try decodeSignalMetaSection(&r)
+        }
+        return FluxFrame(
+            version: version,
+            seq: seq,
+            flags: flags,
+            root: nil,
+            nodes: [:],
+            patches: patches,
+            handlers: handlers,
+            strings: strings,
+            state: [],
+            files: [],
+            signalMeta: signalMeta
+        )
     }
 
     // MARK: - Value
@@ -267,6 +315,42 @@ enum FrameDeserializer {
     }
 
     // MARK: - Closure / Handler
+
+    /// Decodes the ADR-0027 (FA-IRWIRE) `signal_meta` section: a `u16` node
+    /// count followed by, per node, `NodeSignalMeta` (Appendix D §T13).
+    ///
+    /// Layout (matching `flux-ir-serde::wire::encode_signal_meta_section`):
+    /// ```
+    /// node_count: u16
+    /// for each node:
+    ///   node_id:   u32
+    ///   dep_count: u16
+    ///   deps:      [u32; dep_count]
+    ///   has_thunk: u8            // 1 ⇒ closure follows, 0 ⇒ none
+    ///   thunk:     ClosureRef?   // present iff has_thunk == 1
+    ///   layout_count: u16
+    ///   layout:    [u16; layout_count]
+    /// ```
+    static func decodeSignalMetaSection(_ r: inout ByteReader) throws -> [UInt32: NodeSignalMeta] {
+        let count = try r.u16()
+        var out: [UInt32: NodeSignalMeta] = [:]
+        out.reserveCapacity(Int(count))
+        for _ in 0..<count {
+            let nodeId = try r.u32()
+            let depCount = try r.u16()
+            var deps: [UInt32] = []
+            deps.reserveCapacity(Int(depCount))
+            for _ in 0..<depCount { deps.append(try r.u32()) }
+            let thunkPresent = try r.u8()
+            let thunk: ClosureRef? = (thunkPresent == 1) ? try decodeClosureRef(&r) : nil
+            let layoutCount = try r.u16()
+            var layout: [UInt16] = []
+            layout.reserveCapacity(Int(layoutCount))
+            for _ in 0..<layoutCount { layout.append(try r.u16()) }
+            out[nodeId] = NodeSignalMeta(deps: deps, thunk: thunk, layout: layout)
+        }
+        return out
+    }
 
     /// Decodes a `ClosureRef` (Appendix D §D.7).
     static func decodeClosureRef(_ r: inout ByteReader) throws -> ClosureRef {
