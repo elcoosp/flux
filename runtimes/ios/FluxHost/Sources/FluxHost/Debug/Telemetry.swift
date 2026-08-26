@@ -13,6 +13,25 @@
 
 import Foundation
 
+/// A native view layout rectangle (device points). Mirrors the wire `Rect`.
+public struct Rect: Sendable, Equatable {
+    /// Left edge (x origin).
+    public let x: Double
+    /// Top edge (y origin).
+    public let y: Double
+    /// Width.
+    public let width: Double
+    /// Height.
+    public let height: Double
+
+    public init(x: Double, y: Double, width: Double, height: Double) {
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+    }
+}
+
 /// Protocol a DevTools transport conforms to in order to receive VM telemetry.
 public protocol VMTelemetrySink: AnyObject {
     /// Receives one decoded telemetry event from the host VM / signal graph.
@@ -193,7 +212,12 @@ public final class TelemetryBridge: VMTelemetrySink {
 ///
 /// The VM and signal graph call `fluxDevtoolsEmit` after each observable step;
 /// when no sink is attached the call is a no-op (zero release impact).
-private(set) public var fluxDevtoolsSink: (any VMTelemetrySink)?
+///
+/// Marked `nonisolated(unsafe)` because it is externally synchronized: it is
+/// assigned exactly once at host startup (before any handler runs) and only
+/// ever read afterwards, so the Swift 6 concurrency checker's global-mutable
+/// state rule does not apply.
+nonisolated(unsafe) public var fluxDevtoolsSink: (any VMTelemetrySink)?
 
 /// Attaches (or clears) the DevTools telemetry sink.
 public func fluxDevtoolsSetSink(_ sink: (any VMTelemetrySink)?) {
