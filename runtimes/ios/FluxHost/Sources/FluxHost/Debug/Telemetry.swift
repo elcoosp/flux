@@ -164,7 +164,6 @@ public enum DebugCommand {
 public final class TelemetryBridge: VMTelemetrySink {
     private let queue = DispatchQueue(label: "dev.flux.telemetry")
     private var pending: [TelemetryEvent] = []
-    private weak var webSocket: NSObjectProtocol?
 
     /// Appends an event to the batch, flushing when the threshold is reached.
     public func emit(_ event: TelemetryEvent) {
@@ -218,6 +217,51 @@ public final class TelemetryBridge: VMTelemetrySink {
 /// ever read afterwards, so the Swift 6 concurrency checker's global-mutable
 /// state rule does not apply.
 nonisolated(unsafe) public var fluxDevtoolsSink: (any VMTelemetrySink)?
+
+/// Best-effort WebSocket connection from the host to the dev server's `:7333`
+/// DevTools endpoint. Telemetry frames are sent here; the server enriches them
+/// with source spans and broadcasts to connected DevTools clients. Sends are
+/// dropped if the endpoint is unavailable, so a missing dev server never
+/// affects the running app (spec §3 Key Principle 1).
+final class DevToolsSocket {
+    private let session: URLSession
+    private var task: URLSessionWebSocketTask?
+
+    init() {
+        session = URLSession(configuration: .default)
+    }
+
+    func connect(host: String = "127.0.0.1", port: UInt16 = 7333) {
+        guard let url = URL(string: "ws://\(host):\(port)/devtools") else { return }
+        let task = session.webSocketTask(with: url)
+        self.task = task
+        task.resume()
+    }
+
+    func send(_ data: Data) {
+        task?.send(.data(data)) { _ in }
+    }
+
+    func close() {
+        task?.cancel(with: .goingAway, reason: nil)
+        task = nil
+    }
+}
+
+nonisolated(unsafe) private var devtoolsSocket: DevToolsSocket?
+
+/// Opens the host → DevTools `:7333` channel and installs the telemetry sink so
+/// emitted VM/signal events flow to the dev server. Call once at host startup
+/// (DEBUG builds only). Safe to call when no dev server is running: the socket
+/// retries are not attempted, but sends before connect complete are dropped.
+public func fluxDevtoolsConnect(host: String = "127.0.0.1", port: UInt16 = 7333) {
+    let socket = DevToolsSocket()
+    socket.connect(host: host, port: port)
+    devtoolsSocket = socket
+    let bridge = TelemetryBridge()
+    fluxDevtoolsSetSink(bridge)
+    bridge.onFlush = { devtoolsSocket?.send($0) }
+}
 
 /// Attaches (or clears) the DevTools telemetry sink.
 public func fluxDevtoolsSetSink(_ sink: (any VMTelemetrySink)?) {

@@ -60,6 +60,53 @@ public object TelemetryBridge {
         return drained
     }
 
+    /**
+     * Opens the host → DevTools `:7333` channel and installs the batch sender so
+     * emitted VM/signal events flow to the dev server, which enriches them with
+     * source spans and broadcasts to connected DevTools clients. Call once at
+     * host startup. Safe when no dev server is running: sends before the socket
+     * opens are dropped, and a closed socket simply stops delivering (spec §3
+     * Key Principle 1 — zero release impact, no crash).
+     */
+    public fun connectDevtools(
+        host: String = "127.0.0.1",
+        port: Int = 7333,
+    ) {
+        val client =
+            okhttp3.OkHttpClient
+                .Builder()
+                .pingInterval(15, java.util.concurrent.TimeUnit.SECONDS)
+                .build()
+        val request =
+            okhttp3.Request
+                .Builder()
+                .url("ws://$host:$port/devtools")
+                .build()
+        val ws =
+            client.newWebSocket(
+                request,
+                object : okhttp3.WebSocketListener() {
+                    override fun onOpen(
+                        webSocket: okhttp3.WebSocket,
+                        response: okhttp3.Response,
+                    ) = Unit
+
+                    override fun onFailure(
+                        webSocket: okhttp3.WebSocket,
+                        t: Throwable,
+                        response: okhttp3.Response?,
+                    ) = Unit
+
+                    override fun onClosed(
+                        webSocket: okhttp3.WebSocket,
+                        code: Int,
+                        reason: String,
+                    ) = Unit
+                },
+            )
+        onBatch = { bytes -> ws.send(okio.ByteString.of(*bytes)) }
+    }
+
     private fun ByteArrayOutputStream.writeUIntLE(v: UInt) {
         write((v.toInt() and 0xFF))
         write((v.toInt() ushr 8) and 0xFF)
