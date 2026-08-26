@@ -56,12 +56,24 @@ struct ShadowTreeReconciler {
 
     /// The interning string table for this reconciler. Kept in sync from every
     /// applied frame's `strings` so prop resolution never depends on reaching
-    /// back into the executor.
-    private var table: StringTable = StringTable()
+    /// back into the executor. A reference type (ADR-0027 T14) so the VM can
+    /// intern thunk-derived strings (STR_CONCAT results) into the same instance
+    /// the kit resolves from.
+    private var table: MaterializationStringTable = MaterializationStringTable()
+
+    /// The async string interner that publishes derived strings to the dev server
+    /// (brittleness 4c). Wired from the executor at startup so a prop-thunk that
+    /// builds `tapped \(count) times` receives a canonical id the kit can look up.
+    /// Defaults to `NoOpStringInterner` for offline reconciliation.
+    private var interner: any AnyStringInterner = NoOpStringInterner()
 
     /// Per-node signal-graph metadata (ADR-0027 §T13/T14), captured from the
     /// most recently applied frame. Drives thunk materialisation on reconcile.
     private var signalMeta: [UInt32: NodeSignalMeta] = [:]
+    /// Component-id → adapter-name bindings (Appendix D §D.9), captured from the
+    /// most recently applied frame. Kept separate from the string resolver so a
+    /// component id never collides with a prop string id.
+    private var componentNames: [UInt32: String] = [:]
     /// Lookup of prop-thunk bytecode by closure hash (the 8-byte BLAKE3), sliced
     /// from the frame's shared handler blob. Populated on every applied frame so
     /// a dirty node can re-run its thunk against the live signal graph.
@@ -81,16 +93,23 @@ struct ShadowTreeReconciler {
         executorRef = executor
     }
 
+    /// Replaces the string interner used when materialising prop thunks
+    /// (brittleness 4c). Called by the executor once the live transport exists.
+    mutating func setInterner(_ interner: any AnyStringInterner){
+        self.interner = interner
+    }
+
     /// Reconciles a freshly decoded frame against the current view set.
     /// - Returns: the ids of views that were built, updated, or detached.
     @discardableResult
     mutating func apply(_ frame: FluxFrame) -> ReconcileReport {
         var report = ReconcileReport()
-        for str in frame.strings { table.intern(str.stringId, str.value) }
+        table.seed(frame.strings)
         // Cache the ADR-0027 signal metadata + thunk bytecode so subsequent
         // dirty reconciliations can re-materialise dynamic props without the
         // full frame.
         signalMeta = frame.signalMeta
+        componentNames = Dictionary(frame.componentNames.map { ($0.stringId, $0.value) }, uniquingKeysWith: { $1 })
         var blobs: [Data: [UInt8]] = [:]
         for handler in frame.handlers {
             if let bytecode = handler.bytecode {
@@ -113,7 +132,7 @@ struct ShadowTreeReconciler {
     }
 
     /// The currently built native view for `nodeId`, if any (for test assertions).
-    func view(for nodeId: UInt32) -> AnyObject? {
+    func view(for nodeId: UInt32)->AnyObject?{
         built[nodeId]?.view
     }
 
@@ -164,7 +183,7 @@ struct ShadowTreeReconciler {
             let adapter: AnyFluxAdapter
             if node.kind == .component {
                 adapter = AnyFluxAdapter(ContainerAdapter(executor: executorRef))
-            } else if let name = currentTable().lookup(node.componentId),
+            } else if let name = componentNames[node.componentId],
                       let prim = registry.make(named: name, executor: executorRef) {
                 adapter = prim
             } else {
@@ -218,7 +237,7 @@ struct ShadowTreeReconciler {
         signalIds: Set<UInt32>,
         nodes: [UInt32: ShadowNode],
         report: inout ReconcileReport
-    ) -> Bool {
+    )->Bool{
         guard let node = nodes[nodeId] else { return false }
         let deps = signalDeps[nodeId, default: []]
         let isDirty = !deps.intersection(signalIds).isEmpty
@@ -292,7 +311,7 @@ struct ShadowTreeReconciler {
     /// Resolves the string table used to resolve prop strings. The reconciler
     /// keeps its own table, synced from every applied frame, so prop resolution
     /// never depends on reaching back into the executor.
-    private func currentTable() -> StringTable {
+    private func currentTable()->MaterializationStringTable{
         table
     }
 
@@ -307,15 +326,27 @@ struct ShadowTreeReconciler {
     /// shipped props unchanged.
     private func materializeProps(for nodeId: UInt32, node: ShadowNode) -> [Prop] {
         guard let meta = signalMeta[nodeId], let thunk = meta.thunk else {
+            #if DEBUG
+            NSLog("[materialize] node \(nodeId) no thunk (meta=\(signalMeta[nodeId] != nil)) -> shipped \(node.props.count) props")
+            #endif
             return node.props
         }
         guard let bytecode = thunkBlobs[Data(thunk.hash)],
               let runtime = executorRef as? FluxRuntime else {
+            #if DEBUG
+            NSLog("[materialize] node \(nodeId) thunk present but bytecode missing (blobs=\(thunkBlobs.count), hash=\(Data(thunk.hash).map { String(format: "%02x", $0) }.joined()))")
+            #endif
             return node.props
         }
+        #if DEBUG
+        NSLog("[materialize] node \(nodeId) RUNNING thunk hash=\(Data(thunk.hash).map { String(format: "%02x", $0) }.joined()) bcLen=\(bytecode.count) deps=\(meta.deps) layout=\(meta.layout)")
+        #endif
         do {
             // The thunk only reads signals; run it against a copy of the live
-            // graph so materialisation never mutates graph state.
+            // graph so materialisation never mutates graph state. Derived strings
+            // (e.g. `STR_CONCAT` results) are interned through the dev server's
+            // canonical string table via `interner` (brittleness 4c) — no local
+            // synthetic id is ever minted.
             var store = runtime.graph
             let outcome = try FluxBytecodeVM.run(
                 bytecode,
@@ -324,6 +355,9 @@ struct ShadowTreeReconciler {
                 stringTable: currentTable()
             )
             guard case let .record(fields) = outcome.registers[1] else {
+                #if DEBUG
+                NSLog("[materialize] node \(nodeId) thunk result r1 not a record: \(outcome.registers[1])")
+                #endif
                 return node.props
             }
             var props: [Prop] = []
@@ -332,8 +366,18 @@ struct ShadowTreeReconciler {
                 guard position < fields.count else { break }
                 props.append(Prop(index: propIdx, value: fields[position].value))
             }
+            #if DEBUG
+            let resolved = props.map { p -> String in
+                if case let .str(id) = p.value { return currentTable().lookup(id) ?? "UNRESOLVED(\(id))" }
+                return "\(p.value)"
+            }
+            NSLog("[materialize] node \(nodeId) OK resolved=\(resolved)")
+            #endif
             return props
         } catch {
+            #if DEBUG
+            NSLog("[materialize] node \(nodeId) thunk THREW: \(error)")
+            #endif
             // Materialisation is best-effort: degrade to shipped props rather
             // than leaving the view stale or crashing the reconcile.
             return node.props

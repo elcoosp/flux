@@ -8,8 +8,18 @@
 //  bit-identical to `crates/flux-ir-serde/src/telemetry.rs` so the Rust dev
 //  server decodes host frames without a translation step.
 //
-//  Emission is guarded by `#if DEBUG`: the production VM never touches this
-//  file, and `fluxDevtoolsEmit` is a no-op outside a DEBUG build.
+//  ┌───────────────────────────────────────────────────────────────────────┐
+//  │ RELEASE COMPILE-OUT (brittleness 8c). The entire telemetry/"trace" sink  │
+//  │ is wrapped in `#if DEBUG`. In a Release build none of this — the        │
+//  │ `TelemetryEvent`/`DebugCommand` models, the `TelemetryBridge`, the       │
+//  │ `DevToolsSocket`, the `encodeValue` helper, nor the `fluxDevtoolsEmit`   │
+//  │ no-op — is compiled or linked. The VM (`FluxBytecodeVM`) and signal graph│
+//  │ (`SignalGraph`) emit only inside their own `#if DEBUG` blocks, which now │
+//  │ reference a symbol that does not exist in Release, so the optimiser       │
+//  │ drops every trace call site and leaves zero dead telemetry code linked.  │
+//  └───────────────────────────────────────────────────────────────────────┘
+
+#if DEBUG
 
 import Foundation
 
@@ -206,7 +216,6 @@ public final class TelemetryBridge: VMTelemetrySink {
     }
 }
 
-#if DEBUG
 /// The active DevTools telemetry sink, or `nil` when DevTools is disconnected.
 ///
 /// The VM and signal graph call `fluxDevtoolsEmit` after each observable step;
@@ -272,10 +281,6 @@ public func fluxDevtoolsSetSink(_ sink: (any VMTelemetrySink)?) {
 public func fluxDevtoolsEmit(_ event: TelemetryEvent) {
     fluxDevtoolsSink?.emit(event)
 }
-#else
-/// No-op outside DEBUG builds (spec §3 Key Principle 1: zero release impact).
-public func fluxDevtoolsEmit(_ event: TelemetryEvent) {}
-#endif
 
 /// Encodes a `VMValue` into `data` per Appendix D §D.5.
 func encodeValue(_ value: VMValue, into data: inout Data) {
@@ -313,3 +318,5 @@ extension FixedWidthInteger {
         withUnsafeBytes(of: self.littleEndian) { Array($0) }
     }
 }
+
+#endif

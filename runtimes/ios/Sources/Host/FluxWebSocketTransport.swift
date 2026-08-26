@@ -14,6 +14,7 @@
 //  confinement (P1).
 
 import Foundation
+import UIKit
 import FluxHost
 
 /// The live WebSocket transport backed by `URLSessionWebSocketTask`.
@@ -46,6 +47,19 @@ public final class FluxWebSocketTransport: FluxTransport {
         let task = session.webSocketTask(with: url)
         socket = task
         task.resume()
+        // Appendix D §D.12.1: the server only replies with `Init` after a
+        // `Hello` handshake. `URLSessionWebSocketTask` queues the message until
+        // the upgrade completes, so sending here is safe and fires the handshake
+        // as soon as the socket opens.
+        let hello = HelloFrame.bytes(platform: "ios", device: UIDevice.current.model)
+        task.send(.data(hello)) { [weak self] error in
+            if let error {
+                NSLog("[FluxTransport] Hello send FAILED: \(error.localizedDescription)")
+                Task { @MainActor in self?.handleDrop() }
+            } else {
+                NSLog("[FluxTransport] Hello send OK (sent \(hello.count) bytes)")
+            }
+        }
         receiveLoop(task)
     }
 

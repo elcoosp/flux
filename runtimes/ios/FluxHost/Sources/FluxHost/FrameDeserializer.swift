@@ -87,11 +87,24 @@ enum FrameDeserializer {
             let path = try r.utf8(Int(len))
             files.append(FileEntry(fileId: fileId, path: path))
         }
-        // `string_count` is a u32 (Appendix D §D.12.2).
+        // `string_count` is a u32 (Appendix D §D.12.2). These are prop string
+        // literals only — NOT component names (those follow in `component_names`).
         let strCount = try r.u32()
         var strings: [StringEntry] = []
         for _ in 0..<strCount {
             strings.append(try decodeStringEntry(&r))
+        }
+        // `component_names`: u16 count, then per entry `(u32 cid, u16 name_len, utf8 name)`
+        // (Appendix D §D.12.2, FLUX-019 split). These bind each component id to its
+        // adapter name so the reconciler can resolve primitives (Text/Column/Button).
+        // Kept separate from `strings` to avoid id collisions in the string resolver.
+        let compCount = try r.u16()
+        var componentNames: [StringEntry] = []
+        for _ in 0..<compCount {
+            let cid = try r.u32()
+            let nameLen = Int(try r.u16())
+            let name = try r.utf8(nameLen)
+            componentNames.append(StringEntry(stringId: cid, value: name))
         }
         // Handler (closure) section (Appendix D §D.12, Gap G1).
         let handlers = try decodeHandlerSection(&r)
@@ -118,6 +131,7 @@ enum FrameDeserializer {
             strings: strings,
             state: state,
             files: files,
+            componentNames: componentNames,
             signalMeta: signalMeta
         )
     }
@@ -162,6 +176,7 @@ enum FrameDeserializer {
             strings: strings,
             state: [],
             files: [],
+            componentNames: [],
             signalMeta: signalMeta
         )
     }
@@ -205,7 +220,13 @@ enum FrameDeserializer {
     static func decodeNode(_ r: inout ByteReader) throws -> ShadowNode {
         let id = try r.u32()
         let rawKind = try r.u8()
-        guard let kind = NodeKind(rawValue: rawKind) else {
+        // The kind byte packs the `NodeKind` in the low 5 bits (0x1F) and the
+        // `@pure` flag in bit 0x20 (Appendix D §D.3). Mask them apart so a pure
+        // node resolves to a valid kind instead of throwing `unknownTag` — mirrors
+        // the Android port.
+        let kindByte = rawKind & 0x1F
+        let isPure = (rawKind & 0x20) != 0
+        guard let kind = NodeKind(rawValue: kindByte) else {
             throw WireError.unknownTag(offset: r.offset - 1, tag: rawKind)
         }
         let componentId = try r.u32()
@@ -239,7 +260,8 @@ enum FrameDeserializer {
             children: Array(children),
             handlerCount: handlerCount,
             handlers: Array(handlers),
-            span: span
+            span: span,
+            isPure: isPure
         )
     }
 

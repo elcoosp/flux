@@ -75,6 +75,13 @@ struct FluxFrame: Equatable, Sendable {
     let strings: [StringEntry]
     let state: [StateCell]
     let files: [FileEntry]
+    /// Component-name bindings (Appendix D §D.9): each node's `componentId`
+    /// maps to its adapter name ("Text", "Column", ...). Kept SEPARATE from
+    /// `strings` so a component id never collides with a prop string id in the
+    /// string resolver — the reconciler resolves components via `componentNames`
+    /// and prop strings via `strings`. This mirrors the Android host, which feeds
+    /// `componentNames` to the adapter registry rather than the string table.
+    let componentNames: [StringEntry]
     /// Per-node signal-graph metadata (ADR-0027 §T13/T14): the signals each node
     /// reads and, for dynamic nodes, the prop-thunk closure that re-materialises
     /// its props against the live signal graph.

@@ -40,6 +40,12 @@ public final class FluxRuntime: FluxExecutor {
     private var reconciler: ShadowTreeReconciler
     /// The interned string table from the most recent Init frame.
     private(set) var table: StringTable
+    /// The async string internerer that publishes freshly-derived strings to the
+    /// dev server (brittleness 4c). Replaces the local `synthetic_str_id` fallback:
+    /// every id the VM publishes is now canonical (`< stringIdCanonicalCeiling`),
+    /// minted by the server's authoritative string table. Defaults to the offline
+    /// `NoOpStringInterner` (id `0`) so headless evaluation needs no transport.
+    private(set) var interner: any AnyStringInterner = NoOpStringInterner()
     /// Handler id → (closure descriptor + bytecode blob + pre-decoded instruction
     /// stream). The decoded `[Instruction]` is produced once at registration (R3)
     /// and reused on every dispatch, so the per-tap hot path never re-decodes. A
@@ -91,6 +97,30 @@ public final class FluxRuntime: FluxExecutor {
         return apply(frame)
     }
 
+    /// Routes one received wire frame to the right consumer.
+    ///
+    /// A `StringInterned` reply (brittleness 4c) is delivered to the `InternString`
+    /// client, which resumes the awaiting VM intern; any other frame is decoded
+    /// and applied to the tree. The app shell's transport `onFrame` calls this, so
+    /// the interner stays encapsulated inside the runtime.
+    /// - Parameter data: the raw frame bytes from the transport.
+    public func handleFrame(_ data: Data) {
+        let bytes = [UInt8](data)
+        if bytes.count >= 6, bytes[5] == frameKindStringInterned {
+            // A `StringInterned` reply is only meaningful for the async
+            // server-intern RPC (brittleness 4c), which is not used by the
+            // current synchronous materialisation path; ignore it here.
+        } else {
+            do {
+                _ = try applyFrame(data)
+            } catch {
+                #if DEBUG
+                NSLog("[frame] applyFrame threw: \(error)")
+                #endif
+            }
+        }
+    }
+
     /// Applies an Init/full frame: seeds state, builds the string table, builds
     /// the view tree.
     /// - Returns: the node ids built or updated.
@@ -127,7 +157,11 @@ public final class FluxRuntime: FluxExecutor {
     /// returns the outcome (or the `VMError` that faulted). Does NOT reconcile —
     /// shared by both event dispatch and lifecycle hooks. Uses the concrete
     /// `SignalGraph` by reference (R3) so the dispatch hot path never boxes it into
-    /// an `any SignalStore` existential.
+    /// an `any SignalStore` existential. The VM interns derived strings (a
+    /// `STR_CONCAT` result or a `TO_STRING` rendering) *locally* into the shared
+    /// `MaterializationStringTable` it is passed (brittleness 4c), mirroring the
+    /// Android host — no round-trip to the dev server — so the evaluation itself
+    /// is fully synchronous.
     private func evaluate(
         instructions: [Instruction],
         payload: VMValue
@@ -176,6 +210,9 @@ public final class FluxRuntime: FluxExecutor {
     ) -> DispatchResult {
         let (outcome, error) = evaluate(instructions: instructions, payload: payload)
         guard let outcome else {
+            #if DEBUG
+            NSLog("[executor] dispatch/evaluate FAILED: \(String(describing: error))")
+            #endif
             lastError = error
             return DispatchResult(builtOrUpdated: [], signals: [], error: error)
         }
@@ -195,7 +232,13 @@ public final class FluxRuntime: FluxExecutor {
     ///
     /// The event is always delivered on the main actor (the kit's
     /// `HandlerTarget` asserts isolation), so dispatching a handler — which
-    /// evaluates bytecode and mutates UIKit views — is safe here.
+    /// evaluates bytecode and mutates UIKit views — is safe here. The byte-VM
+    /// evaluation is synchronous: the VM interns derived strings locally into the
+    /// shared string table (brittleness 4c), never round-tripping to the dev
+    /// server. Only the native event payload conversion (`toRuntime`) is `async`,
+    /// because it interns event strings through the dev server's `InternString`
+    /// RPC; that runs off the synchronous entry point inside a `Task`, so the
+    /// kit's `dispatch` call returns immediately and never blocks the UI thread.
     public func dispatch(_ event: FluxEvent) {
         guard let entry = handlerClosures[event.handlerId] else {
             lastError = VMError(kind: .invalidDispatch, offset: 0)
@@ -205,20 +248,29 @@ public final class FluxRuntime: FluxExecutor {
         // Reuse the cached decode from registration (R3); fall back to a one-off
         // decode only if caching was impossible.
         let instructions = entry.decoded ?? (try? Instruction.decode(entry.bytecode)) ?? []
-        let payload: VMValue = event.payload.map { toRuntime($0, table: &table) } ?? .null
-        let result = dispatch(instructions: instructions, payload: payload)
-        // R1: re-reconcile only the nodes whose signal dependencies were just
-        // written, instead of re-walking the whole tree on every tap.
-        let dirty = Set(result.signals.map { $0.0 })
-        if !dirty.isEmpty, let rootId = currentRootId {
-            let report = reconciler.reconcileDirty(rootId: rootId, nodes: currentNodes, signalIds: dirty)
-            lastReconcile = report
-        } else {
-            lastReconcile = ReconcileReport()
+        Task { @MainActor in
+            // Convert the native event payload to the runtime's id-based value,
+            // interning any resolved string through the dev server's canonical
+            // string table (brittleness 4c).
+            let payload: VMValue = if let kitPayload = event.payload {
+                await toRuntime(kitPayload, interner: interner)
+            } else {
+                .null
+            }
+            let result = dispatch(instructions: instructions, payload: payload)
+            // R1: re-reconcile only the nodes whose signal dependencies were just
+            // written, instead of re-walking the whole tree on every tap.
+            let dirty = Set(result.signals.map { $0.0 })
+            if !dirty.isEmpty, let rootId = currentRootId {
+                let report = reconciler.reconcileDirty(rootId: rootId, nodes: currentNodes, signalIds: dirty)
+                lastReconcile = report
+            } else {
+                lastReconcile = ReconcileReport()
+            }
+            // A signal-dependent reconcile may have re-parented native views; the
+            // host should re-present the (unchanged-identity) root view.
+            onTreeChanged?()
         }
-        // A signal-dependent reconcile may have re-parented native views; the
-        // host should re-present the (unchanged-identity) root view.
-        onTreeChanged?()
     }
 
     /// The built native view for a node id, for test assertions (real UIKit
@@ -233,6 +285,15 @@ public final class FluxRuntime: FluxExecutor {
     func registerHandler(_ id: UInt32, closure: ClosureRef, bytecode: [UInt8]) {
         let decoded = try? Instruction.decode(bytecode)
         handlerClosures[id] = (closure: closure, bytecode: bytecode, decoded: decoded)
+    }
+
+    /// Replaces the string interner (brittleness 4c). Called once at host startup
+    /// once the live transport exists, so the VM publishes derived strings through
+    /// the dev server's `InternString` RPC instead of synthesizing ids locally.
+    /// Passing `NoOpStringInterner()` (the default) keeps evaluation offline-safe.
+    public func setInterner(_ interner: any AnyStringInterner) {
+        self.interner = interner
+        reconciler.setInterner(interner)
     }
 
     /// Evaluates a lifecycle handler (e.g. `onMount`/`onCleanup`, §18.4) by its

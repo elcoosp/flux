@@ -53,9 +53,23 @@ struct FluxRootView: View {
         let registry = AdapterRegistry(table: table)
         let runtime = FluxRuntime(graph: SignalGraph(), registry: registry)
         let connection = HostConnectionState()
-        // Dev server runs locally; plaintext WebSocket is permitted by the app's
-        // NSAppTransportSecurity (see project.yml).
-        let transport = FluxWebSocketTransport(url: URL(string: "ws://127.0.0.1:7331")!)
+        // Dev server endpoint, configurable via the `FLUX_WS_URL` Info.plist key
+        // (defaults to the local loopback). For a simulator or device that cannot
+        // reach the Mac's loopback, set this to `ws://<mac-lan-ip>:7331`.
+        let wsUrlString =
+            (Bundle.main.object(forInfoDictionaryKey: "FLUX_WS_URL") as? String)
+            ?? "ws://127.0.0.1:7331"
+        guard let wsUrl = URL(string: wsUrlString) else {
+            fatalError("FLUX_WS_URL is not a valid WebSocket URL: \(wsUrlString)")
+        }
+        let transport = FluxWebSocketTransport(url: wsUrl)
+        // Wire the VM's string interner to the live transport so derived strings
+        // (STR_CONCAT / TO_STRING results, native event payloads) are interned
+        // through the dev server's `InternString` RPC and receive a canonical id
+        // (brittleness 4c). `StringInterned` replies are routed back into the
+        // client by the `onFrame` handler below.
+        let interner = InternStringClient(transport: transport)
+        runtime.setInterner(interner)
         _executor = State(initialValue: runtime)
         _connection = StateObject(wrappedValue: connection)
         _transport = State(initialValue: transport)
@@ -64,6 +78,7 @@ struct FluxRootView: View {
     var body: some View {
         ZStack {
             FluxHostRepresentable(executor: executor)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityLabel("Flux root")
             if let error = executor.lastError {
                 ErrorOverlay(error: error)
@@ -79,7 +94,7 @@ struct FluxRootView: View {
             // reconnect implicitly re-requests the tree (FR-017).
             connection.bind(transport)
             transport.onFrame = { [executor] data in
-                _ = try? executor.applyFrame(data)
+                executor.handleFrame(data)
             }
             transport.connect()
         }

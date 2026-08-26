@@ -15,7 +15,11 @@ import FluxUIKit
 ///
 /// The Init frame interns every string — including each component's *name*
 /// under its own `ComponentId` — so the runtime resolves a node's
-/// `component_id` to its adapter by looking the id up here.
+/// `component_id` to its adapter by looking the id up here. The ids stored here
+/// are always *server-assigned* (the Init frame seeds them), never synthesized
+/// on the host: the host publishes any freshly-derived string via the async
+/// `AnyStringInterner` RPC, which returns a canonical id `< stringIdCanonicalCeiling`.
+/// The former high-range `synthetic_str_id` fallback is retired (brittleness 4c).
 public struct StringTable {
     /// The id → string mapping.
     private var strings: [UInt32: String] = [:]
@@ -23,13 +27,17 @@ public struct StringTable {
     /// native event's string payload in O(1) instead of scanning `strings`.
     private var reverseLookup: [String: UInt32] = [:]
 
+    /// Counter for host-local derived string ids (above the server seed range).
+    private var nextDerivedId: UInt32 = 0xC000_0000
+
     /// Every known string id (used to discover declared components).
     var ids: [UInt32] { Array(strings.keys) }
 
     /// Creates an empty table.
     public init() {}
 
-    /// Interns `value` under `id`, replacing any prior entry.
+    /// Interns `value` under `id`, replacing any prior entry. Only ever called
+    /// with server-assigned ids (the Init frame's seeds), never to mint a new id.
     public mutating func intern(_ id: UInt32, _ value: String) {
         strings[id] = value
         reverseLookup[value] = id
@@ -40,50 +48,88 @@ public struct StringTable {
         strings[id]
     }
 
-    /// Interns `value` (or returns the id of an existing equal string) under a
-    /// fresh high-range id, mirroring `id(for:)` but returning the raw id so the
-    /// VM can place it into a register. Used by `STR_CONCAT` to publish a newly
-    /// concatenated string for later `STR_LEN` / prop resolution.
-    mutating func intern(_ value: String) -> UInt32 {
-        id(for: value)
-    }
-
-    /// Resolves `value` to an existing id, or interns it under a fresh,
-    /// high-range id (distinct from the low stdlib component ids) so native
-    /// event payloads can be converted back to the runtime's id-based
-    /// `VMValue` without colliding with declared strings.
-    ///
-    /// Uses the `reverseLookup` index for O(1) resolution (Perf #7 / R4); only
-    /// when the value is new does it scan for a free high-range id.
-    mutating func id(for value: String) -> UInt32 {
-        if let existing = reverseLookup[value] {
-            return existing
-        }
-        // Reserve the high half for reverse-interns to avoid colliding with
-        // forward-interns made by the decoder.
-        var candidate: UInt32 = 0x8000_0000
-        while strings[candidate] != nil { candidate &+= 1 }
-        strings[candidate] = value
-        reverseLookup[value] = candidate
-        return candidate
+    /// Resolves `value` to an already-interned id, or `nil` if it has never been
+    /// interned. Pure cache lookup — the host never *generates* a fresh id here;
+    /// publishing a new string is the `AnyStringInterner` RPC's job (brittleness 4c).
+    func id(for value: String) -> UInt32? {
+        reverseLookup[value]
     }
 }
 
-/// Read/append access to an interned string table, abstracting over the concrete
+/// Read-only access to an interned string table, abstracting over the concrete
 /// `StringTable` so the VM can resolve `STR_LEN` / `STR_CONCAT` without depending
 /// on the runtime's concrete type (Appendix E §E.1).
+///
+/// Derived strings (e.g. a `STR_CONCAT` result inside a prop thunk) are interned
+/// *locally* into this same table via `intern(_:)` — the table is a reference
+/// type during materialisation, so the id the VM mints is the one the kit later
+/// resolves. This mirrors the Android host's shared `materializationStrings`
+/// resolver and avoids a round-trip to the dev server (brittleness 4c).
 protocol StringResolvable {
     /// Resolves an interned `StringId` to its text, or `nil` if unknown.
     func lookup(_ id: UInt32) -> String?
-    /// Interns `value`, returning the id it was stored under.
+
+    /// Interns a freshly-derived `value`, returning the id it was stored under.
+    /// Implementations mint a host-local id; the id need only be resolvable via
+    /// `lookup` on the same instance.
     mutating func intern(_ value: String) -> UInt32
 }
 
-extension StringTable: StringResolvable {}
+extension StringTable: StringResolvable {
+    mutating func intern(_ value: String) -> UInt32 {
+        if let existing = id(for: value) { return existing }
+        // Mint above the server's seed range; collisions are astronomically
+        // unlikely for derived strings within a single frame.
+        let id = nextDerivedId
+        nextDerivedId = nextDerivedId &+ 1
+        strings[id] = value
+        reverseLookup[value] = id
+        return id
+    }
+}
 
-/// A `StringResolvable` that holds nothing: lookups miss and interning yields
-/// the id `0`. Used by offline VM evaluation (the ISA conformance vectors),
-/// where `STR_LEN` / `STR_CONCAT` are not exercised, so resolution is a no-op.
+/// A reference-type string table used for prop-thunk materialisation
+/// (ADR-0027 T14). Unlike the value-type `StringTable`, a `class` lets the VM's
+/// `run` intern derived strings (e.g. `STR_CONCAT` results) into the *same*
+/// instance the reconciler resolves later — so a thunk that builds a derived
+/// label produces a string id the kit can actually look up. This mirrors the
+/// Android host's shared `materializationStrings` resolver.
+///
+/// Resolution is read-only here; the canonical id for a freshly-derived string
+/// is produced by the `AnyStringInterner` RPC, never synthesized locally.
+final class MaterializationStringTable: StringResolvable {
+    private var strings: [UInt32: String] = [:]
+    private var reverseLookup: [String: UInt32] = [:]
+    /// Host-local derived string id counter (above the server seed range).
+    private var nextDerivedId: UInt32 = 0xC000_0000
+
+    init() {}
+
+    /// Seeds the table from a frame's string entries (literals + component names).
+    func seed(_ entries: [StringEntry]) {
+        for entry in entries {
+            strings[entry.stringId] = entry.value
+            reverseLookup[entry.value] = entry.stringId
+        }
+    }
+
+    func lookup(_ id: UInt32) -> String? { strings[id] }
+
+    /// Mints a host-local id for a freshly-derived string (e.g. a `STR_CONCAT`
+    /// result), so the kit resolves the same id later.
+    func intern(_ value: String) -> UInt32 {
+        if let existing = reverseLookup[value] { return existing }
+        let id = nextDerivedId
+        nextDerivedId = nextDerivedId &+ 1
+        strings[id] = value
+        reverseLookup[value] = id
+        return id
+    }
+}
+
+/// A `StringResolvable` that holds nothing: lookups miss. Used by offline VM
+/// evaluation (the ISA conformance vectors), where `STR_LEN` / `STR_CONCAT` are
+/// not exercised, so resolution is a no-op.
 struct EmptyStringTable: StringResolvable {
     func lookup(_ id: UInt32) -> String? { nil }
     mutating func intern(_ value: String) -> UInt32 { 0 }
@@ -96,7 +142,7 @@ struct EmptyStringTable: StringResolvable {
 /// - Returns: the equivalent kit value; unresolved string ids fall back to a
 ///   debug representation so an adapter never receives a dangling reference.
 @MainActor
-func toKit(_ value: VMValue, table: StringTable) -> FluxValue {
+func toKit(_ value: VMValue, table: any StringResolvable) -> FluxValue {
     switch value {
     case let .int(i):
         return .int(i)
@@ -123,7 +169,7 @@ func toKit(_ value: VMValue, table: StringTable) -> FluxValue {
 
 /// Builds a kit `Props` map from runtime `Prop`s, resolving strings via `table`.
 @MainActor
-func kitProps(_ props: [Prop], table: StringTable) -> Props {
+func kitProps(_ props: [Prop], table: any StringResolvable) -> Props {
     var fields: [UInt16: FluxValue] = [:]
     for p in props {
         fields[p.index] = toKit(p.value, table: table)
@@ -182,10 +228,20 @@ private func rawValueHash(_ v: VMValue) -> UInt64 {
 }
 
 /// Converts a kit `FluxValue` (resolved strings) back to the runtime's
-/// id-based `VMValue`, interning any resolved string through `table`. Used to
+/// id-based `VMValue`, interning any resolved string through `interner`. Used to
 /// hand a native event's payload to the VM, which speaks id-based values.
+///
+/// Native event payloads carry concrete Swift strings (e.g. text typed into a
+/// `TextField`). Those must be interned through the dev server's authoritative
+/// string table to receive a canonical id `< stringIdCanonicalCeiling`, exactly
+/// like every other string the host publishes — the local `synthetic_str_id`
+/// fallback is retired (brittleness 4c). The call is `async` and never blocks the
+/// UI thread (see `FluxRuntime.dispatch`).
+/// - Parameter interner: the host's `InternString` RPC client (or the offline
+///   `NoOpStringInterner` when no live transport is attached).
+/// - Returns: the equivalent runtime `VMValue` with canonical `.str` ids.
 @MainActor
-func toRuntime(_ value: FluxValue, table: inout StringTable) -> VMValue {
+func toRuntime(_ value: FluxValue, interner: any AnyStringInterner) async -> VMValue {
     switch value {
     case let .int(i):
         return .int(i)
@@ -196,15 +252,15 @@ func toRuntime(_ value: FluxValue, table: inout StringTable) -> VMValue {
     case .null:
         return .null
     case let .str(s):
-        return .str(table.id(for: s))
+        return .str(await interner.intern(s))
     case let .handlerRef(h):
         return .handlerRef(h)
     case let .list(items):
-        return .list(items.map { toRuntime($0, table: &table) })
+        return .list(await items.asyncMap { await toRuntime($0, interner: interner) })
     case let .record(props):
         var arr: [(propIndex: UInt16, value: VMValue)] = []
         for (idx, v) in props.fields {
-            arr.append((propIndex: idx, value: toRuntime(v, table: &table)))
+            arr.append((propIndex: idx, value: await toRuntime(v, interner: interner)))
         }
         return .record(arr)
     }
@@ -289,21 +345,26 @@ struct AnyFluxAdapter {
 /// coordinator without retaining the runtime.
 typealias RegistryFactory = ((any FluxExecutor)?) -> AnyFluxAdapter
 
-/// Resolves a `ComponentId` to a fresh adapter instance, using the Init
-/// frame's string table to map each declared component id to its adapter.
+/// Resolves a `ComponentId` to a fresh adapter instance.
 ///
-/// The standard library's seven primitives — `Text`, `Button`, `Column`,
-/// `Row`, `TextField`, `Router`, `Screen` — each have a fixed adapter
-/// factory; a component id whose name matches one of these is bound.
+/// The wire carries component ids that are the server's interned *component
+/// names* (Appendix D §D.3). A primitive such as `Text` is interned to some
+/// `ComponentId` on the server; that id is content-dependent and collides with
+/// the host's own hardcoded primitive ids, so we must resolve the id → *name*
+/// through the Init frame's string table and look the adapter up by name. The
+/// registry is therefore keyed by name, and `make` translates the incoming id
+/// to a name before binding.
 @MainActor
 public struct AdapterRegistry {
-    /// Factories keyed by `ComponentId`.
-    private let factories: [UInt32: RegistryFactory]
+    /// Factories keyed by component name.
+    private let byName: [String: RegistryFactory]
+    /// The string table used to resolve a `ComponentId` to its name.
+    private let table: StringTable
 
-    /// Creates a registry from `table`, binding every component id whose
-    /// interned name is a known primitive.
+    /// Creates a registry from `table`, binding every interned name that is a
+    /// known primitive.
     public init(table: StringTable) {
-        let byName: [String: RegistryFactory] = [
+        self.byName = [
             "Text": { AnyFluxAdapter(TextAdapter(executor: $0)) },
             "Button": { AnyFluxAdapter(ButtonAdapter(executor: $0)) },
             "Column": { AnyFluxAdapter(ColumnAdapter(executor: $0)) },
@@ -313,21 +374,48 @@ public struct AdapterRegistry {
             "Router": { AnyFluxAdapter(RouterAdapter(executor: $0)) },
             "Screen": { AnyFluxAdapter(ScreenAdapter(executor: $0)) },
         ]
-        var map: [UInt32: RegistryFactory] = [:]
-        for id in table.ids {
-            if let name = table.lookup(id), let factory = byName[name] {
-                map[id] = factory
-            }
-        }
-        self.factories = map
+        self.table = table
     }
 
     /// Produces a fresh adapter for `componentId`, wired to `executor`, or
     /// `nil` if the id is unbound.
+    ///
+    /// Unbound ids are user-defined `Component` nodes (e.g. `Counter`): the
+    /// dev server lowers them to `Component` roots with no primitive adapter,
+    /// and the reconciler renders those as plain containers (see
+    /// `ShadowTreeReconciler`). `make` itself returns `nil` for unbound ids;
+    /// the reconciler supplies the container fallback so a typo'd primitive is
+    /// surfaced (B8) rather than silently swallowed.
     func make(for componentId: UInt32, executor: (any FluxExecutor)?) -> AnyFluxAdapter? {
-        factories[componentId]?(executor)
+        guard let name = table.lookup(componentId), let factory = byName[name] else { return nil }
+        return factory(executor)
     }
 
-    /// Every `ComponentId` this registry can resolve.
-    var resolvedComponentIds: [UInt32] { Array(factories.keys) }
+    /// Produces a fresh adapter for a component resolved to `name` by the
+    /// caller (typically via the frame-synced string table), wired to
+    /// `executor`, or `nil` if the name is unbound.
+    func make(named name: String, executor: (any FluxExecutor)?) -> AnyFluxAdapter? {
+        guard let factory = byName[name] else { return nil }
+        return factory(executor)
+    }
+
+    /// Every component name this registry can resolve.
+    var resolvedComponentIds: [UInt32] {
+        byName.keys.compactMap { table.id(for: $0) }
+    }
+}
+
+/// Maps each element of `sequence` through the `async` `transform`, preserving
+/// `Sequence`-scoped async map, used by `toRuntime` to intern event-payload
+/// strings without blocking the UI thread.
+extension Sequence {
+    @MainActor
+    fileprivate func asyncMap<T>(_ transform: @MainActor (Element) async -> T) async -> [T] {
+        var result: [T] = []
+        result.reserveCapacity(underestimatedCount)
+        for element in self {
+            result.append(await transform(element))
+        }
+        return result
+    }
 }

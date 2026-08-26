@@ -279,14 +279,15 @@ enum FluxBytecodeVM {
                     // text; the closure is being evaluated outside a frame (e.g.
                     // a conformance vector), where this opcode is not exercised.
                     throw VMError.memoryExhausted(offset: instr.offset)
-                }
-                let combined = a + b
-                let newId = stringTable.intern(combined)
-                regs[Int(dst)] = .str(newId)
+                    }
+                    let combined = a + b
+                    let newId = stringTable.intern(combined)
+                    regs[Int(dst)] = .str(newId)
 
             case .toString:
                 let dst = instr.u8(0)
-                let rendered = renderForToString(reg(instr.u8(1)), table: stringTable)
+                let src = reg(instr.u8(1))
+                let rendered = renderForToString(src, table: stringTable)
                 regs[Int(dst)] = .str(stringTable.intern(rendered))
 
             case .jump:
@@ -627,6 +628,7 @@ enum FluxBytecodeVM {
                 regs[Int(dst)] = .str(newId)
             case opcodeIndex[.toString]!:
                 let dst = instr.u8(0)
+                let src = reg(instr.u8(1))
                 let rendered = renderForToString(reg(instr.u8(1)), table: stringTable)
                 regs[Int(dst)] = .str(stringTable.intern(rendered))
             case opcodeIndex[.jump]!:

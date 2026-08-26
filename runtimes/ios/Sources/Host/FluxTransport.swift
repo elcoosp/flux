@@ -9,6 +9,7 @@
 //  FLUX-023).
 
 import Foundation
+import FluxHost
 
 /// The connection state surfaced to the UI (FR-017).
 public enum ConnectionStatus: Equatable, Sendable {
@@ -26,7 +27,7 @@ public enum ConnectionStatus: Equatable, Sendable {
 /// to raw frame bytes and may push dispatch events back. The concrete
 /// implementation (`FluxWebSocketTransport`) uses `URLSessionWebSocketTask`.
 @MainActor
-public protocol FluxTransport: AnyObject {
+public protocol FluxTransport: AnyObject, InternStringTransport {
     /// The latest connection status (drives the reconnect banner).
     var status: ConnectionStatus { get }
 
