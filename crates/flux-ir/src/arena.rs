@@ -107,6 +107,15 @@ impl IRArena {
         Some(NodeView { arena: self, index })
     }
 
+    /// Returns the source [`Span`] a node was lowered from, if the node is in
+    /// the arena. Used by the dev server to enrich telemetry with `.flux`
+    /// source locations (DevTools spec §4.2).
+    #[must_use]
+    pub fn span_for_node_id(&self, id: NodeId) -> Option<Span> {
+        let index = *self.node_index.get(&id)?;
+        Some(self.spans[index])
+    }
+
     /// Packs `node`, returning its stable [`NodeId`].
     ///
     /// The node's `id` is the source-derived ID from

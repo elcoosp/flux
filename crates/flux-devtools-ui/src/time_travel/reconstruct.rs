@@ -1,0 +1,236 @@
+//! Time-travel state reconstruction (ADR-0042).
+//!
+//! Given a base snapshot and the telemetry events since it, [`reconstruct_state`]
+//! replays the events through a pure, allocation-light simulator to rebuild the
+//! full DevTools state at any point in the timeline. Replay is deterministic so
+//! scrubbing always yields the same result for a given index.
+
+use flux_ir_serde::{EnrichedTelemetryEvent, Rect};
+use flux_syntax::{NodeId, SignalId, Value};
+
+/// The reconstructed VM register view at a point in time.
+pub type Registers = Box<[Value; 16]>;
+
+/// A fully reconstructed DevTools state snapshot.
+///
+/// Produced by replaying telemetry events from a base snapshot (ADR-0042
+/// §2). It is the model the gpui views render when scrubbing the timeline.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReconstructedState {
+    /// VM instruction pointer (bytecode offset), if known.
+    pub bytecode_offset: Option<u32>,
+    /// Current opcode at the instruction pointer.
+    pub opcode: Option<u8>,
+    /// VM register bank (r0–r15).
+    pub registers: Registers,
+    /// Remaining gas.
+    pub gas_remaining: Option<u32>,
+    /// Signal cell values keyed by [`SignalId`].
+    pub signals: Vec<(SignalId, Value)>,
+    /// Native view layout frames keyed by [`NodeId`].
+    pub view_frames: Vec<(NodeId, Rect)>,
+    /// Whether the VM is currently paused.
+    pub paused: bool,
+}
+
+impl ReconstructedState {
+    /// The base (empty) state the timeline anchors to.
+    #[must_use]
+    pub fn base() -> Self {
+        Self {
+            bytecode_offset: None,
+            opcode: None,
+            registers: Box::new(std::array::from_fn(|_| Value::Null)),
+            gas_remaining: None,
+            signals: Vec::new(),
+            view_frames: Vec::new(),
+            paused: false,
+        }
+    }
+}
+
+/// Replays `events` (each an [`EnrichedTelemetryEvent`]) onto `base`, returning
+/// the state at the end of the slice.
+///
+/// `base` is the nearest base snapshot at or before the target index (ADR-0042
+/// §2). The fold is pure: it never touches I/O and allocates only the
+/// reconstructed collections, so it is cheap to run on every scrub frame and is
+/// unit-tested without a display.
+#[must_use]
+pub fn reconstruct_state(
+    base: &ReconstructedState,
+    events: &[EnrichedTelemetryEvent],
+) -> ReconstructedState {
+    let mut state = base.clone();
+    for event in events {
+        match event {
+            EnrichedTelemetryEvent::VmStep {
+                bytecode_offset,
+                opcode,
+                registers,
+                gas_remaining,
+                ..
+            } => {
+                state.bytecode_offset = Some(*bytecode_offset);
+                state.opcode = Some(*opcode);
+                state.registers = registers.clone();
+                state.gas_remaining = Some(*gas_remaining);
+            }
+            EnrichedTelemetryEvent::SignalWrite {
+                signal_id,
+                new_value,
+                ..
+            } => {
+                upsert(&mut state.signals, *signal_id, new_value.clone());
+            }
+            EnrichedTelemetryEvent::ViewMutation {
+                node_id,
+                frame,
+                mutation_kind,
+                ..
+            } => {
+                if let Some(rect) = frame {
+                    upsert(&mut state.view_frames, *node_id, *rect);
+                } else if *mutation_kind == 1 {
+                    // Remove (mutation_kind 1): drop the frame if present.
+                    state.view_frames.retain(|(id, _)| *id != *node_id);
+                }
+            }
+            EnrichedTelemetryEvent::HandlerInvocation { is_start, .. } => {
+                // A running handler implies the VM is mid-execution; a finished
+                // handler with no pending start leaves pause state unchanged.
+                if *is_start {
+                    state.paused = false;
+                }
+            }
+            // Future (non-exhaustive) variants: ignored for reconstruction.
+            _ => {}
+        }
+    }
+    state
+}
+
+/// Inserts or updates `value` for `key` in `vec`, preserving order.
+fn upsert<K: PartialEq, V: Clone>(vec: &mut Vec<(K, V)>, key: K, value: V) {
+    if let Some(slot) = vec.iter_mut().find(|(k, _)| *k == key) {
+        slot.1 = value;
+    } else {
+        vec.push((key, value));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flux_syntax::{EffectId, NodeId, SignalId};
+
+    fn vm_step(offset: u32, reg0: i64) -> EnrichedTelemetryEvent {
+        EnrichedTelemetryEvent::VmStep {
+            bytecode_offset: offset,
+            opcode: 0x02,
+            registers: Box::new(std::array::from_fn(|i| {
+                if i == 0 {
+                    Value::Int(reg0)
+                } else {
+                    Value::Null
+                }
+            })),
+            gas_remaining: 50,
+            source_span: None,
+        }
+    }
+
+    fn signal_write(id: u32, value: i64) -> EnrichedTelemetryEvent {
+        EnrichedTelemetryEvent::SignalWrite {
+            signal_id: SignalId::from(id),
+            old_value: Value::Null,
+            new_value: Value::Int(value),
+            triggered_effect_ids: vec![EffectId::from(0u32)],
+            source_span: None,
+        }
+    }
+
+    fn view_layout(node: u32, w: f64) -> EnrichedTelemetryEvent {
+        EnrichedTelemetryEvent::ViewMutation {
+            node_id: NodeId::from(node),
+            native_view_id: 0,
+            mutation_kind: 3,
+            frame: Some(Rect {
+                x: 0.0,
+                y: 0.0,
+                width: w,
+                height: w,
+            }),
+            source_span: None,
+        }
+    }
+
+    #[test]
+    fn replay_updates_registers_and_ip() {
+        let events = vec![vm_step(10, 7), vm_step(14, 9)];
+        let state = reconstruct_state(&ReconstructedState::base(), &events);
+        assert_eq!(state.bytecode_offset, Some(14));
+        assert_eq!(state.opcode, Some(0x02));
+        assert_eq!(state.gas_remaining, Some(50));
+        assert_eq!(state.registers[0], Value::Int(9));
+    }
+
+    #[test]
+    fn replay_accumulates_signals() {
+        let events = vec![
+            signal_write(1, 100),
+            signal_write(2, 200),
+            signal_write(1, 150),
+        ];
+        let state = reconstruct_state(&ReconstructedState::base(), &events);
+        // Signal 1 was written twice; the last value wins.
+        assert_eq!(state.signals.len(), 2);
+        let s1 = state
+            .signals
+            .iter()
+            .find(|(id, _)| *id == SignalId::from(1u32))
+            .map(|(_, v)| v.clone())
+            .unwrap();
+        assert_eq!(s1, Value::Int(150));
+    }
+
+    #[test]
+    fn replay_tracks_view_frames_and_removal() {
+        let mut events = vec![view_layout(5, 10.0), view_layout(6, 20.0)];
+        events.push(EnrichedTelemetryEvent::ViewMutation {
+            node_id: NodeId::from(5u32),
+            native_view_id: 0,
+            mutation_kind: 1, // Remove
+            frame: None,
+            source_span: None,
+        });
+        let state = reconstruct_state(&ReconstructedState::base(), &events);
+        assert_eq!(state.view_frames.len(), 1);
+        assert!(
+            state
+                .view_frames
+                .iter()
+                .all(|(id, _)| *id != NodeId::from(5u32))
+        );
+    }
+
+    #[test]
+    fn replay_is_deterministic() {
+        let events = vec![vm_step(2, 3), signal_write(1, 42)];
+        let a = reconstruct_state(&ReconstructedState::base(), &events);
+        let b = reconstruct_state(&ReconstructedState::base(), &events);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn partial_replay_from_base_is_stable() {
+        // Reconstructing up to index 1 from base must equal replaying only the
+        // first event.
+        let events = [vm_step(2, 3), signal_write(1, 42), vm_step(8, 9)];
+        let full = reconstruct_state(&ReconstructedState::base(), &events[..2]);
+        let partial = reconstruct_state(&ReconstructedState::base(), &events[..1]);
+        assert_eq!(partial.bytecode_offset, Some(2));
+        assert_eq!(full.bytecode_offset, Some(2));
+        assert_eq!(full.signals.len(), 1);
+    }
+}

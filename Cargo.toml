@@ -13,6 +13,7 @@ members = [
     "crates/flux-codegen-kotlin",
     "crates/flux-cli",
     "crates/flux-parity",
+    "crates/flux-devtools-ui",
 ]
 
 [workspace.package]
@@ -33,6 +34,14 @@ flux-vm-ref = { path = "crates/flux-vm-ref" }
 flux-devserver = { path = "crates/flux-devserver" }
 flux-codegen-swift = { path = "crates/flux-codegen-swift" }
 flux-codegen-kotlin = { path = "crates/flux-codegen-kotlin" }
+
+flux-devtools-ui = { path = "crates/flux-devtools-ui" }
+
+# gpui (Zed's retained-mode UI framework) is approved ONLY for the
+# `flux-devtools-ui` DevTools desktop crate (ADR-0041). It is a git dependency
+# because gpui is not published to crates.io. Pinned to a `main` commit; bump
+# deliberately via ADR when upgrading.
+gpui = { git = "https://github.com/zed-industries/zed.git", rev = "1ff7cb669b6351eaf2a5b79ccb40f5cd1676b8f8" }
 
 ahash = "^0.8"
 anyhow = "^1"

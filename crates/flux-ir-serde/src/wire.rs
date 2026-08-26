@@ -89,6 +89,20 @@ impl Writer {
         self.buf.extend_from_slice(value);
     }
 
+    /// Number of bytes written so far; used by callers that reserve a length
+    /// slot and back-patch it after the body is encoded.
+    pub(crate) fn buf_len(&self) -> usize {
+        self.buf.len()
+    }
+
+    /// Overwrites the `u32` little-endian value at `offset` (must already be
+    /// allocated in the buffer). Used to back-patch a length prefix once the
+    /// body size is known.
+    pub(crate) fn patch_u32_at(&mut self, offset: usize, value: u32) {
+        let bytes = value.to_le_bytes();
+        self.buf[offset..offset + 4].copy_from_slice(&bytes);
+    }
+
     pub(crate) fn into_vec(self) -> Vec<u8> {
         self.buf
     }
@@ -116,7 +130,11 @@ impl<'a> Reader<'a> {
         self.bytes.len().saturating_sub(self.pos)
     }
 
-    fn take(&mut self, needed: usize, context: &'static str) -> Result<&'a [u8], WireError> {
+    pub(crate) fn take(
+        &mut self,
+        needed: usize,
+        context: &'static str,
+    ) -> Result<&'a [u8], WireError> {
         let available = self.bytes.len() - self.pos;
         if available < needed {
             return Err(WireError::Truncated {
@@ -315,13 +333,13 @@ pub(crate) fn decode_props(r: &mut Reader<'_>) -> Result<Props, WireError> {
 
 // ── Span ─────────────────────────────────────────────────────────────────
 
-fn encode_span(w: &mut Writer, span: &Span) {
+pub fn encode_span(w: &mut Writer, span: &Span) {
     w.u32(span.file_id);
     w.u32(span.start);
     w.u32(span.end);
 }
 
-fn decode_span(r: &mut Reader<'_>) -> Result<Span, WireError> {
+pub fn decode_span(r: &mut Reader<'_>) -> Result<Span, WireError> {
     let file_id = r.u32("span.file")?;
     let start = r.u32("span.start")?;
     let end = r.u32("span.end")?;

@@ -1,0 +1,35 @@
+[package]
+name = "flux-devtools-ui"
+version.workspace = true
+edition = "2024"
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+# The gpui desktop UI is opt-in: the pinned gpui build requires a toolchain
+# newer than the workspace's stable pin (it uses `std::hint::cold_path`, a
+# nightly feature), so the UI is compiled only when this feature is enabled on
+# a compatible toolchain. The time-travel core, wire client and state
+# (everything testable without a display) build and test on stable without it.
+default = []
+gpui-ui = ["dep:gpui"]
+
+[dependencies]
+flux-syntax.workspace = true
+flux-ir-serde.workspace = true
+flux-ir.workspace = true
+parking_lot.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+# DevTools websocket client to the dev server's :7333 endpoint.
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+futures-util = "^0.3"
+# Only this crate depends on gpui (ADR-0041); optional + feature-gated because
+# the current gpui pin needs a newer-than-stable toolchain.
+gpui = { git = "https://github.com/zed-industries/zed.git", rev = "1ff7cb669b6351eaf2a5b79ccb40f5cd1676b8f8", optional = true }
+
+[dev-dependencies]
+tokio.workspace = true
