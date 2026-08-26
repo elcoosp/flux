@@ -1,0 +1,68 @@
+---
+name: merge-guard
+
+# Brittleness issue 1 (Branch Collision) — all agents commit directly to `main`,
+# so two consecutive pushes touching the same top-level directory mean two
+# agents were editing the same ownership area at the same time. This workflow
+# records the directories touched by each push in `.github/dir-locks.json` and
+# fails when the current push overlaps the previous one.
+
+on:
+  push:
+    branches: ["main"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: merge-guard
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Compute touched top-level directories
+        id: dirs
+        run: |
+          set -euo pipefail
+          if git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+            range="HEAD~1 HEAD"
+          else
+            range="--root HEAD"
+          fi
+          # shellcheck disable=SC2086
+          dirs=$(git diff --dirstat=files,0 $range \
+            | awk '{print $2}' \
+            | cut -d/ -f1 \
+            | sed 's#^$#.#' \
+            | sort -u \
+            | paste -sd, -)
+          echo "dirs=${dirs}" >>"$GITHUB_OUTPUT"
+          echo "touched: ${dirs:-<none>}"
+
+      - name: Check collision against previous push
+        env:
+          CURRENT_DIRS: ${{ steps.dirs.outputs.dirs }}
+        run: bash scripts/merge-guard-check.sh "$CURRENT_DIRS"
+
+      - name: Record this push's directories
+        if: success()
+        env:
+          CURRENT_DIRS: ${{ steps.dirs.outputs.dirs }}
+        run: |
+          set -euo pipefail
+          bash scripts/merge-guard-check.sh --write "$CURRENT_DIRS"
+          if git diff --quiet -- .github/dir-locks.json; then
+            echo "dir-locks.json unchanged"
+            exit 0
+          fi
+          git config user.name "flux-merge-guard"
+          git config user.email "merge-guard@flux.invalid"
+          git commit --only .github/dir-locks.json \
+            -m "ci: record touched directories for merge-guard [skip ci]"
+          git push
