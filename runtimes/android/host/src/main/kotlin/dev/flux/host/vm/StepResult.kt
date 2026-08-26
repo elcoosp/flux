@@ -323,6 +323,14 @@ internal fun executeInstruction(
             regs[instr.u8(0)] = regs[instr.u8(1)]
             StepResult.Proceed
         }
+        Opcode.TO_STRING -> {
+            // TO_STRING (0xD0, ADR-0043): render [regs[src]] to its textual form
+            // and intern it, mirroring the Swift runtime and the Rust oracle.
+            val src = instr.u8(1)
+            val rendered = renderToString(regs[src], strings)
+            regs[instr.u8(0)] = FluxValue.StrVal(strings.intern(rendered))
+            StepResult.Proceed
+        }
         Opcode.GAS_CHECK -> {
             val budget = instr.u32(0).toUInt()
             if (regs[15] is FluxValue.IntVal) {

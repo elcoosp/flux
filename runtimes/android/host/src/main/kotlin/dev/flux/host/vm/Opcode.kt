@@ -82,6 +82,7 @@ public enum class Opcode(
     MOV(0xB5, 2),
 
     GAS_CHECK(0xC0, 4),
+    TO_STRING(0xD0, 2),
     ;
 
     public companion object {
