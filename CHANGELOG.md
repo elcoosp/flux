@@ -29,10 +29,13 @@ are already taken by unrelated topics, so the next free slots were used).
   `SourceMap` built from `LoweredIr` (node spans via `IRArena::span_for_node_id`,
   bytecode-offset→closure-span heuristic), `enrich`/`enrich_with_span`, and a
   pure `DevToolsRouter` (telemetry broadcast + command forwarding). `serve_devtools`
-  accepts `:7333` and relays enriched frames to DevTools / commands to the host.
-  The `:7333` listener is provided as a self-contained module; wiring it into
-  the in-flight `server.rs` `start()` is left as a documented TODO to avoid
-  colliding with the server agent's uncommitted work.
+  accepts `:7333`, enriches host `Telemetry` frames with source spans, and
+  broadcasts them to DevTools clients (commands drain to a host channel owned by
+  the host-session agent). `Pipeline::devtools_source_map()` feeds it from the
+  last-good IR, and `DevServer::start()` now binds `:7333` and spawns the
+  endpoint (added the `debug_bridge` module to `lib.rs`). A new
+  `host_telemetry_reaches_devtools_client` tokio integration test proves the
+  full host→server→DevTools-client data path over a real WebSocket.
 - **`gpui` desktop crate (Phases 4 & 6, `flux-devtools-ui`)** — new crate with
   `DevToolsState`, `wire_client` (decodes enriched frames, sends `DebugCommand`s),
   a time-travel ring `TimelineBuffer` + `Reconstruct` state simulator (base-state
@@ -40,29 +43,38 @@ are already taken by unrelated topics, so the next free slots were used).
   `timeline`) gated behind the `gpui-ui` cargo feature. `gpui` is a git
   dependency (ADR-0041) pinned to `zed-industries/zed@1ff7cb6…`; the always-on
   core is `gpui`-free so it builds + tests on the workspace's stable toolchain
-  (gpui itself needs nightly for `std::hint::cold_path`). 15 nextest cases green.
+  (gpui itself needs nightly for `std::hint::cold_path`, so the desktop UI is
+  compile-gated on nightly). 15 nextest cases green.
 - **Host instrumentation (Phases 2 & 2k)** — `TelemetryEvent`/`DebugCommand`/
   `TelemetryBridge`/`VMTelemetrySink` for iOS (`runtimes/ios/.../Debug/Telemetry.swift`)
   and Android (`.../vm/debug/Telemetry.kt`, `TelemetryBridge.kt`). Both reproduce
   the Rust wire codec exactly. Guarded by `#if DEBUG` / `BuildConfig.DEBUG`.
-  The per-step/`writeSignal` emit *call site* into the in-flight
-  `FluxBytecodeVM.run` / `SignalGraph.writeSignal` / `FluxBytecodeVM.kt` is left
-  for the VM-owning agent to insert (one line each) so their uncommitted 867-line
-  VM files are not swept. The encoder + bridge + protocol types are complete and
-  `swiftc -parse`-clean (iOS); Kotlin is written to the same contract but cannot
-  be compiled here (no `kotlinc`).
+  Emit call-sites are inserted into `FluxBytecodeVM.run` (iOS both run paths +
+  Android `FluxBytecodeVM.kt`) and `SignalGraph.write` (iOS), each guarded so
+  there is zero release impact. Each bridge owns the **host → `:7333` DevTools
+  client**: iOS `fluxDevtoolsConnect()` opens a `ws://127.0.0.1:7333/devtools`
+  socket and wires `onFlush` to send batched frames; Android `TelemetryBridge
+  .connectDevtools()` does the same over OkHttp. With the sink installed
+  (`fluxDevtoolsConnect`/`connectDevtools` called once at host startup), emitted
+  VM/signal events now flow to the dev server. All three platforms compile
+  (iOS `xcodebuild` for the simulator, Android `./gradlew :runtimes:android:host:
+  compileKotlin`, Rust nextest).
 - **Adapter debug hook (Phase 5, `adapters/ui-swift`)** — `DebugMetadata.swift`
   adds `NativeViewDebugMetadata` and an `#if DEBUG` `inspectDebugState(of:)`
   extension on `FluxAdapter` (default `nil`) + a concrete `ContainerAdapter`
   implementation. Placed in a new file so the in-flight `AdapterKit.swift` /
-  `ContainerAdapter.swift` are untouched.
+  `ContainerAdapter.swift` are untouched. The hook is ready to be called by any
+  adapter's render path to emit a `viewMutation`/`debugState` event (the
+  concrete caller is owned by the adapter agent).
 - **Spec deviations / notes** — two concrete frame types (`TelemetryFrame`,
   `EnrichedTelemetryFrame`) were used instead of a single generic
   `TelemetryFrame<E>` (the skill's suggestion) because the generic `WireEvent`
   trait leaked `pub(crate)` `Writer`/`Reader` types and produced dead-code;
   the two concrete types are cleaner and keep the channel types explicit.
-  Unverified in this environment: `xcodebuild` (iOS) and `kotlinc` (Android)
-  builds — only `swiftc -parse` was run on the iOS files.
+  The `gpui` desktop UI (views) is nightly-gated because the pinned `gpui`
+  revision requires `std::hint::cold_path`; the always-on data path
+  (host → `:7333` → `serve_devtools` → DevTools clients) is fully exercised by
+  the Rust integration test on stable.
 
 ### FLUX-019 — dev server (`flux-devserver`) — DONE
 
