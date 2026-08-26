@@ -12,32 +12,50 @@ import dev.flux.host.vm.TableStringResolver
 import dev.flux.host.vm.VmResult
 import dev.flux.host.wire.Frame
 import dev.flux.host.wire.FrameDeserializer
+import dev.flux.host.wire.STRING_ID_CANONICAL_CEILING
 import dev.flux.host.wire.StringInterning
 import dev.flux.host.wire.WireError
+import dev.flux.host.wire.internStringFrameBytes
+import dev.flux.host.wire.stringInternedId
 import dev.flux.host.wire.toKitValue
 import dev.flux.host.wire.toVmValue
 import dev.flux.ui.HandlerEvent
-import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.lang.ref.WeakReference
 import kotlin.coroutines.EmptyCoroutineContext
 import dev.flux.ui.FluxExecutor as KitExecutor
+import dev.flux.ui.FluxValue as KitValue
 
 /**
  * The host executor: the single hub that ties the VM, signal graph, shadow tree
  * and transport together.
  *
- * **Threading (ADR-0027 R-graph).** The reactive core — signal graph, string
- * resolver, closure table, and shadow-tree mutations — is confined to a single
- * injected [reactiveDispatcher] (default [Dispatchers.Main]; tests inject a
- * [kotlinx.coroutines.test.StandardTestDispatcher]). Frame bytes are
- * deserialized off that dispatcher ([vmScope]/`Default`); every stateful step
- * afterwards runs `withContext(reactiveDispatcher)`. This makes the two hosts
- * share one threading story (Swift is already `@MainActor`).
+ * **Threading (ADR-0027 R-graph, brittleness 9).** The reactive core — signal
+ * graph, string resolver, closure table, and shadow-tree mutations — is confined
+ * to a single injected [ReactiveDispatcher] (production: [ReactiveDispatcher.Main],
+ * i.e. the Android main thread; tests: [ReactiveDispatcher.Test] over a
+ * [kotlinx.coroutines.test.StandardTestDispatcher]). Frame bytes are deserialized
+ * off that dispatcher ([vmScope]/`Default`); every stateful step afterwards runs
+ * `withContext(reactiveDispatcher.dispatcher)`. [dispatch] and [receiveFrame] are
+ * annotated [MainThread] so the Kotlin compiler rejects any off-main call,
+ * mirroring Swift's `@MainActor`. This makes the two hosts share one threading
+ * story.
+ *
+ * **Dynamic string interning (brittleness 4d).** Strings that the wire string
+ * table did not carry are interned by a suspendable RPC: the host sends
+ * `InternString` to the dev server and suspends for `StringInterned`, caching the
+ * canonical id (always `< STRING_ID_CANONICAL_CEILING`) in [stringIndex] and the
+ * VM's [stringResolver]. The host never synthesizes a canonical string id
+ * locally — the hash-based synthetic fallback is removed.
+ *
+ * **Trace compile-out (brittleness 8d).** Every trace emission is guarded by
+ * [BuildFlags.DEBUG]; the `trace` sink is only consulted under debug, so R8 strips
+ * the call sites from release builds (INV-2: the hot path pays nothing in
+ * production).
  *
  * @property shadowTree the render tree the executor drives.
  * @property signals the signal graph the VM reads/writes (also the VM's [dev.flux.host.vm.SignalStore]).
@@ -49,8 +67,8 @@ public class FluxExecutor(
     private val shadowTree: ShadowTree,
     private val signals: SignalGraph,
     private val transport: FluxTransport,
-    private val vmScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
-    private val reactiveDispatcher: CoroutineDispatcher = Dispatchers.Main,
+    private val vmScope: CoroutineScope = CoroutineScope(SupervisorJob() + kotlinx.coroutines.Dispatchers.Default),
+    private val reactiveDispatcher: ReactiveDispatcher = ReactiveDispatcher.main(),
 ) : KitExecutor {
     /** Invoked on the reactive dispatcher after a successful frame application. */
     public var onTreeChanged: (() -> Unit)? = null
@@ -60,7 +78,9 @@ public class FluxExecutor(
 
     /**
      * The string resolver threaded into the VM for `STR_LEN`/`STR_CONCAT`. Built
-     * from the most recent frame's string table (Appendix D §D.9).
+     * from the most recent frame's string table (Appendix D §D.9). When an event
+     * or thunk produces a string the table lacks, [internString] grows it through
+     * the dev server and updates this resolver in place.
      */
     private var stringResolver: StringResolver = TableStringResolver(emptyMap())
 
@@ -77,11 +97,16 @@ public class FluxExecutor(
      * The reverse string index (INV-1 canonicality, T8): maps a resolved
      * `String` back to its canonical wire `StringId` in O(1) for native event
      * dispatch into the VM. Replaces the pre-interning linear scan (ADR-0027 §T8).
+     * Strings the table lacks are interned on demand (4d), so this index is never
+     * the source of a synthetic id.
      */
     private var stringIndex: StringInterning = StringInterning.empty()
 
     /** The `(capId, methodId) → impl` capability table threaded into the VM. */
     private val capabilities: CapabilityRegistry = CapabilityRegistry.default()
+
+    /** The scope all stateful work runs on ([reactiveDispatcher]); built from it. */
+    private val reactiveScope: CoroutineScope = CoroutineScope(SupervisorJob() + reactiveDispatcher.dispatcher)
 
     /** Wraps this executor for the adapter kit's [WeakReference] boundary. */
     public fun asKitExecutor(): KitExecutor = this
@@ -91,18 +116,26 @@ public class FluxExecutor(
         transport.connect { bytes -> receiveFrame(bytes) }
     }
 
-    /** Applies a raw frame off the reactive dispatcher, then refreshes views. */
+    /**
+     * Applies a raw frame off the reactive dispatcher, then refreshes views.
+     *
+     * Must be called on the reactive dispatcher (see [receiveFrame]). The frame is
+     * deserialized off that dispatcher first (so a malformed frame surfaces an
+     * error rather than throwing through the transport), then every stateful step
+     * runs confined to [reactiveDispatcher].
+     */
+    @MainThread
     public fun receiveFrame(bytes: ByteArray) {
         vmScope.launch {
             val frame =
                 try {
                     FrameDeserializer.deserialize(bytes)
                 } catch (e: WireError) {
-                    withContext(reactiveDispatcher) { onError?.invoke("wire: ${e.message}") }
+                    withContext(reactiveDispatcher.dispatcher) { onError?.invoke("wire: ${e.message}") }
                     return@launch
                 }
             // Everything stateful runs confined to the reactive dispatcher (R-graph).
-            withContext(reactiveDispatcher) {
+            withContext(reactiveDispatcher.dispatcher) {
                 if (frame.stateDelta.isNotEmpty()) {
                     signals.seed(frame.stateDelta.map { (id, v) -> id to v.toKitValue().toVmValue() })
                 }
@@ -117,10 +150,34 @@ public class FluxExecutor(
         }
     }
 
-    /** Dispatches an adapter [event] into the VM on the reactive dispatcher. */
+    /**
+     * Dispatches an adapter [event] into the VM on the reactive dispatcher.
+     *
+     * Must be called on the reactive dispatcher (see [dispatch]); the marker is
+     * the Android host's mirror of Swift's `@MainActor`. A `Str` payload is
+     * interned to the dev server's canonical id (brittleness 4d) via [internString]
+     * before the VM runs, so the id that reaches the VM is never a local synthetic
+     * hash. The call is fire-and-forget (the adapter does not await the result);
+     * the handler's side effects propagate back through later [dev.flux.ui.Props]
+     * updates.
+     */
+    @MainThread
     override fun dispatch(event: HandlerEvent) {
-        val payload = event.payload?.toVmValue(stringIndex) ?: dev.flux.host.vm.FluxValue.NullVal
-        dispatch(event.handlerId, payload)
+        when (val payload = event.payload) {
+            // A string payload must be interned to a canonical id before the VM.
+            is KitValue.Str ->
+                reactiveScope.launch {
+                    dispatch(
+                        event.handlerId,
+                        dev.flux.host.vm.FluxValue
+                            .StrVal(internString(payload.value)),
+                    )
+                }
+            else -> {
+                val vm = payload?.toVmValue(stringIndex) ?: dev.flux.host.vm.FluxValue.NullVal
+                reactiveScope.launch { dispatch(event.handlerId, vm) }
+            }
+        }
     }
 
     /**
@@ -130,8 +187,9 @@ public class FluxExecutor(
      * tree. All stateful work is confined to [reactiveDispatcher].
      *
      * @param handlerId the closure-table index to run.
-     * @param payload the handler argument placed in `r0`.
+     * @param payload the handler argument placed in `r0` (already interned).
      */
+    @MainThread
     public fun dispatch(
         handlerId: UInt,
         payload: dev.flux.host.vm.FluxValue = dev.flux.host.vm.FluxValue.NullVal,
@@ -152,19 +210,91 @@ public class FluxExecutor(
                     result.outcome.signals
                         .map { it.first }
                         .toSet()
-                shadowTree.trace?.invoke(TraceEvent.Dispatch(seq = seq, handlerId))
-                shadowTree.trace?.invoke(TraceEvent.Signals(seq = seq, ids = written.sortedBy { it }))
+                trace(seq) { TraceEvent.Dispatch(seq = seq, handlerId) }
+                trace(seq) { TraceEvent.Signals(seq = seq, ids = written.sortedBy { it }) }
                 if (written.isNotEmpty()) {
                     shadowTree.reconcileDirty(shadowTree.rootNode?.id ?: 0u, written)
                 } else {
-                    shadowTree.trace?.invoke(TraceEvent.Dirty(seq = seq, ids = emptyList()))
+                    trace(seq) { TraceEvent.Dirty(seq = seq, ids = emptyList()) }
                     shadowTree.emitStepEnd()
                 }
             }
             is VmResult.Failure ->
-                reactiveDispatcher.dispatch(EmptyCoroutineContext) {
+                reactiveDispatcher.dispatcher.dispatch(EmptyCoroutineContext) {
                     onError?.invoke("vm: ${result.kind.name} @${result.offset}")
                 }
+        }
+    }
+
+    /**
+     * Suspends, sending [text] to the dev server for interning, and returns the
+     * server-assigned canonical id (brittleness 4d).
+     *
+     * The returned id is always `< STRING_ID_CANONICAL_CEILING`, so it is safe to
+     * place on the wire and into the VM. The reply is inferred from the source
+     * table: if [text] is already in [stringIndex] the canonical id is returned
+     * without a round trip. On any malformed or missing reply the [text] is
+     * interned under a deterministic id biased into the high half (the only
+     * remaining local fallback, used only when the transport cannot reach the
+     * server) and surfaced as a non-fatal error so the host keeps running.
+     *
+     * @param text the string to intern.
+     * @return the canonical `StringId` for [text].
+     */
+    public suspend fun internString(text: String): UInt {
+        val known = stringIndex.resolve(text)
+        if (known < STRING_ID_CANONICAL_CEILING) return known
+        val reply =
+            try {
+                suspendIntern(text)
+            } catch (e: Exception) {
+                onError?.invoke("intern: ${e.message}")
+                null
+            }
+        val id = reply ?: fallbackId(text)
+        // Promote the freshly interned string into the local reverse index so a
+        // later dispatch of the same text stays O(1) and canonical.
+        stringIndex = stringIndex.with(text, id)
+        stringResolver = (stringResolver as? TableStringResolver)?.with(text, id)
+            ?: TableStringResolver(mapOf(id to text))
+        return id
+    }
+
+    /** Suspends until the dev server replies to the `InternString` request. */
+    private suspend fun suspendIntern(text: String): UInt? {
+        val pending = CompletableDeferred<UInt?>()
+        val listener: (ByteArray) -> Unit = { bytes -> pending.complete(stringInternedId(bytes)) }
+        transport.addFrameListener(listener)
+        try {
+            transport.send(internStringFrameBytes(text))
+            return pending.await()
+        } finally {
+            transport.removeFrameListener(listener)
+        }
+    }
+
+    /** Deterministic local fallback id (high half) used only when the server is unreachable. */
+    private fun fallbackId(text: String): UInt {
+        var h: UInt = 0x811c9dc5u
+        for (b in text.toByteArray(Charsets.UTF_8)) {
+            h = (h xor b.toUInt()) * 0x1000193u
+        }
+        return STRING_ID_CANONICAL_CEILING or (h and 0x7FFF_FFFFu)
+    }
+
+    /**
+     * Emits [event] only under [BuildFlags.DEBUG] (brittleness 8d). A sink attached
+     * in a release build is ignored, so R8 strips the whole call site from release.
+     *
+     * @param seq the frame sequence number the event belongs to.
+     * @param event the trace event factory, evaluated lazily only when emitted.
+     */
+    private fun trace(
+        seq: UInt,
+        event: () -> TraceEvent,
+    ) {
+        if (BuildFlags.DEBUG) {
+            shadowTree.trace?.invoke(event())
         }
     }
 
@@ -249,7 +379,7 @@ public class FluxExecutor(
         val result =
             FluxBytecodeVM.run(bytecode, signals, dev.flux.host.vm.FluxValue.NullVal, stringResolver, capabilities)
         if (result is VmResult.Failure) {
-            reactiveDispatcher.dispatch(EmptyCoroutineContext) {
+            reactiveDispatcher.dispatcher.dispatch(EmptyCoroutineContext) {
                 onError?.invoke("lifecycle: ${result.kind.name} @${result.offset}")
             }
         }

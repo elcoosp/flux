@@ -23,7 +23,7 @@ import dev.flux.ui.FluxUiKit
  */
 public class AdapterRegistry(
     private val byComponent: Map<UInt, String>,
-    private val byKind: Map<String, FluxAdapter<out FluxNativeView>> = FluxUiKit.adapters,
+    private val byKind: Map<String, FluxAdapter<out FluxNativeView>> = FluxUiKit.adapters.mapValues { (_, factory) -> factory.create() },
 ) {
     /**
      * Resolves [componentId] to its dev adapter, or `null` when no component
@@ -31,7 +31,10 @@ public class AdapterRegistry(
      */
     public fun resolve(componentId: UInt): FluxAdapter<out FluxNativeView>? {
         val kind = byComponent[componentId] ?: return null
-        return byKind[kind]
+        // The string table interns component names capitalized ("Text",
+        // "Column"); the adapter kit is keyed by lowercase kind tags, so
+        // normalize before the lookup.
+        return byKind[kind.lowercase()]
     }
 
     /**

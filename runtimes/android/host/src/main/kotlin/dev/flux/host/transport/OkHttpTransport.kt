@@ -1,5 +1,6 @@
 package dev.flux.host.transport
 
+import dev.flux.host.wire.helloFrameBytes
 import kotlinx.coroutines.suspendCancellableCoroutine
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -48,6 +49,11 @@ public class OkHttpTransport(
                         response: Response,
                     ) {
                         connected = true
+                        // Appendix D §D.12.1: the server only replies with `Init`
+                        // after a `Hello` handshake. Send it immediately on open so
+                        // the full tree is pushed and the host leaves "connecting".
+                        val hello = helloFrameBytes("android", "android")
+                        socket?.send(okio.ByteString.of(*hello))
                     }
 
                     override fun onMessage(
@@ -82,6 +88,14 @@ public class OkHttpTransport(
     }
 
     override fun isConnected(): Boolean = connected
+
+    override fun addFrameListener(listener: (ByteArray) -> Unit) {
+        listeners.add(listener)
+    }
+
+    override fun removeFrameListener(listener: (ByteArray) -> Unit) {
+        listeners.remove(listener)
+    }
 
     override fun close() {
         socket?.close(1000, "host shutdown")

@@ -1,8 +1,10 @@
 package dev.flux.app
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
 import dev.flux.host.AdapterRegistry
 import dev.flux.host.FluxExecutor
+import dev.flux.host.ReactiveDispatcher
 import dev.flux.host.shadow.ShadowTree
 import dev.flux.host.signal.SignalGraph
 import dev.flux.host.transport.FluxTransport
@@ -18,11 +20,19 @@ import dev.flux.host.transport.OkHttpTransport
  * WebSocket, forcing a full frame re-fetch; retaining them keeps the session
  * seamless across rotations.
  *
- * The session is created once (via `viewModels()`); the executor is started by the
- * composable layer ([FluxRoot]) and only explicitly disposed when the activity is
- * truly finishing (roast fix 5: teardown is explicit, never implicit on pause).
+ * The session is created once via a [ViewModelProvider.Factory] that injects the
+ * dev-server WebSocket URL (read from the `flux_ws_url` string resource, so the
+ * endpoint is configurable per build without code changes). The executor is
+ * started by the composable layer ([FluxRoot]) and only explicitly disposed when
+ * the activity is truly finishing (roast fix 5: teardown is explicit, never
+ * implicit on pause).
+ *
+ * @param wsUrl the dev-server WebSocket URL, e.g. `ws://127.0.0.1:7331` for the
+ *   local loopback or `ws://192.168.x.x:7331` for a physical device on the LAN.
  */
-public class FluxSession : ViewModel() {
+public class FluxSession(
+    private val wsUrl: String = "ws://127.0.0.1:7331",
+) : ViewModel() {
     /** The live signal graph (also the VM's [dev.flux.host.vm.SignalStore]). */
     public val signals: SignalGraph = SignalGraph()
 
@@ -31,7 +41,7 @@ public class FluxSession : ViewModel() {
         ShadowTree(AdapterRegistry.fromStringTable(emptyList()))
 
     /** The dev-mode frame transport. */
-    public val transport: FluxTransport = OkHttpTransport("ws://127.0.0.1:7331")
+    public val transport: FluxTransport = OkHttpTransport(wsUrl)
 
     /** The executor that ties the above together. */
     public val executor: FluxExecutor = FluxExecutor(shadowTree, signals, transport)
@@ -49,5 +59,14 @@ public class FluxSession : ViewModel() {
     override fun onCleared() {
         super.onCleared()
         executor.dispose()
+    }
+
+    /** Factory injecting the configured [wsUrl] into [FluxSession]. */
+    public class Factory(
+        private val wsUrl: String,
+    ) : ViewModelProvider.Factory {
+        @Suppress("UNCHECKED_CAST")
+        override fun <T : ViewModel> create(modelClass: Class<T>): T =
+            FluxSession(wsUrl) as T
     }
 }

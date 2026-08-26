@@ -1,5 +1,6 @@
 package dev.flux.host
 
+import dev.flux.host.ReactiveDispatcher
 import dev.flux.host.shadow.ShadowTree
 import dev.flux.host.signal.SignalGraph
 import dev.flux.host.transport.MockTransport
@@ -133,7 +134,7 @@ class EndToEndTest {
             val frame = FrameDeserializer.deserialize(bytes)
             val tree = ShadowTree(AdapterRegistry.fromStringTable(stdlibEntries().map { (id, k) -> StringTableEntry(id, k) }))
             val transport = MockTransport()
-            val executor = FluxExecutor(tree, signals, transport, scope, dispatcher)
+            val executor = FluxExecutor(tree, signals, transport, scope, ReactiveDispatcher.test(dispatcher))
 
             val root = tree.applyFrame(frame, executor)
             assertNotNull(root)
@@ -205,7 +206,7 @@ class EndToEndTest {
             val frame = FrameDeserializer.deserialize(bytes)
             val tree = ShadowTree(AdapterRegistry.fromStringTable(stdlibEntries().map { (id, k) -> StringTableEntry(id, k) }))
             val transport = MockTransport()
-            val executor = FluxExecutor(tree, signals, transport, scope, dispatcher)
+            val executor = FluxExecutor(tree, signals, transport, scope, ReactiveDispatcher.test(dispatcher))
             val root = tree.applyFrame(frame, executor)
             assertNotNull(root)
             val routerNode = root!!

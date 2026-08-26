@@ -50,7 +50,7 @@ public fun ShadowTree.reconcileDirty(
     writtenSignals: Set<UInt>,
 ) {
     if (writtenSignals.isEmpty()) {
-        trace?.invoke(TraceEvent.Dirty(seq = lastSeq, ids = emptyList()))
+        emitTrace(TraceEvent.Dirty(seq = lastSeq, ids = emptyList()))
         emitStepEnd()
         return
     }
@@ -60,7 +60,7 @@ public fun ShadowTree.reconcileDirty(
     // intersect the written signals (ADR-0027 determinism + R1). Ancestors that
     // are merely re-parented are NOT reported as dirty.
     val ordered = dirty.sortedWith(compareBy({ depthOf(it) }, { it }))
-    trace?.invoke(TraceEvent.Dirty(seq = lastSeq, ids = ordered))
+    emitTrace(TraceEvent.Dirty(seq = lastSeq, ids = ordered))
     for (id in ordered) {
         val node = nodes[id] ?: continue
         // ADR-0027 (FA-IRWIRE): re-materialise dynamic props against the freshly
@@ -73,7 +73,7 @@ public fun ShadowTree.reconcileDirty(
         withAdapter(node.kind, node.componentId, node.view) { adapter, view ->
             adapter.update(view, newKit)
         }
-        trace?.invoke(TraceEvent.Update(seq = lastSeq, id = id))
+        emitTrace(TraceEvent.Update(seq = lastSeq, id = id))
     }
     emitStepEnd()
 }

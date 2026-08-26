@@ -1,5 +1,6 @@
 package dev.flux.host
 
+import dev.flux.host.ReactiveDispatcher
 import dev.flux.host.shadow.ShadowTree
 import dev.flux.host.signal.SignalGraph
 import dev.flux.host.transport.MockTransport
@@ -82,7 +83,7 @@ class RuntimeFixesTest {
 
             val tree = ShadowTree(AdapterRegistry.fromStringTable(stdlibEntries.map { (id, k) -> StringTableEntry(id, k) }))
             val transport = MockTransport()
-            val executor = FluxExecutor(tree, signals, transport, vmScope = scope, reactiveDispatcher = dispatcher)
+            val executor = FluxExecutor(tree, signals, transport, vmScope = scope, reactiveDispatcher = ReactiveDispatcher.test(dispatcher))
             executor.onError = { throw AssertionError("executor error: $it") }
             // The real integration path: receiveFrame deserializes, registers
             // handlers into the VM, and applies the tree.
@@ -273,7 +274,7 @@ class RuntimeFixesTest {
             val frame = FrameDeserializer.deserialize(bytes)
             val tree = ShadowTree(AdapterRegistry.fromStringTable(stdlibEntries.map { (id, k) -> StringTableEntry(id, k) }))
             val transport = MockTransport()
-            val executor = FluxExecutor(tree, signals, transport, vmScope = scope, reactiveDispatcher = dispatcher)
+            val executor = FluxExecutor(tree, signals, transport, vmScope = scope, reactiveDispatcher = ReactiveDispatcher.test(dispatcher))
             executor.onError = { throw AssertionError("g5 onMount error: $it") }
             executor.registerLifecycle(2u, FluxExecutor.LifecycleHooks(onMount = onMount))
             tree.applyFrame(frame, executor)
@@ -307,7 +308,7 @@ class RuntimeFixesTest {
             val frame = FrameDeserializer.deserialize(initBytes)
             val tree = ShadowTree(AdapterRegistry.fromStringTable(stdlibEntries.map { (id, k) -> StringTableEntry(id, k) }))
             val transport = MockTransport()
-            val executor = FluxExecutor(tree, signals, transport, vmScope = scope, reactiveDispatcher = dispatcher)
+            val executor = FluxExecutor(tree, signals, transport, vmScope = scope, reactiveDispatcher = ReactiveDispatcher.test(dispatcher))
             executor.onError = { throw AssertionError("g5 onCleanup error: $it") }
             executor.registerLifecycle(2u, FluxExecutor.LifecycleHooks(onCleanup = onCleanup))
             tree.applyFrame(frame, executor)
@@ -374,7 +375,7 @@ class RuntimeFixesTest {
 
             val tree = ShadowTree(AdapterRegistry.fromStringTable(stdlibEntries.map { (id, k) -> StringTableEntry(id, k) }))
             val transport = MockTransport()
-            val executor = FluxExecutor(tree, signals, transport, vmScope = scope, reactiveDispatcher = dispatcher)
+            val executor = FluxExecutor(tree, signals, transport, vmScope = scope, reactiveDispatcher = ReactiveDispatcher.test(dispatcher))
             tree.applyFrame(frame, executor)
             assertEquals(1, tree.reconcileCount(2u))
             assertEquals(1, tree.reconcileCount(3u))
@@ -427,7 +428,7 @@ class RuntimeFixesTest {
             val frame = FrameDeserializer.deserialize(bytes)
             val tree = ShadowTree(AdapterRegistry.fromStringTable(stdlibEntries.map { (id, k) -> StringTableEntry(id, k) }))
             val transport = MockTransport()
-            val executor = FluxExecutor(tree, signals, transport, vmScope = scope, reactiveDispatcher = dispatcher)
+            val executor = FluxExecutor(tree, signals, transport, vmScope = scope, reactiveDispatcher = ReactiveDispatcher.test(dispatcher))
             tree.applyFrame(frame, executor)
             assertEquals(1, tree.reconcileCount(2u))
 

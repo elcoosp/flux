@@ -1,6 +1,7 @@
 package dev.flux.host.shadow
 
 import dev.flux.host.AdapterRegistry
+import dev.flux.host.BuildFlags
 import dev.flux.host.StringTableEntry
 import dev.flux.host.vm.FluxBytecodeVM
 import dev.flux.host.vm.VmResult
@@ -100,6 +101,17 @@ public class ShadowTree(
     /** The current root node, or `null` before an Init frame is applied. */
     public val rootNode: ShadowNode? get() = root
 
+    /**
+     * Emits [event] only under [BuildFlags.DEBUG] (brittleness 8d). A sink
+     * attached in a release build is ignored, so R8 strips the call site from
+     * release (INV-2: the hot path pays nothing in production).
+     *
+     * @param event the trace event to emit when tracing is active.
+     */
+    internal fun emitTrace(event: TraceEvent) {
+        if (BuildFlags.DEBUG) trace?.invoke(event)
+    }
+
     /** All nodes currently in the tree, in insertion order. */
     public fun allNodes(): List<ShadowNode> = nodes.values.toList()
 
@@ -162,7 +174,7 @@ public class ShadowTree(
             val index = LinkedHashMap<UInt, WireNode>()
             index[frame.root.id] = frame.root
             for (n in frame.extraNodes) index[n.id] = n
-            trace?.invoke(
+            emitTrace(
                 TraceEvent.Frame(
                     seq = frame.seq,
                     full = true,
@@ -182,7 +194,7 @@ public class ShadowTree(
             emitStepEnd()
             return built
         }
-        trace?.invoke(
+        emitTrace(
             TraceEvent.Frame(
                 seq = frame.seq,
                 full = false,
@@ -193,7 +205,7 @@ public class ShadowTree(
         )
         if (frame.patches.isNotEmpty()) {
             for (patch in frame.patches) applyPatch(patch, executor)
-            trace?.invoke(TraceEvent.ApplyPatch(seq = frame.seq, patches = frame.patches.size.toUInt()))
+            emitTrace(TraceEvent.ApplyPatch(seq = frame.seq, patches = frame.patches.size.toUInt()))
             emitStepEnd()
         }
         return root
@@ -244,14 +256,14 @@ public class ShadowTree(
                 // (No reconcile count: the node was not revisited — see G6.)
                 if (node.isPure && merged.fields == node.wireProps.fields) {
                     skippedPureCount++
-                    trace?.invoke(TraceEvent.SkipUnchanged(seq = lastSeq, id = patch.id))
+                    emitTrace(TraceEvent.SkipUnchanged(seq = lastSeq, id = patch.id))
                     return
                 }
                 // T5/R2: skip the adapter update when raw props AND the child-id
                 // list are identical — no native mutation is required.
                 if (merged.fields == node.wireProps.fields && !childListChanged(node, merged.childIds)) {
                     skippedUnchangedCount++
-                    trace?.invoke(TraceEvent.SkipUnchanged(seq = lastSeq, id = patch.id))
+                    emitTrace(TraceEvent.SkipUnchanged(seq = lastSeq, id = patch.id))
                     return
                 }
                 // Materialize old + new kits exactly once, on genuine change.
@@ -264,7 +276,7 @@ public class ShadowTree(
                 withAdapter(node.kind, node.componentId, node.view) { adapter, view ->
                     adapter.update(view, newKit)
                 }
-                trace?.invoke(TraceEvent.Update(seq = lastSeq, id = patch.id))
+                emitTrace(TraceEvent.Update(seq = lastSeq, id = patch.id))
             }
             0x03 -> { // Insert
                 val wire = patch.node ?: return
@@ -276,7 +288,7 @@ public class ShadowTree(
                 built.children.forEach { parents[it.id] = built.id }
                 nodes[built.id] = built
                 collect(built)
-                trace?.invoke(
+                emitTrace(
                     TraceEvent.SetChildren(
                         seq = lastSeq,
                         id = parent.id,
@@ -298,7 +310,7 @@ public class ShadowTree(
                 (executor as? HostExecutor)?.onNodeRemoved(patch.id)
                 destroySubtree(node)
                 detachedCount++
-                trace?.invoke(TraceEvent.Detach(seq = lastSeq, id = patch.id))
+                emitTrace(TraceEvent.Detach(seq = lastSeq, id = patch.id))
             }
             0x06 -> { // Handler
                 val node = nodes[patch.id] ?: return
@@ -373,7 +385,7 @@ public class ShadowTree(
             )
         reconciled[wire.id] = (reconciled[wire.id] ?: 0) + 1
         builtCount++
-        trace?.invoke(TraceEvent.Build(seq = lastSeq, id = wire.id))
+        emitTrace(TraceEvent.Build(seq = lastSeq, id = wire.id))
         for (child in wire.children) {
             val childId =
                 when (child) {
@@ -388,14 +400,14 @@ public class ShadowTree(
         }
         withAdapter(wire.kind, wire.componentId, view) { a, v -> a.bindHandler(v, props, WeakReference(executor)) }
         (executor as? HostExecutor)?.onNodeCreated(wire.id)
-        trace?.invoke(
+        emitTrace(
             TraceEvent.SetChildren(
                 seq = lastSeq,
                 id = wire.id,
                 n = node.children.size.toUInt(),
             ),
         )
-        trace?.invoke(TraceEvent.Mount(seq = lastSeq, id = wire.id))
+        emitTrace(TraceEvent.Mount(seq = lastSeq, id = wire.id))
         return node
     }
 
@@ -550,7 +562,7 @@ public class ShadowTree(
 
     internal fun emitStepEnd() {
         stepCount++
-        trace?.invoke(
+        emitTrace(
             TraceEvent.StepEnd(
                 seq = lastSeq,
                 i = stepCount,
@@ -602,6 +614,10 @@ public class ShadowTree(
         // A component-kind node (kind "0", i.e. NodeKind.component) that resolves
         // to no primitive adapter is backed by the container adapter, which
         // simply hosts its children (mirrors the iOS dev runtime).
-        return if (kind == "0") FluxUiKit.adapters["container"] else null
+        return if (kind == "0") {
+            FluxUiKit.adapters["container"]?.create()
+        } else {
+            null
+        }
     }
 }

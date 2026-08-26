@@ -20,6 +20,23 @@ public interface FluxTransport : Closeable {
 
     /** True once [connect] has completed. */
     public fun isConnected(): Boolean
+
+    /**
+     * Subscribes an extra frame listener (in addition to the one passed to
+     * [connect]). Used by [dev.flux.host.FluxExecutor] to await `StringInterned`
+     * replies for the dynamic-interning RPC (brittleness 4d) without the main
+     * frame feed knowing about it.
+     *
+     * @param listener invoked for every received frame.
+     */
+    public fun addFrameListener(listener: (ByteArray) -> Unit)
+
+    /**
+     * Removes a listener previously registered with [addFrameListener].
+     *
+     * @param listener the listener to detach.
+     */
+    public fun removeFrameListener(listener: (ByteArray) -> Unit)
 }
 
 /**
@@ -33,10 +50,6 @@ public class MockTransport : FluxTransport {
 
     /** Frames that were sent back to the (pretend) server via [send]. */
     public val sent: MutableList<ByteArray> = mutableListOf()
-
-    public fun addFrameListener(listener: (ByteArray) -> Unit) {
-        frameSink.add(listener)
-    }
 
     /** Injects a raw frame into the transport as if received from the server. */
     public fun deliver(frame: ByteArray) {
@@ -53,6 +66,14 @@ public class MockTransport : FluxTransport {
     }
 
     override fun isConnected(): Boolean = connected
+
+    override fun addFrameListener(listener: (ByteArray) -> Unit) {
+        frameSink.add(listener)
+    }
+
+    override fun removeFrameListener(listener: (ByteArray) -> Unit) {
+        frameSink.remove(listener)
+    }
 
     override fun close() {
         frameSink.clear()

@@ -23,7 +23,10 @@ public interface StringResolver {
      * runtime (dynamic intern is out of scope per ADR-flux-0028); the default
      * resolver reproduces the `flux-vm-ref` oracle's `x*10_000_000 + y` proxy so
      * the golden vectors stay green, while [TableStringResolver] widens the
-     * proxy to a deterministic hash of the real joined text.
+     * proxy to a deterministic hash of the real joined text. The host never
+     * treats these as canonical ids — a string produced here must be interned
+     * through the dev server ([dev.flux.host.FluxExecutor.internString]) before
+     * it crosses the wire (brittleness 4d).
      */
     public fun concat(
         x: UInt,
@@ -37,16 +40,17 @@ public interface StringResolver {
      * fresh `StringId` so downstream prop resolution observes a real string.
      * Without a live table the host cannot grow the frame's string table at
      * runtime (dynamic intern is out of scope per ADR-flux-0028); the default
-     * resolver reproduces the `flux-vm-ref` oracle's FNV-1a-into-high-half proxy
-     * so the golden vectors stay green, while [TableStringResolver] widens the
-     * proxy to a deterministic hash of the real text.
+     * resolver reproduces the `flux-vm-ref` oracle's FNV-1a proxy so the golden
+     * vectors stay green, while [TableStringResolver] widens the proxy to a
+     * deterministic hash of the real text. The result is **not** a canonical id
+     * and must be interned via the dev server before it reaches the wire.
      */
     public fun intern(text: String): UInt {
         var h: UInt = 0x811c9dc5u
         for (b in text.toByteArray(Charsets.UTF_8)) {
             h = (h xor b.toUInt()) * 0x1000193u
         }
-        return 0x8000_0000u or (h and 0x7FFF_FFFFu)
+        return h
     }
 }
 
@@ -70,28 +74,56 @@ public object DecimalStringResolver : StringResolver {
 public class TableStringResolver(
     private val table: Map<UInt, String>,
 ) : StringResolver {
-    override fun resolve(id: UInt): String = table[id] ?: id.toString()
+    // Runtime-produced text (concatenations, `TO_STRING` renders) that is not
+    // part of the frame's literal string table. Keyed by the deterministic proxy
+    // id computed in [concat]/[intern] so [resolve] returns the *real* text
+    // (and therefore the *real* length under `STR_LEN`) rather than a decimal
+    // proxy. This is a host-internal cache, never a canonical wire id — a string
+    // here must still be interned through the dev server (brittleness 4d) before
+    // it crosses the wire.
+    private val extra = LinkedHashMap<UInt, String>()
+
+    override fun resolve(id: UInt): String = extra[id] ?: table[id] ?: id.toString()
 
     override fun concat(
         x: UInt,
         y: UInt,
     ): UInt {
         val joined = resolve(x) + resolve(y)
-        var h: UInt = 0xcbf29ce4u
-        for (b in joined.toByteArray(Charsets.UTF_8)) {
-            h = (h xor b.toUInt()) * 0x1000193u
-        }
-        // Bias away from small ids that collide with the frame's literal table.
-        return 0x8000_0000u or (h and 0x7FFF_FFFFu)
+        val id = internHash(joined)
+        extra[id] = joined
+        return id
     }
 
     override fun intern(text: String): UInt {
-        // Deterministic hash of the real text, biased into the high half so it
-        // never collides with the frame's literal string ids (ADR-0043).
+        val id = internHash(text)
+        extra[id] = text
+        return id
+    }
+
+    /** Deterministic, non-canonical proxy for [text] (FNV-1a). */
+    private fun internHash(text: String): UInt {
         var h: UInt = 0x811c9dc5u
         for (b in text.toByteArray(Charsets.UTF_8)) {
             h = (h xor b.toUInt()) * 0x1000193u
         }
-        return 0x8000_0000u or (h and 0x7FFF_FFFFu)
+        return h
+    }
+
+    /**
+     * Returns a copy of this resolver with [text] bound to [id]. Used by the
+     * executor to cache a server-interned string (brittleness 4d) so subsequent
+     * `STR_LEN`/`STR_CONCAT`/`TO_STRING` resolutions observe the canonical id.
+     * Runtime-produced [extra] entries are carried forward so a prior
+     * concatenation still resolves to real text.
+     */
+    public fun with(
+        text: String,
+        id: UInt,
+    ): TableStringResolver {
+        val next = table.toMutableMap().apply { put(id, text) }
+        val resolver = TableStringResolver(next)
+        resolver.extra.putAll(extra)
+        return resolver
     }
 }

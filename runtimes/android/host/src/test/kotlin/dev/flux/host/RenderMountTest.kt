@@ -1,11 +1,11 @@
 package dev.flux.host
 
+import dev.flux.host.ReactiveDispatcher
 import dev.flux.host.shadow.ShadowTree
-import dev.flux.host.shadow.displayText
 import dev.flux.host.shadow.buttonHandlerId
+import dev.flux.host.shadow.displayText
 import dev.flux.host.signal.SignalGraph
 import dev.flux.host.transport.MockTransport
-import dev.flux.host.vm.FluxValue
 import dev.flux.host.wire.FrameBuilder
 import dev.flux.host.wire.FrameDeserializer
 import dev.flux.host.wire.WireValue
@@ -15,7 +15,6 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
-import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 /**
@@ -73,7 +72,14 @@ class RenderMountTest {
             val bytes = counterBytes()
             val frame = FrameDeserializer.deserialize(bytes)
             val tree = ShadowTree(AdapterRegistry.fromStringTable(stdlibEntries().map { (id, k) -> StringTableEntry(id, k) }))
-            val executor = FluxExecutor(tree, SignalGraph(), MockTransport(), vmScope = TestScope(StandardTestDispatcher(testScheduler)), reactiveDispatcher = StandardTestDispatcher(testScheduler))
+            val executor =
+                FluxExecutor(
+                    tree,
+                    SignalGraph(),
+                    MockTransport(),
+                    vmScope = TestScope(StandardTestDispatcher(testScheduler)),
+                    reactiveDispatcher = ReactiveDispatcher.test(StandardTestDispatcher(testScheduler)),
+                )
             val root = tree.applyFrame(frame, executor)
 
             // The renderer would bind exactly this root node (the old code only

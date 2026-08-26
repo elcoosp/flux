@@ -1,5 +1,6 @@
 package dev.flux.host
 
+import dev.flux.host.ReactiveDispatcher
 import dev.flux.host.shadow.ShadowTree
 import dev.flux.host.shadow.TraceEvent
 import dev.flux.host.signal.SignalGraph
@@ -87,7 +88,13 @@ class TraceDriverTest {
             val transport = MockTransport()
             val scope = TestScope(StandardTestDispatcher(testScheduler))
             val executor =
-                FluxExecutor(tree, signals, transport, vmScope = scope, reactiveDispatcher = StandardTestDispatcher(testScheduler))
+                FluxExecutor(
+                    tree,
+                    signals,
+                    transport,
+                    vmScope = scope,
+                    reactiveDispatcher = ReactiveDispatcher.test(StandardTestDispatcher(testScheduler)),
+                )
             executor.onError = { throw AssertionError("executor error: $it") }
 
             // Apply the 1000-node frame (build pass).
@@ -130,7 +137,13 @@ class TraceDriverTest {
             val transport = MockTransport()
             val scope = TestScope(StandardTestDispatcher(testScheduler))
             val executor =
-                FluxExecutor(tree, signals, transport, vmScope = scope, reactiveDispatcher = StandardTestDispatcher(testScheduler))
+                FluxExecutor(
+                    tree,
+                    signals,
+                    transport,
+                    vmScope = scope,
+                    reactiveDispatcher = ReactiveDispatcher.test(StandardTestDispatcher(testScheduler)),
+                )
             executor.onError = { throw AssertionError("executor error: $it") }
 
             tree.applyFrame(FrameDeserializer.deserialize(counter1000Bytes()), executor)
@@ -161,7 +174,13 @@ class TraceDriverTest {
             val transport = MockTransport()
             val scope = TestScope(StandardTestDispatcher(testScheduler))
             val executor =
-                FluxExecutor(tree, signals, transport, vmScope = scope, reactiveDispatcher = StandardTestDispatcher(testScheduler))
+                FluxExecutor(
+                    tree,
+                    signals,
+                    transport,
+                    vmScope = scope,
+                    reactiveDispatcher = ReactiveDispatcher.test(StandardTestDispatcher(testScheduler)),
+                )
             executor.onError = { throw AssertionError("executor error: $it") }
 
             val bytes =
