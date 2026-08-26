@@ -1,5 +1,6 @@
 package dev.flux.host.vm.debug
 
+import java.io.ByteArrayOutputStream
 import java.util.concurrent.ConcurrentLinkedQueue
 
 /**

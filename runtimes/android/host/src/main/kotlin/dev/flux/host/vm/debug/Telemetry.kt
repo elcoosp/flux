@@ -1,6 +1,7 @@
 package dev.flux.host.vm.debug
 
 import dev.flux.host.vm.FluxValue
+import java.io.ByteArrayOutputStream
 
 /**
  * DevTools bidirectional debug telemetry (spec §3, §4).
@@ -76,9 +77,9 @@ public sealed interface DebugCommand {
 }
 
 /** The `MAGIC` header for every Flux wire frame (Appendix D §D.1). */
-private const val MAGIC: UInt = 0x465C5558u
+internal const val MAGIC: UInt = 0x465C5558u
 
-private const val FRAME_TELEMETRY: UByte = 0x10u
+internal const val FRAME_TELEMETRY: UByte = 0x10u
 private const val FRAME_DEBUG_COMMAND: UByte = 0x11u
 
 /** Encodes a [FluxValue] into [out] per Appendix D §D.5. */
@@ -124,12 +125,12 @@ private fun encodeValue(
     }
 }
 
-private fun writeUIntLE(
+private fun writeUIntLE0(
     out: ByteArrayOutputStream,
     v: UInt,
 ) = out.write(v.toInt())
 
-private fun writeUShortLE(
+private fun writeUShortLE0(
     out: ByteArrayOutputStream,
     v: UShort,
 ) {
@@ -137,25 +138,25 @@ private fun writeUShortLE(
     out.write((v.toInt() ushr 8) and 0xFF)
 }
 
-private fun writeLongLE(
+private fun writeLongLE0(
     out: ByteArrayOutputStream,
     v: Long,
 ) {
     var x = v
     repeat(8) {
         out.write((x.toInt() and 0xFF))
-        x = x ushr 8
+        x = x shr 8
     }
 }
 
-private fun ByteArrayOutputStream.writeUIntLE(v: UInt) = writeUIntLE(this, v)
+private fun ByteArrayOutputStream.writeUIntLE(v: UInt) = writeUIntLE0(this, v)
 
-private fun ByteArrayOutputStream.writeUShortLE(v: UShort) = writeUShortLE(this, v)
+private fun ByteArrayOutputStream.writeUShortLE(v: UShort) = writeUShortLE0(this, v)
 
-private fun ByteArrayOutputStream.writeLongLE(v: Long) = writeLongLE(this, v)
+private fun ByteArrayOutputStream.writeLongLE(v: Long) = writeLongLE0(this, v)
 
 /** Encodes this event as a length-prefixed union body (no frame header). */
-private fun TelemetryEvent.encodeBody(out: ByteArrayOutputStream) {
+internal fun TelemetryEvent.encodeBody(out: ByteArrayOutputStream) {
     val body = ByteArrayOutputStream()
     when (this) {
         is TelemetryEvent.VmStep -> {
@@ -202,7 +203,7 @@ private fun TelemetryEvent.encodeBody(out: ByteArrayOutputStream) {
     }
     // Length-prefix (u32 LE) the body, back-patched at the front.
     val bytes = body.toByteArray()
-    writeUIntLE(out, bytes.size.toUInt())
+    writeUIntLE0(out, bytes.size.toUInt())
     out.write(bytes)
 }
 
@@ -213,14 +214,14 @@ private fun writeULongLE(
     var x = v
     repeat(8) {
         out.write((x.toInt() and 0xFF))
-        x = x ushr 8
+        x = x shr 8
     }
 }
 
 private fun writeDoubleBitsLE(
     out: ByteArrayOutputStream,
     v: Double,
-) = writeLongLE(out, v.toBits())
+) = writeLongLE0(out, v.toBits())
 
 /** Encodes this event into a full `Telemetry` frame (Appendix D §D.12). */
 public fun TelemetryEvent.toFrameBytes(version: UByte = 0x01u): ByteArray {

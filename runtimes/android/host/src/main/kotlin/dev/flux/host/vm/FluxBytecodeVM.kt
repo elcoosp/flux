@@ -1,5 +1,8 @@
 package dev.flux.host.vm
 
+import dev.flux.host.vm.debug.TelemetryBridge
+import dev.flux.host.vm.debug.TelemetryEvent
+
 /**
  * The native Kotlin Flux bytecode VM, a faithful port of the Rust
  * `flux-vm-ref` oracle (FLUX-005) so the Android host agrees with the Swift and
@@ -88,6 +91,16 @@ public object FluxBytecodeVM {
                     is StepResult.JumpTo -> result.index
                     StepResult.Proceed -> ipIndex + 1
                 }
+            if (TelemetryBridge.sink != null) {
+                TelemetryBridge.emit(
+                    TelemetryEvent.VmStep(
+                        bytecodeOffset = instr.offset,
+                        opcode = instr.opcode.byte.toUByte(),
+                        registers = regs.toList(),
+                        gasRemaining = gas,
+                    ),
+                )
+            }
         }
 
         return VmResult.Success(VmOutcome(signals.snapshot(), regs, ENTRY_GAS - gas))
