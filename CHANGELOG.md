@@ -8,6 +8,26 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### FLUX-011 — codegen backends: Component bridge fix — PARTIAL
+
+- Fixed the codegen bridge key mismatch: both `flux-codegen-swift` and
+  `flux-codegen-kotlin` derived the component lookup key with
+  `ExprTag(COMPONENT_TAG)`, but `flux-ir::lower::ids` records components
+  under `DeclTag(3)` (disjoint byte ranges). The IDs never matched, so
+  `Bridge::component(id)` always returned `None` and both emitters fell
+  into the `FluxComponent_<id>`/`EmptyView` placeholder branch. Now keyed
+  under `DeclTag(3)` — b31/b34/b37/b39 codegen trees are structurally
+  equal to the dev tree (parity equivalence holds for those examples).
+- **Blocker (out of scope):** 6/10 B.3 examples (b32,b33,b35,b36,b38,b310)
+  still fail the parity gate, but at the `flux-ir` lowering step
+  (`unsupported handler operand: Call {...}` for `Numeric.one()` /
+  `Rectangle(...)`; `unsupported handler expression` for
+  `router.navigate(...)`, `refetch()`, `Auth.login(...)`, `...` spreads).
+  These live in `crates/flux-ir/src/lower/bytecode.rs` (issue 5's
+  lowering scope), not the codegen crates. The gate cannot reach 10/10
+  from the codegen side; the flux-ir handler-lower gap must be landed
+  first. Committed as `e50e518`.
+
 ### DevTools — bidirectional telemetry suite (FLUX-DevTools) — DONE
 
 Implemented the Flux DevTools suite per the 2026-08-26 spec: a bidirectional
