@@ -83,6 +83,9 @@ struct FluxRootView: View {
             if let error = executor.lastError {
                 ErrorOverlay(error: error)
             }
+            if let serverError = executor.serverError {
+                ServerErrorOverlay(error: serverError)
+            }
             if connection.isReconnecting {
                 ReconnectingOverlay()
             }
@@ -143,6 +146,33 @@ struct ErrorOverlay: View {
 /// FR-017 "Reconnecting…" banner shown while the dev-server socket is down.
 /// Reuses the error-overlay's material styling so the two banners read as one
 /// family; it is informational (amber) rather than a fault (red).
+/// Inline overlay shown when the dev server reports a failed recompile via an
+/// `Error` (0x03) frame. Mirrors `ErrorOverlay`'s material styling; it is a red
+/// fault banner that keeps the last good tree visible (Appendix E §E.6).
+struct ServerErrorOverlay: View {
+    let error: ServerError
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Flux compile error")
+                .font(.headline)
+            Text(error.message)
+                .font(.subheadline)
+                .textSelection(.enabled)
+            if let location = error.location {
+                Text(location)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding()
+        .background(.thinMaterial)
+        .cornerRadius(12)
+        .padding()
+        .frame(maxWidth: .infinity, alignment: .top)
+    }
+}
+
 struct ReconnectingOverlay: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {

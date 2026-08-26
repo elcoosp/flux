@@ -57,6 +57,27 @@ struct NodeSignalMeta: Equatable, Sendable {
     let layout: [UInt16]
 }
 
+/// A server-side compile/type error delivered via an `Error` (0x03) frame
+/// (Appendix D §D.12.3). The Rust encoder writes only `message` and an optional
+/// `span`; there is intentionally no diagnostics array on the wire.
+///
+/// `message` is `public` so the host app can render it from a separate module;
+/// `span` is internal to the decoder and exposed to consumers via `location`.
+public struct ServerError: Equatable, Sendable {
+    /// Human-readable error message from the dev server.
+    public let message: String
+    /// Source span where the error occurred, if the server supplied one.
+    let span: FluxSpan?
+
+    /// A human-readable location string (`"at byte offset … (file …)"`), or
+    /// `nil` when the server sent no span. Computed within the module so the
+    /// (internal) `FluxSpan` type never crosses the module boundary.
+    public var location: String? {
+        guard let span else { return nil }
+        return "at byte offset \(span.start)…\(span.end) (file \(span.fileId))"
+    }
+}
+
 /// A fully decoded frame. `full` frames (Init) carry a root node; patch frames
 /// carry `patches`/`handlers`/`strings` deltas.
 ///
@@ -84,6 +105,54 @@ struct FluxFrame: Equatable, Sendable {
     let componentNames: [StringEntry]
     /// Per-node signal-graph metadata (ADR-0027 §T13/T14): the signals each node
     /// reads and, for dynamic nodes, the prop-thunk closure that re-materialises
-    /// its props against the live signal graph.
+    /// re-materialises its props against the live signal graph.
     let signalMeta: [UInt32: NodeSignalMeta]
+    /// Server-side compile/type error delivered via an `Error` (0x03) frame.
+    /// `nil` on normal frames; when present the executor surfaces it as a banner
+    /// and leaves the last good tree intact (Appendix E §E.6), so a failed
+    /// recompile does not blank the screen.
+    let error: ServerError?
+    /// `true` for housekeeping frames (`Heartbeat` 0x05, `InternString` 0x07,
+    /// `StringInterned` 0x08) that carry no tree mutation. The executor
+    /// short-circuits these before touching the live tree or clearing prior
+    /// fault state.
+    let isControl: Bool
+
+    /// Designated initializer. The two trailing parameters default so existing
+    /// call sites (which omit them) keep compiling; the `decode` functions and
+    /// tests pass them explicitly. An explicit initializer is used instead of
+    /// relying on the synthesized memberwise initializer so the defaulted
+    /// `error`/`isControl` parameters are unambiguously part of the API surface
+    /// across build-cache states.
+    init(
+        version: UInt8,
+        seq: UInt32,
+        flags: UInt8,
+        root: ShadowNode?,
+        nodes: [UInt32: ShadowNode],
+        patches: [Patch],
+        handlers: [HandlerDef],
+        strings: [StringEntry],
+        state: [StateCell],
+        files: [FileEntry],
+        componentNames: [StringEntry],
+        signalMeta: [UInt32: NodeSignalMeta],
+        error: ServerError? = nil,
+        isControl: Bool = false
+    ) {
+        self.version = version
+        self.seq = seq
+        self.flags = flags
+        self.root = root
+        self.nodes = nodes
+        self.patches = patches
+        self.handlers = handlers
+        self.strings = strings
+        self.state = state
+        self.files = files
+        self.componentNames = componentNames
+        self.signalMeta = signalMeta
+        self.error = error
+        self.isControl = isControl
+    }
 }

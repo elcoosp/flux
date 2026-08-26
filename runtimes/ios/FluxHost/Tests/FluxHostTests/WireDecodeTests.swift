@@ -210,4 +210,59 @@ final class WireDecodeTests: XCTestCase {
         var r2 = ByteReader(encValue(rec))
         XCTAssertEqual(try FrameDeserializer.decodeValue(&r2), rec)
     }
+
+    /// An `Error` (0x03) frame decodes into a `FluxFrame` whose `error` carries
+    /// the message and optional span — rather than throwing `unknownTag`.
+    func testErrorFrameDecodes() throws {
+        // Payload: seq(u32)=11, message="boom" (u16 len + utf8), has_span=1,
+        // span(file=3, start=4, end=9).
+        let payload: [UInt8] = cat([
+            u32(11),
+            u16(4), Array("boom".utf8),
+            [0x01],
+            u32(3), u32(4), u32(9),
+        ])
+        let frame = cat([
+            u32(FrameDeserializer.magic), [0x01], [0x03], // version, kind=Error
+            payload,
+        ])
+        let decoded = try FrameDeserializer.decode(frame)
+        XCTAssertNil(decoded.root)
+        XCTAssertFalse(decoded.isControl)
+        let err = try XCTUnwrap(decoded.error)
+        XCTAssertEqual(err.message, "boom")
+        let span = try XCTUnwrap(err.span)
+        XCTAssertEqual(span.fileId, 3)
+        XCTAssertEqual(span.start, 4)
+        XCTAssertEqual(span.end, 9)
+    }
+
+    /// A `Heartbeat` (0x05) frame decodes to a control no-op rather than an error.
+    func testHeartbeatFrameIsControl() throws {
+        let frame = cat([
+            u32(FrameDeserializer.magic), [0x01], [0x05], u32(42), // version, kind, seq
+        ])
+        let decoded = try FrameDeserializer.decode(frame)
+        XCTAssertTrue(decoded.isControl)
+        XCTAssertNil(decoded.error)
+    }
+
+    /// `InternString` (0x07) and `StringInterned` (0x08) decode to control
+    /// no-ops rather than throwing `unknownTag`.
+    func testInternFramesAreControl() throws {
+        // InternString: len(u16)=3, bytes("abc").
+        let intern = cat([
+            u32(FrameDeserializer.magic), [0x01], [0x07],
+            u16(3), Array("abc".utf8),
+        ])
+        let d1 = try FrameDeserializer.decode(intern)
+        XCTAssertTrue(d1.isControl)
+
+        // StringInterned: id(u32)=77.
+        let interned = cat([
+            u32(FrameDeserializer.magic), [0x01], [0x08], u32(77),
+        ])
+        let d2 = try FrameDeserializer.decode(interned)
+        XCTAssertTrue(d2.isControl)
+    }
 }

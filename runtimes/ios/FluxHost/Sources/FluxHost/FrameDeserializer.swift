@@ -15,6 +15,14 @@ private enum FrameKind {
     static let deltaByte: UInt8 = 0x04
     /// `Delta` flag bit indicating a trailing `signal_meta` section.
     static let flagNodeHasSignalDeps: UInt8 = 0x40
+    /// `Error` frame type byte (Appendix D §D.12.3).
+    static let errorByte: UInt8 = 0x03
+    /// `Heartbeat` frame type byte (Appendix D §D.12.5).
+    static let heartbeatByte: UInt8 = 0x05
+    /// `InternString` request frame type byte (Appendix D §D.12.6, Host → Server).
+    static let internStringByte: UInt8 = 0x07
+    /// `StringInterned` response frame type byte (Appendix D §D.12.7, Server → Host).
+    static let stringInternedByte: UInt8 = 0x08
 }
 
 /// Decodes Flux binary frames (Appendix D) into host-side `FluxFrame` models.
@@ -52,6 +60,11 @@ enum FrameDeserializer {
             return try decodeInit(&r, version: version)
         case FrameKind.deltaByte:
             return try decodeDelta(&r, version: version)
+        case FrameKind.errorByte:
+            return try decodeError(&r, version: version)
+        case FrameKind.heartbeatByte, FrameKind.internStringByte, FrameKind.stringInternedByte:
+            // Housekeeping frames: no tree mutation, no reconciler action.
+            return controlFrame(version: version, kind: kind)
         default:
             throw WireError.unknownTag(offset: 5, tag: kind)
         }
@@ -178,6 +191,58 @@ enum FrameDeserializer {
             files: [],
             componentNames: [],
             signalMeta: signalMeta
+        )
+    }
+
+    /// Decodes an `Error` frame (Appendix D §D.12.3).
+    ///
+    /// The Rust encoder lays out `seq(u32) | message(u16-len UTF-8) |
+    /// has_span(u8) | span?`; a `span` is present only when `has_span != 0`.
+    /// There is deliberately no diagnostics array on the wire — the handoff's
+    /// assumed `diagnostics: [String]` field does not exist in the encoder.
+    private static func decodeError(_ r: inout ByteReader, version: UInt8) throws -> FluxFrame {
+        let seq = try r.u32()
+        let msgLen = Int(try r.u16())
+        let message = try r.utf8(msgLen)
+        let hasSpan = try r.u8()
+        let span: FluxSpan? = (hasSpan != 0) ? try decodeSpan(&r) : nil
+        return FluxFrame(
+            version: version,
+            seq: seq,
+            flags: FrameKind.errorByte,
+            root: nil,
+            nodes: [:],
+            patches: [],
+            handlers: [],
+            strings: [],
+            state: [],
+            files: [],
+            componentNames: [],
+            signalMeta: [:],
+            error: ServerError(message: message, span: span),
+            isControl: false
+        )
+    }
+
+    /// Builds a no-op `FluxFrame` for housekeeping frames that carry no tree
+    /// data (`Heartbeat` 0x05, `InternString` 0x07, `StringInterned` 0x08).
+    /// The executor short-circuits these before touching the live tree.
+    private static func controlFrame(version: UInt8, kind: UInt8) -> FluxFrame {
+        FluxFrame(
+            version: version,
+            seq: 0,
+            flags: kind,
+            root: nil,
+            nodes: [:],
+            patches: [],
+            handlers: [],
+            strings: [],
+            state: [],
+            files: [],
+            componentNames: [],
+            signalMeta: [:],
+            error: nil,
+            isControl: true
         )
     }
 

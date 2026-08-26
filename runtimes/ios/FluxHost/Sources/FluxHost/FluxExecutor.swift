@@ -58,6 +58,10 @@ public final class FluxRuntime: FluxExecutor {
     private var currentRootId: UInt32?
     /// The most recent VM error, surfaced to the UI overlay.
     public private(set) var lastError: VMError?
+    /// The most recent server-side compile/type error, delivered via an `Error`
+    /// (0x03) frame. `nil` until a recompile fails. Surfaced as a banner overlay
+    /// while the last successfully-rendered tree stays on screen (Appendix E §E.6).
+    public private(set) var serverError: ServerError?
     /// The report from the most recent `dispatch`'s dirty-set reconcile (R1), for
     /// test assertions; empty when the dispatch touched no signal-dependent node.
     private(set) var lastReconcile: ReconcileReport = ReconcileReport()
@@ -126,7 +130,20 @@ public final class FluxRuntime: FluxExecutor {
     /// - Returns: the node ids built or updated.
     @discardableResult
     func apply(_ frame: FluxFrame) -> [UInt32] {
+        // Housekeeping frames (`Heartbeat`/`InternString`/`StringInterned`)
+        // carry no tree data. Ignore them without disturbing the live tree or
+        // wiping a previously-displayed fault (a heartbeat must never clear an
+        // error banner).
+        guard !frame.isControl else { return [] }
+        // A server `Error` frame reports a failed recompile. Surface it as a
+        // banner and keep the last good tree on screen; do not reconcile an
+        // empty payload (that would blank the UI). Appendix E §E.6.
+        if let serverError = frame.error {
+            self.serverError = serverError
+            return []
+        }
         lastError = nil
+        serverError = nil
         for cell in frame.state { graph.seed(cell.signalId, cell.value) }
         for str in frame.strings { table.intern(str.stringId, str.value) }
         if let root = frame.root {
