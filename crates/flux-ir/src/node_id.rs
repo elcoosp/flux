@@ -9,6 +9,7 @@
 //! `docs/adr/ir-node-id-bridge.md`); this crate delegates to it so the IR and
 //! the type checker produce identical IDs for identical source constructs.
 
+use flux_syntax::ExprTag;
 use flux_syntax::Key;
 use flux_syntax::NodeId;
 use flux_syntax::NodeKind;
@@ -41,7 +42,11 @@ use flux_syntax::Span;
 /// there is no fallible path.
 #[must_use]
 pub fn compute_node_id(parent: NodeId, kind: NodeKind, span: Span, key: Option<Key>) -> NodeId {
-    flux_syntax::compute_node_id(parent, kind.tag(), span, key)
+    // `ExprTag::into_u8` returns the `NodeKind` discriminant unchanged, so this
+    // is byte-identical to the historical `compute_node_id(parent, kind.tag(),
+    // …)` call — the canonical `compute_node_id` now requires `impl NodeTag`
+    // (ADR/issue 3a).
+    flux_syntax::compute_node_id(parent, ExprTag(kind.tag()), span, key)
 }
 
 #[cfg(test)]
@@ -115,11 +120,11 @@ mod tests {
         for kind in [NodeKind::Component, NodeKind::Primitive, NodeKind::ForEach] {
             assert_eq!(
                 compute_node_id(0, kind, span, None),
-                flux_syntax::compute_node_id(0, kind.tag(), span, None),
+                flux_syntax::compute_node_id(0, ExprTag(kind.tag()), span, None),
             );
             assert_eq!(
                 compute_node_id(7, kind, span, Some(99)),
-                flux_syntax::compute_node_id(7, kind.tag(), span, Some(99)),
+                flux_syntax::compute_node_id(7, ExprTag(kind.tag()), span, Some(99)),
             );
         }
     }

@@ -9,7 +9,7 @@
 //! wire discriminant, when deriving IDs.
 
 use flux_parser::{Decl, Expr};
-use flux_syntax::{NodeId, compute_node_id};
+use flux_syntax::{DeclTag, ExprTag, NodeId, compute_node_id};
 
 /// Structural tag the type checker assigns to *every* expression node.
 pub(crate) const EXPR_TAG: u8 = 10;
@@ -34,6 +34,12 @@ pub(crate) enum ExprNodeKind {
 }
 
 /// Derives the [`NodeId`] for a declaration, matching the type checker.
+///
+/// The tag is wrapped in [`DeclTag`] (not [`ExprTag`]): the node-ID hash folds
+/// the tag *family* in, so a declaration ID must use the same family the type
+/// checker used when it recorded the inferred type under `TypedAST::types`.
+/// Mismatching the family (`ExprTag` vs [`DeclTag`]) silently produces a
+/// different ID and breaks the ADR-0027 node-ID bridge.
 #[must_use]
 pub(crate) fn decl_node_id(decl: &Decl) -> NodeId {
     let tag = match decl {
@@ -48,7 +54,7 @@ pub(crate) fn decl_node_id(decl: &Decl) -> NodeId {
         #[allow(unreachable_patterns)]
         _ => 9,
     };
-    compute_node_id(0, tag, decl.span(), None)
+    compute_node_id(0, DeclTag(tag), decl.span(), None)
 }
 
 /// Derives the [`NodeId`] for an expression-origin IR node.
@@ -59,5 +65,5 @@ pub(crate) fn decl_node_id(decl: &Decl) -> NodeId {
 /// lowered statically.
 #[must_use]
 pub(crate) fn expr_node_id(expr: &Expr, _kind: ExprNodeKind) -> NodeId {
-    compute_node_id(0, EXPR_TAG, expr.span, None)
+    compute_node_id(0, ExprTag(EXPR_TAG), expr.span, None)
 }
