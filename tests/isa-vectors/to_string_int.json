@@ -1,0 +1,20 @@
+{
+  "bytecode_hex": "b0002a00000000000000d0010000",
+  "description": "TO_STRING renders an Int register as its decimal text and interns it.",
+  "expected_error": null,
+  "expected_gas_used": 2,
+  "expected_registers": {
+    "r0": {
+      "type": "Int",
+      "value": 42
+    },
+    "r1": {
+      "type": "Str",
+      "value": 2279835011
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "to_string_int",
+  "payload": null
+}
