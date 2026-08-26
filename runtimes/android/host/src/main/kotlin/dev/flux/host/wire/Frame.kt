@@ -111,6 +111,11 @@ public sealed interface WireChild {
  * @property patches the patch entries (delta frames only).
  * @property root the root node (full-tree Init frames only).
  * @property strings newly interned strings (string-table delta).
+ * @property componentNames `ComponentId → component-name` bindings (Appendix D
+ *   §D.9), a SEPARATE id space from [strings]. The registry resolves each node's
+ *   adapter from these; the string resolver must NOT see them (a `ComponentId`
+ *   and a literal `StringId` can share a numeric value, which would corrupt
+ *   resolution if merged).
  * @property stateDelta initial/updated signal cells.
  * @property handlers frame-level handler definitions (Appendix D §D.8, Gap G1).
  * @property bytecodeBlob the shared handler-bytecode blob (Appendix D §D.12)
@@ -126,6 +131,7 @@ public data class Frame(
     val patches: List<Patch>,
     val root: WireNode?,
     val strings: List<StringEntry>,
+    val componentNames: List<StringEntry> = emptyList(),
     val stateDelta: List<Pair<UInt, WireValue>>,
     val handlers: List<HandlerDef> = emptyList(),
     val bytecodeBlob: BytecodeBlob? = null,

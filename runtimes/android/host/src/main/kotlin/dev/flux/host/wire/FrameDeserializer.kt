@@ -11,15 +11,24 @@ package dev.flux.host.wire
  * producing a half-built tree, so the host can show a red error overlay instead
  * of crashing (Appendix E §E.6).
  *
- * The frame layout follows Appendix D exactly:
- * `magic(4) version(1) seq(4) flags(1) patch_count(2) handler_count(2)
- * string_count(2) [patches] [handlers] [strings] [state_delta]`.
- * For a full-tree (bit 0 set) frame the root node follows the string section in
- * place of patches; the Init frame (§D.12.2) carries `root + state_seed`.
+ * The 6-byte header is magic(4) | version(1) | kind(1); the remaining layout
+ * depends on kind (Appendix D §D.1):
+ * - FRAME_INIT (0x02): seq, root, a u32 count of extraNodes, the signal
+ *   state_seed, the source_map, the string_count (u32) + string table, then the
+ *   handler (closure) section.
+ * - FRAME_DELTA (0x04): seq, flags, patch_count, handler_count, string_count
+ *   (all u16), then the patch stream, the string delta, the handler section.
  */
 public object FrameDeserializer {
-    /** The little-endian magic `"FLUX"` (Appendix D §D.1). */
-    public const val MAGIC: UInt = 0x58554C46u
+    /** Little-endian magic FLUX (Appendix D §D.1). */
+    public const val MAGIC: UInt = 0x465C5558u
+
+    /** Frame kind constants mirroring crates/flux-ir-serde/src/frame.rs. */
+    private const val FRAME_INIT: UByte = 0x02u
+    private const val FRAME_DELTA: UByte = 0x04u
+
+    /** Delta flag bit gating a trailing signal_meta section. */
+    private const val FLAG_NODE_HAS_SIGNAL_DEPS: UByte = 0x40u
 
     /** Decodes [bytes] into a [Frame], or raises [WireError] on a malformed frame. */
     public fun deserialize(bytes: ByteArray): Frame {
@@ -29,57 +38,122 @@ public object FrameDeserializer {
             throw WireError("bad magic 0x%08X (expected 0x%08X)".format(magic.toLong(), MAGIC.toLong()))
         }
         val version = r.u8().toUByte()
-        val seq = r.u32().toUInt()
-        val flags = r.u8()
-        val fullTree = (flags and 0x01) != 0
-        val pureEncoded = (flags and 0x20) != 0
-        val patchCount = r.u16()
-        val handlerCount = r.u16()
-        val stringCount = r.u16()
-
-        val patches = ArrayList<Patch>(patchCount)
-        repeat(patchCount) { patches.add(decodePatch(r, pureEncoded)) }
-
-        // Handler section (Gap G1, Appendix D §D.8 + §D.12): a shared bytecode
-        // blob followed by a `HandlerDef` stream whose `ClosureRef`s index the
-        // blob by offset/length. The MLP host previously dropped these bytes; we
-        // now decode them so [FluxExecutor.receiveFrame] can register handlers.
-        val (blob, handlers) =
-            if (handlerCount > 0) {
-                decodeBytecodeBlob(r) to
-                    ArrayList<HandlerDef>(handlerCount).also { defs ->
-                        repeat(handlerCount) { defs.add(decodeHandlerDef(r)) }
-                    }
-            } else {
-                BytecodeBlob(ByteArray(0), 0, 0) to emptyList<HandlerDef>()
-            }
-
-        val strings = ArrayList<StringEntry>(stringCount)
-        repeat(stringCount) { strings.add(decodeStringEntry(r)) }
-
-        val stateDelta = if ((flags and 0x08) != 0) decodeStateDelta(r) else emptyList()
-
-        // Full-tree node block (§D.3) is decoded LAST: the root node, then the
-        // flat extras list that follows it until end of frame. Both the patches
-        // above and any handler/string/state bytes have been consumed first, so
-        // the `while (r.has(1))` scan only reaches genuine node bytes.
-        val (root, extraNodes) =
-            if (fullTree) {
-                val rootNode = decodeNode(r, pureEncoded)
-                val extras = ArrayList<WireNode>()
-                while (r.has(1)) extras.add(decodeNode(r, pureEncoded))
-                rootNode to extras
-            } else {
-                null to emptyList<WireNode>()
-            }
-
-        return Frame(version, seq, fullTree, patches, root, strings, stateDelta, handlers, blob, extraNodes)
+        val kind = r.u8().toUByte()
+        return when (kind) {
+            FRAME_INIT -> decodeInit(r, version)
+            FRAME_DELTA -> decodeDelta(r, version)
+            else -> throw WireError("unknown frame kind 0x%02X".format(kind.toInt()))
+        }
     }
 
-    private fun decodePatch(
+    /** Decodes an Init (full-tree) frame (Appendix D §D.12.2). */
+    private fun decodeInit(
         r: ByteReader,
-        pureEncoded: Boolean,
-    ): Patch {
+        version: UByte,
+    ): Frame {
+        val seq = r.u32().toUInt()
+        val root = decodeNode(r)
+        // Appendix D §D.12.2: the full tree is root followed by a u32 count of
+        // descendant nodes, flat.
+        val extraCount = r.u32().toUInt()
+        val extraNodes = ArrayList<WireNode>(extraCount.toInt())
+        repeat(extraCount.toInt()) { extraNodes.add(decodeNode(r)) }
+        // signal state_seed: u16 count of (u32 signalId, value).
+        val seedCount = r.u16()
+        val stateDelta = ArrayList<Pair<UInt, WireValue>>(seedCount)
+        repeat(seedCount) {
+            val id = r.u32().toUInt()
+            stateDelta.add(id to decodeValue(r))
+        }
+        // source_map: u16 count of (u32 fileId, u16 len + utf8 path).
+        val smCount = r.u16()
+        repeat(smCount) {
+            r.u32() // fileId
+            val len = r.u16()
+            r.utf8(len) // path (consumed; not modeled on the Android Frame)
+        }
+        // string_count is a u32 (Appendix D §D.12.2). These are LITERAL strings
+        // only (text props, etc.); component-name interning lives in its own
+        // section below so the two id spaces never collide on the wire.
+        val strCount = r.u32().toUInt()
+        val strings = ArrayList<StringEntry>(strCount.toInt())
+        repeat(strCount.toInt()) { strings.add(decodeStringEntry(r)) }
+        // Appendix D §D.9: component-name interning, a SEPARATE `u16` count then
+        // `(u32 ComponentId, utf8 name)` pairs. These bind each node's
+        // `componentId` to its adapter name ("Text", "Column", ...). They are
+        // NOT string literals and MUST NOT be fed to the string resolver; the
+        // registry consumes them via `componentNames`.
+        val componentCount = r.u16()
+        val componentNames = ArrayList<StringEntry>(componentCount)
+        repeat(componentCount) {
+            val cid = r.u32().toUInt()
+            val nameLen = r.u16()
+            val name = r.utf8(nameLen)
+            componentNames.add(StringEntry(cid, name))
+        }
+        // Handler (closure) section (Appendix D §D.12, Gap G1): always present
+        // as a self-describing blob + HandlerDef stream.
+        val (blob, handlers) = decodeHandlerSection(r)
+        // ADR-0027 (FA-IRWIRE): optional signal_meta section. The counter ships
+        // none, so the trailing marker is 0 and the section is absent.
+        if (r.has(1)) r.u8()
+        return Frame(
+            version = version,
+            seq = seq,
+            fullTree = true,
+            patches = emptyList(),
+            root = root,
+            strings = strings,
+            componentNames = componentNames,
+            stateDelta = stateDelta,
+            handlers = handlers,
+            bytecodeBlob = blob,
+            extraNodes = extraNodes,
+        )
+    }
+
+    /** Decodes a Delta (patch) frame (Appendix D §D.1 + §D.2). */
+    private fun decodeDelta(
+        r: ByteReader,
+        version: UByte,
+    ): Frame {
+        val seq = r.u32().toUInt()
+        val flags = r.u8()
+        val patchCount = r.u16()
+        val handlerCount = r.u16()
+        val strCount = r.u16()
+        val patches = ArrayList<Patch>(patchCount)
+        repeat(patchCount) { patches.add(decodePatch(r)) }
+        val strings = ArrayList<StringEntry>(strCount)
+        repeat(strCount) { strings.add(decodeStringEntry(r)) }
+        val (blob, handlers) = decodeHandlerSection(r)
+        // ADR-0027 (FA-IRWIRE): signal_meta present only when the Delta flags
+        // carry FLAG_NODE_HAS_SIGNAL_DEPS.
+        if ((flags and FLAG_NODE_HAS_SIGNAL_DEPS.toInt()) != 0) r.u8()
+        return Frame(
+            version = version,
+            seq = seq,
+            fullTree = false,
+            patches = patches,
+            root = null,
+            strings = strings,
+            stateDelta = emptyList(),
+            handlers = handlers,
+            bytecodeBlob = blob,
+            extraNodes = emptyList(),
+        )
+    }
+
+    /** Decodes the handler (closure) section (Appendix D §D.12, Gap G1). */
+    private fun decodeHandlerSection(r: ByteReader): Pair<BytecodeBlob, List<HandlerDef>> {
+        val blob = decodeBytecodeBlob(r)
+        val defs = ArrayList<HandlerDef>(0)
+        val count = r.u16()
+        repeat(count) { defs.add(decodeHandlerDef(r)) }
+        return blob to defs
+    }
+
+    private fun decodePatch(r: ByteReader): Patch {
         val tag = r.u8().toUByte()
         return when (tag.toInt()) {
             0x01 ->
@@ -88,7 +162,7 @@ public object FrameDeserializer {
                     id = r.u32().toUInt(),
                     parentId = 0u,
                     index = 0u,
-                    node = decodeNode(r, pureEncoded),
+                    node = decodeNode(r),
                     diff = null,
                     keyCount = 0u,
                     keys = emptyList(),
@@ -116,7 +190,7 @@ public object FrameDeserializer {
                     id = 0u,
                     parentId = parent,
                     index = index,
-                    node = decodeNode(r, pureEncoded),
+                    node = decodeNode(r),
                     diff = null,
                     keyCount = 0u,
                     keys = emptyList(),
@@ -218,28 +292,14 @@ public object FrameDeserializer {
         return StringEntry(id, text)
     }
 
-    private fun decodeStateDelta(r: ByteReader): List<Pair<UInt, WireValue>> {
-        val cellCount = r.u16()
-        val cells = ArrayList<Pair<UInt, WireValue>>(cellCount)
-        repeat(cellCount) {
-            val id = r.u32().toUInt()
-            cells.add(id to decodeValue(r))
-        }
-        return cells
-    }
-
-    private fun decodeNode(
-        r: ByteReader,
-        pureEncoded: Boolean,
-    ): WireNode {
+    private fun decodeNode(r: ByteReader): WireNode {
         val id = r.u32().toUInt()
         val kindByte = r.u8()
-        // Resolve the wire kind byte to an adapter registry key. The MLP host
-        // maps well-known component kinds to their string tag; unknown bytes
-        // fall back to the decimal string so a test frame's custom kinds still
-        // resolve. Real component-name resolution (via the string table) lands
-        // in FLUX-016.
-        val kind = kindAlias(kindByte) ?: kindByte.toString()
+        // The wire kind byte is the NodeKind enum (0 = component, 1 = primitive);
+        // we keep it only as a fallback tag. Real resolution is by `componentId`
+        // against the synced string table (see AdapterRegistry / ShadowTree),
+        // which maps the id to the component name ("Text", "Column", ...).
+        val kind = kindByte.toString()
         val componentId = r.u32().toUInt()
         val propCount = r.u16()
         val props = ArrayList<Pair<UShort, WireValue>>(propCount)
@@ -256,30 +316,8 @@ public object FrameDeserializer {
         val spanFile = r.u32().toUInt()
         val spanStart = r.u32().toUInt()
         val spanEnd = r.u32().toUInt()
-        // MLP host extension: when the frame set the 0x20 flag, a purity byte
-        // follows the span. We thread it into `WireNode.isPure` so the
-        // reconciler can apply the §18.10 skip.
-        val isPure = if (pureEncoded) r.u8() != 0 else false
-        return WireNode(id, kind, componentId, props, children, handlerIds, isPure, spanFile, spanStart, spanEnd)
+        return WireNode(id, kind, componentId, props, children, handlerIds, false, spanFile, spanStart, spanEnd)
     }
-
-    /**
-     * Maps a wire node-kind byte to an adapter registry key. Returns `null` for
-     * unrecognized bytes (caller falls back to the decimal string). The seven
-     * dev adapter kinds (FLUX-009) are the only well-known mappings the MLP
-     * host resolves without a string table.
-     */
-    private fun kindAlias(byte: Int): String? =
-        when (byte) {
-            0x10 -> "text"
-            0x11 -> "button"
-            0x12 -> "column"
-            0x13 -> "row"
-            0x14 -> "text_field"
-            0x15 -> "screen"
-            0x16 -> "router"
-            else -> null
-        }
 
     private fun decodeChild(r: ByteReader): WireChild =
         when (val tag = r.u8()) {

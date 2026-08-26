@@ -9,11 +9,12 @@ class FrameBuilder {
     private val out = ArrayList<Byte>()
 
     fun magic() {
-        // "FLUX" little-endian: bytes F(0x46) L(0x4C) U(0x55) X(0x58).
-        out.add(0x46.toByte())
-        out.add(0x4C.toByte())
-        out.add(0x55.toByte())
+        // "FLUX" little-endian as a u32 = 0x465C5558, matching the Rust encoder
+        // (`write_magic_version` writes `w.u32(MAGIC)` → LE bytes 58 55 5C 46).
         out.add(0x58.toByte())
+        out.add(0x55.toByte())
+        out.add(0x5C.toByte())
+        out.add(0x46.toByte())
     }
 
     fun version(v: Int) = out.add(v.toByte())
@@ -42,6 +43,27 @@ class FrameBuilder {
     fun handlerCount(n: Int) = u16(n)
 
     fun stringCount(n: Int) = u16(n)
+
+    /**
+     * Writes the component-name interning section (Appendix D §D.9): a `u16`
+     * count then `(u32 ComponentId, u16 len, utf8 name)` pairs. This follows the
+     * literal string table in a full-tree frame and is a SEPARATE id space from
+     * the string literals. The deserializer requires exactly one such section,
+     * so every built frame emits it — pass an empty list for "no components".
+     */
+    fun componentSection(entries: List<Pair<UInt, String>> = emptyList()) {
+        u16(entries.size)
+        for ((cid, name) in entries) {
+            u32(cid.toInt())
+            val bytes = name.toByteArray(Charsets.UTF_8)
+            u16(bytes.size)
+            out.addAll(bytes.toList())
+        }
+        componentSectionEmitted = true
+    }
+
+    /** Tracks whether [componentSection] was already written for this frame. */
+    private var componentSectionEmitted: Boolean = false
 
     /**
      * Writes one string-table entry (Appendix D §D.9) as `(id, utf8 text)`.
@@ -161,7 +183,15 @@ class FrameBuilder {
         }
     }
 
-    fun build(): ByteArray = out.toByteArray()
+    fun build(): ByteArray {
+        // Appendix D §D.9: every full-tree frame carries a component-name
+        // section after the literal string table. If the caller didn't write
+        // one explicitly, emit an empty section so the decoder stays in sync
+        // with the wire layout (a missing section would misread the handler
+        // blob as component bytes).
+        if (!componentSectionEmitted) componentSection()
+        return out.toByteArray()
+    }
 
     private fun u8(v: Int) = out.add((v and 0xFF).toByte())
 

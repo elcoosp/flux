@@ -158,3 +158,33 @@ internal fun setField(
     }
     throw VmError(VmErrorKind.TYPE_MISMATCH, off)
 }
+
+/**
+ * Renders [value] as the text `TO_STRING` (0xD0, ADR-0043) produces.
+ *
+ * This is a cross-runtime contract: the Rust oracle, the Swift runtime and this
+ * Kotlin VM must produce byte-identical text for the same value, because a
+ * node's materialised props are compared against the release codegen output in
+ * the parity suite. An integral `Double` keeps one fractional digit (`1.0`),
+ * and a `StrVal` resolves through [strings] (falling back to its id when the
+ * table has no entry, which only happens outside a live frame).
+ */
+internal fun renderToString(
+    value: FluxValue,
+    strings: StringResolver,
+): String =
+    when (value) {
+        is FluxValue.IntVal -> value.value.toString()
+        is FluxValue.FloatVal -> {
+            val f = value.value
+            if (f.isFinite() && f == f.toLong().toDouble()) "%.1f".format(f) else f.toString()
+        }
+        is FluxValue.BoolVal -> value.value.toString()
+        is FluxValue.StrVal -> strings.resolve(value.id)
+        is FluxValue.HandlerRefVal -> "handler(${value.handlerId})"
+        is FluxValue.ListVal ->
+            "[${value.items.joinToString(", ") { renderToString(it, strings) }}]"
+        is FluxValue.RecordVal ->
+            "{${value.fields.joinToString(", ") { "${it.index}: ${renderToString(it.value, strings)}" }}}"
+        is FluxValue.NullVal -> "null"
+    }

@@ -12,6 +12,7 @@ import dev.flux.host.wire.toKitValue
 import dev.flux.ui.FluxAdapter
 import dev.flux.ui.FluxExecutor
 import dev.flux.ui.FluxNativeView
+import dev.flux.ui.FluxUiKit
 import dev.flux.ui.Props
 import java.lang.ref.WeakReference
 import dev.flux.host.FluxExecutor as HostExecutor
@@ -48,6 +49,11 @@ public class ShadowTree(
     internal val parents = LinkedHashMap<UInt, UInt>()
     internal var root: ShadowNode? = null
     private var executorRef: FluxExecutor? = null
+
+    // Resolves interned string ids (wire `StrVal`) to their text. Rebuilt from
+    // each frame's string table in `applyFrame` so `kitFromWire` can materialize
+    // real strings instead of raw ids (Appendix D §D.9).
+    internal var stringLookup: (UInt) -> String? = { null }
 
     // How many times each node's view has been reconciled (built or updated).
     // Used by the `@pure` skip (§18.10) and observable in tests.
@@ -111,6 +117,16 @@ public class ShadowTree(
         lastSeq = frame.seq
         if (frame.strings.isNotEmpty()) {
             registry = registry.withEntries(frame.strings.map { StringTableEntry(it.id, it.text) })
+            val table = frame.strings.associate { it.id to it.text }
+            stringLookup = { id -> table[id] }
+        }
+        // Appendix D §D.9: the Init frame's `component_names` section binds each
+        // `ComponentId` to its adapter name. These are a SEPARATE id space from
+        // the string literals in `frame.strings` and must not leak into the
+        // string resolver (a ComponentId and a StringId can share a numeric
+        // value). Feed them only to the registry.
+        if (frame.componentNames.isNotEmpty()) {
+            registry = registry.withEntries(frame.componentNames.map { StringTableEntry(it.id, it.text) })
         }
         if (frame.fullTree && frame.root != null) {
             val index = LinkedHashMap<UInt, WireNode>()
@@ -207,7 +223,7 @@ public class ShadowTree(
                 }
                 // Materialize old + new kits exactly once, on genuine change.
                 val oldKit = node.props
-                val newKit = kitFromWire(merged.fields)
+                val newKit = kitFromWire(merged.fields, stringLookup)
                 node.wireProps = merged
                 node.props = newKit
                 reconciled[patch.id] = (reconciled[patch.id] ?: 0) + 1
@@ -292,7 +308,7 @@ public class ShadowTree(
         depth: UInt,
     ): ShadowNode {
         val adapter = adapterFor(wire.kind, wire.componentId)
-        val props = kitFromWire(wire.props)
+        val props = kitFromWire(wire.props, stringLookup)
         val view =
             adapter?.create(wire.id)
                 ?: error(
@@ -306,7 +322,11 @@ public class ShadowTree(
         val node =
             ShadowNode(
                 id = wire.id,
-                kind = wire.kind,
+                // Resolve the render kind to the adapter's tag (e.g. "text",
+                // "column", "container"); the wire carries the raw NodeKind enum
+                // (0 = component, 1 = primitive), which the Compose renderer
+                // cannot switch on directly.
+                kind = adapter.kind,
                 componentId = wire.componentId,
                 key = null,
                 isPure = wire.isPure,
@@ -404,11 +424,14 @@ public class ShadowTree(
     }
 
     /** Materializes a kit [Props] from raw wire values. */
-    internal fun kitFromWire(fields: List<Pair<UShort, dev.flux.host.wire.WireValue>>): Props =
+    internal fun kitFromWire(
+        fields: List<Pair<UShort, dev.flux.host.wire.WireValue>>,
+        stringLookup: (UInt) -> String? = { null },
+    ): Props =
         Props(
             fields.map {
                 dev.flux.ui.Props
-                    .Field(it.first, it.second.toKitValue())
+                    .Field(it.first, it.second.toKitValue(stringLookup))
             },
         )
 
@@ -453,9 +476,19 @@ public class ShadowTree(
         block(adapter as FluxAdapter<FluxNativeView>, view)
     }
 
-    /** Resolves the adapter for [componentId], falling back to the raw [kind] tag. */
+    /** Resolves the adapter for [componentId], falling back to the raw [kind] tag.
+     * A component-kind node (kind "0", i.e. [NodeKind.component]) that resolves to
+     * no primitive adapter is backed by the container adapter, which simply hosts
+     * its children (mirrors the iOS dev runtime). */
     internal fun adapterFor(
         kind: String,
         componentId: UInt,
-    ): FluxAdapter<*>? = registry.resolve(componentId) ?: registry.adapterForKind(kind)
+    ): FluxAdapter<*>? {
+        val resolved = registry.resolve(componentId) ?: registry.adapterForKind(kind)
+        if (resolved != null) return resolved
+        // A component-kind node (kind "0", i.e. NodeKind.component) that resolves
+        // to no primitive adapter is backed by the container adapter, which
+        // simply hosts its children (mirrors the iOS dev runtime).
+        return if (kind == "0") FluxUiKit.adapters["container"] else null
+    }
 }

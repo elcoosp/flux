@@ -65,8 +65,6 @@ public object FluxBytecodeVM {
                 return VmResult.Failure(VmErrorKind.GAS_EXHAUSTED, instr.offset)
             }
             gas -= 1u
-            // Mirror the live gas budget into r15 (Appendix E §E.3; ADR-0021 says
-            // the budget register decrements as instructions run).
             regs[15] = FluxValue.IntVal(gas.toLong())
 
             val result =
