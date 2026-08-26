@@ -163,6 +163,12 @@ pub async fn serve_devtools(
     host_sink: mpsc::UnboundedSender<DebugCommand>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
+    // One router shared by every connection so host telemetry is broadcast to
+    // all subscribed DevTools clients (not just the sender's own connection).
+    let router = std::sync::Arc::new(parking_lot::Mutex::new(DevToolsRouter::new(
+        source_map,
+        host_sink,
+    )));
     loop {
         let (stream, _) = listener.accept().await?;
         let upgraded = tokio_tungstenite::accept_async(stream).await;
@@ -170,14 +176,12 @@ pub async fn serve_devtools(
             continue; // malformed handshake; skip this connection
         };
         let (mut writer, mut reader) = ws.split();
-        let (to_devtools_tx, mut to_devtools_rx) =
-            mpsc::unbounded_channel::<EnrichedTelemetryEvent>();
-        let mut router = DevToolsRouter::new(source_map.clone(), host_sink.clone());
-        router.subscribe_devtools(); // register this client
-        let client_tx = to_devtools_tx;
+        // Subscribe this connection; the returned receiver drives its outbound
+        // stream. Dropped connections are pruned by `route_telemetry`.
+        let mut sub_rx = router.lock().subscribe_devtools();
         // Outbound: enriched events → WebSocket.
         tokio::spawn(async move {
-            while let Some(event) = to_devtools_rx.recv().await {
+            while let Some(event) = sub_rx.recv().await {
                 let frame = EnrichedTelemetryFrame {
                     version: flux_ir_serde::PROTOCOL_VERSION,
                     event_count: 1,
@@ -195,6 +199,7 @@ pub async fn serve_devtools(
             }
         });
         // Inbound: telemetry → enrich+broadcast; commands → host.
+        let router_in = router.clone();
         tokio::spawn(async move {
             while let Some(msg) = reader.next().await {
                 let Ok(msg) = msg else { continue };
@@ -205,8 +210,7 @@ pub async fn serve_devtools(
                     continue;
                 };
                 for event in frame.events {
-                    router.route_telemetry(&event);
-                    let _ = &client_tx; // client receives via to_devtools_rx
+                    router_in.lock().route_telemetry(&event);
                 }
             }
         });
@@ -269,5 +273,63 @@ mod tests {
         assert_eq!(map.span_for_node_id(flux_syntax::NodeId::from(1u32)), None);
         assert_eq!(map.span_for_bytecode_offset(0), None);
         let _ = PROTOCOL_VERSION;
+    }
+
+    // Proves the full host -> server -> DevTools-client data path over a real
+    // WebSocket: a host client sends a raw Telemetry frame, the server enriches
+    // it, and a subscribed DevTools client receives the enriched frame. This is
+    // the wire contract the iOS/Android bridges rely on (without needing the
+    // gpui desktop UI, which is nightly-gated).
+    #[tokio::test]
+    async fn host_telemetry_reaches_devtools_client() {
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+        use tokio_tungstenite::{connect_async, tungstenite::Message};
+
+        // Fixed ephemeral-range port for the test endpoint. A probe/rebind race
+        // with `serve_devtools` (which binds the same addr itself) would hang
+        // the clients, so we use a stable port and let the server own the bind.
+        let addr: std::net::SocketAddr = "127.0.0.1:17399".parse().unwrap();
+
+        let (host_tx, _host_rx) = mpsc::unbounded_channel();
+        let source_map = SourceMap::default();
+        tokio::spawn(async move { serve_devtools(addr, source_map, host_tx).await });
+        // Give the accept loop a moment to bind.
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        let url = format!("ws://{addr}/devtools");
+
+        // DevTools client MUST subscribe before the host sends: the server
+        // broadcasts telemetry live to currently-connected DevTools clients.
+        let devtools_req = url.clone().into_client_request().unwrap();
+        let (mut devtools_ws, _) = connect_async(devtools_req).await.unwrap();
+
+        // Host client: sends a raw Telemetry frame.
+        let host_req = url.into_client_request().unwrap();
+        let (mut host_ws, _) = connect_async(host_req).await.unwrap();
+        let frame = TelemetryFrame {
+            version: PROTOCOL_VERSION,
+            event_count: 1,
+            events: vec![sample_event()],
+        };
+        host_ws
+            .send(Message::Binary(frame.to_bytes().into()))
+            .await
+            .unwrap();
+
+        // DevTools client: receives the enriched frame.
+        let msg = devtools_ws.next().await.unwrap().unwrap();
+        let bytes = match msg {
+            Message::Binary(b) => b,
+            _ => panic!("expected binary telemetry frame"),
+        };
+        let enriched = EnrichedTelemetryFrame::from_bytes(&bytes).expect("decodes enriched frame");
+        assert_eq!(enriched.event_count, 1);
+        assert_eq!(enriched.events.len(), 1);
+        match &enriched.events[0] {
+            EnrichedTelemetryEvent::VmStep {
+                bytecode_offset, ..
+            } => assert_eq!(*bytecode_offset, 0),
+            other => panic!("expected enriched VmStep, got {other:?}"),
+        }
     }
 }
