@@ -11,9 +11,11 @@ import kotlin.collections.List as KList
  * route key: across router push/pop the [FluxNativeView] instance is preserved
  * so any local view state (scroll position, entered text in nested fields)
  * survives being popped and re-pushed.
+ *
+ * Each node gets its own adapter instance via [create] (FLUX-007).
  */
-public class ScreenAdapter : FluxAdapter<FluxNativeView> {
-    override val kind: String = "screen"
+public class ScreenAdapter private constructor() : FluxAdapter<FluxNativeView> {
+    override val kind: String = KIND
 
     override fun create(nodeId: UInt): FluxNativeView = FluxNativeViewImpl(nodeId, kind)
 
@@ -46,5 +48,13 @@ public class ScreenAdapter : FluxAdapter<FluxNativeView> {
 
     override fun destroy(view: FluxNativeView) {
         view.clearChildren()
+    }
+
+    internal companion object {
+        /** The kind tag this adapter handles. Exposed for the factory map. */
+        const val KIND: String = "screen"
+
+        /** Builds a fresh [ScreenAdapter] for one IR node (FLUX-007). */
+        fun create(): FluxAdapter<FluxNativeView> = ScreenAdapter()
     }
 }

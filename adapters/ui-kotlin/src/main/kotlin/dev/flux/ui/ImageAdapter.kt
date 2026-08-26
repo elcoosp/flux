@@ -14,14 +14,17 @@ import kotlin.collections.List as KList
  * reads these properties and renders the actual `Image`/`painter`, handling the
  * HTTP fetch and graceful fallback to a placeholder (BR-003) on failure.
  *
+ * Each node gets its own adapter instance via [create], so the resolved source
+ * and dimensions never bleed into a sibling image (FLUX-007).
+ *
  * Prop fields and their `PropIdx` (Appendix F.8 contract):
  * - `0 src: String` (required) — asset path relative to the project root.
  * - `1 width: Option[Float]`
  * - `2 height: Option[Float]`
- * - `3 contentMode: Option[String]` — `"fill"` (default), `"fit"`, `"stretch"`.
+ * - `3 contentMode: Option[String]` — `\"fill\"` (default), `\"fit\"`, `\"stretch\"`.
  */
-public class ImageAdapter : FluxAdapter<FluxNativeView> {
-    override val kind: String = "image"
+public class ImageAdapter private constructor() : FluxAdapter<FluxNativeView> {
+    override val kind: String = KIND
 
     override fun create(nodeId: UInt): FluxNativeView = FluxNativeViewImpl(nodeId, kind)
 
@@ -73,6 +76,12 @@ public class ImageAdapter : FluxAdapter<FluxNativeView> {
     }
 
     internal companion object {
+        /** The kind tag this adapter handles. Exposed for the factory map. */
+        const val KIND: String = "image"
+
+        /** Builds a fresh [ImageAdapter] for one IR node (FLUX-007). */
+        fun create(): FluxAdapter<FluxNativeView> = ImageAdapter()
+
         const val PROP_SRC = "imageSrc"
         const val PROP_HAS_SRC = "hasImageSrc"
         const val PROP_WIDTH = "imageWidth"

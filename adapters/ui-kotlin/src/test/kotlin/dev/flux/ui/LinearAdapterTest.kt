@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test
 class LinearAdapterTest {
     @Test
     fun `column sets vertical orientation and gap`() {
-        val adapter = ColumnAdapter()
+        val adapter = ColumnAdapter.create()
         val view = adapter.create(10u)
         adapter.update(view, propsOf(PropsIndex.STACK_GAP to FluxValue.Float(12.0)))
         assertEquals("vertical", view.getProperty(FluxLinearAdapter.PROP_ORIENTATION))
@@ -16,7 +16,7 @@ class LinearAdapterTest {
 
     @Test
     fun `row sets horizontal orientation`() {
-        val adapter = RowAdapter()
+        val adapter = RowAdapter.create()
         val view = adapter.create(11u)
         adapter.update(view, propsOf(PropsIndex.STACK_GAP to FluxValue.Float(8.0)))
         assertEquals("horizontal", view.getProperty(FluxLinearAdapter.PROP_ORIENTATION))
@@ -24,7 +24,7 @@ class LinearAdapterTest {
 
     @Test
     fun `column reconciles children by stable id preserving order`() {
-        val adapter = ColumnAdapter()
+        val adapter = ColumnAdapter.create()
         val view = adapter.create(12u)
         val a = FluxNativeViewImpl(100u, "text")
         val b = FluxNativeViewImpl(101u, "text")
@@ -41,7 +41,7 @@ class LinearAdapterTest {
 
     @Test
     fun `column removes orphaned children`() {
-        val adapter = ColumnAdapter()
+        val adapter = ColumnAdapter.create()
         val view = adapter.create(13u)
         val a = FluxNativeViewImpl(10u, "text")
         val b = FluxNativeViewImpl(11u, "text")
@@ -52,7 +52,7 @@ class LinearAdapterTest {
 
     @Test
     fun `destroy clears children`() {
-        val adapter = ColumnAdapter()
+        val adapter = ColumnAdapter.create()
         val view = adapter.create(14u)
         val a = FluxNativeViewImpl(20u, "text")
         adapter.setChildren(view, listOf(20u), listOf(a))

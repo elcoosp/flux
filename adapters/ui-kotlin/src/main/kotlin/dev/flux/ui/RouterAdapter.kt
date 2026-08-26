@@ -16,9 +16,11 @@ import kotlin.collections.List as KList
  * instance and any nested state, exactly matching release `NavHost` semantics.
  * The host owns the actual `FrameLayout`/`NavHost`; this adapter only orders
  * and inserts/removes screen views through [FluxNativeView].
+ *
+ * Each node gets its own adapter instance via [create] (FLUX-007).
  */
-public class RouterAdapter : FluxAdapter<FluxNativeView> {
-    override val kind: String = "router"
+public class RouterAdapter private constructor() : FluxAdapter<FluxNativeView> {
+    override val kind: String = KIND
 
     override fun create(nodeId: UInt): FluxNativeView = FluxNativeViewImpl(nodeId, kind)
 
@@ -51,5 +53,13 @@ public class RouterAdapter : FluxAdapter<FluxNativeView> {
 
     override fun destroy(view: FluxNativeView) {
         view.clearChildren()
+    }
+
+    internal companion object {
+        /** The kind tag this adapter handles. Exposed for the factory map. */
+        const val KIND: String = "router"
+
+        /** Builds a fresh [RouterAdapter] for one IR node (FLUX-007). */
+        fun create(): FluxAdapter<FluxNativeView> = RouterAdapter()
     }
 }

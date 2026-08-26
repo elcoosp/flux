@@ -11,9 +11,12 @@ import kotlin.collections.List as KList
  * only declares intent through [FluxNativeView.setProperty] so the host
  * translates `text`, `color`, `fontSize`, `textAlignment`, `maxLines` onto the
  * real view. Button presses are not bound here — text is non-interactive.
+ *
+ * Each node gets its own adapter instance via [create], so no per-node view
+ * state or bound handlers leak between nodes (FLUX-007).
  */
-public class TextAdapter : FluxAdapter<FluxNativeView> {
-    override val kind: String = "text"
+public class TextAdapter private constructor() : FluxAdapter<FluxNativeView> {
+    override val kind: String = KIND
 
     override fun create(nodeId: UInt): FluxNativeView = FluxNativeViewImpl(nodeId, kind)
 
@@ -67,6 +70,12 @@ public class TextAdapter : FluxAdapter<FluxNativeView> {
     }
 
     internal companion object {
+        /** The kind tag this adapter handles. Exposed for the factory map. */
+        const val KIND: String = "text"
+
+        /** Builds a fresh [TextAdapter] for one IR node (FLUX-007). */
+        fun create(): FluxAdapter<FluxNativeView> = TextAdapter()
+
         const val PROP_TEXT = "text"
         const val PROP_COLOR = "color"
         const val PROP_FONT_SIZE = "fontSize"

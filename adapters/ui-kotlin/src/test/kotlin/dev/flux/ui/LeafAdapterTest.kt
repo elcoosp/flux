@@ -8,7 +8,7 @@ import java.lang.ref.WeakReference
 class LeafAdapterTest {
     @Test
     fun `text adapter writes text and color on update`() {
-        val adapter = TextAdapter()
+        val adapter = TextAdapter.create()
         val view = adapter.create(1u)
         adapter.update(view, stringProps(PropsIndex.TEXT_TEXT, "hello"))
         assertEquals("hello", view.getProperty(TextAdapter.PROP_TEXT))
@@ -20,7 +20,7 @@ class LeafAdapterTest {
 
     @Test
     fun `button adapter dispatches onClick through weak executor`() {
-        val adapter = ButtonAdapter()
+        val adapter = ButtonAdapter.create()
         val view = adapter.create(2u)
         val executor = FluxExecutorFake()
         adapter.update(view, stringProps(PropsIndex.BUTTON_TEXT, "Tap"))
@@ -36,7 +36,7 @@ class LeafAdapterTest {
 
     @Test
     fun `button adapter stops dispatching after executor disposed`() {
-        val adapter = ButtonAdapter()
+        val adapter = ButtonAdapter.create()
         val view = adapter.create(3u)
         val executor = FluxExecutorFake()
         executor.dispose()
@@ -49,7 +49,7 @@ class LeafAdapterTest {
 
     @Test
     fun `button adapter reflects enabled flag`() {
-        val adapter = ButtonAdapter()
+        val adapter = ButtonAdapter.create()
         val view = adapter.create(4u)
         adapter.update(view, propsOf(PropsIndex.BUTTON_ENABLED to FluxValue.Bool(false)))
         assertEquals(false, view.getProperty(ButtonAdapter.PROP_ENABLED))
@@ -59,7 +59,7 @@ class LeafAdapterTest {
 
     @Test
     fun `text field adapter pushes controlled text and binds onChange`() {
-        val adapter = TextFieldAdapter()
+        val adapter = TextFieldAdapter.create()
         val view = adapter.create(5u)
         adapter.update(view, stringProps(PropsIndex.TEXT_FIELD_TEXT, "abc"))
         assertEquals("abc", view.getProperty(TextFieldAdapter.PROP_TEXT))
@@ -75,7 +75,7 @@ class LeafAdapterTest {
 
     @Test
     fun `destroy clears bound executor to break retain cycle`() {
-        val adapter = ButtonAdapter()
+        val adapter = ButtonAdapter.create()
         val view = adapter.create(6u)
         val executor = FluxExecutorFake()
         adapter.bindHandler(view, propsOf(PropsIndex.BUTTON_ON_CLICK to FluxValue.HandlerRef(1u)), WeakReference(executor))

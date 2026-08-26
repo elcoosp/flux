@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test
 class RouterScreenTest {
     @Test
     fun `screen hosts a single content child`() {
-        val adapter = ScreenAdapter()
+        val adapter = ScreenAdapter.create()
         val view = adapter.create(50u)
         val content = FluxNativeViewImpl(500u, "text")
         adapter.setChildren(view, listOf(500u), listOf(content))
@@ -21,7 +21,7 @@ class RouterScreenTest {
 
     @Test
     fun `router preserves existing screen view across push`() {
-        val adapter = RouterAdapter()
+        val adapter = RouterAdapter.create()
         val router = adapter.create(60u)
         val home = FluxNativeViewImpl(600u, "screen")
         val settings = FluxNativeViewImpl(601u, "screen")
@@ -38,7 +38,7 @@ class RouterScreenTest {
 
     @Test
     fun `router pop preserves pushed screen instance for re-push`() {
-        val adapter = RouterAdapter()
+        val adapter = RouterAdapter.create()
         val router = adapter.create(61u)
         val home = FluxNativeViewImpl(610u, "screen")
         val detail = FluxNativeViewImpl(611u, "screen")
@@ -55,7 +55,7 @@ class RouterScreenTest {
 
     @Test
     fun `router reconciliation reorders without recreating screens`() {
-        val adapter = RouterAdapter()
+        val adapter = RouterAdapter.create()
         val router = adapter.create(62u)
         val a = FluxNativeViewImpl(620u, "screen")
         val b = FluxNativeViewImpl(621u, "screen")
@@ -69,7 +69,7 @@ class RouterScreenTest {
 
     @Test
     fun `router destroy clears screen stack`() {
-        val adapter = RouterAdapter()
+        val adapter = RouterAdapter.create()
         val router = adapter.create(63u)
         val home = FluxNativeViewImpl(630u, "screen")
         adapter.setChildren(router, listOf(630u), listOf(home))

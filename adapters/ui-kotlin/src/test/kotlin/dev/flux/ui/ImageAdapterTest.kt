@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test
 class ImageAdapterTest {
     @Test
     fun `image adapter writes src and content mode on update`() {
-        val adapter = ImageAdapter()
+        val adapter = ImageAdapter.create()
         val view = adapter.create(10u)
         adapter.update(
             view,
@@ -23,7 +23,7 @@ class ImageAdapterTest {
 
     @Test
     fun `image adapter defaults content mode to fill`() {
-        val adapter = ImageAdapter()
+        val adapter = ImageAdapter.create()
         val view = adapter.create(11u)
         adapter.update(view, stringProps(PropsIndex.IMAGE_SRC, "assets/logo.png"))
         assertEquals(
@@ -34,7 +34,7 @@ class ImageAdapterTest {
 
     @Test
     fun `image adapter forwards width and height when present`() {
-        val adapter = ImageAdapter()
+        val adapter = ImageAdapter.create()
         val view = adapter.create(12u)
         adapter.update(
             view,
@@ -50,7 +50,7 @@ class ImageAdapterTest {
 
     @Test
     fun `image adapter degrades safely on missing src`() {
-        val adapter = ImageAdapter()
+        val adapter = ImageAdapter.create()
         val view = adapter.create(13u)
         // First set a real source, then simulate the source being removed: the
         // adapter must clear it so the host shows its placeholder (BR-003).
@@ -64,7 +64,7 @@ class ImageAdapterTest {
 
     @Test
     fun `destroy clears source to break retain cycle`() {
-        val adapter = ImageAdapter()
+        val adapter = ImageAdapter.create()
         val view = adapter.create(14u)
         adapter.update(view, stringProps(PropsIndex.IMAGE_SRC, "assets/logo.png"))
         adapter.destroy(view)

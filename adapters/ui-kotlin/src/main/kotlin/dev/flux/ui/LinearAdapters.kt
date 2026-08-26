@@ -10,16 +10,36 @@ import kotlin.collections.List as KList
  * is declared as a view property the host applies between children; the child
  * list is reconciled by stable [node id][FluxNativeView.nodeId] so reorders
  * preserve child state.
+ *
+ * Each node gets its own adapter instance via [create] (FLUX-007).
  */
-public class ColumnAdapter : FluxLinearAdapter(orientation = "vertical", kind = "column")
+public class ColumnAdapter private constructor() : FluxLinearAdapter(orientation = "vertical", kind = KIND) {
+    internal companion object {
+        /** The kind tag this adapter handles. Exposed for the factory map. */
+        const val KIND: String = "column"
+
+        /** Builds a fresh [ColumnAdapter] for one IR node (FLUX-007). */
+        fun create(): FluxAdapter<FluxNativeView> = ColumnAdapter()
+    }
+}
 
 /**
  * Dev adapter for `Row` (Appendix F.4).
  *
  * Maps a Flux `Row` node to a horizontal linear container. Identical contract
  * to [ColumnAdapter] modulo orientation.
+ *
+ * Each node gets its own adapter instance via [create] (FLUX-007).
  */
-public class RowAdapter : FluxLinearAdapter(orientation = "horizontal", kind = "row")
+public class RowAdapter private constructor() : FluxLinearAdapter(orientation = "horizontal", kind = KIND) {
+    internal companion object {
+        /** The kind tag this adapter handles. Exposed for the factory map. */
+        const val KIND: String = "row"
+
+        /** Builds a fresh [RowAdapter] for one IR node (FLUX-007). */
+        fun create(): FluxAdapter<FluxNativeView> = RowAdapter()
+    }
+}
 
 /**
  * Shared base for the two linear-container adapters ([ColumnAdapter],

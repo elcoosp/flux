@@ -11,9 +11,13 @@ import kotlin.collections.List as KList
  * user edits, the view dispatches the `onChange` handler (carrying the new
  * string) through the weakly-held executor. A secure flag swaps the view to a
  * password field; [enabled] gates editing.
+ *
+ * Each node gets its own adapter instance via [create], so the bound
+ * `WeakReference<FluxExecutor>` and handler id never leak into a sibling node
+ * (FLUX-007).
  */
-public class TextFieldAdapter : FluxAdapter<FluxNativeView> {
-    override val kind: String = "text_field"
+public class TextFieldAdapter private constructor() : FluxAdapter<FluxNativeView> {
+    override val kind: String = KIND
 
     override fun create(nodeId: UInt): FluxNativeView = FluxNativeViewImpl(nodeId, kind)
 
@@ -60,6 +64,12 @@ public class TextFieldAdapter : FluxAdapter<FluxNativeView> {
     }
 
     internal companion object {
+        /** The kind tag this adapter handles. Exposed for the factory map. */
+        const val KIND: String = "text_field"
+
+        /** Builds a fresh [TextFieldAdapter] for one IR node (FLUX-007). */
+        fun create(): FluxAdapter<FluxNativeView> = TextFieldAdapter()
+
         const val PROP_TEXT = "text"
         const val PROP_ENABLED = "enabled"
         const val PROP_SECURE = "secure"
