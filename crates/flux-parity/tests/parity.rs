@@ -4,43 +4,36 @@
 //! and both release (Swift / Kotlin codegen) paths to the structural [`ViewNode`]
 //! model, asserts equivalence, and snapshots the relation with `insta`.
 //!
-//! Examples the MLP lowerer does not yet support are reported as
-//! `LowererUnsupported` rather than failing — the harness proves parity for every
-//! example the pipeline can fully compile and degrades gracefully otherwise.
+//! A lowering failure is a hard error (issue 5): every B.3 example must ship with
+//! a lowering pass, so `check_parity` returns `Err` rather than a silently
+//! okayed "unsupported" result. The harness therefore proves parity for *every*
+//! example, and CI fails loudly if any example cannot be fully lowered.
 
-use flux_parity::{ParityReport, ParityStatus, all_examples, check_parity};
+use flux_parity::{ParityReport, all_examples, check_parity};
 
 /// Asserts the documented parity contract for one example and snapshots the
 /// report via `insta`.
 ///
-/// Panics (via `insta::assert_snapshot!`) if the snapshot diverges from the
-/// committed baseline; that is the intended failure mode for a parity regression.
-/// A lowerer-unsupported example is asserted to be reported gracefully (not to
-/// panic), since the release backends could not be exercised for it.
+/// Panics (via `insta::assert_snapshot!` / `assert!`) if the snapshot diverges
+/// from the committed baseline, or if the release backends could not be
+/// exercised for the example — that is the intended failure mode for a parity
+/// regression (and for a missing lowering pass, issue 5).
 fn assert_parity(name: &str, source: &str, file_id: u32) {
     let report: ParityReport =
-        check_parity(source, file_id).expect("example parses and type-checks");
+        check_parity(source, file_id).expect("example parses, type-checks and lowers");
     if std::env::var("PARITY_DEBUG").is_ok() {
         eprintln!(
             "=== MISMATCH {name} ===\nDEV={:#?}\nSW={:#?}\nKT={:#?}",
             report.dev, report.swift, report.kotlin
         );
     }
-    match report.status {
-        ParityStatus::Supported => assert!(
-            report.is_equivalent(),
-            "parity divergence for {name}: dev vs swift vs kotlin trees differ"
-        ),
-        ParityStatus::LowererUnsupported => {
-            // The dev (AST) tree is still available; only the release backends
-            // could not run. This is a documented MLP lowerer capability boundary.
-            assert!(!report.dev.is_empty(), "dev AST tree must be present");
-        }
-    }
+    assert!(
+        report.is_equivalent(),
+        "parity divergence for {name}: dev vs swift vs kotlin trees differ"
+    );
     let serialized = format!(
-        "verdict: {}\nstatus: {:?}\n\ndev    == {:#?}\nswift  == {:#?}\nkotlin == {:#?}\n",
+        "verdict: {}\n\n dev    == {:#?}\nswift  == {:#?}\nkotlin == {:#?}\n",
         report.verdict(),
-        report.status,
         report.dev,
         report.swift,
         report.kotlin

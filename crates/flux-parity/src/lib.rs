@@ -38,5 +38,5 @@ pub mod trace;
 pub use model::{ViewNode, from_ast, normalize_view_name};
 pub use recognize_kotlin::{KotlinRecognitionError, recognize as recognize_kotlin};
 pub use recognize_swift::{SwiftRecognitionError, recognize as recognize_swift};
-pub use relation::{ParityPipelineError, ParityReport, ParityStatus, check_parity, compile};
+pub use relation::{ParityPipelineError, ParityReport, check_parity, compile};
 pub use sources::all_examples;
