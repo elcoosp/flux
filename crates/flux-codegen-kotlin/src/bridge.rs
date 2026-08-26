@@ -13,7 +13,7 @@
 //! freely through the emitter.
 
 use flux_parser::{Ast, ComponentDecl, Decl, Expr};
-use flux_syntax::{ExprTag, NodeId, Span};
+use flux_syntax::{DeclTag, ExprTag, NodeId, Span};
 
 /// Structural tag the type checker/lowering assigns to every expression node.
 pub(crate) const EXPR_TAG: u8 = 10;
@@ -31,9 +31,15 @@ pub(crate) fn expr_id(span: Span) -> NodeId {
 }
 
 /// Derives the [`NodeId`] for `span` as a component-declaration node.
+///
+/// The lowerer records every `component` declaration under [`DeclTag`] (see
+/// `flux-ir::lower::ids::decl_node_id`), so the bridge must use the same
+/// family. `DeclTag` and `ExprTag` map to disjoint byte ranges; using
+/// `ExprTag` here silently produces an ID that never matches the lowered node
+/// and forces the emitter into its `FluxComponent_<id>` placeholder branch.
 #[must_use]
 pub(crate) fn component_id(span: Span) -> NodeId {
-    flux_syntax::compute_node_id(0, ExprTag(COMPONENT_TAG), span, None)
+    flux_syntax::compute_node_id(0, DeclTag(COMPONENT_TAG), span, None)
 }
 
 /// Registry of surface constructs keyed by the [`NodeId`] the lowering pass
