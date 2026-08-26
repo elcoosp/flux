@@ -237,27 +237,26 @@ public class ShadowTree(
                 val diff = patch.diff ?: return
                 val merged = mergeProps(node.wireProps, diff)
                 // ADR-0027 (FA-IRWIRE): materialise dynamic props for the merged
-                // field set before comparing/sending to the adapter.
-                val effective = materializeProps(merged.fields, patch.id)
+                // field set before sending to the adapter.
+                val newKit = materializeProps(merged.fields, patch.id)
                 // `@pure` skip (§18.10): a pure node whose raw props are
                 // referentially equal is a function of its props — nothing to do.
                 // (No reconcile count: the node was not revisited — see G6.)
-                if (node.isPure && effective == node.wireProps.fields) {
+                if (node.isPure && merged.fields == node.wireProps.fields) {
                     skippedPureCount++
                     trace?.invoke(TraceEvent.SkipUnchanged(seq = lastSeq, id = patch.id))
                     return
                 }
                 // T5/R2: skip the adapter update when raw props AND the child-id
                 // list are identical — no native mutation is required.
-                if (effective == node.wireProps.fields && !childListChanged(node, merged.childIds)) {
+                if (merged.fields == node.wireProps.fields && !childListChanged(node, merged.childIds)) {
                     skippedUnchangedCount++
                     trace?.invoke(TraceEvent.SkipUnchanged(seq = lastSeq, id = patch.id))
                     return
                 }
                 // Materialize old + new kits exactly once, on genuine change.
                 val oldKit = node.props
-                val newKit = kitFromWire(effective, stringLookup)
-                node.wireProps = WireProps(effective, merged.childIds)
+                node.wireProps = WireProps(merged.fields, merged.childIds)
                 node.props = newKit
                 reconciled[patch.id] = (reconciled[patch.id] ?: 0) + 1
                 updatedCount++
@@ -342,9 +341,10 @@ public class ShadowTree(
     ): ShadowNode {
         val adapter = adapterFor(wire.kind, wire.componentId)
         // ADR-0027 (FA-IRWIRE): materialise dynamic props (interpolations, signal
-        // reads) by running the node's prop thunk against the live graph.
-        val effectiveProps = materializeProps(wire.props, wire.id)
-        val props = kitFromWire(effectiveProps, stringLookup)
+        // reads) by running the node's prop thunk against the live graph. Stored
+        // `wireProps` keep the shipped (raw) fields for diffing; the adapter
+        // receives the materialised kit.
+        val props = materializeProps(wire.props, wire.id)
         val view =
             adapter?.create(wire.id)
                 ?: error(
@@ -366,7 +366,7 @@ public class ShadowTree(
                 componentId = wire.componentId,
                 key = null,
                 isPure = wire.isPure,
-                wireProps = WireProps(effectiveProps, childIds),
+                wireProps = WireProps(wire.props, childIds),
                 props = props,
                 view = view,
                 signalDeps = deps,
@@ -474,19 +474,24 @@ public class ShadowTree(
     /**
      * ADR-0027 (FA-IRWIRE) prop-thunk materialisation. For a dynamic node whose
      * [signalMeta] carries a `thunk`, runs that thunk against the live signal
-     * graph (via the executor's VM) and maps its result `Record` (in `r1`) into
-     * wire props using the captured `layout` (record position → `PropIdx`).
-     * Falls back to the shipped [wireProps] when the node has no thunk or the
-     * thunk cannot be evaluated — materialisation is best-effort.
+     * graph (via the executor's VM) and maps its result `Record` (in `r1`) into a
+     * kit [Props] using the captured `layout` (record position → `PropIdx`).
+     *
+     * Strings produced by the thunk's `TO_STRING`/`STR_CONCAT` are interned into
+     * the VM's own [StringResolver] (not the frame's string table), so they must
+     * be resolved through that resolver here — passing the VM-interned id through
+     * to [kitFromWire] would render interpolated text as a raw numeric id. Falls
+     * back to [kitFromWire] over the shipped [wireProps] when the node has no
+     * thunk or the thunk cannot be evaluated.
      */
     internal fun materializeProps(
         wireProps: List<Pair<UShort, dev.flux.host.wire.WireValue>>,
         nodeId: UInt,
-    ): List<Pair<UShort, dev.flux.host.wire.WireValue>> {
-        val meta = signalMeta[nodeId] ?: return wireProps
-        val thunk = meta.thunk ?: return wireProps
-        val bytecode = thunkBlobs[thunk.hash] ?: return wireProps
-        val host = executorRef as? HostExecutor ?: return wireProps
+    ): Props {
+        val meta = signalMeta[nodeId] ?: return kitFromWire(wireProps, stringLookup)
+        val thunk = meta.thunk ?: return kitFromWire(wireProps, stringLookup)
+        val bytecode = thunkBlobs[thunk.hash] ?: return kitFromWire(wireProps, stringLookup)
+        val host = executorRef as? HostExecutor ?: return kitFromWire(wireProps, stringLookup)
         val result =
             FluxBytecodeVM.run(
                 bytecode,
@@ -494,30 +499,44 @@ public class ShadowTree(
                 dev.flux.host.vm.FluxValue.NullVal,
                 host.materializationStrings,
             )
-        if (result !is VmResult.Success) return wireProps
-        val record = result.outcome.registers.getOrNull(1) as? dev.flux.host.vm.FluxValue.RecordVal
-            ?: return wireProps
-        val out = ArrayList<Pair<UShort, dev.flux.host.wire.WireValue>>(meta.layout.size)
+        if (result !is VmResult.Success) return kitFromWire(wireProps, stringLookup)
+        val record =
+            result.outcome.registers.getOrNull(1) as? dev.flux.host.vm.FluxValue.RecordVal
+                ?: return kitFromWire(wireProps, stringLookup)
+        val fields = ArrayList<dev.flux.ui.Props.Field>(meta.layout.size)
         for ((pos, propIdx) in meta.layout.withIndex()) {
             if (pos >= record.fields.size) break
-            out.add(propIdx to record.fields[pos].value.toWireValue())
+            fields.add(
+                dev.flux.ui.Props.Field(
+                    propIdx,
+                    record.fields[pos].value.toKitValue(host.materializationStrings),
+                ),
+            )
         }
-        return out
+        return Props(fields)
     }
 
-    /** Converts a VM [FluxValue] (thunk result) into a wire [WireValue]. */
-    private fun dev.flux.host.vm.FluxValue.toWireValue(): dev.flux.host.wire.WireValue =
+    /** Converts a VM [FluxValue] (thunk result) into the kit [dev.flux.ui.FluxValue],
+     *  resolving `StrVal` ids through [resolver] so interpolated text survives. */
+    private fun dev.flux.host.vm.FluxValue.toKitValue(
+        resolver: dev.flux.host.vm.StringResolver,
+    ): dev.flux.ui.FluxValue =
         when (this) {
-            is dev.flux.host.vm.FluxValue.IntVal -> dev.flux.host.wire.WireValue.IntVal(value)
-            is dev.flux.host.vm.FluxValue.FloatVal -> dev.flux.host.wire.WireValue.FloatVal(value)
-            is dev.flux.host.vm.FluxValue.BoolVal -> dev.flux.host.wire.WireValue.BoolVal(value)
-            is dev.flux.host.vm.FluxValue.StrVal -> dev.flux.host.wire.WireValue.StrVal(id)
-            dev.flux.host.vm.FluxValue.NullVal -> dev.flux.host.wire.WireValue.Null
-            is dev.flux.host.vm.FluxValue.HandlerRefVal -> dev.flux.host.wire.WireValue.HandlerRefVal(handlerId)
+            is dev.flux.host.vm.FluxValue.IntVal -> dev.flux.ui.FluxValue.Int(value)
+            is dev.flux.host.vm.FluxValue.FloatVal -> dev.flux.ui.FluxValue.Float(value)
+            is dev.flux.host.vm.FluxValue.BoolVal -> dev.flux.ui.FluxValue.Bool(value)
+            is dev.flux.host.vm.FluxValue.StrVal -> dev.flux.ui.FluxValue.Str(resolver.resolve(id))
+            dev.flux.host.vm.FluxValue.NullVal -> dev.flux.ui.FluxValue.Null
+            is dev.flux.host.vm.FluxValue.HandlerRefVal ->
+                dev.flux.ui.FluxValue.HandlerRef(handlerId)
             is dev.flux.host.vm.FluxValue.ListVal ->
-                dev.flux.host.wire.WireValue.ListVal(items.map { it.toWireValue() })
+                dev.flux.ui.FluxValue.List(items.map { it.toKitValue(resolver) })
             is dev.flux.host.vm.FluxValue.RecordVal ->
-                dev.flux.host.wire.WireValue.RecordVal(fields.map { dev.flux.host.wire.WireValue.RecordVal.Field(it.index, it.value.toWireValue()) })
+                dev.flux.ui.FluxValue.Record(
+                    fields.map {
+                        dev.flux.ui.FluxValue.Field(it.index, it.value.toKitValue(resolver))
+                    },
+                )
         }
 
     internal fun emitStepEnd() {
