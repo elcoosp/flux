@@ -55,9 +55,11 @@ fn bench_init_frame_size(c: &mut Criterion) {
         b.iter(|| {
             let frame = Frame::init(
                 std::hint::black_box(&root),
+                std::hint::black_box(&[]),
                 std::hint::black_box(&[(0u32, Value::Int(0))]),
                 std::hint::black_box(&[(0u32, "src/main.flux".to_string())]),
                 std::hint::black_box(&table),
+                &[],
                 &[],
                 &[],
             );
