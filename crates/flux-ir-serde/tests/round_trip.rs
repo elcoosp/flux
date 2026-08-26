@@ -229,9 +229,11 @@ fn init_frame_round_trips() {
     };
     let frame = Frame::init(
         &root,
+        &[],
         &[(SignalId::from(1u32), Value::Int(0))],
         &[(0u32, "src/main.flux".to_string())],
         &table,
+        &[],
         &[],
         &[],
     );
@@ -363,9 +365,11 @@ fn init_frame_carries_handlers_round_trip() {
     let closures = sample_closures();
     let frame = Frame::init(
         &root,
+        &[],
         &[(SignalId::from(1u32), Value::Int(0))],
         &[(0u32, "src/main.flux".to_string())],
         &table,
+        &[],
         &closures,
         &[],
     );
@@ -450,9 +454,11 @@ fn init_frame_under_20kb() {
     }
     let frame = Frame::init(
         &nodes[0],
+        &[],
         &[(SignalId::from(1u32), Value::Int(0))],
         &[(0u32, "src/main.flux".to_string())],
         &table,
+        &[],
         &[],
         &[],
     );
@@ -490,7 +496,16 @@ fn init_frame_signal_meta_round_trips() {
         thunk: Some(closure),
         layout: vec![0u16, 1u16],
     }];
-    let frame = Frame::init(&root, &[], &[], &StringTable::new(), &[], &signal_meta);
+    let frame = Frame::init(
+        &root,
+        &[],
+        &[],
+        &[],
+        &StringTable::new(),
+        &[],
+        &[],
+        &signal_meta,
+    );
     let bytes = frame.to_bytes();
     let decoded = Frame::from_init_bytes(&bytes).expect("decode Init with signal_meta");
     assert_eq!(

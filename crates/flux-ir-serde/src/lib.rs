@@ -31,13 +31,13 @@ mod wire;
 
 pub use encode::{deserialize_patches, hash_closure, hash_props, serialize_patches};
 pub use frame::{
-    DeltaFrame, ErrorFrame, Frame, FrameKind, HeartbeatFrame, HelloFrame, InitFrame, MAGIC,
-    PROTOCOL_VERSION,
+    DeltaFrame, ErrorFrame, Frame, FrameKind, HeartbeatFrame, HelloFrame, InitFrame,
+    InternStringFrame, MAGIC, PROTOCOL_VERSION, STRING_ID_CANONICAL_CEILING, StringInternedFrame,
 };
 pub use frame::{
     FLAG_FULL_TREE, FLAG_HAS_SRC_MAP_DELTA, FLAG_HAS_STATE_DELTA, FLAG_HAS_STRING_DELTA,
     FLAG_HEARTBEAT, FLAG_NODE_HAS_SIGNAL_DEPS, FRAME_DELTA, FRAME_ERROR, FRAME_HEARTBEAT,
-    FRAME_HELLO, FRAME_INIT,
+    FRAME_HELLO, FRAME_INIT, FRAME_INTERN_STRING, FRAME_STRING_INTERNED,
 };
 pub use telemetry::{
     DebugCommand, DebugCommandFrame, EnrichedTelemetryEvent, EnrichedTelemetryFrame,

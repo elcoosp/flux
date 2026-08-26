@@ -71,7 +71,7 @@ fn init_frame_type_byte_is_0x02_and_string_count_is_u32() {
     };
     let table = StringTable::new();
 
-    let frame = Frame::init(&root_ref, &[], &[], &table, &[], &[]);
+    let frame = Frame::init(&root_ref, &[], &[], &[], &table, &[], &[], &[]);
     let bytes = frame.to_bytes();
     assert_eq!(&bytes[0..4], &magic_bytes());
     assert_eq!(bytes[4], PROTOCOL_VERSION);

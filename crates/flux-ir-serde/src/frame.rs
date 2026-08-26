@@ -43,6 +43,21 @@ pub const FRAME_ERROR: u8 = 0x03;
 pub const FRAME_DELTA: u8 = 0x04;
 /// `frame_type` for the `Heartbeat` frame (D.12.5).
 pub const FRAME_HEARTBEAT: u8 = 0x05;
+/// `frame_type` for the `InternString` request (Host → Server, brittleness 4a).
+pub const FRAME_INTERN_STRING: u8 = 0x07;
+/// `frame_type` for the `StringInterned` response (Server → Host, 4a).
+pub const FRAME_STRING_INTERNED: u8 = 0x08;
+
+/// Bit ceiling for canonical string ids.
+///
+/// Ids below `STRING_ID_CANONICAL_CEILING` are assigned by the server's string
+/// table (Appendix D §D.9) and are stable across edits. Ids at or above this
+/// bit are reserved for host-side synthetic fallbacks — the runtime must never
+/// emit one from the wire path, since doing so silently bypasses interning and
+/// reintroduces the brittleness 4a was raised to remove. The Kotlin/Android
+/// `StringResolver` and Swift `FluxBytecodeVM` both OR this mask onto a hash
+/// only as a last-resort fallback, which `InternString`/`StringInterned` retire.
+pub const STRING_ID_CANONICAL_CEILING: u32 = 0x8000_0000;
 
 /// Bit flags inside a `Delta` frame's `flags` byte (D.1).
 ///
@@ -91,6 +106,10 @@ pub enum FrameKind {
     Delta,
     /// Heartbeat.
     Heartbeat,
+    /// String-interning request (Host → Server, brittleness 4a).
+    InternString,
+    /// String-interned response (Server → Host, 4a).
+    StringInterned,
 }
 
 impl FrameKind {
@@ -101,6 +120,8 @@ impl FrameKind {
             FrameKind::Error => FRAME_ERROR,
             FrameKind::Delta => FRAME_DELTA,
             FrameKind::Heartbeat => FRAME_HEARTBEAT,
+            FrameKind::InternString => FRAME_INTERN_STRING,
+            FrameKind::StringInterned => FRAME_STRING_INTERNED,
         }
     }
 
@@ -111,14 +132,16 @@ impl FrameKind {
             FRAME_ERROR => Some(FrameKind::Error),
             FRAME_DELTA => Some(FrameKind::Delta),
             FRAME_HEARTBEAT => Some(FrameKind::Heartbeat),
+            FRAME_INTERN_STRING => Some(FrameKind::InternString),
+            FRAME_STRING_INTERNED => Some(FrameKind::StringInterned),
             _ => None,
         }
     }
 }
 
 /// Marker type carrying the frame-construction API. Use `Frame::hello`,
-/// `Frame::init`, `Frame::delta`, `Frame::error`, `Frame::heartbeat` and their
-/// `from_*_bytes` decoders.
+/// `Frame::init`, `Frame::delta`, `Frame::error`, `Frame::heartbeat`,
+/// `Frame::intern_string` and their `from_*_bytes` decoders.
 #[derive(Debug)]
 pub struct Frame;
 
@@ -386,6 +409,7 @@ pub struct InitFrame {
 impl Frame {
     /// Builds an `Init` (full-tree) frame (Appendix D §D.12.2).
     #[must_use]
+    #[allow(clippy::too_many_arguments)]
     pub fn init(
         root: &NodeRef,
         extra_nodes: &[NodeRef],
@@ -473,8 +497,8 @@ impl Frame {
             let cid: ComponentId = r.u32("init.component_names.cid")?;
             let name_len = r.u16("init.component_names.name_len")? as usize;
             let name_bytes = r.bytes(name_len, "init.component_names.name")?;
-            let name = String::from_utf8(name_bytes.to_vec())
-                .map_err(|_| WireError::InvalidTag {
+            let name =
+                String::from_utf8(name_bytes.to_vec()).map_err(|_| WireError::InvalidTag {
                     tag: 0,
                     context: "init.component_names.name",
                     at: r.pos(),
@@ -589,7 +613,7 @@ impl InitFrame {
         // adapter from `byComponent[component_id]`.
         w.u16(self.component_names.len() as u16);
         for (cid, name) in &self.component_names {
-            w.u32((*cid).into());
+            w.u32(*cid);
             encode_str(&mut w, name);
         }
         // D.12 handler section (Gap G1): shared blob, then HandlerDef stream.
@@ -883,5 +907,234 @@ impl HeartbeatFrame {
         w.u8(self.kind.type_byte());
         w.u32(self.seq);
         w.into_vec()
+    }
+}
+
+// ── InternString / StringInterned (brittleness 4a) ─────────────────────────
+
+/// A decoded `InternString` request frame (Appendix D §D.12.6).
+///
+/// The host sends raw UTF-8 bytes (a string it needs a canonical id for) and
+/// expects a [`StringInternedFrame`] back carrying the server-assigned
+/// [`StringId`]. This retires the host-side `synthetic_str_id` fallback: every
+/// id that flows across the wire is now produced by the server's string table
+/// and is therefore `< [STRING_ID_CANONICAL_CEILING]`.
+///
+/// Layout (after the shared `magic(4) version(1) frame_type(1)` prefix):
+/// `len(u16) | bytes(len)`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InternStringFrame {
+    /// Protocol version.
+    pub version: u8,
+    /// Frame kind (always `InternString`).
+    pub kind: FrameKind,
+    /// Length of `bytes`, in UTF-8 code units.
+    pub len: u16,
+    /// The raw UTF-8 payload to intern.
+    pub bytes: Vec<u8>,
+}
+
+impl Frame {
+    /// Builds an `InternString` request frame from raw bytes (Appendix D §D.12.6).
+    #[must_use]
+    pub fn intern_string(bytes: &[u8]) -> InternStringFrame {
+        InternStringFrame {
+            version: PROTOCOL_VERSION,
+            kind: FrameKind::InternString,
+            len: bytes.len() as u16,
+            bytes: bytes.to_vec(),
+        }
+    }
+
+    /// Decodes an `InternString` frame, or `None` on a malformed/short buffer.
+    #[must_use]
+    pub fn from_intern_string_bytes(bytes: &[u8]) -> Option<InternStringFrame> {
+        let (version, kind, payload) = read_frame_type(bytes).ok()?;
+        if kind != FrameKind::InternString {
+            return None;
+        }
+        if payload.len() < 2 {
+            return None;
+        }
+        let len = u16::from_le_bytes([payload[0], payload[1]]) as usize;
+        let raw = payload.get(2..2 + len)?;
+        Some(InternStringFrame {
+            version,
+            kind,
+            len: len as u16,
+            bytes: raw.to_vec(),
+        })
+    }
+}
+
+impl InternStringFrame {
+    /// Encodes the `InternString` frame per Appendix D §D.12.6.
+    #[must_use]
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut w = Writer::new();
+        write_magic_version(&mut w);
+        w.u8(self.kind.type_byte());
+        w.u16(self.len);
+        w.bytes(&self.bytes);
+        w.into_vec()
+    }
+
+    /// Returns the payload as a string, validating UTF-8.
+    ///
+    /// A host may only ever send valid UTF-8 over this frame; a non-UTF-8
+    /// payload is a protocol violation and yields `None` rather than a
+    /// silently-corrupt intern.
+    #[must_use]
+    pub fn as_str(&self) -> Option<&str> {
+        std::str::from_utf8(&self.bytes).ok()
+    }
+
+    /// Interns this frame's bytes into `table` and returns the server's
+    /// canonical [`StringInternedFrame`] response.
+    ///
+    /// The id is `table.intern`'s result, which is always `< [STRING_ID_CANONICAL_CEILING]`
+    /// by construction — that invariant is what lets the host drop its synthetic
+    /// fallback.
+    #[must_use]
+    pub fn intern_into(&self, table: &mut StringTable) -> StringInternedFrame {
+        let text = self.as_str().unwrap_or_default();
+        let id = table.intern(text);
+        StringInternedFrame::new(id)
+    }
+}
+
+/// A decoded `StringInterned` response frame (Appendix D §D.12.7).
+///
+/// Carries the canonical [`StringId`] the server assigned for an
+/// [`InternStringFrame`] request. The id is `< [STRING_ID_CANONICAL_CEILING]`
+/// (see [`InternStringFrame::intern_into`]).
+///
+/// Layout (after the shared `magic(4) version(1) frame_type(1)` prefix):
+/// `id(u32)`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StringInternedFrame {
+    /// Protocol version.
+    pub version: u8,
+    /// Frame kind (always `StringInterned`).
+    pub kind: FrameKind,
+    /// The canonical string id assigned by the server.
+    pub id: u32,
+}
+
+impl StringInternedFrame {
+    /// Builds a `StringInterned` response frame (Appendix D §D.12.7).
+    #[must_use]
+    pub fn new(id: u32) -> Self {
+        Self {
+            version: PROTOCOL_VERSION,
+            kind: FrameKind::StringInterned,
+            id,
+        }
+    }
+
+    /// Encodes the `StringInterned` frame per Appendix D §D.12.7.
+    #[must_use]
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut w = Writer::new();
+        write_magic_version(&mut w);
+        w.u8(self.kind.type_byte());
+        w.u32(self.id);
+        w.into_vec()
+    }
+}
+
+impl Frame {
+    /// Decodes a `StringInterned` frame, or `None` on a malformed/short buffer.
+    #[must_use]
+    pub fn from_string_interned_bytes(bytes: &[u8]) -> Option<StringInternedFrame> {
+        let (version, kind, payload) = read_frame_type(bytes).ok()?;
+        if kind != FrameKind::StringInterned {
+            return None;
+        }
+        if payload.len() < 4 {
+            return None;
+        }
+        let id = u32::from_le_bytes(payload[0..4].try_into().unwrap());
+        Some(StringInternedFrame { version, kind, id })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flux_syntax::StringTable;
+
+    #[test]
+    fn intern_string_round_trips_bytes() {
+        let payload = b"Hello, Flux";
+        let frame = Frame::intern_string(payload);
+        assert_eq!(frame.len as usize, payload.len());
+        assert_eq!(frame.bytes, payload);
+        let bytes = frame.to_bytes();
+        let decoded = Frame::from_intern_string_bytes(&bytes).expect("decode");
+        assert_eq!(decoded.bytes, payload);
+        assert_eq!(decoded.as_str(), Some("Hello, Flux"));
+        assert_eq!(decoded.kind, FrameKind::InternString);
+    }
+
+    #[test]
+    fn string_interned_round_trips_id() {
+        let frame = StringInternedFrame::new(0x0000_1234);
+        let bytes = frame.to_bytes();
+        let decoded = Frame::from_string_interned_bytes(&bytes).expect("decode");
+        assert_eq!(decoded.id, 0x0000_1234);
+        assert_eq!(decoded.kind, FrameKind::StringInterned);
+    }
+
+    #[test]
+    fn intern_string_yields_canonical_id_below_ceiling() {
+        let mut table = StringTable::new();
+        let req = Frame::intern_string(b"Column");
+        let resp = req.intern_into(&mut table);
+        assert!(
+            resp.id < STRING_ID_CANONICAL_CEILING,
+            "canonical id {:#010x} must be below {:#010x}",
+            resp.id,
+            STRING_ID_CANONICAL_CEILING,
+        );
+        // Re-interning the same bytes returns the same id (table authority).
+        let again = req.intern_into(&mut table);
+        assert_eq!(again.id, resp.id);
+        assert_eq!(table.resolve(resp.id), Some("Column"));
+    }
+
+    #[test]
+    fn intern_string_then_interned_round_trip_proxy() {
+        // Proxy the host path: host sends InternString -> server interns ->
+        // server replies StringInterned -> host decodes id.
+        let mut table = StringTable::new();
+        let req = Frame::intern_string(b"Button");
+        let encoded_req = req.to_bytes();
+        let decoded_req = Frame::from_intern_string_bytes(&encoded_req).expect("req");
+        let resp = decoded_req.intern_into(&mut table);
+        let encoded_resp = resp.to_bytes();
+        let decoded_resp = Frame::from_string_interned_bytes(&encoded_resp).expect("resp");
+        assert!(
+            decoded_resp.id < STRING_ID_CANONICAL_CEILING,
+            "interned id must be canonical (< {:#010x})",
+            STRING_ID_CANONICAL_CEILING,
+        );
+    }
+
+    #[test]
+    fn intern_string_rejects_wrong_frame_kind() {
+        // A Heartbeat frame must not decode as InternString.
+        let hb = Frame::heartbeat(7).to_bytes();
+        assert!(Frame::from_intern_string_bytes(&hb).is_none());
+    }
+
+    #[test]
+    fn intern_string_rejects_truncated_payload() {
+        let frame = Frame::intern_string(b"toolong");
+        let mut bytes = frame.to_bytes();
+        // Claim a length larger than the actual payload.
+        let len = (bytes.len() - 6) as u16;
+        bytes[6..8].copy_from_slice(&(len + 10).to_le_bytes());
+        assert!(Frame::from_intern_string_bytes(&bytes).is_none());
     }
 }
