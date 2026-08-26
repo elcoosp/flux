@@ -21,6 +21,7 @@ tracing.workspace = true
 thiserror.workspace = true
 bytes.workspace = true
 parking_lot.workspace = true
+futures-util.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true
