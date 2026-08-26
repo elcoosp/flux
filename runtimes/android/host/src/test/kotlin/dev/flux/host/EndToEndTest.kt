@@ -39,7 +39,8 @@ class EndToEndTest {
 
     private fun stdlibEntries(): List<Pair<UInt, String>> {
         val ids = (100u..106u).toList()
-        return ids.zip(stdlibKinds)
+        return ids.zip(stdlibKinds) +
+            listOf(200u to "text", 300u to "button", 500u to "screen", 600u to "router")
     }
 
     @Test

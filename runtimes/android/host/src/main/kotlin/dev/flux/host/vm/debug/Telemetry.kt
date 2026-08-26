@@ -15,7 +15,6 @@ import java.io.ByteArrayOutputStream
  * Principle 1: zero release impact).
  */
 
-/** A debug telemetry event emitted by the host runtime (raw, host → server). */
 public sealed interface TelemetryEvent {
     /** Emitted after each VM instruction executes. */
     public data class VmStep(

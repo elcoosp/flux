@@ -11,7 +11,6 @@ import dev.flux.ui.PropsIndex
  * `:app` module draws directly from `node.props` and does not depend on these.
  */
 
-/** Reads the text string prop off a node, for test assertions. */
 public fun ShadowNode.displayText(): String? = props.getString(PropsIndex.TEXT_TEXT)
 
 /** Reads the bound handler id off a button node, for test assertions. */

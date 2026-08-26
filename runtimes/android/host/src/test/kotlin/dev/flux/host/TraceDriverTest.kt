@@ -29,7 +29,9 @@ import org.junit.jupiter.api.Test
  */
 class TraceDriverTest {
     private val stdlibKinds = listOf("column", "text", "button", "row", "text_field", "screen", "router")
-    private val stdlibEntries = (100u..106u).zip(stdlibKinds)
+    private val stdlibEntries =
+        (100u..106u).zip(stdlibKinds) +
+            listOf(200u to "text", 300u to "button", 500u to "screen", 600u to "router")
 
     /** Builds the `counter_1000` frame: 999 filler nodes + one Text bound to signal 1. */
     private fun counter1000Bytes(): ByteArray {

@@ -1,110 +1,201 @@
 package dev.flux.host.wire
 
+import java.io.ByteArrayOutputStream
+
 /**
  * A small builder that emits frames byte-for-byte as [FrameDeserializer] reads
- * them (Appendix D §D.1/§D.3/§D.5). Used by [FrameDeserializerTest] to hand-build
- * deterministic fixtures without a live dev server.
+ * them (Appendix D §D.1/§D.3/§D.5/§D.9/§D.12). Used by the wire/host tests to
+ * hand-build deterministic fixtures without a live dev server.
+ *
+ * The builder buffers each section and assembles the final frame in the exact
+ * order [FrameDeserializer] consumes it, so the Init/Delta layouts always match
+ * the decoder (and the Rust `flux-ir-serde` encoder).
+ *
+ * Two modes are supported:
+ * - [init] — a full-tree `Init` frame (kind `0x02`). Call [node] for the root
+ *   and every descendant, [stringEntry] for the literal string table,
+ *   [componentSection] for component-name bindings, and [handlerSection] for
+ *   handlers. The first [node] written is the root.
+ * - [delta] — a `Delta` frame (kind `0x04`). Call the `patch*` helpers, then
+ *   [stringEntry] and [handlerSection].
  */
 class FrameBuilder {
-    private val out = ArrayList<Byte>()
+    private enum class Mode { INIT, DELTA }
 
+    private var mode: Mode = Mode.INIT
+    private var seq: Int = 0
+    private var deltaFlags: Int = 0
+
+    private val nodes = ArrayList<ByteArray>()
+    private val strings = ArrayList<Pair<UInt, String>>()
+    private val components = ArrayList<Pair<UInt, String>>()
+    private val seed = ArrayList<Pair<UInt, WireValue>>()
+    private val sourceMap = ArrayList<Pair<UInt, String>>()
+    private var blob: ByteArray = ByteArray(0)
+    private val handlers = ArrayList<Pair<UInt, ClosureRef>>()
+    private val patches = ArrayList<ByteArray>()
+
+    // ── frame selection ──────────────────────────────────────────────────
+
+    /** Begins a full-tree `Init` frame (kind `0x02`). */
+    fun init(seq: Int = 0): FrameBuilder {
+        mode = Mode.INIT
+        this.seq = seq
+        return this
+    }
+
+    /** Begins a `Delta` frame (kind `0x04`) with the given flags byte. */
+    fun delta(seq: Int = 0, flags: Int = 0): FrameBuilder {
+        mode = Mode.DELTA
+        this.seq = seq
+        this.deltaFlags = flags
+        return this
+    }
+
+    // ── header primitives ─────────────────────────────────────────────────
+
+    /** Writes the `FLUX` magic as a little-endian `u32` (`0x465C5558`). */
     fun magic() {
-        // "FLUX" little-endian as a u32 = 0x465C5558, matching the Rust encoder
-        // (`write_magic_version` writes `w.u32(MAGIC)` → LE bytes 58 55 5C 46).
-        out.add(0x58.toByte())
-        out.add(0x55.toByte())
-        out.add(0x5C.toByte())
-        out.add(0x46.toByte())
+        // no-op marker kept for readability; magic is emitted by [build].
     }
 
-    fun version(v: Int) = out.add(v.toByte())
+    /** Sets the protocol version byte (default `1`). */
+    fun version(v: Int) = Unit // emitted by build(); retained for call-site readability
 
-    fun seq(v: Int) = u32(v)
-
-    fun flags(
-        fullTree: Boolean,
-        error: Boolean = false,
-        heartbeat: Boolean = false,
-        hasState: Boolean = false,
-        hasPure: Boolean = false,
-    ) {
-        var f = 0
-        if (fullTree) f = f or 0x01
-        if (error) f = f or 0x02
-        if (heartbeat) f = f or 0x04
-        if (hasState) f = f or 0x08
-        if (hasPure) f = f or 0x20 // nodes carry an explicit @pure byte (MLP host extension)
-        pureFlag = hasPure
-        out.add(f.toByte())
+    /** Sets the sequence number (emitted by [build] in the correct slot). */
+    fun seq(v: Int): FrameBuilder {
+        this.seq = v
+        return this
     }
 
-    fun patchCount(n: Int) = u16(n)
-
-    fun handlerCount(n: Int) = u16(n)
-
-    fun stringCount(n: Int) = u16(n)
-
-    /**
-     * Writes the component-name interning section (Appendix D §D.9): a `u16`
-     * count then `(u32 ComponentId, u16 len, utf8 name)` pairs. This follows the
-     * literal string table in a full-tree frame and is a SEPARATE id space from
-     * the string literals. The deserializer requires exactly one such section,
-     * so every built frame emits it — pass an empty list for "no components".
-     */
-    fun componentSection(entries: List<Pair<UInt, String>> = emptyList()) {
-        u16(entries.size)
-        for ((cid, name) in entries) {
-            u32(cid.toInt())
-            val bytes = name.toByteArray(Charsets.UTF_8)
-            u16(bytes.size)
-            out.addAll(bytes.toList())
+    /** Legacy alias for [init]/[delta]; kept so old call sites keep working. */
+    fun flags(fullTree: Boolean, hasPure: Boolean = false): FrameBuilder {
+        if (fullTree) {
+            init(seq)
+        } else {
+            var f = 0
+            if (hasPure) f = f or 0x20
+            delta(seq, f)
         }
-        componentSectionEmitted = true
+        return this
     }
 
-    /** Tracks whether [componentSection] was already written for this frame. */
-    private var componentSectionEmitted: Boolean = false
+    // The following legacy helpers are no-ops: the builder now derives every
+    // section count from the buffered entries, so callers that previously
+    // passed an explicit count need not change. Kept so existing tests compile.
+    @Suppress("UNUSED_PARAMETER")
+    fun patchCount(n: Int) = Unit
 
-    /**
-     * Writes one string-table entry (Appendix D §D.9) as `(id, utf8 text)`.
-     * Call these after [stringCount] and before the root [node] in a full-tree
-     * frame, matching the order [FrameDeserializer] reads them.
-     */
-    fun stringEntry(
+    @Suppress("UNUSED_PARAMETER")
+    fun handlerCount(n: Int) = Unit
+
+    @Suppress("UNUSED_PARAMETER")
+    fun stringCount(n: Int) = Unit
+
+    /** Legacy alias for [componentEntry]; adds each binding to the section. */
+    fun componentSection(entries: List<Pair<UInt, String>> = emptyList()): FrameBuilder {
+        for ((cid, name) in entries) componentEntry(cid, name)
+        return this
+    }
+
+    // ── Init sections ─────────────────────────────────────────────────────
+
+    /** Appends a node. The first node written becomes the root. */
+    fun node(
         id: UInt,
-        text: String,
-    ) {
-        u32(id.toInt())
-        val bytes = text.toByteArray(Charsets.UTF_8)
-        u16(bytes.size)
-        out.addAll(bytes.toList())
+        kind: UInt,
+        component: UInt,
+        props: List<Pair<UShort, WireValue>>,
+        childIds: List<UInt>,
+        pure: Boolean = false,
+    ): FrameBuilder {
+        val b = ByteArrayOutputStream()
+        writeNode(b, id, kind, component, props, childIds, pure)
+        nodes.add(b.toByteArray())
+        return this
     }
 
-    /**
-     * Writes an `Update` patch (Appendix D §D.2, tag 0x02): a prop diff applied
-     * to the node [id].
-     */
+    /** Adds a literal string-table entry (Appendix D §D.9). */
+    fun stringEntry(id: UInt, text: String): FrameBuilder {
+        strings.add(id to text)
+        return this
+    }
+
+    /** Adds a component-name binding (separate id space from literals). */
+    fun componentEntry(cid: UInt, name: String): FrameBuilder {
+        components.add(cid to name)
+        return this
+    }
+
+    /** Adds a state-seed cell `(signalId, value)`. */
+    fun stateSeed(id: UInt, value: WireValue): FrameBuilder {
+        seed.add(id to value)
+        return this
+    }
+
+    /** Adds a source-map entry `(fileId, path)`. */
+    fun sourceMapEntry(fileId: UInt, path: String): FrameBuilder {
+        sourceMap.add(fileId to path)
+        return this
+    }
+
+    // ── Delta sections ────────────────────────────────────────────────────
+
+    /** Writes a `Replace` patch (tag `0x01`): a full node replacing `id`. */
+    fun patchReplace(id: UInt, node: WireNodeBuilder): FrameBuilder {
+        val b = ByteArrayOutputStream()
+        b.write(0x01)
+        u32(b, id.toInt())
+        node.writeTo(b)
+        patches.add(b.toByteArray())
+        return this
+    }
+
+    /** Writes an `Update` patch (tag `0x02`): a prop diff on `id`. */
     fun patchUpdate(
         id: UInt,
         changes: List<Pair<UShort, WireValue>>,
         removals: List<UShort> = emptyList(),
-    ) {
-        out.add(0x02)
-        u32(id.toInt())
-        u16(changes.size)
+    ): FrameBuilder {
+        val b = ByteArrayOutputStream()
+        b.write(0x02)
+        u32(b, id.toInt())
+        u16(b, changes.size)
         for ((idx, value) in changes) {
-            u16(idx.toInt())
-            writeValue(value)
+            u16(b, idx.toInt())
+            writeValue(b, value)
         }
-        u16(removals.size)
-        for (r in removals) u16(r.toInt())
+        u16(b, removals.size)
+        for (r in removals) u16(b, r.toInt())
+        patches.add(b.toByteArray())
+        return this
     }
 
-    /**
-     * Writes an `Insert` patch (Appendix D §D.2, tag 0x03): a new [node] placed
-     * at [index] under [parentId]. The inserted node is self-contained (its own
-     * children are not decoded by the host from this patch).
-     */
+    /** Writes an `Insert` patch (tag `0x03`): `node` placed under parent. */
+    fun patchInsert(
+        parentId: UInt,
+        index: Int,
+        node: WireNodeBuilder,
+    ): FrameBuilder {
+        val b = ByteArrayOutputStream()
+        b.write(0x03)
+        u32(b, parentId.toInt())
+        u16(b, index)
+        node.writeTo(b)
+        patches.add(b.toByteArray())
+        return this
+    }
+
+    /** Writes a `Remove` patch (tag `0x04`) for `id`. */
+    fun patchRemove(id: UInt): FrameBuilder {
+        val b = ByteArrayOutputStream()
+        b.write(0x04)
+        u32(b, id.toInt())
+        patches.add(b.toByteArray())
+        return this
+    }
+
+    /** Legacy `Insert` overload matching the old `FrameBuilder` signature. */
     fun patchInsert(
         parentId: UInt,
         index: Int,
@@ -113,20 +204,132 @@ class FrameBuilder {
         component: UInt,
         props: List<Pair<UShort, WireValue>>,
         childIds: List<UInt>,
-    ) {
-        out.add(0x03)
-        u32(parentId.toInt())
-        u16(index)
-        node(id, kind, component, props, childIds)
+    ): FrameBuilder = patchInsert(parentId, index, wireNode(id, kind, component, props, childIds))
+
+    /** Writes a `Reorder` patch (tag `0x05`): `keys` reordered under parent. */
+    fun patchReorder(
+        parentId: UInt,
+        keys: List<UInt>,
+    ): FrameBuilder {
+        val b = ByteArrayOutputStream()
+        b.write(0x05)
+        u32(b, parentId.toInt())
+        u16(b, keys.size)
+        for (k in keys) u32(b, k.toInt())
+        patches.add(b.toByteArray())
+        return this
     }
 
-    /** Writes a `Remove` patch (Appendix D §D.2, tag 0x04) for node [id]. */
-    fun patchRemove(id: UInt) {
-        out.add(0x04)
-        u32(id.toInt())
+    /** Writes a `Handler` patch (tag `0x06`): closure `ref` bound to `id`. */
+    fun patchHandler(
+        id: UInt,
+        ref: ClosureRef,
+    ): FrameBuilder {
+        val b = ByteArrayOutputStream()
+        b.write(0x06)
+        u32(b, id.toInt())
+        writeClosureRef(b, ref)
+        patches.add(b.toByteArray())
+        return this
     }
 
-    fun node(
+    // ── shared handler section ─────────────────────────────────────────────
+
+    /** Sets the shared bytecode blob and `HandlerDef` stream. */
+    fun handlerSection(
+        blobBytes: ByteArray,
+        handlers: List<Pair<UInt, ClosureRef>>,
+    ): FrameBuilder {
+        blob = blobBytes
+        this.handlers.clear()
+        this.handlers.addAll(handlers)
+        return this
+    }
+
+    // ── assembly ────────────────────────────────────────────────────────────
+
+    /** Assembles and returns the frame bytes matching the decoder contract. */
+    fun build(): ByteArray {
+        val out = ByteArrayOutputStream()
+        // Shared 6-byte header: magic(4) | version(1) | kind(1).
+        out.write(0x58); out.write(0x55); out.write(0x5C); out.write(0x46) // 0x465C5558 LE
+        out.write(0x01) // version
+        when (mode) {
+            Mode.INIT -> buildInit(out)
+            Mode.DELTA -> buildDelta(out)
+        }
+        return out.toByteArray()
+    }
+
+    private fun buildInit(out: ByteArrayOutputStream) {
+        out.write(0x02) // FRAME_INIT
+        u32(out, seq)
+        // Root node, then a u32 count of extra (descendant) nodes.
+        require(nodes.isNotEmpty()) { "Init frame requires at least a root node" }
+        out.writeBytes(nodes[0])
+        u32(out, nodes.size - 1)
+        for (i in 1 until nodes.size) out.writeBytes(nodes[i])
+        // signal state_seed: u16 count + (u32 id, value).
+        u16(out, seed.size)
+        for ((id, value) in seed) {
+            u32(out, id.toInt())
+            writeValue(out, value)
+        }
+        // source_map: u16 count + (u32 fileId, u16 len + utf8 path).
+        u16(out, sourceMap.size)
+        for ((fid, path) in sourceMap) {
+            u32(out, fid.toInt())
+            encodeStr(out, path)
+        }
+        // literal string table (u32 count).
+        u32(out, strings.size)
+        for ((id, text) in strings) {
+            u32(out, id.toInt())
+            encodeStr(out, text)
+        }
+        // component-name section (u16 count).
+        u16(out, components.size)
+        for ((cid, name) in components) {
+            u32(out, cid.toInt())
+            encodeStr(out, name)
+        }
+        // handler section: blob (u32 len + bytes) + u16 count + HandlerDefs.
+        writeHandlerSection(out)
+        // ADR-0027 signal_meta presence marker: 0 = none for fixtures.
+        out.write(0)
+    }
+
+    private fun buildDelta(out: ByteArrayOutputStream) {
+        out.write(0x04) // FRAME_DELTA
+        u32(out, seq)
+        out.write(deltaFlags and 0xFF)
+        u16(out, patches.size)
+        u16(out, handlers.size)
+        u16(out, strings.size)
+        for (p in patches) out.writeBytes(p)
+        for ((id, text) in strings) {
+            u32(out, id.toInt())
+            encodeStr(out, text)
+        }
+        writeHandlerSection(out)
+        // ADR-0027 signal_meta: present only when FLAG_NODE_HAS_SIGNAL_DEPS set.
+        if ((deltaFlags and 0x40) != 0) out.write(0) else out.write(0)
+    }
+
+    private fun writeHandlerSection(out: ByteArrayOutputStream) {
+        u32(out, blob.size)
+        out.writeBytes(blob)
+        u16(out, handlers.size)
+        for ((id, ref) in handlers) {
+            u32(out, id.toInt())
+            writeClosureRef(out, ref)
+        }
+    }
+
+    // ── node / value writers ────────────────────────────────────────────────
+
+    private fun writeNode(
+        b: ByteArrayOutputStream,
         id: UInt,
         kind: UInt,
         component: UInt,
@@ -134,126 +337,151 @@ class FrameBuilder {
         childIds: List<UInt>,
         pure: Boolean = false,
     ) {
-        u32(id.toInt())
-        out.add(kind.toByte())
-        u32(component.toInt())
-        u16(props.size)
+        u32(b, id.toInt())
+        // Pure flag is carried in bit 0x20 of the kind byte (Appendix D §D.4),
+        // matching the Rust encoder's `kind | PURE_FLAG`.
+        b.write((kind.toInt() or if (pure) 0x20 else 0) and 0xFF)
+        u32(b, component.toInt())
+        u16(b, props.size)
         for ((idx, value) in props) {
-            u16(idx.toInt())
-            writeValue(value)
+            u16(b, idx.toInt())
+            writeValue(b, value)
         }
-        u16(childIds.size)
+        u16(b, childIds.size)
         for (cid in childIds) {
-            out.add(0x01) // Node child tag
-            u32(cid.toInt())
+            b.write(0x01) // Node child tag
+            u32(b, cid.toInt())
         }
-        u16(0) // handler count
-        u32(0)
-        u32(0)
-        u32(0) // span
-        // MLP host extension: when the frame sets the 0x20 flag, nodes carry an
-        // explicit @pure byte so the reconciler can skip their subtrees (§18.10).
-        if (pureFlag) u8(if (pure) 1 else 0)
+        u16(b, 0) // handler count
+        // span: file/start/end (u32 each)
+        u32(b, 0); u32(b, 0); u32(b, 0)
     }
 
-    /** Tracks whether [flags] was called with `hasPure = true` for this frame. */
-    private var pureFlag: Boolean = false
-
-    /** Writes the handler section (Appendix D §D.8 + §D.12): a shared bytecode blob followed by `HandlerDef` entries. */
-    fun handlerSection(
-        blob: ByteArray,
-        handlers: List<Pair<UInt, ClosureRef>>,
-    ) {
-        // Shared blob: u32 length + raw bytecode (encode_bytecode_blob).
-        u32(blob.size)
-        out.addAll(blob.toList())
-        // HandlerDef stream: each entry is a `u32 handlerId` + `ClosureRef`
-        // (Appendix D §D.8). The frame header's `handlerCount` tells the
-        // deserializer how many to read, so no inline count is written here.
-        for ((id, closure) in handlers) {
-            u32(id.toInt())
-            out.addAll(closure.hash.toList())
-            u32(closure.bytecodeOffset.toInt())
-            u16(closure.bytecodeLen.toInt())
-            u16(closure.signals.size)
-            for (s in closure.signals) u32(s.toInt())
-            u32(0) // span file
-            u32(0) // span start
-            u32(0) // span end
-        }
-    }
-
-    fun build(): ByteArray {
-        // Appendix D §D.9: every full-tree frame carries a component-name
-        // section after the literal string table. If the caller didn't write
-        // one explicitly, emit an empty section so the decoder stays in sync
-        // with the wire layout (a missing section would misread the handler
-        // blob as component bytes).
-        if (!componentSectionEmitted) componentSection()
-        return out.toByteArray()
-    }
-
-    private fun u8(v: Int) = out.add((v and 0xFF).toByte())
-
-    private fun u16(v: Int) {
-        out.add((v and 0xFF).toByte())
-        out.add(((v ushr 8) and 0xFF).toByte())
-    }
-
-    private fun u32(v: Int) {
-        out.add((v and 0xFF).toByte())
-        out.add(((v ushr 8) and 0xFF).toByte())
-        out.add(((v ushr 16) and 0xFF).toByte())
-        out.add(((v ushr 24) and 0xFF).toByte())
-    }
-
-    private fun writeValue(value: WireValue) {
+    private fun writeValue(b: ByteArrayOutputStream, value: WireValue) {
         when (value) {
-            WireValue.Null -> out.add(0x00)
-            is WireValue.IntVal -> {
-                out.add(0x01)
-                i64(value.value)
-            }
-            is WireValue.FloatVal -> {
-                out.add(0x02)
-                i64(java.lang.Double.doubleToRawLongBits(value.value))
-            }
-            is WireValue.BoolVal -> {
-                out.add(0x03)
-                out.add(if (value.value) 1 else 0)
-            }
-            is WireValue.StrVal -> {
-                out.add(0x04)
-                u32(value.id.toInt())
-            }
-            is WireValue.HandlerRefVal -> {
-                out.add(0x05)
-                u32(value.handlerId.toInt())
-            }
+            WireValue.Null -> b.write(0x00)
+            is WireValue.IntVal -> { b.write(0x01); i64(b, value.value) }
+            is WireValue.FloatVal -> { b.write(0x02); i64(b, java.lang.Double.doubleToRawLongBits(value.value)) }
+            is WireValue.BoolVal -> { b.write(0x03); b.write(if (value.value) 1 else 0) }
+            is WireValue.StrVal -> { b.write(0x04); u32(b, value.id.toInt()) }
+            is WireValue.HandlerRefVal -> { b.write(0x05); u32(b, value.handlerId.toInt()) }
             is WireValue.ListVal -> {
-                out.add(0x06)
-                u16(value.items.size)
-                value.items.forEach { writeValue(it) }
+                b.write(0x06); u16(b, value.items.size)
+                value.items.forEach { writeValue(b, it) }
             }
             is WireValue.RecordVal -> {
-                out.add(0x07)
-                u16(value.fields.size)
-                value.fields.forEach { (idx, v) ->
-                    u16(idx.toInt())
-                    writeValue(v)
-                }
+                b.write(0x07); u16(b, value.fields.size)
+                value.fields.forEach { (idx, v) -> u16(b, idx.toInt()); writeValue(b, v) }
             }
         }
     }
 
-    private fun i64(v: Long) {
-        out.add((v and 0xFF).toByte())
-        out.add(((v ushr 8) and 0xFF).toByte())
-        out.add(((v ushr 16) and 0xFF).toByte())
-        out.add(((v ushr 24) and 0xFF).toByte())
-        out.add(((v ushr 32) and 0xFF).toByte())
-        out.add(((v ushr 40) and 0xFF).toByte())
-        out.add(((v ushr 48) and 0xFF).toByte())
-        out.add(((v ushr 56) and 0xFF).toByte())
+    private fun writeClosureRef(b: ByteArrayOutputStream, ref: ClosureRef) {
+        for (byte in ref.hash) b.write(byte.toInt() and 0xFF)
+        u32(b, ref.bytecodeOffset.toInt())
+        u16(b, ref.bytecodeLen.toInt())
+        u16(b, ref.signals.size)
+        for (s in ref.signals) u32(b, s.toInt())
+        u32(b, 0); u32(b, 0); u32(b, 0) // span file/start/end
+    }
+
+    private fun encodeStr(b: ByteArrayOutputStream, s: String) {
+        val bytes = s.toByteArray(Charsets.UTF_8)
+        u16(b, bytes.size)
+        b.writeBytes(bytes)
+    }
+
+    private fun u8(b: ByteArrayOutputStream, v: Int) = b.write(v and 0xFF)
+    private fun u16(b: ByteArrayOutputStream, v: Int) {
+        b.write(v and 0xFF)
+        b.write((v ushr 8) and 0xFF)
+    }
+    private fun u32(b: ByteArrayOutputStream, v: Int) {
+        b.write(v and 0xFF)
+        b.write((v ushr 8) and 0xFF)
+        b.write((v ushr 16) and 0xFF)
+        b.write((v ushr 24) and 0xFF)
+    }
+    private fun i64(b: ByteArrayOutputStream, v: Long) {
+        b.write((v and 0xFF).toInt())
+        b.write(((v ushr 8) and 0xFF).toInt())
+        b.write(((v ushr 16) and 0xFF).toInt())
+        b.write(((v ushr 24) and 0xFF).toInt())
+        b.write(((v ushr 32) and 0xFF).toInt())
+        b.write(((v ushr 40) and 0xFF).toInt())
+        b.write(((v ushr 48) and 0xFF).toInt())
+        b.write(((v ushr 56) and 0xFF).toInt())
     }
 }
+
+/**
+ * Fluent builder for a [WireNode]-shaped node inside a `Replace`/`Insert` patch.
+ * Mirrors [FrameBuilder.writeNode] without allocating a [WireNode].
+ */
+class WireNodeBuilder(
+    private val id: UInt,
+    private val kind: UInt,
+    private val component: UInt,
+    private val props: List<Pair<UShort, WireValue>>,
+    private val childIds: List<UInt>,
+    private val pure: Boolean = false,
+) {
+    internal fun writeTo(b: ByteArrayOutputStream) = encode(b)
+
+    private fun encode(b: ByteArrayOutputStream) {
+        u32(b, id.toInt())
+        b.write((kind.toInt() or if (pure) 0x20 else 0) and 0xFF)
+        u32(b, component.toInt())
+        u16(b, props.size)
+        for ((idx, value) in props) {
+            u16(b, idx.toInt())
+            writeValue(b, value)
+        }
+        u16(b, childIds.size)
+        for (cid in childIds) {
+            b.write(0x01)
+            u32(b, cid.toInt())
+        }
+        u16(b, 0)
+        u32(b, 0); u32(b, 0); u32(b, 0)
+    }
+
+    private fun u16(b: ByteArrayOutputStream, v: Int) {
+        b.write(v and 0xFF)
+        b.write((v ushr 8) and 0xFF)
+    }
+    private fun u32(b: ByteArrayOutputStream, v: Int) {
+        b.write(v and 0xFF)
+        b.write((v ushr 8) and 0xFF)
+        b.write((v ushr 16) and 0xFF)
+        b.write((v ushr 24) and 0xFF)
+    }
+    private fun writeValue(b: ByteArrayOutputStream, value: WireValue) {
+        when (value) {
+            WireValue.Null -> b.write(0x00)
+            is WireValue.IntVal -> { b.write(0x01); i64(b, value.value) }
+            is WireValue.FloatVal -> { b.write(0x02); i64(b, java.lang.Double.doubleToRawLongBits(value.value)) }
+            is WireValue.BoolVal -> { b.write(0x03); b.write(if (value.value) 1 else 0) }
+            is WireValue.StrVal -> { b.write(0x04); u32(b, value.id.toInt()) }
+            is WireValue.HandlerRefVal -> { b.write(0x05); u32(b, value.handlerId.toInt()) }
+            is WireValue.ListVal -> { b.write(0x06); u16(b, value.items.size); value.items.forEach { writeValue(b, it) } }
+            is WireValue.RecordVal -> { b.write(0x07); u16(b, value.fields.size); value.fields.forEach { (idx, v) -> u16(b, idx.toInt()); writeValue(b, v) } }
+        }
+    }
+    private fun i64(b: ByteArrayOutputStream, v: Long) {
+        b.write((v and 0xFF).toInt()); b.write(((v ushr 8) and 0xFF).toInt())
+        b.write(((v ushr 16) and 0xFF).toInt()); b.write(((v ushr 24) and 0xFF).toInt())
+        b.write(((v ushr 32) and 0xFF).toInt()); b.write(((v ushr 40) and 0xFF).toInt())
+        b.write(((v ushr 48) and 0xFF).toInt()); b.write(((v ushr 56) and 0xFF).toInt())
+    }
+}
+
+/** Creates a [WireNodeBuilder] for use with the `patch*` helpers. */
+fun wireNode(
+    id: UInt,
+    kind: UInt,
+    component: UInt,
+    props: List<Pair<UShort, WireValue>> = emptyList(),
+    childIds: List<UInt> = emptyList(),
+    pure: Boolean = false,
+): WireNodeBuilder = WireNodeBuilder(id, kind, component, props, childIds, pure)

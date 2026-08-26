@@ -33,7 +33,8 @@ import org.junit.jupiter.api.Test
 class RenderMountTest {
     private fun stdlibEntries(): List<Pair<UInt, String>> {
         val kinds = listOf("column", "text", "button", "row", "text_field", "screen", "router")
-        return (100u..106u).toList().zip(kinds)
+        return (100u..106u).toList().zip(kinds) +
+            listOf(200u to "text", 300u to "button", 500u to "screen", 600u to "router")
     }
 
     /** Builds a counter-shaped Init frame: column(root) → text + button. */

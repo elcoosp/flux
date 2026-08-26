@@ -323,11 +323,14 @@ public object FrameDeserializer {
     private fun decodeNode(r: ByteReader): WireNode {
         val id = r.u32().toUInt()
         val kindByte = r.u8()
+        // Bit 0x20 of the kind byte carries the `@pure` flag (Appendix D §D.4);
+        // the low bits are the wire NodeKind tag.
+        val isPure = (kindByte and 0x20) != 0
         // The wire kind byte is the NodeKind enum (0 = component, 1 = primitive);
         // we keep it only as a fallback tag. Real resolution is by `componentId`
         // against the synced string table (see AdapterRegistry / ShadowTree),
         // which maps the id to the component name ("Text", "Column", ...).
-        val kind = kindByte.toString()
+        val kind = (kindByte and 0x1F).toString()
         val componentId = r.u32().toUInt()
         val propCount = r.u16()
         val props = ArrayList<Pair<UShort, WireValue>>(propCount)
@@ -344,7 +347,7 @@ public object FrameDeserializer {
         val spanFile = r.u32().toUInt()
         val spanStart = r.u32().toUInt()
         val spanEnd = r.u32().toUInt()
-        return WireNode(id, kind, componentId, props, children, handlerIds, false, spanFile, spanStart, spanEnd)
+        return WireNode(id, kind, componentId, props, children, handlerIds, isPure, spanFile, spanStart, spanEnd)
     }
 
     private fun decodeChild(r: ByteReader): WireChild =

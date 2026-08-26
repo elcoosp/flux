@@ -2,6 +2,8 @@ package dev.flux.host.shadow
 
 import dev.flux.host.AdapterRegistry
 import dev.flux.host.StringTableEntry
+import dev.flux.host.vm.FluxBytecodeVM
+import dev.flux.host.vm.VmResult
 import dev.flux.host.wire.ClosureRef
 import dev.flux.host.wire.Frame
 import dev.flux.host.wire.NodeSignalMeta
@@ -17,8 +19,6 @@ import dev.flux.ui.FluxUiKit
 import dev.flux.ui.Props
 import java.lang.ref.WeakReference
 import dev.flux.host.FluxExecutor as HostExecutor
-import dev.flux.host.vm.FluxBytecodeVM
-import dev.flux.host.vm.VmResult
 
 /**
  * The host render tree: a map of [ShadowNode]s keyed by id, plus the adapter
@@ -518,23 +518,32 @@ public class ShadowTree(
 
     /** Converts a VM [FluxValue] (thunk result) into the kit [dev.flux.ui.FluxValue],
      *  resolving `StrVal` ids through [resolver] so interpolated text survives. */
-    private fun dev.flux.host.vm.FluxValue.toKitValue(
-        resolver: dev.flux.host.vm.StringResolver,
-    ): dev.flux.ui.FluxValue =
+    private fun dev.flux.host.vm.FluxValue.toKitValue(resolver: dev.flux.host.vm.StringResolver): dev.flux.ui.FluxValue =
         when (this) {
-            is dev.flux.host.vm.FluxValue.IntVal -> dev.flux.ui.FluxValue.Int(value)
-            is dev.flux.host.vm.FluxValue.FloatVal -> dev.flux.ui.FluxValue.Float(value)
-            is dev.flux.host.vm.FluxValue.BoolVal -> dev.flux.ui.FluxValue.Bool(value)
-            is dev.flux.host.vm.FluxValue.StrVal -> dev.flux.ui.FluxValue.Str(resolver.resolve(id))
+            is dev.flux.host.vm.FluxValue.IntVal ->
+                dev.flux.ui.FluxValue
+                    .Int(value)
+            is dev.flux.host.vm.FluxValue.FloatVal ->
+                dev.flux.ui.FluxValue
+                    .Float(value)
+            is dev.flux.host.vm.FluxValue.BoolVal ->
+                dev.flux.ui.FluxValue
+                    .Bool(value)
+            is dev.flux.host.vm.FluxValue.StrVal ->
+                dev.flux.ui.FluxValue
+                    .Str(resolver.resolve(id))
             dev.flux.host.vm.FluxValue.NullVal -> dev.flux.ui.FluxValue.Null
             is dev.flux.host.vm.FluxValue.HandlerRefVal ->
-                dev.flux.ui.FluxValue.HandlerRef(handlerId)
+                dev.flux.ui.FluxValue
+                    .HandlerRef(handlerId)
             is dev.flux.host.vm.FluxValue.ListVal ->
-                dev.flux.ui.FluxValue.List(items.map { it.toKitValue(resolver) })
+                dev.flux.ui.FluxValue
+                    .List(items.map { it.toKitValue(resolver) })
             is dev.flux.host.vm.FluxValue.RecordVal ->
                 dev.flux.ui.FluxValue.Record(
                     fields.map {
-                        dev.flux.ui.FluxValue.Field(it.index, it.value.toKitValue(resolver))
+                        dev.flux.ui.FluxValue
+                            .Field(it.index, it.value.toKitValue(resolver))
                     },
                 )
         }
