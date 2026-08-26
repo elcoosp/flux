@@ -44,7 +44,11 @@ public struct SignalGraph: SignalStore {
 
     /// Writes a value and notifies every observer of that signal.
     mutating func write(_ id: UInt32, _ value: VMValue) {
+        let oldValue = values[id] ?? .null
         values[id] = value
+        #if DEBUG
+        fluxDevtoolsEmit(.signalWrite(signalId: id, oldValue: oldValue, newValue: value, triggeredEffectIds: []))
+        #endif
         let subs = observers[id] ?? [:]
         for notify in subs.values { notify() }
     }

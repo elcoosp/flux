@@ -450,6 +450,9 @@ enum FluxBytecodeVM {
             }
 
             ip = nextIP
+            #if DEBUG
+            fluxDevtoolsEmit(.vmStep(bytecodeOffset: UInt32(instr.offset), opcode: instr.opCode.rawValue, registers: regs, gasRemaining: gas))
+            #endif
         }
 
         return VmOutcome(
@@ -734,6 +737,9 @@ enum FluxBytecodeVM {
             }
 
             ip = nextIP
+            #if DEBUG
+            fluxDevtoolsEmit(.vmStep(bytecodeOffset: UInt32(instr.offset), opcode: instr.opCode.rawValue, registers: regs, gasRemaining: gas))
+            #endif
         }
 
         return VmOutcome(signals: signals.snapshot(), registers: regs, gasUsed: entryGas - gas)
