@@ -1,113 +1,166 @@
 //! One host connection: the `Hello` handshake and the frame fan-out loop (FLUX-019).
 //!
-//! Each accepted socket is driven by a blocking task running [`serve_client`].
-//! The synchronous `tungstenite` state machine is used because this crate's
-//! pre-wired dependency set carries no `futures-util`, so the async
-//! `Sink`/`Stream` adapters on `WebSocketStream` cannot be named here.
+//! Each accepted socket is upgraded with [`tokio_tungstenite::accept_async`] and
+//! driven by its own `tokio::spawn`ed task running [`serve_client`]. The socket's
+//! read half and the session's outbound queue are polled together with
+//! `tokio::select!`, so neither a silent client nor a burst of broadcast frames
+//! can block the other — and no thread is parked per connection (brittleness
+//! issue 6).
+//!
+//! Compile work reached from this loop (the `Hello` → `Init` reply) runs on
+//! Tokio's blocking pool via `spawn_blocking`, keeping the I/O reactor free.
 
-use std::io::ErrorKind;
-use std::net::TcpStream;
 use std::sync::Arc;
-use std::sync::mpsc::{Receiver, TryRecvError};
-use std::time::Duration;
 
-use tokio_tungstenite::tungstenite::{
-    Error as WsError, HandshakeError, Message, WebSocket, accept,
-};
+use futures_util::{SinkExt, StreamExt};
+use tokio::net::TcpStream;
+use tokio::sync::mpsc::UnboundedReceiver;
+use tokio_tungstenite::tungstenite::{Error as WsError, Message};
+use tokio_tungstenite::{WebSocketStream, accept_async};
 
 use crate::dispatch::FRAME_DISPATCH_REPORT;
 use crate::error::Diagnostic;
 use crate::server::Shared;
 
-/// How long a client thread blocks on a socket read before checking its queue.
-const CLIENT_POLL: Duration = Duration::from_millis(10);
+/// The upgraded WebSocket stream a session is driven over.
+type HostSocket = WebSocketStream<TcpStream>;
 
 /// Drives one host connection: `Hello` handshake, `Init` reply, then frame fan-out.
+///
+/// The loop terminates on a clean close, on server shutdown, or when the
+/// session's broadcast queue is dropped.
 ///
 /// # Errors
 ///
 /// Returns the underlying `tungstenite` error when the upgrade or a socket write
 /// fails. A clean close is `Ok(())`.
-pub(crate) fn serve_client(stream: TcpStream, shared: &Arc<Shared>) -> Result<(), WsError> {
-    let mut socket = upgrade(stream)?;
+pub(crate) async fn serve_client(stream: TcpStream, shared: Arc<Shared>) -> Result<(), WsError> {
+    // Nagle off: patch frames are small and latency-sensitive (spec §3.7).
+    stream.set_nodelay(true).map_err(WsError::Io)?;
+    let socket = accept_async(stream).await?;
     let queue = shared.register();
+    run_session(socket, queue, shared).await
+}
+
+/// The read/write select loop for one upgraded connection.
+async fn run_session(
+    socket: HostSocket,
+    mut queue: UnboundedReceiver<Vec<u8>>,
+    shared: Arc<Shared>,
+) -> Result<(), WsError> {
+    let (mut writer, mut reader) = socket.split();
     let mut handshook = false;
     while !shared.is_shutdown() {
-        match socket.read() {
-            Ok(Message::Binary(bytes)) => {
-                if handle_host_frame(&bytes, &mut socket, shared)? {
-                    handshook = true;
+        tokio::select! {
+            incoming = reader.next() => match incoming {
+                Some(Ok(Message::Binary(bytes))) => {
+                    for frame in handle_host_frame(&bytes, &shared).await {
+                        writer.send(Message::Binary(frame.into())).await?;
+                    }
+                    if is_hello(&bytes) {
+                        handshook = true;
+                    }
                 }
-            }
-            Ok(Message::Close(_)) => return Ok(()),
-            Ok(_) => {}
-            Err(WsError::Io(e))
-                if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
-            Err(WsError::ConnectionClosed) => return Ok(()),
-            Err(error) => return Err(error),
-        }
-        if handshook && !drain_queue(&queue, &mut socket)? {
-            return Ok(());
+                Some(Ok(Message::Close(_))) | None => return Ok(()),
+                Some(Ok(_)) => {}
+                Some(Err(WsError::ConnectionClosed | WsError::AlreadyClosed)) => return Ok(()),
+                Some(Err(error)) => return Err(error),
+            },
+            queued = queue.recv(), if handshook => match queued {
+                Some(frame) => writer.send(Message::Binary(frame.into())).await?,
+                None => return Ok(()),
+            },
         }
     }
     Ok(())
 }
 
-/// Performs the WebSocket upgrade and switches the socket to polled reads.
-fn upgrade(stream: TcpStream) -> Result<WebSocket<TcpStream>, WsError> {
-    // Accepted sockets inherit the listener's non-blocking flag on macOS and
-    // Linux; the HTTP upgrade must be read in blocking mode or `accept` reports
-    // `HandshakeIncomplete`. The read timeout installed afterwards is what lets
-    // the frame loop poll its outgoing queue.
-    stream.set_nonblocking(false).map_err(WsError::Io)?;
-    stream.set_nodelay(true).map_err(WsError::Io)?;
-    let socket = accept(stream).map_err(|e| match e {
-        HandshakeError::Failure(err) => err,
-        HandshakeError::Interrupted(_) => WsError::ConnectionClosed,
-    })?;
-    socket
-        .get_ref()
-        .set_read_timeout(Some(CLIENT_POLL))
-        .map_err(WsError::Io)?;
-    Ok(socket)
+/// Whether `bytes` is a `Hello` handshake frame (spec §D.12.1).
+fn is_hello(bytes: &[u8]) -> bool {
+    bytes.get(5).copied() == Some(flux_ir_serde::FRAME_HELLO)
 }
 
-/// Handles one host→server frame. Returns `true` once the handshake completed.
-fn handle_host_frame(
-    bytes: &[u8],
-    socket: &mut WebSocket<TcpStream>,
-    shared: &Arc<Shared>,
-) -> Result<bool, WsError> {
+/// Handles one host→server frame, returning the frames to write back (possibly
+/// none).
+async fn handle_host_frame(bytes: &[u8], shared: &Arc<Shared>) -> Vec<Vec<u8>> {
     // A host dispatch report is a separate frame type from `Hello`; route it
     // before the handshake check because a host may report dispatches at any
     // time after connecting.
-    if bytes.get(5).copied() == Some(FRAME_DISPATCH_REPORT) {
-        handle_dispatch_report(bytes, shared);
-        return Ok(false);
-    }
-    use flux_ir_serde::{FRAME_HELLO, Frame};
-    if bytes.get(5).copied() != Some(FRAME_HELLO) {
+    match bytes.get(5).copied() {
+        Some(FRAME_DISPATCH_REPORT) => {
+            handle_dispatch_report(bytes, shared);
+            Vec::new()
+        }
+        // Brittleness 4a: the host asks for a canonical `StringId` instead of
+        // synthesising one locally.
+        Some(flux_ir_serde::FRAME_INTERN_STRING) => {
+            handle_intern_string(bytes, shared).into_iter().collect()
+        }
+        Some(flux_ir_serde::FRAME_HELLO) => handle_hello(bytes, shared).await.into_iter().collect(),
         // Heartbeats and unknown host frames are ignored; the host drives the
         // channel with `Hello` only (spec §D.12).
-        return Ok(false);
+        _ => Vec::new(),
     }
-    let reply = match Frame::from_hello_bytes(bytes) {
-        Some(hello) => {
-            tracing::info!(
-                platform = %hello.platform,
-                device = %hello.device,
-                version = hello.version,
-                capabilities = hello.capabilities.len(),
-                "host handshake"
-            );
-            init_reply(shared)
-        }
-        None => Some(shared.pipeline.lock().error_frame(&malformed_hello())),
+}
+
+/// Handles the `Hello` handshake, returning the `Init` (or `Error`) reply.
+///
+/// The compile the reply may need runs on the blocking pool: it is the only
+/// CPU-bound step in the WebSocket path and must not stall the reactor.
+async fn handle_hello(bytes: &[u8], shared: &Arc<Shared>) -> Option<Vec<u8>> {
+    use flux_ir_serde::Frame;
+    let Some(hello) = Frame::from_hello_bytes(bytes) else {
+        let shared = Arc::clone(shared);
+        return blocking(move || shared.pipeline.lock().error_frame(&malformed_hello())).await;
     };
-    if let Some(frame) = reply {
-        socket.send(Message::Binary(frame.into()))?;
+    tracing::info!(
+        platform = %hello.platform,
+        device = %hello.device,
+        version = hello.version,
+        capabilities = hello.capabilities.len(),
+        "host handshake"
+    );
+    let shared = Arc::clone(shared);
+    blocking(move || init_reply(&shared)).await.flatten()
+}
+
+/// Runs `work` on Tokio's blocking pool, returning `None` if the pool task was
+/// cancelled (server shutdown).
+async fn blocking<T, F>(work: F) -> Option<T>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    match tokio::task::spawn_blocking(work).await {
+        Ok(value) => Some(value),
+        Err(error) => {
+            tracing::debug!(%error, "blocking pipeline task did not complete");
+            None
+        }
     }
-    Ok(true)
+}
+
+/// Handles an `InternString` request (brittleness 4a).
+///
+/// Interns the payload into the server's canonical string table — shared across
+/// every session through the pipeline mutex — and replies with a
+/// `StringInterned` frame carrying an id below
+/// [`flux_ir_serde::STRING_ID_CANONICAL_CEILING`]. A non-UTF-8 or over-long
+/// payload is a protocol violation: it is logged and dropped rather than
+/// answered with a bogus id.
+fn handle_intern_string(bytes: &[u8], shared: &Arc<Shared>) -> Option<Vec<u8>> {
+    use flux_ir_serde::{Frame, StringInternedFrame};
+    let request = Frame::from_intern_string_bytes(bytes)?;
+    let Some(text) = request.as_str() else {
+        tracing::warn!(
+            len = request.len,
+            "dropped InternString frame with a non-UTF-8 payload"
+        );
+        return None;
+    };
+    let id = shared.pipeline.lock().intern_string(text);
+    tracing::debug!(id, text, "interned host string");
+    Some(StringInternedFrame::new(id).to_bytes())
 }
 
 /// Handles a host→server dispatch report (ADR-0027 Phase 2).
@@ -154,18 +207,4 @@ fn malformed_hello() -> Diagnostic {
         ),
         None,
     )
-}
-
-/// Writes every queued frame to `socket`. Returns `false` when the queue closed.
-fn drain_queue(
-    queue: &Receiver<Vec<u8>>,
-    socket: &mut WebSocket<TcpStream>,
-) -> Result<bool, WsError> {
-    loop {
-        match queue.try_recv() {
-            Ok(frame) => socket.send(Message::Binary(frame.into()))?,
-            Err(TryRecvError::Empty) => return Ok(true),
-            Err(TryRecvError::Disconnected) => return Ok(false),
-        }
-    }
 }
