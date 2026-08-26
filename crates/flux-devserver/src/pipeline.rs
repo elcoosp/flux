@@ -40,12 +40,14 @@ use std::time::Instant;
 use flux_ir::{IRArena, LoweredIr, lower};
 use flux_ir_serde::{Frame, InitFrame, NodeSignalMeta};
 use flux_parser::Ast;
-use flux_syntax::{FileId, Patch, SignalId, Value};
+use flux_syntax::{FileId, Patch, SignalId, StringId, Value};
 
 use crate::dispatch::{DependencyIndex, DispatchReport, NodeSignalDeps, emit_minimal_updates};
 use crate::error::Diagnostic;
+use host_strings::HostStrings;
 use tree::{display_path, flatten_extra_nodes, merge_arenas, root_node};
 
+pub(crate) mod host_strings;
 pub(crate) mod tree;
 
 /// The outcome of compiling one source snapshot.
@@ -106,6 +108,12 @@ pub struct Pipeline {
     /// compile or when no dependency data is available, which leaves `index`
     /// inactive and degrades the server to coarse frames.
     signal_deps: Option<Vec<NodeSignalDeps>>,
+    /// Strings interned on behalf of a connected host (brittleness 4a).
+    ///
+    /// Kept separate from the compiler's arena table so a host request can never
+    /// perturb the ids the tree itself was serialised with. Ids reported to the
+    /// host are dense within the module's own reserved region.
+    host_strings: HostStrings,
 }
 
 impl Pipeline {
@@ -123,6 +131,7 @@ impl Pipeline {
             timings: PhaseTimings::default(),
             index: DependencyIndex::default(),
             signal_deps: None,
+            host_strings: HostStrings::default(),
         }
     }
 
@@ -130,6 +139,44 @@ impl Pipeline {
     #[must_use]
     pub fn timings(&self) -> PhaseTimings {
         self.timings
+    }
+
+    /// Interns `text` on behalf of a host and returns its canonical
+    /// [`StringId`] (brittleness 4a).
+    ///
+    /// A string already present in the compiled tree's own table resolves to
+    /// that arena id, so the host and the wire tree agree. Anything else is
+    /// interned into the server's own reserved host-string region. The returned
+    /// id is always below
+    /// [`flux_ir_serde::STRING_ID_CANONICAL_CEILING`], which is what lets a host
+    /// drop its synthetic-hash fallback; interning the same text twice returns
+    /// the same id.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use flux_devserver::Pipeline;
+    ///
+    /// let mut pipeline = Pipeline::new(".", false);
+    /// let first = pipeline.intern_string("tap");
+    /// assert_eq!(pipeline.intern_string("tap"), first);
+    /// assert!(first < flux_ir_serde::STRING_ID_CANONICAL_CEILING);
+    /// ```
+    pub fn intern_string(&mut self, text: &str) -> StringId {
+        if let Some(last) = &self.last_good
+            && let Some(id) = last.arena.string_table().lookup(text)
+        {
+            return id;
+        }
+        self.host_strings.intern(text)
+    }
+
+    /// Resolves a host-interned string previously assigned by
+    /// [`intern_string`](Self::intern_string), or `None` when `id` was never
+    /// handed out from the host-string region.
+    #[must_use]
+    pub fn resolve_host_string(&self, id: StringId) -> Option<&str> {
+        self.host_strings.resolve(id)
     }
 
     /// Whether a good tree has been compiled at least once.
