@@ -79,6 +79,8 @@ enum OpCode: UInt8, CaseIterable, Equatable {
 
     case gasCheck = 0xC0
 
+    case toString = 0xD0
+
     /// The Appendix E mnemonic, e.g. `"ADD_I64"`.
     var mnemonic: String {
         switch self {
@@ -136,6 +138,7 @@ enum OpCode: UInt8, CaseIterable, Equatable {
         case .loadNull: "LOAD_NULL"
         case .mov: "MOV"
         case .gasCheck: "GAS_CHECK"
+        case .toString: "TO_STRING"
         }
     }
 
@@ -147,7 +150,7 @@ enum OpCode: UInt8, CaseIterable, Equatable {
         case .halt, .nop: 0
         case .loadNull: 1
         case .negI64, .negF64, .i64ToF64, .f64ToI64, .notBool, .strLen,
-             .mov, .listLen: 2
+             .mov, .listLen, .toString: 2
         case .addI64, .subI64, .mulI64, .divI64, .modI64, .eqI64, .ltI64, .gtI64,
              .lteI64, .gteI64, .addF64, .subF64, .mulF64, .divF64, .eqF64, .ltF64,
              .gtF64, .andBool, .orBool, .strConcat, .strEq, .recordEq, .listGet,

@@ -284,6 +284,11 @@ enum FluxBytecodeVM {
                 let newId = stringTable.intern(combined)
                 regs[Int(dst)] = .str(newId)
 
+            case .toString:
+                let dst = instr.u8(0)
+                let rendered = renderForToString(reg(instr.u8(1)), table: stringTable)
+                regs[Int(dst)] = .str(stringTable.intern(rendered))
+
             case .jump:
                 ip = try jumpTarget(instr, nextIP: nextIP, offsets: offsets, delta: instr.i32(0))
                 continue
@@ -617,6 +622,10 @@ enum FluxBytecodeVM {
                 let combined = a + b
                 let newId = stringTable.intern(combined)
                 regs[Int(dst)] = .str(newId)
+            case opcodeIndex[.toString]!:
+                let dst = instr.u8(0)
+                let rendered = renderForToString(reg(instr.u8(1)), table: stringTable)
+                regs[Int(dst)] = .str(stringTable.intern(rendered))
             case opcodeIndex[.jump]!:
                 ip = try jumpTarget(instr, nextIP: nextIP, offsets: offsets, delta: instr.i32(0))
                 continue
@@ -837,6 +846,36 @@ enum FluxBytecodeVM {
             throw VMError.indexOutOfBounds(offset: instr.offset)
         }
         return index
+    }
+}
+
+/// Renders `value` as the text `TO_STRING` (0xD0, ADR-0043) produces.
+///
+/// The rendering is a cross-runtime contract: the Rust oracle, this VM and the
+/// Kotlin VM must produce byte-identical text for the same value, because a
+/// node's materialised props are compared against the release codegen output in
+/// the parity suite. An integral `Float` keeps one fractional digit (`1.0`), and
+/// a `Str` resolves through `table` (falling back to its id when the table has
+/// no entry, which only happens outside a live frame).
+func renderForToString(_ value: VMValue, table: any StringResolvable) -> String {
+    switch value {
+    case let .int(i):
+        return String(i)
+    case let .float(f):
+        return f.isFinite && f == f.rounded() ? String(format: "%.1f", f) : String(f)
+    case let .bool(b):
+        return b ? "true" : "false"
+    case let .str(id):
+        return table.lookup(id) ?? String(id)
+    case let .handlerRef(id):
+        return "handler(\(id))"
+    case let .list(items):
+        return "[" + items.map { renderForToString($0, table: table) }.joined(separator: ", ") + "]"
+    case let .record(fields):
+        let rendered = fields.map { "\($0.propIndex): \(renderForToString($0.value, table: table))" }
+        return "{" + rendered.joined(separator: ", ") + "}"
+    case .null:
+        return "null"
     }
 }
 
