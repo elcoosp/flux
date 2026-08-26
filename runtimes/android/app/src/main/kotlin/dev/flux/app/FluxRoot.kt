@@ -31,23 +31,34 @@ import dev.flux.host.shadow.ShadowTree
 public fun FluxRoot(session: FluxSession) {
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var treeReady by remember { mutableStateOf(false) }
+    // Bumped on every tree mutation (initial frame + post-dispatch reconcile) so
+    // Compose re-composes and re-reads the shadow node props. Holding only a
+    // `treeReady` boolean would freeze the UI after the first frame, because the
+    // shadow tree is mutated in place (same root node instance) and Compose would
+    // never observe the prop changes a tap produces.
+    var generation by remember { mutableStateOf(0) }
 
     val executor = session.executor
     DisposableEffect(executor) {
-        // Roast fix 2: actually (re)bind the executor to the transport on (re)compose
-        // instead of an empty resume lambda. `start()` is idempotent, so rotation /
-        // recomposition rebinds without duplicating listeners (OkHttpTransport clears
-        // them on connect).
         session.start()
-        executor.onTreeChanged = { treeReady = session.shadowTree.rootNode != null }
+        executor.onTreeChanged = {
+            val rn = session.shadowTree.rootNode
+            treeReady = rn != null
+            generation++
+        }
         executor.onError = { errorMessage = it }
         onDispose { /* session is retained by the ViewModel; not disposed here */ }
     }
 
+    // Reading `generation` inside the composition makes this composable re-run
+    // whenever the tree changes, so `FluxTreeView` below re-reads the latest
+    // node props (the new `count` value after a tap).
+    generation
+    val rootNode = session.shadowTree.rootNode
     Box(modifier = Modifier.fillMaxSize()) {
         when {
             // Real Compose UI: walk the shadow tree and render native widgets.
-            treeReady -> FluxTreeView(node = session.shadowTree.rootNode) { handlerId ->
+            treeReady && rootNode != null -> FluxTreeView(node = rootNode, generation = generation) { handlerId ->
                 executor.dispatch(dev.flux.ui.HandlerEvent(handlerId))
             }
             else -> Text("Flux — connecting…", modifier = Modifier.align(Alignment.Center))

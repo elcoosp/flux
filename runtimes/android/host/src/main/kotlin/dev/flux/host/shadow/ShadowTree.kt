@@ -76,6 +76,13 @@ public class ShadowTree(
     // re-materialise its dynamic props against the live signal graph.
     internal var thunkBlobs: Map<ByteArray, ByteArray> = emptyMap()
 
+    // Reverse map from a prop-thunk's stable handler id to the node that owns it,
+    // so a state-preserving Handler patch updating the thunk body can
+    // re-materialise the node's dynamic props immediately (FR hot-reload). Keyed
+    // by the server-assigned handler id — stable across edits — NOT the thunk's
+    // content hash, which changes whenever the body changes.
+    internal var thunkHandlerToNode: MutableMap<UInt, UInt> = mutableMapOf()
+
     // Cumulative reconcile counters (reconcile-counters-and-budgets.md).
     internal var builtCount = 0u
     internal var updatedCount = 0u
@@ -170,6 +177,20 @@ public class ShadowTree(
             }
         }
         thunkBlobs = thunks
+        // Join the frame's handler ids (stable across edits) to each node's
+        // prop-thunk (identified by its content hash) so a state-preserving
+        // Handler patch can find the node to re-materialise. The delta frame
+        // carries both `handlers` (id -> hash) and `signalMeta` (node -> thunk
+        // hash), which we connect here.
+        val handlerHashToId = LinkedHashMap<ByteArray, UInt>()
+        for (h in frame.handlers) handlerHashToId[h.closure.hash] = h.handlerId
+        val map = mutableMapOf<UInt, UInt>()
+        for ((nid, meta) in frame.signalMeta) {
+            val thunk = meta.thunk ?: continue
+            val hid = handlerHashToId[thunk.hash] ?: continue
+            map[hid] = nid
+        }
+        thunkHandlerToNode = map
         if (frame.fullTree && frame.root != null) {
             val index = LinkedHashMap<UInt, WireNode>()
             index[frame.root.id] = frame.root
@@ -316,6 +337,17 @@ public class ShadowTree(
                 val node = nodes[patch.id] ?: return
                 val closure: ClosureRef = patch.closure ?: return
                 node.view.setProperty("closureRef", closure)
+                // If this handler is a node's prop thunk, re-materialise the
+                // node's dynamic props so a thunk-body edit (e.g. a changed
+                // string literal) takes effect immediately, without waiting for
+                // a signal change (FR hot-reload). Non-thunk handlers (e.g.
+                // onClick) need no view mutation here.
+                val nodeId = thunkHandlerToNode[patch.id] ?: return
+                val target = nodes[nodeId] ?: return
+                val newProps = materializeProps(target.wireProps.fields, target.id)
+                withAdapter(target.kind, target.componentId, target.view) { a, v -> a.update(v, newProps) }
+                updatedCount++
+                emitTrace(TraceEvent.Update(seq = lastSeq, id = nodeId))
             }
             else -> { /* Reorder/unknown tags are no-ops for the MLP host */ }
         }
@@ -366,7 +398,19 @@ public class ShadowTree(
         propMaterializations++
         withAdapter(wire.kind, wire.componentId, view) { a, v -> a.update(v, props) }
         val childIds = childIdList(wire)
-        val deps = signalDepsFrom(wire.props)
+        // R1 signal dependencies come from two sources: the explicit
+        // `signal_meta` section the dev server ships (the authoritative record
+        // of which signals a prop thunk reads — e.g. the `count` signal the
+        // interpolated Text reads) and any legacy `IntVal`-based deps inferred
+        // from the raw props. The `signal_meta` deps are required: in the
+        // counter example the Text node's `count` dependency is carried only in
+        // `signal_meta`, never as an `IntVal` prop, so ignoring it leaves the
+        // node with an empty dependency set and it is never re-materialised on
+        // a tap (the label freezes at "tapped 0 times").
+        val deps =
+            (signalMeta[wire.id]?.deps?.toMutableSet() ?: mutableSetOf()).apply {
+                addAll(signalDepsFrom(wire.props))
+            }
         val node =
             ShadowNode(
                 id = wire.id,

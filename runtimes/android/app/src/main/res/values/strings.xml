@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dev-server WebSocket endpoint the host connects to.
+         Defaults to the loopback used by `flux dev`. For a physical device or
+         simulator, override this with your development machine's LAN IP, e.g.
+         "ws://192.168.1.42:7331", so the sandboxed client can reach the server. -->
+    <string name="flux_ws_url" translatable="false">ws://127.0.0.1:7331</string>
+</resources>

@@ -8,6 +8,7 @@ import dev.flux.host.vm.FluxValue
 import dev.flux.host.wire.FrameBuilder
 import dev.flux.host.wire.FrameDeserializer
 import dev.flux.host.wire.WireValue
+import dev.flux.ui.PropsIndex
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -69,7 +70,7 @@ class EndToEndTest {
                         id = 2u,
                         kind = 0x10u,
                         component = 200u,
-                        props = listOf(0u.toUShort() to WireValue.StrVal(7u)),
+                        props = listOf(PropsIndex.TEXT_TEXT to WireValue.StrVal(7u)),
                         childIds = emptyList(),
                     )
                 }.build()
@@ -124,8 +125,8 @@ class EndToEndTest {
                             component = 300u,
                             props =
                                 listOf(
-                                    0u.toUShort() to WireValue.StrVal(9u),
-                                    1u.toUShort() to WireValue.HandlerRefVal(5u),
+                                    PropsIndex.BUTTON_TEXT to WireValue.StrVal(9u),
+                                    PropsIndex.BUTTON_ON_CLICK to WireValue.HandlerRefVal(5u),
                                 ),
                             childIds = emptyList(),
                         )
@@ -198,7 +199,7 @@ class EndToEndTest {
                             id = 11u,
                             kind = 0x10u,
                             component = 200u,
-                            props = listOf(0u.toUShort() to WireValue.StrVal(7u)),
+                            props = listOf(PropsIndex.TEXT_TEXT to WireValue.StrVal(7u)),
                             childIds = emptyList(),
                         )
                     }.build()
@@ -239,7 +240,7 @@ class EndToEndTest {
                             id = 21u,
                             kind = 0x10u,
                             component = 200u,
-                            props = listOf(0u.toUShort() to WireValue.StrVal(8u)),
+                            props = listOf(PropsIndex.TEXT_TEXT to WireValue.StrVal(8u)),
                             childIds = emptyList(),
                         )
                     }.build()
@@ -263,7 +264,7 @@ class EndToEndTest {
                         patchUpdate(
                             id = 11u,
                             changes =
-                                listOf(0u.toUShort() to WireValue.StrVal(77u)),
+                                listOf(PropsIndex.TEXT_TEXT to WireValue.StrVal(77u)),
                         )
                     }.build()
             tree.applyFrame(FrameDeserializer.deserialize(editHomeText), executor)

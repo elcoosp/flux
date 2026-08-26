@@ -3,53 +3,73 @@ package dev.flux.ui
 /**
  * Canonical component-local prop indices shared by every adapter in the kit.
  *
- * These mirror the field positions the Flux dev server assigns to each
- * component's props (Appendix F). Centralizing them keeps adapters in lockstep
- * with the IR schema and avoids magic numbers at every `props.get(...)`.
+ * These MUST match the wire indices the Flux dev server assigns to each
+ * component's props (Appendix D / F, and `flux_ir::lower::prop_index_for_name`).
+ * The server derives a prop's index from an FNV-1a digest of its *name* (stable
+ * across edits, Appendix F §F.0), so a host that read a fixed positional index
+ * (e.g. `text = 0`) would never find the value the server placed at the hashed
+ * index — which is exactly what produced blank labels. We therefore derive
+ * every constant from the same digest, keeping the kit in lockstep with the IR
+ * schema and avoiding magic numbers that could drift from the server.
  */
 public object PropsIndex {
+    /**
+     * FNV-1a (32-bit) digest of `name`, masked to `u16` — the exact algorithm
+     * `flux_ir::lower::prop_index_for_name` uses to assign a wire prop index.
+     * Zero-extends each byte (matching Rust's `u32::from(u8)`) so the host and
+     * server compute identical indices for the same name.
+     */
+    private fun propIndexForName(name: String): UShort {
+        var hash: UInt = 0x811c_9dc5u
+        for (byte in name.encodeToByteArray()) {
+            hash = hash xor byte.toUByte().toUInt()
+            hash = hash * 0x0100_0193u
+        }
+        return (hash and 0xFFFFu).toUShort()
+    }
+
     // Text (F.1)
-    public const val TEXT_TEXT: UShort = 0u
-    public const val TEXT_FONT: UShort = 1u
-    public const val TEXT_SIZE: UShort = 2u
-    public const val TEXT_COLOR: UShort = 3u
-    public const val TEXT_ALIGNMENT: UShort = 4u
-    public const val TEXT_MAX_LINES: UShort = 5u
-    public const val TEXT_OVERFLOW: UShort = 6u
+    public val TEXT_TEXT: UShort = propIndexForName("text")
+    public val TEXT_FONT: UShort = propIndexForName("font")
+    public val TEXT_SIZE: UShort = propIndexForName("size")
+    public val TEXT_COLOR: UShort = propIndexForName("color")
+    public val TEXT_ALIGNMENT: UShort = propIndexForName("alignment")
+    public val TEXT_MAX_LINES: UShort = propIndexForName("maxLines")
+    public val TEXT_OVERFLOW: UShort = propIndexForName("overflow")
 
     // Button (F.2)
-    public const val BUTTON_TEXT: UShort = 0u
-    public const val BUTTON_ON_CLICK: UShort = 1u
-    public const val BUTTON_ENABLED: UShort = 2u
-    public const val BUTTON_COLOR: UShort = 3u
+    public val BUTTON_TEXT: UShort = propIndexForName("text")
+    public val BUTTON_ON_CLICK: UShort = propIndexForName("onClick")
+    public val BUTTON_ENABLED: UShort = propIndexForName("enabled")
+    public val BUTTON_COLOR: UShort = propIndexForName("color")
 
     // Column (F.3) / Row (F.4)
-    public const val STACK_GAP: UShort = 0u
-    public const val STACK_ALIGNMENT: UShort = 1u
+    public val STACK_GAP: UShort = propIndexForName("gap")
+    public val STACK_ALIGNMENT: UShort = propIndexForName("alignment")
 
     // TextField (F.5)
-    public const val TEXT_FIELD_TEXT: UShort = 0u
-    public const val TEXT_FIELD_ON_CHANGE: UShort = 1u
-    public const val TEXT_FIELD_PLACEHOLDER: UShort = 2u
-    public const val TEXT_FIELD_REF: UShort = 3u
-    public const val TEXT_FIELD_ENABLED: UShort = 4u
-    public const val TEXT_FIELD_SECURE: UShort = 5u
-    public const val TEXT_FIELD_KEYBOARD: UShort = 6u
+    public val TEXT_FIELD_TEXT: UShort = propIndexForName("text")
+    public val TEXT_FIELD_ON_CHANGE: UShort = propIndexForName("onChange")
+    public val TEXT_FIELD_PLACEHOLDER: UShort = propIndexForName("placeholder")
+    public val TEXT_FIELD_REF: UShort = propIndexForName("ref")
+    public val TEXT_FIELD_ENABLED: UShort = propIndexForName("enabled")
+    public val TEXT_FIELD_SECURE: UShort = propIndexForName("secure")
+    public val TEXT_FIELD_KEYBOARD: UShort = propIndexForName("keyboard")
 
     // Font sub-record
-    public const val FONT_SIZE: UShort = 0u
-    public const val FONT_WEIGHT: UShort = 1u
-    public const val FONT_FAMILY: UShort = 2u
+    public val FONT_SIZE: UShort = propIndexForName("size")
+    public val FONT_WEIGHT: UShort = propIndexForName("weight")
+    public val FONT_FAMILY: UShort = propIndexForName("family")
 
     // Color sub-record
-    public const val COLOR_RED: UShort = 0u
-    public const val COLOR_GREEN: UShort = 1u
-    public const val COLOR_BLUE: UShort = 2u
-    public const val COLOR_ALPHA: UShort = 3u
+    public val COLOR_RED: UShort = propIndexForName("red")
+    public val COLOR_GREEN: UShort = propIndexForName("green")
+    public val COLOR_BLUE: UShort = propIndexForName("blue")
+    public val COLOR_ALPHA: UShort = propIndexForName("alpha")
 
     // Image (F.8)
-    public const val IMAGE_SRC: UShort = 0u
-    public const val IMAGE_WIDTH: UShort = 1u
-    public const val IMAGE_HEIGHT: UShort = 2u
-    public const val IMAGE_CONTENT_MODE: UShort = 3u
+    public val IMAGE_SRC: UShort = propIndexForName("src")
+    public val IMAGE_WIDTH: UShort = propIndexForName("width")
+    public val IMAGE_HEIGHT: UShort = propIndexForName("height")
+    public val IMAGE_CONTENT_MODE: UShort = propIndexForName("contentMode")
 }

@@ -22,10 +22,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 class FluxHostActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val wsUrl = getString(R.string.flux_ws_url)
         setContent {
             MaterialTheme {
-                // `viewModel()` returns the retained session across rotations.
-                val session: FluxSession = viewModel()
+                // Retained across rotations; the factory injects the configured
+                // dev-server WebSocket URL from the `flux_ws_url` resource.
+                val session: FluxSession = viewModel(factory = FluxSession.Factory(wsUrl))
                 FluxRoot(session)
             }
         }

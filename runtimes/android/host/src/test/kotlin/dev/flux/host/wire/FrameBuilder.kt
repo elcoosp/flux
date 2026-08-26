@@ -45,7 +45,10 @@ class FrameBuilder {
     }
 
     /** Begins a `Delta` frame (kind `0x04`) with the given flags byte. */
-    fun delta(seq: Int = 0, flags: Int = 0): FrameBuilder {
+    fun delta(
+        seq: Int = 0,
+        flags: Int = 0,
+    ): FrameBuilder {
         mode = Mode.DELTA
         this.seq = seq
         this.deltaFlags = flags
@@ -69,7 +72,10 @@ class FrameBuilder {
     }
 
     /** Legacy alias for [init]/[delta]; kept so old call sites keep working. */
-    fun flags(fullTree: Boolean, hasPure: Boolean = false): FrameBuilder {
+    fun flags(
+        fullTree: Boolean,
+        hasPure: Boolean = false,
+    ): FrameBuilder {
         if (fullTree) {
             init(seq)
         } else {
@@ -116,25 +122,37 @@ class FrameBuilder {
     }
 
     /** Adds a literal string-table entry (Appendix D §D.9). */
-    fun stringEntry(id: UInt, text: String): FrameBuilder {
+    fun stringEntry(
+        id: UInt,
+        text: String,
+    ): FrameBuilder {
         strings.add(id to text)
         return this
     }
 
     /** Adds a component-name binding (separate id space from literals). */
-    fun componentEntry(cid: UInt, name: String): FrameBuilder {
+    fun componentEntry(
+        cid: UInt,
+        name: String,
+    ): FrameBuilder {
         components.add(cid to name)
         return this
     }
 
     /** Adds a state-seed cell `(signalId, value)`. */
-    fun stateSeed(id: UInt, value: WireValue): FrameBuilder {
+    fun stateSeed(
+        id: UInt,
+        value: WireValue,
+    ): FrameBuilder {
         seed.add(id to value)
         return this
     }
 
     /** Adds a source-map entry `(fileId, path)`. */
-    fun sourceMapEntry(fileId: UInt, path: String): FrameBuilder {
+    fun sourceMapEntry(
+        fileId: UInt,
+        path: String,
+    ): FrameBuilder {
         sourceMap.add(fileId to path)
         return this
     }
@@ -142,7 +160,10 @@ class FrameBuilder {
     // ── Delta sections ────────────────────────────────────────────────────
 
     /** Writes a `Replace` patch (tag `0x01`): a full node replacing `id`. */
-    fun patchReplace(id: UInt, node: WireNodeBuilder): FrameBuilder {
+    fun patchReplace(
+        id: UInt,
+        node: WireNodeBuilder,
+    ): FrameBuilder {
         val b = ByteArrayOutputStream()
         b.write(0x01)
         u32(b, id.toInt())
@@ -252,7 +273,10 @@ class FrameBuilder {
     fun build(): ByteArray {
         val out = ByteArrayOutputStream()
         // Shared 6-byte header: magic(4) | version(1) | kind(1).
-        out.write(0x58); out.write(0x55); out.write(0x5C); out.write(0x46) // 0x465C5558 LE
+        out.write(0x58)
+        out.write(0x55)
+        out.write(0x5C)
+        out.write(0x46) // 0x465C5558 LE
         out.write(0x01) // version
         when (mode) {
             Mode.INIT -> buildInit(out)
@@ -354,55 +378,103 @@ class FrameBuilder {
         }
         u16(b, 0) // handler count
         // span: file/start/end (u32 each)
-        u32(b, 0); u32(b, 0); u32(b, 0)
+        u32(b, 0)
+        u32(b, 0)
+        u32(b, 0)
     }
 
-    private fun writeValue(b: ByteArrayOutputStream, value: WireValue) {
+    private fun writeValue(
+        b: ByteArrayOutputStream,
+        value: WireValue,
+    ) {
         when (value) {
             WireValue.Null -> b.write(0x00)
-            is WireValue.IntVal -> { b.write(0x01); i64(b, value.value) }
-            is WireValue.FloatVal -> { b.write(0x02); i64(b, java.lang.Double.doubleToRawLongBits(value.value)) }
-            is WireValue.BoolVal -> { b.write(0x03); b.write(if (value.value) 1 else 0) }
-            is WireValue.StrVal -> { b.write(0x04); u32(b, value.id.toInt()) }
-            is WireValue.HandlerRefVal -> { b.write(0x05); u32(b, value.handlerId.toInt()) }
+            is WireValue.IntVal -> {
+                b.write(0x01)
+                i64(b, value.value)
+            }
+            is WireValue.FloatVal -> {
+                b.write(0x02)
+                i64(b, java.lang.Double.doubleToRawLongBits(value.value))
+            }
+            is WireValue.BoolVal -> {
+                b.write(0x03)
+                b.write(if (value.value) 1 else 0)
+            }
+            is WireValue.StrVal -> {
+                b.write(0x04)
+                u32(b, value.id.toInt())
+            }
+            is WireValue.HandlerRefVal -> {
+                b.write(0x05)
+                u32(b, value.handlerId.toInt())
+            }
             is WireValue.ListVal -> {
-                b.write(0x06); u16(b, value.items.size)
+                b.write(0x06)
+                u16(b, value.items.size)
                 value.items.forEach { writeValue(b, it) }
             }
             is WireValue.RecordVal -> {
-                b.write(0x07); u16(b, value.fields.size)
-                value.fields.forEach { (idx, v) -> u16(b, idx.toInt()); writeValue(b, v) }
+                b.write(0x07)
+                u16(b, value.fields.size)
+                value.fields.forEach { (idx, v) ->
+                    u16(b, idx.toInt())
+                    writeValue(b, v)
+                }
             }
         }
     }
 
-    private fun writeClosureRef(b: ByteArrayOutputStream, ref: ClosureRef) {
+    private fun writeClosureRef(
+        b: ByteArrayOutputStream,
+        ref: ClosureRef,
+    ) {
         for (byte in ref.hash) b.write(byte.toInt() and 0xFF)
         u32(b, ref.bytecodeOffset.toInt())
         u16(b, ref.bytecodeLen.toInt())
         u16(b, ref.signals.size)
         for (s in ref.signals) u32(b, s.toInt())
-        u32(b, 0); u32(b, 0); u32(b, 0) // span file/start/end
+        u32(b, 0)
+        u32(b, 0)
+        u32(b, 0) // span file/start/end
     }
 
-    private fun encodeStr(b: ByteArrayOutputStream, s: String) {
+    private fun encodeStr(
+        b: ByteArrayOutputStream,
+        s: String,
+    ) {
         val bytes = s.toByteArray(Charsets.UTF_8)
         u16(b, bytes.size)
         b.writeBytes(bytes)
     }
 
-    private fun u8(b: ByteArrayOutputStream, v: Int) = b.write(v and 0xFF)
-    private fun u16(b: ByteArrayOutputStream, v: Int) {
+    private fun u8(
+        b: ByteArrayOutputStream,
+        v: Int,
+    ) = b.write(v and 0xFF)
+
+    private fun u16(
+        b: ByteArrayOutputStream,
+        v: Int,
+    ) {
         b.write(v and 0xFF)
         b.write((v ushr 8) and 0xFF)
     }
-    private fun u32(b: ByteArrayOutputStream, v: Int) {
+
+    private fun u32(
+        b: ByteArrayOutputStream,
+        v: Int,
+    ) {
         b.write(v and 0xFF)
         b.write((v ushr 8) and 0xFF)
         b.write((v ushr 16) and 0xFF)
         b.write((v ushr 24) and 0xFF)
     }
-    private fun i64(b: ByteArrayOutputStream, v: Long) {
+
+    private fun i64(
+        b: ByteArrayOutputStream,
+        v: Long,
+    ) {
         b.write((v and 0xFF).toInt())
         b.write(((v ushr 8) and 0xFF).toInt())
         b.write(((v ushr 16) and 0xFF).toInt())
@@ -443,36 +515,83 @@ class WireNodeBuilder(
             u32(b, cid.toInt())
         }
         u16(b, 0)
-        u32(b, 0); u32(b, 0); u32(b, 0)
+        u32(b, 0)
+        u32(b, 0)
+        u32(b, 0)
     }
 
-    private fun u16(b: ByteArrayOutputStream, v: Int) {
+    private fun u16(
+        b: ByteArrayOutputStream,
+        v: Int,
+    ) {
         b.write(v and 0xFF)
         b.write((v ushr 8) and 0xFF)
     }
-    private fun u32(b: ByteArrayOutputStream, v: Int) {
+
+    private fun u32(
+        b: ByteArrayOutputStream,
+        v: Int,
+    ) {
         b.write(v and 0xFF)
         b.write((v ushr 8) and 0xFF)
         b.write((v ushr 16) and 0xFF)
         b.write((v ushr 24) and 0xFF)
     }
-    private fun writeValue(b: ByteArrayOutputStream, value: WireValue) {
+
+    private fun writeValue(
+        b: ByteArrayOutputStream,
+        value: WireValue,
+    ) {
         when (value) {
             WireValue.Null -> b.write(0x00)
-            is WireValue.IntVal -> { b.write(0x01); i64(b, value.value) }
-            is WireValue.FloatVal -> { b.write(0x02); i64(b, java.lang.Double.doubleToRawLongBits(value.value)) }
-            is WireValue.BoolVal -> { b.write(0x03); b.write(if (value.value) 1 else 0) }
-            is WireValue.StrVal -> { b.write(0x04); u32(b, value.id.toInt()) }
-            is WireValue.HandlerRefVal -> { b.write(0x05); u32(b, value.handlerId.toInt()) }
-            is WireValue.ListVal -> { b.write(0x06); u16(b, value.items.size); value.items.forEach { writeValue(b, it) } }
-            is WireValue.RecordVal -> { b.write(0x07); u16(b, value.fields.size); value.fields.forEach { (idx, v) -> u16(b, idx.toInt()); writeValue(b, v) } }
+            is WireValue.IntVal -> {
+                b.write(0x01)
+                i64(b, value.value)
+            }
+            is WireValue.FloatVal -> {
+                b.write(0x02)
+                i64(b, java.lang.Double.doubleToRawLongBits(value.value))
+            }
+            is WireValue.BoolVal -> {
+                b.write(0x03)
+                b.write(if (value.value) 1 else 0)
+            }
+            is WireValue.StrVal -> {
+                b.write(0x04)
+                u32(b, value.id.toInt())
+            }
+            is WireValue.HandlerRefVal -> {
+                b.write(0x05)
+                u32(b, value.handlerId.toInt())
+            }
+            is WireValue.ListVal -> {
+                b.write(0x06)
+                u16(b, value.items.size)
+                value.items.forEach { writeValue(b, it) }
+            }
+            is WireValue.RecordVal -> {
+                b.write(0x07)
+                u16(b, value.fields.size)
+                value.fields.forEach { (idx, v) ->
+                    u16(b, idx.toInt())
+                    writeValue(b, v)
+                }
+            }
         }
     }
-    private fun i64(b: ByteArrayOutputStream, v: Long) {
-        b.write((v and 0xFF).toInt()); b.write(((v ushr 8) and 0xFF).toInt())
-        b.write(((v ushr 16) and 0xFF).toInt()); b.write(((v ushr 24) and 0xFF).toInt())
-        b.write(((v ushr 32) and 0xFF).toInt()); b.write(((v ushr 40) and 0xFF).toInt())
-        b.write(((v ushr 48) and 0xFF).toInt()); b.write(((v ushr 56) and 0xFF).toInt())
+
+    private fun i64(
+        b: ByteArrayOutputStream,
+        v: Long,
+    ) {
+        b.write((v and 0xFF).toInt())
+        b.write(((v ushr 8) and 0xFF).toInt())
+        b.write(((v ushr 16) and 0xFF).toInt())
+        b.write(((v ushr 24) and 0xFF).toInt())
+        b.write(((v ushr 32) and 0xFF).toInt())
+        b.write(((v ushr 40) and 0xFF).toInt())
+        b.write(((v ushr 48) and 0xFF).toInt())
+        b.write(((v ushr 56) and 0xFF).toInt())
     }
 }
 

@@ -1,6 +1,7 @@
 package dev.flux.host.wire
 
 import dev.flux.host.vm.FluxValue
+import dev.flux.ui.PropsIndex
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -54,7 +55,7 @@ class FrameDeserializerTest {
                         id = 2u,
                         kind = 1u,
                         component = 200u,
-                        props = listOf(0u.toUShort() to WireValue.StrVal(7u)),
+                        props = listOf(PropsIndex.TEXT_TEXT to WireValue.StrVal(7u)),
                         childIds = emptyList(),
                     )
                 }.build()

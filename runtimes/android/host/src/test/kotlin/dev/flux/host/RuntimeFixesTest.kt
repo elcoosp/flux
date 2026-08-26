@@ -17,6 +17,7 @@ import dev.flux.host.wire.ClosureRef
 import dev.flux.host.wire.FrameBuilder
 import dev.flux.host.wire.FrameDeserializer
 import dev.flux.host.wire.WireValue
+import dev.flux.ui.PropsIndex
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
@@ -358,7 +359,7 @@ class RuntimeFixesTest {
                             id = 2u,
                             kind = 0x10u,
                             component = 200u,
-                            props = listOf(0u.toUShort() to WireValue.StrVal(7u)),
+                            props = listOf(PropsIndex.TEXT_TEXT to WireValue.StrVal(7u)),
                             childIds = emptyList(),
                             pure = true,
                         )
@@ -366,7 +367,7 @@ class RuntimeFixesTest {
                             id = 3u,
                             kind = 0x10u,
                             component = 200u,
-                            props = listOf(0u.toUShort() to WireValue.StrVal(8u)),
+                            props = listOf(PropsIndex.TEXT_TEXT to WireValue.StrVal(8u)),
                             childIds = emptyList(),
                         )
                     }.build()
@@ -391,7 +392,7 @@ class RuntimeFixesTest {
                         patchCount(1)
                         handlerCount(0)
                         stringCount(0)
-                        patchUpdate(id = 3u, changes = listOf(0u.toUShort() to WireValue.StrVal(77u)))
+                        patchUpdate(id = 3u, changes = listOf(PropsIndex.TEXT_TEXT to WireValue.StrVal(77u)))
                     }.build()
             tree.applyFrame(FrameDeserializer.deserialize(update), executor)
             assertEquals(1, tree.reconcileCount(2u), "@pure node must not re-reconcile on unrelated update")
@@ -420,7 +421,7 @@ class RuntimeFixesTest {
                             id = 2u,
                             kind = 0x10u,
                             component = 200u,
-                            props = listOf(0u.toUShort() to WireValue.StrVal(7u)),
+                            props = listOf(PropsIndex.TEXT_TEXT to WireValue.StrVal(7u)),
                             childIds = emptyList(),
                             pure = true,
                         )
@@ -443,7 +444,7 @@ class RuntimeFixesTest {
                         patchCount(1)
                         handlerCount(0)
                         stringCount(0)
-                        patchUpdate(id = 2u, changes = listOf(0u.toUShort() to WireValue.StrVal(7u)))
+                        patchUpdate(id = 2u, changes = listOf(PropsIndex.TEXT_TEXT to WireValue.StrVal(7u)))
                     }.build()
             tree.applyFrame(FrameDeserializer.deserialize(update), executor)
             assertEquals(1, tree.reconcileCount(2u), "@pure node with identical props must skip reconcile")

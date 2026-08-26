@@ -8,6 +8,7 @@ import dev.flux.host.transport.MockTransport
 import dev.flux.host.wire.FrameBuilder
 import dev.flux.host.wire.FrameDeserializer
 import dev.flux.host.wire.WireValue
+import dev.flux.ui.PropsIndex
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
@@ -57,7 +58,7 @@ class TraceDriverTest {
                         id = i,
                         kind = 0x12u,
                         component = 100u,
-                        props = listOf(0u.toUShort() to WireValue.StrVal(7u)),
+                        props = listOf(PropsIndex.STACK_GAP to WireValue.StrVal(7u)),
                         childIds = emptyList(),
                     )
                 }
@@ -66,7 +67,7 @@ class TraceDriverTest {
                     id = textId,
                     kind = 0x10u,
                     component = 200u,
-                    props = listOf(0u.toUShort() to WireValue.IntVal(1L)),
+                    props = listOf(PropsIndex.TEXT_TEXT to WireValue.IntVal(1L)),
                     childIds = emptyList(),
                 )
             }.build()
@@ -198,14 +199,14 @@ class TraceDriverTest {
                             id = 1u,
                             kind = 0x12u,
                             component = 100u,
-                            props = listOf(0u.toUShort() to WireValue.StrVal(7u)),
+                            props = listOf(PropsIndex.STACK_GAP to WireValue.StrVal(7u)),
                             childIds = listOf(2u),
                         )
                         node(
                             id = 2u,
                             kind = 0x10u,
                             component = 200u,
-                            props = listOf(0u.toUShort() to WireValue.StrVal(8u)),
+                            props = listOf(PropsIndex.TEXT_TEXT to WireValue.StrVal(8u)),
                             childIds = emptyList(),
                         )
                     }.build()
@@ -223,7 +224,7 @@ class TraceDriverTest {
                         patchCount(1)
                         handlerCount(0)
                         stringCount(0)
-                        patchUpdate(id = 2u, changes = listOf(0u.toUShort() to WireValue.StrVal(8u)))
+                        patchUpdate(id = 2u, changes = listOf(PropsIndex.TEXT_TEXT to WireValue.StrVal(8u)))
                     }.build()
             tree.applyFrame(FrameDeserializer.deserialize(update), executor)
 

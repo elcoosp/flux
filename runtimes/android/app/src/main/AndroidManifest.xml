@@ -8,7 +8,8 @@
         android:allowBackup="true"
         android:label="Flux"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Flux">
+        android:theme="@style/Theme.Flux"
+        android:usesCleartextTraffic="true">
         <activity
             android:name=".FluxHostActivity"
             android:exported="true">

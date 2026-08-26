@@ -214,6 +214,11 @@ public class FluxExecutor(
                 trace(seq) { TraceEvent.Signals(seq = seq, ids = written.sortedBy { it }) }
                 if (written.isNotEmpty()) {
                     shadowTree.reconcileDirty(shadowTree.rootNode?.id ?: 0u, written)
+                    // A handler wrote signals, so dependent nodes re-materialised
+                    // their props (R1). Notify the render layer so Compose
+                    // re-composes and picks up the new values (the shadow tree is
+                    // the source of truth; the composable must be told to re-read).
+                    onTreeChanged?.invoke()
                 } else {
                     trace(seq) { TraceEvent.Dirty(seq = seq, ids = emptyList()) }
                     shadowTree.emitStepEnd()

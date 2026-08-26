@@ -9,6 +9,7 @@ import dev.flux.host.transport.MockTransport
 import dev.flux.host.wire.FrameBuilder
 import dev.flux.host.wire.FrameDeserializer
 import dev.flux.host.wire.WireValue
+import dev.flux.ui.PropsIndex
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -51,7 +52,13 @@ class RenderMountTest {
                 // Root column (id=1, component=100) with text (2) + button (3).
                 node(id = 1u, kind = 0x12u, component = 100u, props = emptyList(), childIds = listOf(2u, 3u))
                 // Text: text prop = str id 7.
-                node(id = 2u, kind = 0x10u, component = 200u, props = listOf(0u.toUShort() to WireValue.StrVal(7u)), childIds = emptyList())
+                node(
+                    id = 2u,
+                    kind = 0x10u,
+                    component = 200u,
+                    props = listOf(PropsIndex.TEXT_TEXT to WireValue.StrVal(7u)),
+                    childIds = emptyList(),
+                )
                 // Button: text prop = str id 8, onClick handler 5.
                 node(
                     id = 3u,
@@ -59,8 +66,8 @@ class RenderMountTest {
                     component = 300u,
                     props =
                         listOf(
-                            0u.toUShort() to WireValue.StrVal(8u),
-                            1u.toUShort() to WireValue.HandlerRefVal(5u),
+                            PropsIndex.BUTTON_TEXT to WireValue.StrVal(8u),
+                            PropsIndex.BUTTON_ON_CLICK to WireValue.HandlerRefVal(5u),
                         ),
                     childIds = emptyList(),
                 )
