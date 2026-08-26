@@ -11,13 +11,13 @@
 use crate::env::{AdtDef, Binding, CtorKind, Env, VariantDef};
 use crate::error::TypeError;
 use crate::exhaust::check_exhaustive;
-use crate::kind::{TcType, compute_node_id};
+use crate::kind::{TcType, compute_node_id, decl_tag};
 use crate::prelude::{prelude, primitives};
 use crate::scheme::{Supply, generalise, instantiate};
 use crate::traits::{admits_arithmetic, admits_equality, check_trait_bound};
 use crate::unify::{UnifyError, unify_into};
 use flux_parser::{Ast, BinOp, Decl, Expr, ExprKind, Ident, LetPattern, Param, Pattern, Type};
-use flux_syntax::{NodeId, Span};
+use flux_syntax::{ExprTag, NodeId, NodeTag, Span};
 use std::collections::HashMap;
 
 /// A resolved callee shape, owned so it outlives any `self.env` borrow.
@@ -88,7 +88,7 @@ impl Checker {
     }
 
     /// Records the inferred type for `span` under the standard structural node id.
-    fn record(&mut self, tag: u8, span: Span, ty: &TcType) -> NodeId {
+    fn record(&mut self, tag: impl NodeTag, span: Span, ty: &TcType) -> NodeId {
         let id = compute_node_id(0, tag, span, None);
         self.types.insert(id, ty.clone());
         id
@@ -155,7 +155,7 @@ impl Checker {
     /// Infers the type of `expr`, recording it under the expression node id.
     fn infer(&mut self, expr: &Expr) -> Result<TcType, TypeError> {
         let ty = self.infer_inner(expr)?;
-        self.record(10, expr.span, &ty);
+        self.record(ExprTag(10), expr.span, &ty);
         Ok(ty)
     }
 
@@ -1105,10 +1105,7 @@ pub fn check_decl(checker: &mut Checker, decl: &Decl) -> Result<(NodeId, TcType)
     match decl {
         Decl::Type(_) => {
             // Already collected.
-            Ok((
-                compute_node_id(0, crate::kind::NodeTag::decl_tag(decl), span, None),
-                TcType::Unit,
-            ))
+            Ok((compute_node_id(0, decl_tag(decl), span, None), TcType::Unit))
         }
         Decl::Component(comp) => {
             checker.env.push_scope();
@@ -1144,7 +1141,7 @@ pub fn check_decl(checker: &mut Checker, decl: &Decl) -> Result<(NodeId, TcType)
             // (see `apply_callee`), where concrete type arguments are known.
             // Recording them at the definition site would push never-resolved
             // fresh variables, which lowering would consume as junk.
-            let id = checker.record(crate::kind::NodeTag::decl_tag(decl), span, &body_ty);
+            let id = checker.record(decl_tag(decl), span, &body_ty);
             Ok((id, body_ty))
         }
         Decl::Fn(fn_decl) => {
@@ -1183,17 +1180,15 @@ pub fn check_decl(checker: &mut Checker, decl: &Decl) -> Result<(NodeId, TcType)
             };
             checker.env.pop_scope();
             checker.generics.clear();
-            let id = checker.record(crate::kind::NodeTag::decl_tag(decl), span, &ret_ty);
+            let id = checker.record(decl_tag(decl), span, &ret_ty);
             Ok((id, ret_ty))
         }
-        Decl::Trait(_) | Decl::Capability(_) => Ok((
-            compute_node_id(0, crate::kind::NodeTag::decl_tag(decl), span, None),
-            TcType::Unit,
-        )),
-        Decl::Import(_) | Decl::Use(_) => Ok((
-            compute_node_id(0, crate::kind::NodeTag::decl_tag(decl), span, None),
-            TcType::Unit,
-        )),
+        Decl::Trait(_) | Decl::Capability(_) => {
+            Ok((compute_node_id(0, decl_tag(decl), span, None), TcType::Unit))
+        }
+        Decl::Import(_) | Decl::Use(_) => {
+            Ok((compute_node_id(0, decl_tag(decl), span, None), TcType::Unit))
+        }
         Decl::Const(const_binding) => {
             // Module-level associated constant, e.g. `Color.red = RGB(1.0, 0.0, 0.0)`.
             // It is stored under its dotted path so that a later `Color.red`
@@ -1208,12 +1203,9 @@ pub fn check_decl(checker: &mut Checker, decl: &Decl) -> Result<(NodeId, TcType)
             checker
                 .env
                 .insert(full_name, Binding::Mono(value_ty.clone()));
-            let id = checker.record(crate::kind::NodeTag::decl_tag(decl), span, &value_ty);
+            let id = checker.record(decl_tag(decl), span, &value_ty);
             Ok((id, value_ty))
         }
-        _ => Ok((
-            compute_node_id(0, crate::kind::NodeTag::decl_tag(decl), span, None),
-            TcType::Unit,
-        )),
+        _ => Ok((compute_node_id(0, decl_tag(decl), span, None), TcType::Unit)),
     }
 }

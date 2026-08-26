@@ -7,7 +7,8 @@
 //! [`TcType::to_typekind`] converts back to [`TypeKind`] once a type is fully
 //! resolved and concrete.
 
-use flux_syntax::{Key, NodeId, Span, TypeKind};
+use flux_parser::Decl;
+use flux_syntax::{DeclTag, Key, NodeId, NodeTag, Span, TypeKind};
 use std::collections::HashSet;
 use std::fmt;
 
@@ -304,33 +305,34 @@ impl fmt::Display for TcType {
 #[must_use]
 pub(crate) fn compute_node_id(
     parent: NodeId,
-    kind_tag: u8,
+    tag: impl NodeTag,
     span: Span,
     key: Option<Key>,
 ) -> NodeId {
-    flux_syntax::compute_node_id(parent, kind_tag, span, key)
+    flux_syntax::compute_node_id(parent, tag, span, key)
 }
 
-/// A small tag identifying each surface node kind, used as `kind_tag` for
-/// [`compute_node_id`].
-#[derive(Clone, Copy)]
-pub(crate) struct NodeTag;
-
-impl NodeTag {
-    /// Returns the structural tag for a declaration kind.
-    #[must_use]
-    pub(crate) const fn decl_tag(decl: &flux_parser::Decl) -> u8 {
-        match decl {
-            flux_parser::Decl::Import(_) => 1,
-            flux_parser::Decl::Use(_) => 2,
-            flux_parser::Decl::Component(_) => 3,
-            flux_parser::Decl::Fn(_) => 4,
-            flux_parser::Decl::Type(_) => 5,
-            flux_parser::Decl::Trait(_) => 6,
-            flux_parser::Decl::Capability(_) => 7,
-            flux_parser::Decl::Const(_) => 8,
-            _ => 9,
-        }
+/// Maps a surface declaration to its structural [`DeclTag`], matching the
+/// discriminants the type checker has always used (see
+/// `crates/flux-ir/src/lower/ids.rs`). The tags are stable across edits and
+/// shared with lowering so `TypedAST::types` keys line up with the IR.
+///
+/// Wrapping the discriminant in [`DeclTag`] (rather than passing a bare `u8`)
+/// is what guarantees the compiler rejects an expression tag where a
+/// declaration tag is required — that is the whole point of the sealed
+/// [`NodeTag`] trait introduced in `flux-syntax`.
+#[must_use]
+pub(crate) fn decl_tag(decl: &Decl) -> DeclTag {
+    match decl {
+        Decl::Import(_) => DeclTag(1),
+        Decl::Use(_) => DeclTag(2),
+        Decl::Component(_) => DeclTag(3),
+        Decl::Fn(_) => DeclTag(4),
+        Decl::Type(_) => DeclTag(5),
+        Decl::Trait(_) => DeclTag(6),
+        Decl::Capability(_) => DeclTag(7),
+        Decl::Const(_) => DeclTag(8),
+        _ => DeclTag(9),
     }
 }
 
@@ -354,14 +356,15 @@ mod tests {
         ];
         let keys: [Option<Key>; 3] = [None, Some(0), Some(99)];
         for &parent in &parents {
-            for &tag in &tags {
+            for &raw in &tags {
+                let tag = DeclTag(raw);
                 for &span in &spans {
                     for &key in &keys {
                         let our = compute_node_id(parent, tag, span, key);
                         let canonical = flux_syntax::compute_node_id(parent, tag, span, key);
                         assert_eq!(
                             our, canonical,
-                            "mismatch for ({parent}, {tag}, {span:?}, {key:?})"
+                            "mismatch for ({parent}, {tag:?}, {span:?}, {key:?})"
                         );
                     }
                 }
