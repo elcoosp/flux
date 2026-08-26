@@ -100,6 +100,7 @@ use tokio::sync::mpsc;
 /// enriched and broadcast to every subscribed DevTools client; commands from a
 /// DevTools client are forwarded to the host. It holds no network state, so it
 /// is unit-tested directly.
+#[derive(Debug)]
 pub struct DevToolsRouter {
     source_map: SourceMap,
     /// One sender per connected DevTools client.
@@ -166,8 +167,7 @@ pub async fn serve_devtools(
     // One router shared by every connection so host telemetry is broadcast to
     // all subscribed DevTools clients (not just the sender's own connection).
     let router = std::sync::Arc::new(parking_lot::Mutex::new(DevToolsRouter::new(
-        source_map,
-        host_sink,
+        source_map, host_sink,
     )));
     loop {
         let (stream, _) = listener.accept().await?;

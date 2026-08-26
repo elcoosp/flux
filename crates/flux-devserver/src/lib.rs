@@ -45,6 +45,7 @@
 
 mod assets;
 mod config;
+mod debug_bridge;
 mod dispatch;
 mod error;
 mod pipeline;
@@ -59,6 +60,7 @@ pub use dispatch::{
 pub use config::{
     DEFAULT_COALESCE, DEFAULT_DEBOUNCE, DEFAULT_HTTP_PORT, DEFAULT_WS_PORT, ServerConfig,
 };
+pub use debug_bridge::{DEFAULT_DEVTOOLS_PORT, DevToolsRouter, SourceMap, enrich, serve_devtools};
 pub use error::{DevServerError, Diagnostic};
 pub use pipeline::{Compiled, PhaseTimings, Pipeline};
 pub use server::{DevServer, RunningServer};
