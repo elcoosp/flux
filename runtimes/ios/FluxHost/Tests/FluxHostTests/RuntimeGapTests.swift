@@ -13,6 +13,23 @@ import FluxUIKit
 
 @testable import FluxHost
 
+/// A deterministic offline `AnyStringInterner` for unit tests that exercise the
+/// VM's derived-string path without a live dev server. It allocates sequential
+/// low ids (1, 2, 3, …) — all `< stringIdCanonicalCeiling` — so a test can seed
+/// the same id into its `StringTable` and observe the interned string resolve
+/// through `STR_LEN` (the canonical-id contract brittleness 4c introduced).
+@MainActor
+final class DeterministicInterner: AnyStringInterner {
+    /// The next id to hand out.
+    private var next: UInt32 = 1
+    /// Resolves `text` to a fresh sequential low id, caching repeats.
+    func intern(_ text: String) async -> UInt32 {
+        let id = next
+        next &+= 1
+        return id
+    }
+}
+
 // MARK: - Test support
 
 /// Builds a primitive `ShadowNode` (mirrors the helper in RuntimeE2ETests).
@@ -70,7 +87,7 @@ private func gapFrame(
         root: root, nodes: nodes,
         patches: [], handlers: handlers,
         strings: strings, state: state,
-        files: []
+        files: [], componentNames: [], signalMeta: [:]
     )
 }
 
@@ -94,7 +111,7 @@ private func gapRegistry() -> AdapterRegistry {
 /// the decoded bytecode when the bound id fires.
 final class GapG1RegisterHandlersTests: XCTestCase {
     @MainActor
-    func testInitHandlerFiresAfterRegister() {
+    func testInitHandlerFiresAfterRegister() async {
         // READ_SIGNAL r0, 1 ; LOAD_INT_CONST r1, 1 ; ADD_I64 r0,r0,r1 ;
         // WRITE_SIGNAL 1, r0 ; HALT
         let bytecode: [UInt8] = [
@@ -135,7 +152,7 @@ final class GapG1RegisterHandlersTests: XCTestCase {
 /// G2 — allocations past the per-dispatch budget must raise `MemoryExhausted`.
 final class GapG2MemoryCapTests: XCTestCase {
     @MainActor
-    func testLargeAllocationErrors() {
+    func testLargeAllocationErrors() async {
         // Loop: ALLOC_RECORD r0, 65535 (~512 KiB each) then JUMP back. The
         // running allocation counter crosses 16 MiB after ~31 iterations, which
         // is well within the 100k gas budget, so `MemoryExhausted` (not gas)
@@ -157,7 +174,7 @@ final class GapG2MemoryCapTests: XCTestCase {
     }
 
     @MainActor
-    func testSmallAllocationSucceeds() {
+    func testSmallAllocationSucceeds() async {
         // ALLOC_RECORD r0, count=10  → 160 bytes, well under the budget.
         let small: [UInt8] = [
             0x70, 0x00, 0x0A, 0x00, 0x00, // ALLOC_RECORD r0, 10
@@ -179,7 +196,7 @@ final class GapG2MemoryCapTests: XCTestCase {
 /// G3 — `STR_LEN`/`STR_CONCAT` must resolve real strings via the table.
 final class GapG3StringOpsTests: XCTestCase {
     @MainActor
-    func testStrLenResolvesRealString() throws {
+    func testStrLenResolvesRealString() async throws {
         var table = StringTable()
         table.intern(5, "hello") // 5 bytes
         var signals: any SignalStore = InMemorySignals()
@@ -194,10 +211,13 @@ final class GapG3StringOpsTests: XCTestCase {
     }
 
     @MainActor
-    func testStrConcatInternsResult() throws {
+    func testStrConcatInternsResult() async throws {
         var table = StringTable()
         table.intern(5, "hello")
         table.intern(6, "world")
+        // The deterministic offline interner hands the concatenated "helloworld"
+        // id 1; seed the same id so STR_LEN can resolve it back to text.
+        table.intern(1, "helloworld")
         var signals: any SignalStore = InMemorySignals()
         // LOAD_STR_CONST r1, 5 ; LOAD_STR_CONST r2, 6 ;
         // STR_CONCAT r3, r1, r2 ; STR_LEN r0, r3 ; HALT
@@ -211,7 +231,10 @@ final class GapG3StringOpsTests: XCTestCase {
             0x53, 0x00, 0x03,                     // STR_LEN r0, r3
             0x00,
         ]
-        let out = try FluxBytecodeVM.run(bc, signals: &signals, payload: .null, stringTable: table)
+        let out = try FluxBytecodeVM.run(
+            bc, signals: &signals, payload: .null,
+            stringTable: table, interner: DeterministicInterner()
+        )
         XCTAssertEqual(out.registers[0], .int(10))
     }
 }
@@ -222,7 +245,7 @@ final class GapG3StringOpsTests: XCTestCase {
 /// hardcoded `== (1,1)` branch.
 final class GapG4CapRegistryTests: XCTestCase {
     @MainActor
-    func testNonTrivialCapRoutesToRegisteredImpl() throws {
+    func testNonTrivialCapRoutesToRegisteredImpl() async throws {
         // Registry wiring capId=7, methodId=9 to write signal 50 with the first
         // argument's value.
         let registry = CapabilityRegistry(entries: [
@@ -249,7 +272,7 @@ final class GapG4CapRegistryTests: XCTestCase {
     }
 
     @MainActor
-    func testUnregisteredCapErrors() {
+    func testUnregisteredCapErrors() async {
         // Only (1,1) is registered by `.dev`; (4,4) must raise a type error.
         var signals: any SignalStore = InMemorySignals()
         let bc: [UInt8] = [
@@ -267,7 +290,7 @@ final class GapG4CapRegistryTests: XCTestCase {
 /// G5 — `onMount` runs on node creation, `onCleanup` runs on removal.
 final class GapG5LifecycleTests: XCTestCase {
     @MainActor
-    func testOnMountRunsOnBuild() {
+    func testOnMountRunsOnBuild() async {
         // Handler 1 writes signal 5 = 1.
         let mountBc: [UInt8] = [
             0xB0, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // r0 = 1
@@ -292,7 +315,7 @@ final class GapG5LifecycleTests: XCTestCase {
     }
 
     @MainActor
-    func testOnCleanupRunsOnRemove() {
+    func testOnCleanupRunsOnRemove() async {
         // Handler 2 writes signal 6 = 1.
         let cleanupBc: [UInt8] = [
             0xB0, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -317,7 +340,7 @@ final class GapG5LifecycleTests: XCTestCase {
         executor.apply(FluxFrame(
             version: 1, seq: 1, flags: 0x00,
             root: nil, nodes: [:],
-            patches: [.remove(id: 10)], handlers: [], strings: [], state: [], files: []
+            patches: [.remove(id: 10)], handlers: [], strings: [], state: [], files: [], componentNames: [], signalMeta: [:]
         ))
         // onCleanup must have fired on removal.
         XCTAssertEqual(executor.graph.read(6), .int(1))
@@ -329,7 +352,7 @@ final class GapG5LifecycleTests: XCTestCase {
 /// G6 — a `@pure` node with unchanged props skips re-reconciling its subtree.
 final class GapG6PureSkipTests: XCTestCase {
     @MainActor
-    func testPureSubtreeSkippedOnStableProps() {
+    func testPureSubtreeSkippedOnStableProps() async {
         // A @pure parent wrapping a child Text. Both are stable across a
         // re-applied identical frame, so neither should be re-reconciled.
         let child = gapNode(11, componentId: 0, props: [Prop(index: 0, value: .str(7))])
@@ -373,7 +396,7 @@ final class GapR1DirtySetTests: XCTestCase {
     ]
 
     @MainActor
-    func testDispatchReconcilesOnlySignalDependentNode() {
+    func testDispatchReconcilesOnlySignalDependentNode() async {
         // Node 10 reads signal 5 via an int prop; node 11 is static. Both live
         // under a Column (20).
         let dependent = gapNode(10, componentId: 0, props: [Prop(index: 0, value: .int(5))])
@@ -421,7 +444,7 @@ final class GapR3CacheTests: XCTestCase {
     }
 
     @MainActor
-    func testReRegistrationInvalidatesDecodeCache() {
+    func testReRegistrationInvalidatesDecodeCache() async {
         let executor = FluxRuntime(graph: SignalGraph(), registry: gapRegistry())
 
         // First registration: handler 1 writes signal 5 = 2.

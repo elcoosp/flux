@@ -16,7 +16,7 @@ import XCTest
 final class VMDispatchPerfTests: XCTestCase {
     /// Every program in the battery must yield an identical `VmOutcome` from
     /// the switch-based `run` and the dispatch-table `runViaDispatchTable`.
-    func testDispatchTableMatchesSwitch() throws {
+    func testDispatchTableMatchesSwitch() async throws {
         let battery: [[UInt8]] = VMDispatchPerfTests.battery()
         for bc in battery {
             var s1: any SignalStore = InMemorySignals()
@@ -40,7 +40,7 @@ final class VMDispatchPerfTests: XCTestCase {
 
     /// The canonical switch-based evaluator must sustain a throughput budget
     /// (regression guard for the "keep the switch" decision).
-    func testSwitchThroughput() throws {
+    func testSwitchThroughput() async throws {
         let bc = VMDispatchPerfTests.counterHandler()
         let iterations = 20_000
         let start = Date()

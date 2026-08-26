@@ -52,7 +52,7 @@ final class FluxHostConnectionTests: XCTestCase {
         XCTAssertFalse(state.isReconnecting, "reconnected → banner hidden")
     }
 
-    func testReceivedFrameBuildsNativeTree() throws {
+    func testReceivedFrameBuildsNativeTree() async throws {
         // The transport's onFrame path decodes bytes and calls
         // `FluxRuntime.apply`; decoding is covered by WireDecodeTests, so here we
         // assert the frame the transport would deliver actually mounts a real
@@ -94,6 +94,10 @@ private func makeCounterInitFrame() -> FluxFrame {
         patches: [], handlers: [],
         strings: [StringEntry(stringId: 7, value: "tapped 0 times"),
                   StringEntry(stringId: 8, value: "Increment")],
-        state: [], files: []
+        state: [], files: [], componentNames: [
+            StringEntry(stringId: 0, value: "Text"),
+            StringEntry(stringId: 1, value: "Button"),
+            StringEntry(stringId: 2, value: "Column"),
+        ], signalMeta: [:]
     )
 }

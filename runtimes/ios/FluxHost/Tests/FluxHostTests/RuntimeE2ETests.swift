@@ -54,7 +54,7 @@ private func initFrame(root: ShadowNode, descendantNodes: [ShadowNode] = [], str
         root: root, nodes: nodes,
         patches: [], handlers: [],
         strings: strings, state: state,
-        files: []
+        files: [], componentNames: [], signalMeta: [:]
     )
 }
 
@@ -83,7 +83,7 @@ final class RuntimeE2ETests: XCTestCase {
     /// Init frame -> reconciler builds the real `UILabel` view tree; the label's
     /// text is set from the resolved string prop.
     @MainActor
-    func testInitBuildsRealViewTree() {
+    func testInitBuildsRealViewTree() async {
         let textNode = node(10, componentId: 0, props: [Prop(index: 0, value: .str(7))])
         let frame = initFrame(
             root: textNode,
@@ -103,7 +103,7 @@ final class RuntimeE2ETests: XCTestCase {
     /// content hash once and skips the update when it matches. The second apply
     /// should produce neither `built` (views already exist) nor `updated`.
     @MainActor
-    func testReapplyingUnchangedFrameSkipsUpdates() {
+    func testReapplyingUnchangedFrameSkipsUpdates() async {
         let textNode = node(10, componentId: 0, props: [Prop(index: 0, value: .str(7))])
         let frame = initFrame(
             root: textNode,
@@ -123,7 +123,7 @@ final class RuntimeE2ETests: XCTestCase {
     /// reconciler applies it in place and reuses the SAME `UILabel` instance
     /// (identity preserved, no recreation).
     @MainActor
-    func testTapUpdatesLabelWithoutRecreatingView() {
+    func testTapUpdatesLabelWithoutRecreatingView() async {
         let labelNode = node(10, componentId: 0, props: [Prop(index: 0, value: .str(7))])
         let buttonNode = node(11, componentId: 1, props: [Prop(index: 0, value: .str(8))], handlers: [1])
         let column = node(20, componentId: 2, children: [.node(10), .node(11)])
@@ -157,7 +157,7 @@ final class RuntimeE2ETests: XCTestCase {
             patches: [.update(id: 10, changes: [Prop(index: 0, value: .str(9))], removals: [])],
             handlers: [],
             strings: [StringEntry(stringId: 9, value: "Count: 1")],
-            state: [], files: []
+            state: [], files: [], componentNames: [], signalMeta: [:]
         )
         executor.apply(patchFrame)
 
@@ -169,7 +169,7 @@ final class RuntimeE2ETests: XCTestCase {
     /// A patch Update to an existing node's props must reuse the view, not build
     /// a new one.
     @MainActor
-    func testPatchUpdateReusesView() {
+    func testPatchUpdateReusesView() async {
         let textNode = node(10, componentId: 0, props: [Prop(index: 0, value: .str(7))])
         let frame = initFrame(
             root: textNode,
@@ -188,7 +188,7 @@ final class RuntimeE2ETests: XCTestCase {
             handlers: [],
             strings: [StringEntry(stringId: 9, value: "second")],
             state: [],
-            files: []
+            files: [], componentNames: [], signalMeta: [:]
         )
         executor.apply(patchFrame)
 
@@ -201,7 +201,7 @@ final class RuntimeE2ETests: XCTestCase {
     /// view controller is reused by identity, so its state (a text field's text)
     /// survives the round trip.
     @MainActor
-    func testRouterPreservesScreenStateAcrossPushPop() {
+    func testRouterPreservesScreenStateAcrossPushPop() async {
         // Two screens, each hosting a TextField bound to its own signal.
         let screenA = node(30, componentId: 6, children: [.node(31)])
         let fieldA = node(31, componentId: 4, props: [Prop(index: 0, value: .str(7))], handlers: [1])
@@ -235,7 +235,7 @@ final class RuntimeE2ETests: XCTestCase {
             version: 1, seq: 1, flags: 0x00,
             root: nil, nodes: [:],
             patches: [.reorder(parentId: 50, keys: [30])],
-            handlers: [], strings: [], state: [], files: []
+            handlers: [], strings: [], state: [], files: [], componentNames: [], signalMeta: [:]
         )
         executor.apply(poppedFrame)
         XCTAssertEqual(nav.viewControllers.count, 1)
@@ -247,7 +247,7 @@ final class RuntimeE2ETests: XCTestCase {
             version: 1, seq: 2, flags: 0x00,
             root: nil, nodes: [:],
             patches: [.reorder(parentId: 50, keys: [30, 40])],
-            handlers: [], strings: [], state: [], files: []
+            handlers: [], strings: [], state: [], files: [], componentNames: [], signalMeta: [:]
         )
         executor.apply(pushedFrame)
         XCTAssertEqual(nav.viewControllers.count, 2)
@@ -256,7 +256,7 @@ final class RuntimeE2ETests: XCTestCase {
 
     /// AdapterRegistry resolves the `Image` primitive (registered for P1).
     @MainActor
-    func testRegistryResolvesImage() {
+    func testRegistryResolvesImage() async {
         var table = StringTable()
         table.intern(0, "Text")
         table.intern(1, "Button")
@@ -272,7 +272,7 @@ final class RuntimeE2ETests: XCTestCase {
 
     /// AdapterRegistry resolves every stdlib ComponentId the Init frame declares.
     @MainActor
-    func testRegistryResolvesAllStdlibComponents() {
+    func testRegistryResolvesAllStdlibComponents() async {
         var table = StringTable()
         table.intern(0, "Text")
         table.intern(1, "Button")
@@ -290,7 +290,7 @@ final class RuntimeE2ETests: XCTestCase {
 
     /// Gas exhaustion must be reported, not loop forever, on the real pipeline.
     @MainActor
-    func testGasExhaustionIsReported() {
+    func testGasExhaustionIsReported() async {
         let textNode = node(10, componentId: 0, props: [Prop(index: 0, value: .str(7))])
         let frame = initFrame(root: textNode, strings: [StringEntry(stringId: 7, value: "x")])
         let executor = FluxRuntime(graph: SignalGraph(), registry: buildRegistry())

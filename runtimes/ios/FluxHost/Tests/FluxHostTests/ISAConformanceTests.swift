@@ -45,7 +45,7 @@ final class ISAConformanceTests: XCTestCase {
         return nil
     }
 
-    func testAllIsaVectorsPass() throws {
+    func testAllIsaVectorsPass() async throws {
         guard let dir = vectorsDirectory() else {
             throw XCTSkip("ISA vectors not found; set FLUX_ISA_VECTORS to the directory")
         }
