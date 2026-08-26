@@ -63,7 +63,9 @@ public fun ShadowTree.reconcileDirty(
     trace?.invoke(TraceEvent.Dirty(seq = lastSeq, ids = ordered))
     for (id in ordered) {
         val node = nodes[id] ?: continue
-        val newKit = kitFromWire(node.wireProps.fields)
+        // ADR-0027 (FA-IRWIRE): re-materialise dynamic props against the freshly
+        // written signals before sending the kit to the adapter.
+        val newKit = kitFromWire(materializeProps(node.wireProps.fields, id), stringLookup)
         node.props = newKit
         reconciled[id] = (reconciled[id] ?: 0) + 1
         updatedCount++

@@ -94,9 +94,13 @@ public object FrameDeserializer {
         // Handler (closure) section (Appendix D §D.12, Gap G1): always present
         // as a self-describing blob + HandlerDef stream.
         val (blob, handlers) = decodeHandlerSection(r)
-        // ADR-0027 (FA-IRWIRE): optional signal_meta section. The counter ships
-        // none, so the trailing marker is 0 and the section is absent.
-        if (r.has(1)) r.u8()
+        // ADR-0027 (FA-IRWIRE): optional signal_meta section, gated by a 1-byte
+        // presence marker (a `0` marker means no dynamic nodes this frame).
+        var signalMeta = emptyList<NodeSignalMeta>()
+        if (r.has(1)) {
+            val marker = r.u8()
+            if (marker != 0.toUByte()) signalMeta = decodeSignalMetaSection(r)
+        }
         return Frame(
             version = version,
             seq = seq,
@@ -109,6 +113,7 @@ public object FrameDeserializer {
             handlers = handlers,
             bytecodeBlob = blob,
             extraNodes = extraNodes,
+            signalMeta = signalMeta,
         )
     }
 
@@ -127,9 +132,12 @@ public object FrameDeserializer {
         val strings = ArrayList<StringEntry>(strCount)
         repeat(strCount) { strings.add(decodeStringEntry(r)) }
         val (blob, handlers) = decodeHandlerSection(r)
-        // ADR-0027 (FA-IRWIRE): signal_meta present only when the Delta flags
-        // carry FLAG_NODE_HAS_SIGNAL_DEPS.
-        if ((flags and FLAG_NODE_HAS_SIGNAL_DEPS.toInt()) != 0) r.u8()
+        // ADR-0027 (FA-IRWIRE): `signal_meta` trails a Delta directly (no marker
+        // byte, unlike Init) only when its `flags` carry FLAG_NODE_HAS_SIGNAL_DEPS.
+        var signalMeta = emptyMap<UInt, NodeSignalMeta>()
+        if ((flags and FLAG_NODE_HAS_SIGNAL_DEPS.toInt()) != 0) {
+            signalMeta = decodeSignalMetaSection(r)
+        }
         return Frame(
             version = version,
             seq = seq,
@@ -141,6 +149,7 @@ public object FrameDeserializer {
             handlers = handlers,
             bytecodeBlob = blob,
             extraNodes = emptyList(),
+            signalMeta = signalMeta,
         )
     }
 
@@ -268,6 +277,25 @@ public object FrameDeserializer {
         r.u32()
         r.u32() // span_file/start/end ignored by host
         return ClosureRef(hash, offset, len, signals)
+    }
+
+    /** Decodes the ADR-0027 (FA-IRWIRE) signal_meta section (Appendix D §T13). */
+    private fun decodeSignalMetaSection(r: ByteReader): Map<UInt, NodeSignalMeta> {
+        val count = r.u16()
+        val out = LinkedHashMap<UInt, NodeSignalMeta>(count)
+        repeat(count) {
+            val nodeId = r.u32().toUInt()
+            val depCount = r.u16()
+            val deps = ArrayList<UInt>(depCount)
+            repeat(depCount) { deps.add(r.u32().toUInt()) }
+            val thunkPresent = r.u8()
+            val thunk: ClosureRef? = if (thunkPresent != 0.toUByte()) decodeClosureRef(r) else null
+            val layoutCount = r.u16()
+            val layout = ArrayList<UShort>(layoutCount)
+            repeat(layoutCount) { layout.add(r.u16().toUShort()) }
+            out[nodeId] = NodeSignalMeta(deps, thunk, layout)
+        }
+        return out
     }
 
     /** Decodes the shared handler-bytecode blob (Appendix D §D.12) as a zero-copy window over the frame buffer. */

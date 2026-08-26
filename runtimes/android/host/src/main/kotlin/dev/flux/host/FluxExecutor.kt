@@ -65,6 +65,15 @@ public class FluxExecutor(
     private var stringResolver: StringResolver = TableStringResolver(emptyMap())
 
     /**
+     * Internal accessors for the shadow tree's ADR-0027 prop-thunk
+     * materialisation: the VM runs a node's thunk against the live signal graph
+     * using the same resolver the dispatch path uses, so interpolated strings
+     * intern consistently with the graph.
+     */
+    internal val materializationSignals: SignalGraph get() = signals
+    internal val materializationStrings: StringResolver get() = stringResolver
+
+    /**
      * The reverse string index (INV-1 canonicality, T8): maps a resolved
      * `String` back to its canonical wire `StringId` in O(1) for native event
      * dispatch into the VM. Replaces the pre-interning linear scan (ADR-0027 §T8).

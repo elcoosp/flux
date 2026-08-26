@@ -136,6 +136,23 @@ public data class Frame(
     val handlers: List<HandlerDef> = emptyList(),
     val bytecodeBlob: BytecodeBlob? = null,
     val extraNodes: List<WireNode> = emptyList(),
+    /** Per-node ADR-0027 signal-graph metadata, keyed by node id (Appendix D §T13). */
+    val signalMeta: Map<UInt, NodeSignalMeta> = emptyMap(),
+)
+
+/**
+ * Per-node ADR-0027 (FA-IRWIRE) signal-graph metadata (Appendix D §T13/T14).
+ *
+ * @property deps the distinct signal ids the node reads.
+ * @property thunk the prop-thunk closure that re-materialises the node's dynamic
+ *   props against the live signal graph, or `null` for control-only/static nodes.
+ * @property layout maps each prop expression's ordinal position in the thunk's
+ *   result `Record` to the on-wire `PropIdx`.
+ */
+public data class NodeSignalMeta(
+    val deps: List<UInt>,
+    val thunk: ClosureRef?,
+    val layout: List<UShort>,
 )
 
 /**
