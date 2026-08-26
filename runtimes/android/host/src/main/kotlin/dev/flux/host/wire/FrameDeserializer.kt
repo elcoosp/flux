@@ -96,10 +96,10 @@ public object FrameDeserializer {
         val (blob, handlers) = decodeHandlerSection(r)
         // ADR-0027 (FA-IRWIRE): optional signal_meta section, gated by a 1-byte
         // presence marker (a `0` marker means no dynamic nodes this frame).
-        var signalMeta = emptyList<NodeSignalMeta>()
+        var signalMeta = emptyMap<UInt, NodeSignalMeta>()
         if (r.has(1)) {
             val marker = r.u8()
-            if (marker != 0.toUByte()) signalMeta = decodeSignalMetaSection(r)
+            if (marker != 0) signalMeta = decodeSignalMetaSection(r)
         }
         return Frame(
             version = version,
@@ -289,7 +289,7 @@ public object FrameDeserializer {
             val deps = ArrayList<UInt>(depCount)
             repeat(depCount) { deps.add(r.u32().toUInt()) }
             val thunkPresent = r.u8()
-            val thunk: ClosureRef? = if (thunkPresent != 0.toUByte()) decodeClosureRef(r) else null
+            val thunk: ClosureRef? = if (thunkPresent != 0) decodeClosureRef(r) else null
             val layoutCount = r.u16()
             val layout = ArrayList<UShort>(layoutCount)
             repeat(layoutCount) { layout.add(r.u16().toUShort()) }

@@ -4,6 +4,7 @@ import dev.flux.host.AdapterRegistry
 import dev.flux.host.StringTableEntry
 import dev.flux.host.wire.ClosureRef
 import dev.flux.host.wire.Frame
+import dev.flux.host.wire.NodeSignalMeta
 import dev.flux.host.wire.Patch
 import dev.flux.host.wire.PropDiff
 import dev.flux.host.wire.WireChild
