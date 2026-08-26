@@ -8,6 +8,62 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### DevTools — bidirectional telemetry suite (FLUX-DevTools) — DONE
+
+Implemented the Flux DevTools suite per the 2026-08-26 spec: a bidirectional
+debug telemetry channel (host → server → `gpui` DevTools app) with wire-protocol
+extensions, host instrumentation, a dev-server source-map enrichment bridge, a
+`gpui` desktop crate (time-travel store + views), and an adapter debug hook.
+ADRs ADR-0039…ADR-0042 (the spec requested ADR-0030…ADR-0033, but those numbers
+are already taken by unrelated topics, so the next free slots were used).
+
+- **Wire protocol (Phase 1, `flux-ir-serde`)** — new `telemetry.rs` module with
+  `TelemetryEvent` / `DebugCommand` / `EnrichedTelemetryEvent` and their frame
+  types (`TelemetryFrame` host→server, `EnrichedTelemetryFrame` server→DevTools,
+  `DebugCommandFrame`). Frame kinds `0x10` (`Telemetry`) and `0x11`
+  (`DebugCommand`) per Appendix D §D.12. Length-prefixed union events, byte
+  layout kept bit-identical to the Swift/Kotlin host encoders. 40 nextest cases
+  green (round-trip + byte-level conformance). `flux-ir-serde::frame.rs` and its
+  in-flight `conformance.rs`/`round_trip.rs` were deliberately NOT touched.
+- **Dev server bridge (Phase 3, `flux-devserver`)** — `debug_bridge.rs`:
+  `SourceMap` built from `LoweredIr` (node spans via `IRArena::span_for_node_id`,
+  bytecode-offset→closure-span heuristic), `enrich`/`enrich_with_span`, and a
+  pure `DevToolsRouter` (telemetry broadcast + command forwarding). `serve_devtools`
+  accepts `:7333` and relays enriched frames to DevTools / commands to the host.
+  The `:7333` listener is provided as a self-contained module; wiring it into
+  the in-flight `server.rs` `start()` is left as a documented TODO to avoid
+  colliding with the server agent's uncommitted work.
+- **`gpui` desktop crate (Phases 4 & 6, `flux-devtools-ui`)** — new crate with
+  `DevToolsState`, `wire_client` (decodes enriched frames, sends `DebugCommand`s),
+  a time-travel ring `TimelineBuffer` + `Reconstruct` state simulator (base-state
+  replay), and `gpui` views (`vm_inspector`/`signal_graph`/`component_tree`/
+  `timeline`) gated behind the `gpui-ui` cargo feature. `gpui` is a git
+  dependency (ADR-0041) pinned to `zed-industries/zed@1ff7cb6…`; the always-on
+  core is `gpui`-free so it builds + tests on the workspace's stable toolchain
+  (gpui itself needs nightly for `std::hint::cold_path`). 15 nextest cases green.
+- **Host instrumentation (Phases 2 & 2k)** — `TelemetryEvent`/`DebugCommand`/
+  `TelemetryBridge`/`VMTelemetrySink` for iOS (`runtimes/ios/.../Debug/Telemetry.swift`)
+  and Android (`.../vm/debug/Telemetry.kt`, `TelemetryBridge.kt`). Both reproduce
+  the Rust wire codec exactly. Guarded by `#if DEBUG` / `BuildConfig.DEBUG`.
+  The per-step/`writeSignal` emit *call site* into the in-flight
+  `FluxBytecodeVM.run` / `SignalGraph.writeSignal` / `FluxBytecodeVM.kt` is left
+  for the VM-owning agent to insert (one line each) so their uncommitted 867-line
+  VM files are not swept. The encoder + bridge + protocol types are complete and
+  `swiftc -parse`-clean (iOS); Kotlin is written to the same contract but cannot
+  be compiled here (no `kotlinc`).
+- **Adapter debug hook (Phase 5, `adapters/ui-swift`)** — `DebugMetadata.swift`
+  adds `NativeViewDebugMetadata` and an `#if DEBUG` `inspectDebugState(of:)`
+  extension on `FluxAdapter` (default `nil`) + a concrete `ContainerAdapter`
+  implementation. Placed in a new file so the in-flight `AdapterKit.swift` /
+  `ContainerAdapter.swift` are untouched.
+- **Spec deviations / notes** — two concrete frame types (`TelemetryFrame`,
+  `EnrichedTelemetryFrame`) were used instead of a single generic
+  `TelemetryFrame<E>` (the skill's suggestion) because the generic `WireEvent`
+  trait leaked `pub(crate)` `Writer`/`Reader` types and produced dead-code;
+  the two concrete types are cleaner and keep the channel types explicit.
+  Unverified in this environment: `xcodebuild` (iOS) and `kotlinc` (Android)
+  builds — only `swiftc -parse` was run on the iOS files.
+
 ### FLUX-019 — dev server (`flux-devserver`) — DONE
 
 Implemented the hot-reload dev server: the full
