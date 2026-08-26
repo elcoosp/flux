@@ -19,8 +19,7 @@ use flux_ir_serde::{
     DebugCommand, EnrichedTelemetryEvent, EnrichedTelemetryFrame, TelemetryEvent, TelemetryFrame,
 };
 use flux_syntax::{NodeId, Span};
-
-/// A compiled source map from raw runtime IDs to `.flux` source spans.
+use futures_util::{SinkExt, StreamExt};
 ///
 /// Built once per successful compile from the [`LoweredIr`] so telemetry can be
 /// enriched without re-lowering on every event (spec §4.2).
@@ -82,17 +81,16 @@ impl SourceMap {
 #[must_use]
 pub fn enrich(event: &TelemetryEvent, map: &SourceMap) -> EnrichedTelemetryEvent {
     let span = match event {
-        TelemetryEvent::VmStep { bytecode_offset, .. } => {
-            map.span_for_bytecode_offset(*bytecode_offset)
-        }
+        TelemetryEvent::VmStep {
+            bytecode_offset, ..
+        } => map.span_for_bytecode_offset(*bytecode_offset),
         TelemetryEvent::ViewMutation { node_id, .. } => map.span_for_node_id(*node_id),
         TelemetryEvent::SignalWrite { .. } | TelemetryEvent::HandlerInvocation { .. } => None,
+        #[allow(unreachable_patterns)]
+        _ => None,
     };
     flux_ir_serde::enrich_with_span(event.clone(), span)
 }
-
-// `DebugCommand` is re-exported for callers forwarding host control frames.
-pub use flux_ir_serde::DebugCommandFrame;
 
 use tokio::sync::mpsc;
 
@@ -133,14 +131,13 @@ impl DevToolsRouter {
     pub fn route_telemetry(&mut self, event: &TelemetryEvent) -> usize {
         let enriched = enrich(event, &self.source_map);
         let mut reached = 0;
-        self.devtools
-            .retain(|tx| match tx.send(enriched.clone()) {
-                Ok(()) => {
-                    reached += 1;
-                    true
-                }
-                Err(_) => false, // drop disconnected clients
-            });
+        self.devtools.retain(|tx| match tx.send(enriched.clone()) {
+            Ok(()) => {
+                reached += 1;
+                true
+            }
+            Err(_) => false, // drop disconnected clients
+        });
         reached
     }
 
@@ -164,7 +161,7 @@ pub async fn serve_devtools(
     addr: std::net::SocketAddr,
     source_map: SourceMap,
     host_sink: mpsc::UnboundedSender<DebugCommand>,
-) -> anyhow::Result<()> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     loop {
         let (stream, _) = listener.accept().await?;
@@ -199,7 +196,6 @@ pub async fn serve_devtools(
         });
         // Inbound: telemetry → enrich+broadcast; commands → host.
         tokio::spawn(async move {
-            use futures_util::StreamExt;
             while let Some(msg) = reader.next().await {
                 let Ok(msg) = msg else { continue };
                 let Some(frame) = TelemetryFrame::from_bytes(match &msg {
@@ -250,7 +246,9 @@ mod tests {
         // The subscriber received the enriched event.
         let got = rx.try_recv().expect("event should be delivered");
         match got {
-            EnrichedTelemetryEvent::VmStep { bytecode_offset, .. } => assert_eq!(bytecode_offset, 0),
+            EnrichedTelemetryEvent::VmStep {
+                bytecode_offset, ..
+            } => assert_eq!(bytecode_offset, 0),
             _ => panic!("expected VmStep"),
         }
     }

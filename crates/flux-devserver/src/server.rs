@@ -25,6 +25,7 @@ use crate::dispatch::NodeSignalDeps;
 use crate::error::DevServerError;
 use crate::pipeline::Pipeline;
 use crate::watch::{Watcher, collect_flux_sources};
+use flux_ir_serde::DebugCommand;
 
 mod session;
 
@@ -110,13 +111,39 @@ impl DevServer {
         let accept_task = spawn_accept_loop(ws_listener, Arc::clone(&shared));
         let http_task = crate::assets::spawn(http_listener, config.root().to_path_buf());
 
-        tracing::info!(%ws_addr, %http_addr, root = %config.root().display(), "flux dev server started");
+        // DevTools WebSocket endpoint (`:7333`, spec §4.1): enriches host
+        // telemetry with source spans and relays `DebugCommand`s. The host
+        // command channel is drained here; forwarding onto the live host
+        // session is owned by the host-session agent (§4.3).
+        let devtools_addr = std::net::SocketAddr::from((
+            [127, 0, 0, 1],
+            crate::debug_bridge::DEFAULT_DEVTOOLS_PORT,
+        ));
+        let (host_command_tx, mut host_command_rx) =
+            tokio::sync::mpsc::unbounded_channel::<DebugCommand>();
+        let source_map = shared.pipeline.lock().devtools_source_map();
+        let devtools_drain = tokio::spawn(async move {
+            while host_command_rx.recv().await.is_some() {
+                tracing::debug!("devtools command received (host forwarding pending)");
+            }
+        });
+        let devtools_task = tokio::spawn(async move {
+            if let Err(e) =
+                crate::debug_bridge::serve_devtools(devtools_addr, source_map, host_command_tx)
+                    .await
+            {
+                tracing::warn!(error = %e, "devtools endpoint stopped");
+            }
+        });
+
+        tracing::info!(%ws_addr, %http_addr, %devtools_addr, root = %config.root().display(), "flux dev server started");
         Ok(RunningServer {
             shared,
             ws_addr,
             http_addr,
+            devtools_addr,
             root: config.root().to_path_buf(),
-            tasks: vec![accept_task, http_task],
+            tasks: vec![accept_task, http_task, devtools_drain, devtools_task],
             watcher,
         })
     }
@@ -197,6 +224,7 @@ pub struct RunningServer {
     shared: Arc<Shared>,
     ws_addr: SocketAddr,
     http_addr: SocketAddr,
+    devtools_addr: SocketAddr,
     root: PathBuf,
     tasks: Vec<JoinHandle<()>>,
     watcher: Watcher,
@@ -213,6 +241,12 @@ impl RunningServer {
     #[must_use]
     pub fn http_addr(&self) -> SocketAddr {
         self.http_addr
+    }
+
+    /// The bound DevTools WebSocket address (`:7333`, spec §4.1).
+    #[must_use]
+    pub fn devtools_addr(&self) -> SocketAddr {
+        self.devtools_addr
     }
 
     /// The watched project root.

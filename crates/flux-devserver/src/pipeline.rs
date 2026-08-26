@@ -154,6 +154,23 @@ impl Pipeline {
             .collect()
     }
 
+    /// Builds the DevTools [`SourceMap`] from the last-good lowered IR so the
+    /// debug bridge can enrich telemetry with `.flux` source spans (Phase 3).
+    ///
+    /// Prefers [`last_good`] (the retained tree); falls back to the first
+    /// compiled source; returns an empty map when nothing has compiled yet.
+    #[must_use]
+    pub fn devtools_source_map(&self) -> crate::debug_bridge::SourceMap {
+        if let Some(ir) = &self.last_good {
+            return crate::debug_bridge::SourceMap::from_lowered(ir);
+        }
+        self.compiled_sources()
+            .into_iter()
+            .next()
+            .map(|(_, ir, _)| crate::debug_bridge::SourceMap::from_lowered(&ir))
+            .unwrap_or_default()
+    }
+
     /// Injects the per-node `signal_deps` for the current tree (ADR-0027 Phase 2).
     ///
     /// The lowered IR (FA-IRWIRE, T13) will eventually carry `signal_deps` on
