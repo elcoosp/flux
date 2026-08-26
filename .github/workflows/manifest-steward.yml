@@ -1,0 +1,40 @@
+---
+name: manifest-steward
+
+# Brittleness issue 2 (Manifest Deadlock) — manifests are frozen, so agents append
+# dependency requests to MANIFEST_REQUESTS.md instead of editing them. This weekly
+# job fulfils those requests: it applies each row to the real manifest, commits the
+# manifest change, and truncates the request table back to its header.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  steward:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Report pending requests
+        run: bash scripts/manifest-steward.sh --dry-run
+
+      - name: Apply pending requests
+        run: |
+          set -euo pipefail
+          git config user.name "flux-manifest-steward"
+          git config user.email "manifest-steward@flux.invalid"
+          bash scripts/manifest-steward.sh
+
+      - name: Push manifest changes
+        run: |
+          set -euo pipefail
+          if [ -n "$(git log origin/"${GITHUB_REF_NAME}"..HEAD --oneline)" ]; then
+            git push
+          else
+            echo "no manifest changes to push"
+          fi
