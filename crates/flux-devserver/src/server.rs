@@ -3,21 +3,20 @@
 //! [`DevServer::start`] binds all three and returns a [`RunningServer`] handle
 //! carrying the bound addresses and a shutdown switch.
 //!
-//! The WebSocket side uses the synchronous `tungstenite` state machine driven on
-//! Tokio's blocking pool: this crate's pre-wired dependency set has no
-//! `futures-util`, so the async `Sink`/`Stream` adapters on
-//! `tokio_tungstenite::WebSocketStream` cannot be named here. One blocking task
-//! per connection keeps the code allocation-free on the hot path and lets each
-//! client be fed from its own queue.
+//! The WebSocket side is fully asynchronous: [`tokio_tungstenite::accept_async`]
+//! upgrades each accepted socket and one `tokio::spawn`ed task drives it, so a
+//! slow or silent client can never stall the accept loop or another session.
+//! Compile work — the only CPU-bound step — is pushed onto Tokio's blocking pool
+//! with `spawn_blocking`, keeping the I/O reactor free (brittleness issue 6).
 
-use std::net::{SocketAddr, TcpListener};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, Sender, channel};
-use std::time::Duration;
 
 use parking_lot::Mutex;
+use tokio::net::TcpListener;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
 
 use crate::config::ServerConfig;
@@ -29,14 +28,11 @@ use flux_ir_serde::DebugCommand;
 
 mod session;
 
-/// How long the accept loop sleeps between non-blocking accepts.
-const ACCEPT_POLL: Duration = Duration::from_millis(5);
-
 /// Shared server state: the compile pipeline plus the connected clients' queues.
 #[derive(Debug)]
 pub(crate) struct Shared {
     pub(crate) pipeline: Mutex<Pipeline>,
-    clients: Mutex<Vec<Sender<Vec<u8>>>>,
+    clients: Mutex<Vec<UnboundedSender<Vec<u8>>>>,
     shutdown: AtomicBool,
 }
 
@@ -49,8 +45,8 @@ impl Shared {
         }
     }
 
-    fn register(&self) -> Receiver<Vec<u8>> {
-        let (tx, rx) = channel();
+    fn register(&self) -> UnboundedReceiver<Vec<u8>> {
+        let (tx, rx) = unbounded_channel();
         self.clients.lock().push(tx);
         rx
     }
@@ -97,7 +93,7 @@ impl DevServer {
     /// # }
     /// ```
     pub async fn start(config: ServerConfig) -> Result<RunningServer, DevServerError> {
-        let (ws_listener, ws_addr) = bind_ws(config.ws_addr())?;
+        let (ws_listener, ws_addr) = bind_ws(config.ws_addr()).await?;
         let (http_listener, http_addr) = bind_http(config.http_addr()).await?;
 
         let mut pipeline = Pipeline::new(config.root(), config.profile());
@@ -149,16 +145,15 @@ impl DevServer {
     }
 }
 
-/// Binds the WebSocket listener in non-blocking mode, returning it and its
-/// resolved address (a configured port of `0` resolves to the chosen port).
-fn bind_ws(addr: SocketAddr) -> Result<(TcpListener, SocketAddr), DevServerError> {
+/// Binds the asynchronous WebSocket listener, returning it and its resolved
+/// address (a configured port of `0` resolves to the chosen port).
+async fn bind_ws(addr: SocketAddr) -> Result<(TcpListener, SocketAddr), DevServerError> {
     let bind_error = |source| DevServerError::Bind {
         kind: "websocket",
         addr,
         source,
     };
-    let listener = TcpListener::bind(addr).map_err(bind_error)?;
-    listener.set_nonblocking(true).map_err(bind_error)?;
+    let listener = TcpListener::bind(addr).await.map_err(bind_error)?;
     let resolved = listener.local_addr().map_err(bind_error)?;
     Ok((listener, resolved))
 }
@@ -190,26 +185,25 @@ fn initial_compile(shared: &Arc<Shared>) {
     }
 }
 
-/// Spawns the non-blocking accept loop; each accepted socket gets its own
-/// blocking connection task.
+/// Spawns the asynchronous accept loop; each accepted socket is upgraded and
+/// driven by its own `tokio::spawn`ed session task, so one slow client cannot
+/// stall the loop or any other session (brittleness issue 6).
 fn spawn_accept_loop(listener: TcpListener, shared: Arc<Shared>) -> JoinHandle<()> {
-    tokio::task::spawn_blocking(move || {
+    tokio::spawn(async move {
         while !shared.is_shutdown() {
-            match listener.accept() {
+            match listener.accept().await {
                 Ok((stream, peer)) => {
                     let shared = Arc::clone(&shared);
-                    tokio::task::spawn_blocking(move || {
-                        if let Err(error) = session::serve_client(stream, &shared) {
+                    tokio::spawn(async move {
+                        if let Err(error) = session::serve_client(stream, shared).await {
                             tracing::debug!(%peer, %error, "client session ended");
                         }
                     });
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(ACCEPT_POLL);
-                }
                 Err(error) => {
+                    // A per-connection accept failure (e.g. the peer vanished
+                    // between the SYN and the accept) must not kill the loop.
                     tracing::warn!(%error, "accept failed");
-                    std::thread::sleep(ACCEPT_POLL);
                 }
             }
         }
