@@ -40,3 +40,66 @@ sync, most async) and the VM cannot know which at runtime, so the contract is un
 3. `CellState` present on both hosts; Pending cell does not mutate the view.
 4. `AWAIT` on an already-Ready cell continues without suspending (one re-entry), proven by a vector.
 5. v1 `call_cap_basic` golden still green (no CALL_CAP semantics regression).
+
+## Coordination update — 2026-08-27 (state observed on shared `main`)
+
+The dev-server / capability-surface agent (this session) finished the parts that were "not yours" above and
+verified them against the real toolchains (Xcode 26.4 iOS 26.4 SDK; Gradle 9.7.1, AGP 9.3.2). Here is exactly
+where the lanes meet, so you can close the loop without editing their files:
+
+### What they shipped (committed, atomic, do not touch)
+- **Capability IDL = single source of truth** at `crates/flux-devserver/src/capability_idl.rs` (commit `22c02c2`):
+  `CAPABILITY_IDL = [Camera(1): take(1,1)/startPreview(1,2)/stopPreview(1,3), Storage(2): set(2,1)/get(2,2)/delete(2,3),
+  Router(3): navigate(3,1)]`. The dev-server Hello validator and BOTH native Hello advertisements are GENERATED from
+  it; a `cargo nextest` parity test (`capability_idl::parity`) fails if any runtime drifts. If you add a capability,
+  edit the IDL — not the native registry files.
+- **Dev-server Hello validation** (`handle_hello`, session.rs): extracts the compiled tree's required CALL_CAP
+  `(capId, methodId)` pairs via `Pipeline::required_capabilities()` and rejects a host whose advertised capabilities
+  don't cover them with a clear Error frame. Activates automatically once CALL_CAP lowering lands — no work for you.
+- **Native registries (my files) currently use the OLD sync shape** (`Registry.swift` `CapabilityImpl = (...) throws -> VMValue`,
+  `CapabilityRegistry.kt` `fun call(...) : FluxValue?`). They pass the CALL_CAP round-trip tests (Storage/Router/Camera echo),
+  but they are the thing you must convert to the cell-id contract (see gap below).
+
+### What you already did (observed in the working tree, uncommitted)
+- **Oracle is flipped to the v2 cell contract.** `CapabilityImpl` is now
+  `fn(cap_id, method_id, args: &Value, signals: &mut dyn SignalStore) -> SignalId`. `SignalStore` gained
+  `allocate_cell() -> SignalId`, `cell_state(id) -> CellState { Ready, Pending, Error }`, `mark_pending(id)`,
+  `resolve_cell(id, value)`. `parity_echo_99` writes `Ready` into signal 99 and returns `99`; `async_deferred`
+  (cap 2 method 99) allocates a Pending cell. Golden `call_cap_basic.json` is updated to expect `r2 == 99` (the cell id).
+- **iOS native VM partially flipped.** `FluxBytecodeVM.swift` CALL_CAP now calls `let cellId = try impl(...)` and writes
+  `regs[resultReg] = .int(cellId)`; the AWAIT path reads `signals.cellState(cellId)` and parks only on `.pending`.
+  `SignalStore` (InMemorySignals) gained `allocateCell()/cellState()/resolveCell()/CellState{ready,pending,error}`
+  with `nextCell` starting at 1_000_000 (above fixed ids like 99).
+- **iOS native registry NOT yet converted** to `-> UInt32` — still returns a `VMValue`. THIS IS THE OPEN GAP on iOS.
+- **Android native VM (`StepResult.kt`) NOT touched** — still calls `impl.call(regs[argsReg], signals)` and writes the
+  returned value into result_reg. Android `SignalStore` and `CapabilityRegistry.kt` are also still on the old contract.
+  Android is fully on the v1 shape; you must flip all three (VM call site + SignalStore + registry) there.
+
+### The exact gap you need to close (the joint handoff)
+1. **Convert the two native registry impls to the cell-id contract**, mirroring the oracle:
+   - Swift `Registry.swift`: change `typealias CapabilityImpl` return to `UInt32`; each impl does
+     `let cell = signals.allocateCell(); signals.write(cell, <value>); return cell` for sync, or
+     `let cell = signals.allocateCell(); signals.markPending(cell); return cell` for async (then host resolves via
+     `signals.resolveCell(cell, value)`). Keep the Camera.take echo: `args` is a **Record**, echo `fields[0].value` into the cell.
+   - Kotlin `CapabilityRegistry.kt`: change `fun call(...) : FluxValue?` to `: UInt`, same allocate/Ready/Pending pattern,
+     using the `SignalStore` methods you add (mirror the iOS `allocateCell/cellState/resolveCell/CellState`).
+   - Do NOT edit the generated `// ===== GENERATED-BEGIN/END =====` Hello blocks or the IDL — those are generated.
+2. **Flip the Android VM CALL_CAP call site** in `StepResult.kt` to `val cellId = impl.call(regs[argsReg], signals); regs[resultReg] = .int(cellId)`,
+   and add the `CellState` machinery to the Android `SignalStore` (the iOS side is done for you to copy).
+3. **AWAIT on already-Ready cell continues without suspending** — the iOS `FluxBytecodeVM` already does this (reads cellState,
+   deposits `signals.read(cellId)` into r0). Replicate in `StepResult.kt`.
+4. **CALL_CAP args are a Record** (spec §E.1; oracle `parity_echo_99` reads `fields[0]`). Your lowering must pack CALL_CAP
+   args as a Record, or `call_cap_basic` parity breaks. (This was the bug the real Gradle run caught and the dev agent fixed on the v1 side.)
+
+### Breaking note for you (your regression, not theirs)
+Two `flux-devserver` integration tests fail to COMPILE because of your in-flight `flux-ir-serde` / `flux-syntax` edits:
+`crates/flux-devserver/tests/dump_all_patches.rs` and `tests/emit_consistent.rs` reference a `DeltaFrame.handlers` field
+and a trait associated function that no longer exist. `cargo test -p flux-devserver --lib` is green (41 tests, incl. the 3
+capability parity tests); only those two integration bins are broken by your changes. Fix or coordinate before expecting them green.
+
+### Contact boundary (AGENTS.md §4.2)
+You own flux-vm-ref, flux-ir lowering, FluxBytecodeVM.swift, StepResult.kt, flux-syntax opcode. They own flux-devserver
+(capability_idl, capability_manifest, session.rs) and the two native registry files (Registry.swift, CapabilityRegistry.kt)
+— but the registry conversion above is the joint edit: you change the `CapabilityImpl` signature, they (or you, clearly) update
+the impl bodies. Neither re-commits the other's uncommitted work.
+
