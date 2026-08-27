@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flux Architecture — grounded in source</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'JetBrains Mono',monospace; background:#020617; min-height:100vh; padding:2rem; color:white; }
+  .container { max-width:1320px; margin:0 auto; }
+  .header { margin-bottom:1.5rem; }
+  .header-row { display:flex; align-items:center; gap:1rem; margin-bottom:.5rem; }
+  .pulse-dot { width:12px; height:12px; background:#34d399; border-radius:50%; animation:pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.5;} }
+  h1 { font-size:1.5rem; font-weight:700; letter-spacing:-.025em; }
+  .subtitle { color:#94a3b8; font-size:.85rem; margin-left:1.75rem; }
+  .diagram-container { background:rgba(15,23,42,.5); border-radius:1rem; border:1px solid #1e293b; padding:1.5rem; margin-top:1.25rem; overflow-x:auto; }
+  svg { width:100%; min-width:900px; display:block; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:1rem; margin-top:1.5rem; }
+  .card { background:rgba(15,23,42,.5); border-radius:.75rem; border:1px solid #1e293b; padding:1.25rem; }
+  .card-header { display:flex; align-items:center; gap:.5rem; margin-bottom:.75rem; }
+  .card-dot { width:8px; height:8px; border-radius:50%; }
+  .card-dot.cyan{background:#22d3ee;} .card-dot.emerald{background:#34d399;}
+  .card-dot.violet{background:#a78bfa;} .card-dot.amber{background:#fbbf24;}
+  .card-dot.rose{background:#fb7185;} .card-dot.orange{background:#fb923c;}
+  .card h3 { font-size:.875rem; font-weight:600; }
+  .card ul { list-style:none; color:#94a3b8; font-size:.72rem; line-height:1.5; }
+  .card li { margin-bottom:.3rem; }
+  .footer { text-align:center; margin-top:1.5rem; color:#475569; font-size:.72rem; }
+  h2.sec { color:#e2e8f0; font-size:1.05rem; font-weight:600; margin-top:2.5rem; margin-bottom:.25rem; }
+  .sec-note { color:#64748b; font-size:.78rem; margin-bottom:.5rem; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <div class="header-row"><div class="pulse-dot"></div><h1>Flux — End-to-End Architecture (grounded in source)</h1></div>
+    <p class="subtitle">Write-once native UI for iOS &amp; Android. Every box cites the real file I read in /Users/adm/Documents/Repos/flux. Dev mode interprets lowered IR in a bytecode VM; release mode runs generated Swift/Kotlin; both proven equivalent.</p>
+  </div>
+
+  <!-- ===================== SVG 1: FULL ARCHITECTURE ===================== -->
+  <h2 class="sec">1 · Full pipeline: authoring → Rust dev server → wire → dual native runtime → parity</h2>
+  <p class="sec-note">Left: Rust toolchain. Center band: Appendix-D wire. Right: iOS (Swift) and Android (Kotlin) runtimes drawn as structural mirrors. The rose curves are the host→server DispatchReport feeding the ADR-0027 dependency index.</p>
+  <div class="diagram-container">
+  <svg viewBox="0 0 1280 1280" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="ah" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#64748b"/></marker>
+      <marker id="ahc" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#22d3ee"/></marker>
+      <marker id="ahr" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#fb7185"/></marker>
+      <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width=".5"/></pattern>
+    </defs>
+    <rect width="1280" height="1280" fill="url(#grid)"/>
+
+    <!-- Rust dev server boundary -->
+    <rect x="30" y="40" width="470" height="470" rx="12" fill="rgba(8,51,68,.12)" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="8,4"/>
+    <text x="44" y="58" fill="#22d3ee" font-size="11" font-weight="600">Rust Dev Server (crates/)</text>
+
+    <!-- .flux source -->
+    <rect x="50" y="72" width="150" height="42" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+    <text x="62" y="92" fill="#e2e8f0" font-size="11">.flux source</text>
+    <text x="62" y="108" fill="#64748b" font-size="8">editor + file watch</text>
+
+    <!-- flux-cli -->
+    <rect x="50" y="132" width="200" height="42" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+    <text x="62" y="152" fill="#e2e8f0" font-size="11">flux-cli · dev subcmd</text>
+    <text x="62" y="168" fill="#64748b" font-size="8">cli/src/lib.rs · ws_host flag</text>
+
+    <!-- Pipeline -->
+    <rect x="50" y="192" width="300" height="256" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+    <text x="62" y="212" fill="#e2e8f0" font-size="11" font-weight="600">flux-devserver · Pipeline</text>
+    <text x="62" y="226" fill="#64748b" font-size="8">pipeline.rs:97 compile()</text>
+    <rect x="64" y="232" width="272" height="30" rx="4" fill="rgba(8,51,68,.5)" stroke="#0e7490"/><text x="74" y="251">flux_parser::parse → Ast</text>
+    <rect x="64" y="268" width="272" height="30" rx="4" fill="rgba(8,51,68,.5)" stroke="#0e7490"/><text x="74" y="287">flux_types::type_check</text>
+    <rect x="64" y="304" width="272" height="30" rx="4" fill="rgba(8,51,68,.5)" stroke="#0e7490"/><text x="74" y="323">flux_ir::lower → LoweredIr</text>
+    <rect x="64" y="340" width="272" height="30" rx="4" fill="rgba(8,51,68,.5)" stroke="#0e7490"/><text x="74" y="359">flux_differ::diff → Patch</text>
+    <text x="62" y="392" fill="#64748b" font-size="8">retains last_good tree + monotonic seq</text>
+    <text x="62" y="406" fill="#64748b" font-size="8">emits Init / Delta / Error frame</text>
+    <text x="62" y="420" fill="#64748b" font-size="8">set_signal_deps → rebuild_index()</text>
+    <text x="62" y="436" fill="#64748b" font-size="8">handle_dispatch_report → minimal Δ</text>
+
+    <!-- wire codec -->
+    <rect x="372" y="212" width="118" height="52" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+    <text x="384" y="232" fill="#e2e8f0" font-size="10">flux-ir-serde</text>
+    <text x="384" y="248" fill="#64748b" font-size="8">wire.rs · frame.rs</text>
+
+    <!-- dispatch.rs index -->
+    <rect x="372" y="300" width="118" height="74" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+    <text x="384" y="320" fill="#e2e8f0" font-size="10">dispatch.rs</text>
+    <text x="384" y="336" fill="#64748b" font-size="8">DependencyIndex</text>
+    <text x="384" y="350" fill="#64748b" font-size="8">emit_minimal_updates</text>
+    <text x="384" y="364" fill="#64748b" font-size="8">ADR-0027</text>
+
+    <!-- frame types mini -->
+    <rect x="372" y="400" width="118" height="96" rx="6" fill="#0f172a" stroke="#fbbf24" stroke-width="1.5"/>
+    <text x="384" y="420" fill="#fbbf24" font-size="9" font-weight="600">Frame types</text>
+    <text x="384" y="436" fill="#64748b" font-size="8">0x01 Hello</text>
+    <text x="384" y="450" fill="#64748b" font-size="8">0x02 Init</text>
+    <text x="384" y="464" fill="#64748b" font-size="8">0x03 Error</text>
+    <text x="384" y="478" fill="#64748b" font-size="8">0x04 Delta</text>
+    <text x="384" y="492" fill="#64748b" font-size="8">0x06 Report</text>
+
+    <!-- arrows section 1 -->
+    <line x1="125" y1="114" x2="150" y2="130" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
+    <line x1="200" y1="174" x2="200" y2="190" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
+    <line x1="350" y1="320" x2="370" y2="238" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
+    <line x1="431" y1="264" x2="431" y2="298" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
+    <line x1="431" y1="374" x2="431" y2="398" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
+    <line x1="431" y1="264" x2="431" y2="538" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#ah)"/>
+
+    <!-- Wire protocol band -->
+    <rect x="30" y="540" width="1220" height="56" rx="6" fill="#0f172a" stroke="#fbbf24" stroke-width="1.5"/>
+    <text x="46" y="562" fill="#e2e8f0" font-size="11" font-weight="600">WIRE PROTOCOL — Appendix D · magic 0x465C5558 · LE</text>
+    <text x="46" y="580" fill="#a16207" font-size="8.5">Frame = version·seq·flags·[root Node]·patches·handler-section(bytecode blob + ClosureRefs)·strings·stateΔ·files — Value tags 0x00–0x07 · Child = Node id | Splice keyed u64 (D.4) · Patch D.2 · ClosureRef D.7 · DispatchReport D.12.6</text>
+
+    <!-- ============ iOS runtime ============ -->
+    <rect x="30" y="624" width="600" height="612" rx="12" fill="rgba(6,78,59,.10)" stroke="#34d399" stroke-width="1.5" stroke-dasharray="8,4"/>
+    <text x="44" y="644" fill="#34d399" font-size="11" font-weight="600">iOS · SwiftPM `FluxHost` · @MainActor</text>
+
+    <rect x="50" y="656" width="560" height="46" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+    <text x="62" y="676" fill="#e2e8f0" font-size="10.5">FluxWebSocketTransport — Hello handshake, 1s reconnect</text>
+    <text x="62" y="692" fill="#64748b" font-size="8">FluxWebSocketTransport.swift</text>
+
+    <rect x="50" y="716" width="560" height="46" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+    <text x="62" y="736" fill="#e2e8f0" font-size="10.5">FrameDeserializer — bytes → FluxFrame (mirrors Rust)</text>
+    <text x="62" y="752" fill="#64748b" font-size="8">FrameDeserializer.swift · WireModels.swift</text>
+
+    <rect x="50" y="776" width="560" height="46" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+    <text x="62" y="796" fill="#e2e8f0" font-size="10.5">FluxRuntime : FluxExecutor — apply / dispatch</text>
+    <text x="62" y="812" fill="#64748b" font-size="8">FluxExecutor.swift · caches [Instruction] per handler (R3)</text>
+
+    <rect x="66" y="836" width="528" height="46" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+    <text x="78" y="856" fill="#e2e8f0" font-size="10.5">FluxBytecodeVM.run — gas r15, 16 MiB alloc budget</text>
+    <text x="78" y="872" fill="#64748b" font-size="8">FluxBytecodeVM.swift · mirrors flux-vm-ref oracle</text>
+
+    <rect x="66" y="896" width="255" height="46" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
+    <text x="78" y="916" fill="#e2e8f0" font-size="10.5">SignalGraph</text>
+    <text x="78" y="932" fill="#a78bfa" font-size="8">SignalStore · observe() (R-graph)</text>
+
+    <rect x="339" y="896" width="255" height="46" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
+    <text x="351" y="916" fill="#e2e8f0" font-size="10.5">VMValue (D.5)</text>
+    <text x="351" y="932" fill="#a78bfa" font-size="8">int/float/bool/str/list/record</text>
+
+    <rect x="66" y="956" width="528" height="80" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+    <text x="78" y="976" fill="#e2e8f0" font-size="10.5">ShadowTreeReconciler — keyed by NodeId</text>
+    <text x="78" y="992" fill="#64748b" font-size="8">reconcileDirty: dirty-set walk (R1), @pure skip (G6)</text>
+    <text x="78" y="1008" fill="#64748b" font-size="8">AdapterKit.swift → FluxUIKit adapters (Text/Button/…)</text>
+    <text x="78" y="1024" fill="#64748b" font-size="8">mutate UIView in place by stable NodeId</text>
+
+    <!-- iOS internal arrows -->
+    <line x1="330" y1="702" x2="330" y2="714" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
+    <line x1="330" y1="762" x2="330" y2="774" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
+    <line x1="330" y1="822" x2="330" y2="834" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
+    <line x1="193" y1="882" x2="193" y2="894" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#ah)"/>
+    <line x1="466" y1="882" x2="466" y2="894" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#ah)"/>
+    <line x1="330" y1="1042" x2="330" y2="1058" fill="none"/>
+    <!-- executor -> reconciler elbow -->
+    <path d="M 610 799 L 640 799 L 640 996 L 594 996" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
+
+    <!-- ============ Android runtime ============ -->
+    <rect x="650" y="624" width="600" height="612" rx="12" fill="rgba(6,78,59,.10)" stroke="#34d399" stroke-width="1.5" stroke-dasharray="8,4"/>
+    <text x="664" y="644" fill="#34d399" font-size="11" font-weight="600">Android · Kotlin `host` · Dispatchers.Main</text>
+
+    <rect x="670" y="656" width="560" height="46" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+    <text x="682" y="676" fill="#e2e8f0" font-size="10.5">FluxTransport — WS, off-main deserialize (Default)</text>
+    <text x="682" y="692" fill="#64748b" font-size="8">host/.../transport · receiveFrame hops to dispatcher</text>
+
+    <rect x="670" y="716" width="560" height="46" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+    <text x="682" y="736" fill="#e2e8f0" font-size="10.5">FrameDeserializer — bytes → Frame (same D layout)</text>
+    <text x="682" y="752" fill="#64748b" font-size="8">host/.../wire</text>
+
+    <rect x="670" y="776" width="560" height="46" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+    <text x="682" y="796" fill="#e2e8f0" font-size="10.5">FluxExecutor — apply / dispatch</text>
+    <text x="682" y="812" fill="#64748b" font-size="8">FluxExecutor.kt · last-wins hot-swap (T7)</text>
+
+    <rect x="686" y="836" width="528" height="46" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+    <text x="698" y="856" fill="#e2e8f0" font-size="10.5">FluxBytecodeVM.run — VmResult, 16 MiB cap</text>
+    <text x="698" y="872" fill="#64748b" font-size="8">host/.../vm · mirrors flux-vm-ref oracle</text>
+
+    <rect x="686" y="896" width="255" height="46" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
+    <text x="698" y="916" fill="#e2e8f0" font-size="10.5">SignalGraph</text>
+    <text x="698" y="932" fill="#a78bfa" font-size="8">SignalStore impl</text>
+
+    <rect x="959" y="896" width="255" height="46" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
+    <text x="971" y="916" fill="#e2e8f0" font-size="10.5">FluxValue (D.5)</text>
+    <text x="971" y="932" fill="#a78bfa" font-size="8">IntVal/FloatVal/… mirror</text>
+
+    <rect x="686" y="956" width="528" height="80" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+    <text x="698" y="976" fill="#e2e8f0" font-size="10.5">ShadowTree.reconcileDirty — keyed by NodeId</text>
+    <text x="698" y="992" fill="#64748b" font-size="8">dirty-set walk (R1), @pure skip (G6)</text>
+    <text x="698" y="1008" fill="#64748b" font-size="8">host/.../shadow → adapters/ui-kotlin (Compose)</text>
+    <text x="698" y="1024" fill="#64748b" font-size="8">mutate FluxNativeView in place</text>
+
+    <line x1="950" y1="702" x2="950" y2="714" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
+    <line x1="950" y1="762" x2="950" y2="774" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
+    <line x1="950" y1="822" x2="950" y2="834" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
+    <line x1="813" y1="882" x2="813" y2="894" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#ah)"/>
+    <line x1="1086" y1="882" x2="1086" y2="894" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#ah)"/>
+    <path d="M 1230 799 L 1260 799 L 1260 996 L 1214 996" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
+
+    <!-- entry arrows from band -->
+    <line x1="330" y1="596" x2="330" y2="654" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#ah)"/>
+    <line x1="950" y1="596" x2="950" y2="654" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#ah)"/>
+
+    <!-- DispatchReport reverse arrows (rose) -->
+    <path d="M 200 799 C 20 799, 20 300, 372 320" fill="none" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#ahr)"/>
+    <text x="40" y="560" fill="#fb7185" font-size="8">DispatchReport ↑</text>
+    <path d="M 950 799 C 1160 799, 1160 300, 490 320" fill="none" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#ahr)"/>
+    <text x="1000" y="560" fill="#fb7185" font-size="8">DispatchReport ↑ (written sig)</text>
+
+    <!-- Legend -->
+    <rect x="900" y="1070" width="360" height="190" rx="8" fill="rgba(15,23,42,.7)" stroke="#1e293b"/>
+    <text x="914" y="1090" fill="#e2e8f0" font-size="10" font-weight="600">Legend</text>
+    <rect x="914" y="1100" width="14" height="10" rx="2" fill="rgba(8,51,68,.5)" stroke="#22d3ee"/><text x="934" y="1108" fill="#94a3b8" font-size="8">Rust toolchain</text>
+    <rect x="914" y="1116" width="14" height="10" rx="2" fill="rgba(6,78,59,.5)" stroke="#34d399"/><text x="934" y="1124" fill="#94a3b8" font-size="8">Native runtime (iOS≈Android)</text>
+    <rect x="914" y="1132" width="14" height="10" rx="2" fill="rgba(120,53,15,.4)" stroke="#fbbf24"/><text x="934" y="1140" fill="#94a3b8" font-size="8">Wire protocol (Appendix D)</text>
+    <rect x="914" y="1148" width="14" height="10" rx="2" fill="rgba(76,29,149,.5)" stroke="#a78bfa"/><text x="934" y="1156" fill="#94a3b8" font-size="8">Value / signal model</text>
+    <line x1="914" y1="1168" x2="928" y2="1168" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="4,3"/><text x="934" y="1171" fill="#94a3b8" font-size="8">DispatchReport (host→server)</text>
+    <rect x="914" y="1180" width="14" height="10" rx="2" fill="rgba(136,19,55,.5)" stroke="#fb7185"/><text x="934" y="1188" fill="#94a3b8" font-size="8">Fault / lifecycle boundary</text>
+    <text x="914" y="1208" fill="#64748b" font-size="8">All paths converge on parity (SVG 3 region)</text>
+    <text x="914" y="1222" fill="#64748b" font-size="8">vm-ref oracle → ISA conformance.</text>
+    <text x="914" y="1236" fill="#64748b" font-size="8">Codegen → SwiftUI / Compose.</text>
+  </svg>
+  </div>
+
+  <!-- ===================== SVG 2: DISPATCH HOT PATH ===================== -->
+  <h2 class="sec">2 · The per-tap dispatch hot path (deep dive) — with budgets &amp; decisions</h2>
+  <p class="sec-note">What actually runs when a native control fires a handler. Cited from FluxExecutor.swift:199 dispatch(_:) and FluxBytecodeVM.swift:84 run(...). Diamonds are the guard rails that keep a runaway closure from crashing the device.</p>
+  <div class="diagram-container">
+  <svg viewBox="0 0 1280 760" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="ah2" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#64748b"/></marker>
+      <marker id="ahf" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#fb7185"/></marker>
+      <marker id="ahg" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#34d399"/></marker>
+    </defs>
+    <rect width="1280" height="760" fill="url(#grid)"/>
+
+    <!-- Tap -->
+    <rect x="540" y="20" width="200" height="40" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+    <text x="552" y="44" fill="#e2e8f0" font-size="11">Native tap / event</text>
+
+    <!-- dispatch(event) -->
+    <rect x="500" y="80" width="280" height="40" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+    <text x="512" y="104" fill="#e2e8f0" font-size="11">dispatch(FluxEvent) · Executor:199</text>
+
+    <!-- lookup diamond -->
+    <polygon points="640,150 700,180 640,210 580,180" fill="#0f172a" stroke="#fbbf24" stroke-width="1.5"/>
+    <text x="612" y="184" fill="#e2e8f0" font-size="9">handler</text>
+
+    <!-- lastError box (no) -->
+    <rect x="760" y="160" width="190" height="40" rx="6" fill="#0f172a" stroke="#fb7185" stroke-width="1.5"/>
+    <text x="772" y="184" fill="#fb7185" font-size="10">lastError=invalidDispatch</text>
+
+    <!-- cached decode -->
+    <rect x="500" y="240" width="280" height="40" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+    <text x="512" y="264" fill="#e2e8f0" font-size="11">cached [Instruction] (R3) + payload→VMValue</text>
+
+    <!-- VM.run -->
+    <rect x="500" y="300" width="280" height="40" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+    <text x="512" y="324" fill="#e2e8f0" font-size="11">FluxBytecodeVM.run · VM:84</text>
+
+    <!-- gas diamond -->
+    <polygon points="640,380 700,410 640,440 580,410" fill="#0f172a" stroke="#fbbf24" stroke-width="1.5"/>
+    <text x="618" y="408" fill="#e2e8f0" font-size="9">gas==0?</text>
+
+    <!-- gas exhausted -->
+    <rect x="760" y="390" width="190" height="40" rx="6" fill="#0f172a" stroke="#fb7185" stroke-width="1.5"/>
+    <text x="772" y="414" fill="#fb7185" font-size="10">GasExhausted fault</text>
+
+    <!-- per-op -->
+    <rect x="500" y="470" width="280" height="40" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+    <text x="512" y="494" fill="#e2e8f0" font-size="11">decode op · requireInt/Float/Bool</text>
+
+    <!-- alloc diamond -->
+    <polygon points="640,550 700,580 640,610 580,580" fill="#0f172a" stroke="#fbbf24" stroke-width="1.5"/>
+    <text x="606" y="578" fill="#e2e8f0" font-size="9">alloc&gt;16MiB?</text>
+
+    <!-- mem exhausted -->
+    <rect x="760" y="560" width="190" height="40" rx="6" fill="#0f172a" stroke="#fb7185" stroke-width="1.5"/>
+    <text x="772" y="584" fill="#fb7185" font-size="10">MemoryExhausted</text>
+
+    <!-- VmOutcome -->
+    <rect x="500" y="640" width="280" height="40" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+    <text x="512" y="664" fill="#e2e8f0" font-size="11">VmOutcome.signals (sorted)</text>
+
+    <!-- graph.write -->
+    <rect x="180" y="700" width="260" height="40" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
+    <text x="192" y="724" fill="#e2e8f0" font-size="10.5">graph.write(id, value)</text>
+
+    <!-- reconcileDirty -->
+    <rect x="500" y="700" width="280" height="40" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+    <text x="512" y="724" fill="#e2e8f0" font-size="10.5">reconcileDirty(rootId, signalIds)</text>
+
+    <!-- dirty diamond -->
+    <polygon points="860,700 920,730 860,760 800,730" fill="#0f172a" stroke="#fbbf24" stroke-width="1.5"/>
+    <text x="836" y="734" fill="#e2e8f0" font-size="9">dirty?</text>
+
+    <!-- @pure / setChildren -->
+    <rect x="960" y="700" width="240" height="40" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+    <text x="972" y="724" fill="#e2e8f0" font-size="10">@pure? skip · else setChildren</text>
+
+    <!-- arrows -->
+    <line x1="640" y1="60" x2="640" y2="78" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah2)"/>
+    <line x1="640" y1="120" x2="640" y2="148" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah2)"/>
+    <line x1="700" y1="180" x2="758" y2="180" stroke="#fb7185" stroke-width="1.5" marker-end="url(#ahf)"/>
+    <line x1="640" y1="210" x2="640" y2="238" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah2)"/>
+    <line x1="640" y1="280" x2="640" y2="298" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah2)"/>
+    <line x1="640" y1="340" x2="640" y2="378" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah2)"/>
+    <line x1="700" y1="410" x2="758" y2="410" stroke="#fb7185" stroke-width="1.5" marker-end="url(#ahf)"/>
+    <line x1="640" y1="440" x2="640" y2="468" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah2)"/>
+    <line x1="640" y1="510" x2="640" y2="548" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah2)"/>
+    <line x1="700" y1="580" x2="758" y2="580" stroke="#fb7185" stroke-width="1.5" marker-end="url(#ahf)"/>
+    <line x1="640" y1="610" x2="640" y2="638" stroke="#34d399" stroke-width="1.5" marker-end="url(#ahg)"/>
+    <line x1="560" y1="660" x2="438" y2="700" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#ahg)"/>
+    <line x1="640" y1="680" x2="640" y2="698" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah2)"/>
+    <line x1="780" y1="720" x2="798" y2="728" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah2)"/>
+    <line x1="920" y1="730" x2="958" y2="730" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah2)"/>
+    <text x="300" y="694" fill="#a78bfa" font-size="8">folds VM writes</text>
+    <text x="690" y="694" fill="#64748b" font-size="8">dirty set = signalDeps∩written</text>
+  </svg>
+  </div>
+
+  <!-- ===================== SVG 3: RUST WORKSPACE ===================== -->
+  <h2 class="sec">3 · Rust workspace crate graph (crates/Cargo.toml)</h2>
+  <p class="sec-note">Dependency edges among the crates. flux-vm-ref is the oracle (test-only). flux-parity consumes the codegen output + vm-ref, not the app.</p>
+  <div class="diagram-container">
+  <svg viewBox="0 0 1280 560" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="ah3" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#22d3ee"/></marker>
+    </defs>
+    <rect width="1280" height="560" fill="url(#grid)"/>
+
+    <!-- flux-cli -->
+    <rect x="40" y="40" width="220" height="50" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+    <text x="52" y="60" fill="#e2e8f0" font-size="11">flux-cli</text>
+    <text x="52" y="78" fill="#64748b" font-size="8">dev · build · init · doc</text>
+
+    <!-- devserver -->
+    <rect x="40" y="140" width="220" height="50" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+    <text x="52" y="160" fill="#e2e8f0" font-size="11">flux-devserver</text>
+    <text x="52" y="178" fill="#64748b" font-size="8">pipeline · dispatch · watch</text>
+
+    <!-- leaf crates -->
+    <rect x="320" y="40" width="180" height="44" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+    <text x="332" y="60" fill="#e2e8f0" font-size="10">flux-parser</text>
+    <rect x="320" y="100" width="180" height="44" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+    <text x="332" y="120" fill="#e2e8f0" font-size="10">flux-types</text>
+    <rect x="320" y="160" width="180" height="44" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+    <text x="332" y="180" fill="#e2e8f0" font-size="10">flux-ir</text>
+    <rect x="320" y="220" width="180" height="44" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+    <text x="332" y="240" fill="#e2e8f0" font-size="10">flux-differ</text>
+    <rect x="320" y="280" width="180" height="44" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+    <text x="332" y="300" fill="#e2e8f0" font-size="10">flux-ir-serde</text>
+
+    <!-- codegen -->
+    <rect x="560" y="40" width="220" height="50" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+    <text x="572" y="60" fill="#e2e8f0" font-size="11">flux-codegen-swift</text>
+    <text x="572" y="78" fill="#64748b" font-size="8">bridge.rs → SwiftUI</text>
+    <rect x="560" y="110" width="220" height="50" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+    <text x="572" y="130" fill="#e2e8f0" font-size="11">flux-codegen-kotlin</text>
+    <text x="572" y="148" fill="#64748b" font-size="8">bridge.rs → Compose</text>
+
+    <!-- vm-ref oracle -->
+    <rect x="560" y="220" width="220" height="50" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
+    <text x="572" y="240" fill="#e2e8f0" font-size="11">flux-vm-ref</text>
+    <text x="572" y="258" fill="#a78bfa" font-size="8">test oracle only</text>
+
+    <!-- parity -->
+    <rect x="860" y="140" width="240" height="56" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
+    <text x="872" y="162" fill="#e2e8f0" font-size="11">flux-parity (FLUX-023)</text>
+    <text x="872" y="180" fill="#64748b" font-size="8">reduces 3 paths → ViewNode</text>
+
+    <!-- arrows -->
+    <line x1="260" y1="65" x2="318" y2="62" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#ah3)"/>
+    <line x1="260" y1="90" x2="58" y2="138" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#ah3)"/>
+    <line x1="260" y1="165" x2="318" y2="62" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#ah3)"/>
+    <line x1="260" y1="165" x2="318" y2="122" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#ah3)"/>
+    <line x1="260" y1="165" x2="318" y2="182" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#ah3)"/>
+    <line x1="260" y1="165" x2="318" y2="242" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#ah3)"/>
+    <line x1="260" y1="165" x2="318" y2="302" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#ah3)"/>
+    <line x1="500" y1="65" x2="558" y2="62" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#ah3)"/>
+    <line x1="500" y1="135" x2="558" y2="132" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#ah3)"/>
+    <line x1="780" y1="65" x2="858" y2="150" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#ah3)"/>
+    <line x1="780" y1="135" x2="858" y2="168" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#ah3)"/>
+    <line x1="780" y1="245" x2="858" y2="185" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#ah3)"/>
+    <text x="630" y="100" fill="#64748b" font-size="8">build → codegen</text>
+    <text x="800" y="200" fill="#a78bfa" font-size="8">equivalence</text>
+  </svg>
+  </div>
+
+  <div class="cards">
+    <div class="card">
+      <div class="card-header"><div class="card-dot cyan"></div><h3>Dev Server (Rust)</h3></div>
+      <ul>
+        <li>• flux-cli dev → flux-devserver Pipeline</li>
+        <li>• parse → type_check → lower → diff → frame</li>
+        <li>• Retains <b>last_good</b> tree; ships Init/Delta/Error</li>
+        <li>• dispatch.rs DependencyIndex (ADR-0027): on write to S, re-sends only <b>dependents[S]</b> as Update patches</li>
+        <li>• wrote signal nobody reads → ships <b>nothing</b> (noop budget)</li>
+        <li>• handler section = shared bytecode blob + ClosureRefs (Gap G1)</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-dot emerald"></div><h3>Native Runtime (iOS≈Android)</h3></div>
+      <ul>
+        <li>• Transport → FrameDeserializer (mirrors Rust serializer)</li>
+        <li>• Executor.apply seeds signals + string table, registers handlers</li>
+        <li>• Handler bytecode decoded once &amp; cached → reused per tap (R3)</li>
+        <li>• dispatch: VM runs closure, folds written signals into graph</li>
+        <li>• reconcileDirty walks only subtrees reading written signals (R1)</li>
+        <li>• @pure nodes with unchanged prop hash skipped (G6)</li>
+        <li>• Adapters mutate native views <b>in place</b> by stable NodeId</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-dot violet"></div><h3>Shared Model &amp; Parity</h3></div>
+      <ul>
+        <li>• VMValue tag set 0x00–0x07 is the wire contract (Swift/Kotlin/Rust)</li>
+        <li>• flux-vm-ref is the oracle; both native VMs conform via ISA vectors</li>
+        <li>• flux build → idiomatic SwiftUI / Compose from same LoweredIr</li>
+        <li>• flux-parity reduces dev-VM trace + both codegen outputs to one ViewNode, asserts equivalence (BR-004)</li>
+        <li>• Empty ForEach splice faithful on all 3 paths (FLUX-014)</li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="footer">Generated from source: crates/{cli,devserver,ir-serde,vm-ref,codegen-swift,codegen-kotlin,parity} · runtimes/ios/FluxHost/Sources · runtimes/android/host/src. Appendices B–G of mlp-appendices.md are normative.</p>
+</div>
+</body>
+</html>
