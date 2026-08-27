@@ -246,6 +246,62 @@ class RuntimeFixesTest {
         assertEquals(VmErrorKind.TYPE_MISMATCH, out.kind)
     }
 
+    // ── G4: real MLP capability surface (ADR-0045) ──────────────────────────
+
+    @Test
+    fun `Storage set then get round-trips through DEV registry`() {
+        val registry = CapabilityRegistry.DEV
+        val signals = InMemorySignals()
+        val setArgs =
+            FluxValue.RecordVal(
+                listOf(
+                    FluxValue.Field(0u.toUShort(), FluxValue.StrVal(7u)),
+                    FluxValue.Field(1u.toUShort(), FluxValue.ListVal(listOf(FluxValue.IntVal(1), FluxValue.IntVal(2)))),
+                ),
+            )
+        val setOut = registry.lookup(2u, 1u.toUShort())!!.call(setArgs, signals)
+        assertEquals(FluxValue.NullVal, setOut, "Storage.set returns Unit")
+        val getArgs = FluxValue.RecordVal(listOf(FluxValue.Field(0u.toUShort(), FluxValue.StrVal(7u))))
+        val got = registry.lookup(2u, 2u.toUShort())!!.call(getArgs, signals)
+        assertEquals(FluxValue.ListVal(listOf(FluxValue.IntVal(1), FluxValue.IntVal(2))), got, "Storage.get returns persisted value")
+    }
+
+    @Test
+    fun `Router navigate records target in signal 97`() {
+        val registry = CapabilityRegistry.DEV
+        val signals = InMemorySignals()
+        val out = registry.lookup(3u, 1u.toUShort())!!.call(FluxValue.StrVal(42u), signals)
+        assertEquals(FluxValue.NullVal, out, "Router.navigate returns Unit")
+        assertEquals(FluxValue.StrVal(42u), signals.read(97u), "Router.navigate records target in signal 97")
+    }
+
+    @Test
+    fun `Camera take echoes for oracle parity`() {
+        val registry = CapabilityRegistry.DEV
+        val signals = InMemorySignals()
+        val out = registry.lookup(1u, 1u.toUShort())!!.call(FluxValue.IntVal(7), signals)
+        assertEquals(FluxValue.IntVal(7), out, "Camera.take echoes its argument")
+        assertEquals(FluxValue.IntVal(7), signals.read(99u), "Camera.take echoes into signal 99")
+    }
+
+    @Test
+    fun `Storage delete clears value`() {
+        val registry = CapabilityRegistry.DEV
+        val signals = InMemorySignals()
+        val key = FluxValue.RecordVal(listOf(FluxValue.Field(0u.toUShort(), FluxValue.StrVal(11u))))
+        val value =
+            FluxValue.RecordVal(
+                listOf(
+                    FluxValue.Field(0u.toUShort(), FluxValue.StrVal(11u)),
+                    FluxValue.Field(1u.toUShort(), FluxValue.ListVal(listOf(FluxValue.IntVal(9)))),
+                ),
+            )
+        registry.lookup(2u, 1u.toUShort())!!.call(value, signals)
+        assertEquals(FluxValue.ListVal(listOf(FluxValue.IntVal(9))), registry.lookup(2u, 2u.toUShort())!!.call(key, signals), "present before delete")
+        registry.lookup(2u, 3u.toUShort())!!.call(key, signals)
+        assertEquals(FluxValue.NullVal, registry.lookup(2u, 2u.toUShort())!!.call(key, signals), "cleared after delete")
+    }
+
     // ── G5: lifecycle hooks ──────────────────────────────────────────────────
 
     @Test

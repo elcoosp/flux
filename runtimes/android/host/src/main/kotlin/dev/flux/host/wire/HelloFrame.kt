@@ -33,10 +33,37 @@ public fun helloFrameBytes(
     out.add(0x01) // FrameKind::Hello
     writeStr(out, platform)
     writeStr(out, device)
-    out.add(0) // cap_count low
-    out.add(0) // cap_count high
+    // cap_count (u16 LE) + capability triples (name, version u32, features).
+    val caps = advertisedCapabilities
+    out.add((caps.size and 0xFF).toByte())
+    out.add(((caps.size ushr 8) and 0xFF).toByte())
+    for ((name, version, features) in caps) {
+        writeStr(out, name)
+        out.add((version.toInt() and 0xFF).toByte())
+        out.add(((version.toInt() ushr 8) and 0xFF).toByte())
+        out.add(((version.toInt() ushr 16) and 0xFF).toByte())
+        out.add(((version.toInt() ushr 24) and 0xFF).toByte())
+        out.add((features.size and 0xFF).toByte())
+        out.add(((features.size ushr 8) and 0xFF).toByte())
+        for (feature in features) writeStr(out, feature)
+    }
     return out.toByteArray()
 }
+
+/**
+ * The capabilities this host build advertises (Appendix D §D.12.1, §24.4),
+ * as `(name, version, features)` triples. The dev server validates the set
+ * against the compiled `.flux` requirements; a mismatch is a clear `Error`
+ * frame rather than a silent runtime fault. The ids match the stable
+ * capability ids from `stdlib/capabilities.flux` / the native
+ * `CapabilityRegistry` (cap 1 = Camera, cap 2 = Storage, cap 3 = Router).
+ */
+public val advertisedCapabilities: List<Triple<String, UInt, List<String>>> =
+    listOf(
+        Triple("Camera", 1u, listOf("take", "startPreview", "stopPreview")),
+        Triple("Storage", 1u, listOf("set", "get", "delete")),
+        Triple("Router", 1u, listOf("navigate")),
+    )
 
 private fun writeStr(
     out: ArrayList<Byte>,

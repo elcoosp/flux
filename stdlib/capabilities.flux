@@ -3,15 +3,23 @@
 // Capabilities expose vetted platform APIs to the VM. The VM has no
 // `CALL_NATIVE`; the only mechanism for platform calls is `CALL_CAP` with a
 // capability id (mlp-spec §24). These declarations are declarations only —
-// the bodies are bound per-platform (dev mode forwards over WS; release mode
-// calls native directly, per §24.2/§24.3). No method bodies are provided
-// here.
+// the bodies are bound per-platform (dev mode runs in-memory stand-ins;
+// release mode calls native directly, per §24.2/§24.3). No method bodies are
+// provided here.
 //
 // `Data` is the opaque binary payload type shared with these capabilities;
 // it is declared in prelude.flux and is in scope via the implicit prelude.
+//
+// IDs are stable and match the native `CapabilityRegistry` tables (cap 1 =
+// Camera, cap 2 = Storage, cap 3 = Router). Sync vs async is a binding
+// detail: sync methods return immediately; async methods (most platform
+// calls — camera, permissions, network) resolve through the VM's await
+// machinery (ADR-0044 / ADR-0045) and return a `Result` on failure.
 
 capability Camera {
-  fn capture() -> Data
+  // Synchronous dev stand-in returns a deterministic `Data` payload; release
+  // builds capture a real frame.
+  fn take() -> Data
   fn startPreview() -> Unit
   fn stopPreview() -> Unit
 }
@@ -20,4 +28,8 @@ capability Storage {
   fn set(key: String, value: Data) -> Unit
   fn get(key: String) -> Option[Data]
   fn delete(key: String) -> Unit
+}
+
+capability Router {
+  fn navigate(target: String) -> Unit
 }

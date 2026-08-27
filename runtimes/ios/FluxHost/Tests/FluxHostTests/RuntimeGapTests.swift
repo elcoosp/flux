@@ -476,3 +476,53 @@ final class GapR3CacheTests: XCTestCase {
         XCTAssertEqual(executor.graph.read(6), .int(9), "independent handler keeps its own cached decode")
     }
 }
+
+// MARK: - Capability round-trip (real MLP capability surface)
+
+/// Exercises the full `CapabilityRegistry.dev` surface: `Storage` persistence,
+/// `Router` navigation recording, and `Camera` capture — the on-device,
+/// synchronous dev stand-ins for the real native backends (ADR-0045).
+final class CapabilityRoundTripTests: XCTestCase {
+    @MainActor
+    func testStorageSetThenGetRoundTrips() async throws {
+        var signals: any SignalStore = InMemorySignals()
+        // Storage.set(key=Str(7), value=List[1,2,3]) → cap 2, method 1.
+        let setArgs = VMValue.record([(0, .str(7)), (1, .list([.int(1), .int(2), .int(3)]))])
+        let written = CapabilityRegistry.dev.lookup(2, 1)!(2, 1, setArgs, &signals)
+        XCTAssertEqual(written, .null, "Storage.set returns Unit (null)")
+
+        // Storage.get(key=Str(7)) → cap 2, method 2 returns the persisted list.
+        let getArgs = VMValue.record([(0, .str(7))])
+        let got = CapabilityRegistry.dev.lookup(2, 2)!(2, 2, getArgs, &signals)
+        XCTAssertEqual(got, .list([.int(1), .int(2), .int(3)]), "Storage.get returns the persisted value")
+    }
+
+    @MainActor
+    func testRouterNavigateRecordsTarget() async throws {
+        var signals: any SignalStore = InMemorySignals()
+        let out = CapabilityRegistry.dev.lookup(3, 1)!(3, 1, .str(42), &signals)
+        XCTAssertEqual(out, .null, "Router.navigate returns Unit (null)")
+        XCTAssertEqual(signals.read(97), .str(42), "Router.navigate records target string id in signal 97")
+    }
+
+    @MainActor
+    func testCameraTakeEchoesForOracleParity() async throws {
+        var signals: any SignalStore = InMemorySignals()
+        let out = CapabilityRegistry.dev.lookup(1, 1)!(1, 1, .int(7), &signals)
+        XCTAssertEqual(out, .int(7), "Camera.take (dev) echoes its argument")
+        XCTAssertEqual(signals.read(99), .int(7), "Camera.take echoes into signal 99 (oracle parity)")
+    }
+
+    @MainActor
+    func testStorageDeleteClearsValue() async throws {
+        var signals: any SignalStore = InMemorySignals()
+        let key = VMValue.record([(0, .str(11))])
+        let value = VMValue.record([(0, .str(11)), (1, .list([.int(9)]))])
+        _ = CapabilityRegistry.dev.lookup(2, 1)!(2, 1, value, &signals)
+        let before = CapabilityRegistry.dev.lookup(2, 2)!(2, 2, key, &signals)
+        XCTAssertEqual(before, .list([.int(9)]), "value present before delete")
+        _ = CapabilityRegistry.dev.lookup(2, 3)!(2, 3, key, &signals)
+        let after = CapabilityRegistry.dev.lookup(2, 2)!(2, 2, key, &signals)
+        XCTAssertEqual(after, .null, "value cleared after delete")
+    }
+}

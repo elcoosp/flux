@@ -25,11 +25,26 @@ extension Data {
     }
 }
 
+extension HelloFrame {
+    /// The capabilities this host build advertises (Appendix D §D.12.1, §24.4).
+    ///
+    /// Each entry is `(name, version, features)`. The dev server validates the
+    /// set against the compiled `.flux` requirements; a mismatch is a clear
+    /// `Error` frame rather than a silent runtime fault. The ids here match the
+    /// stable capability ids from `stdlib/capabilities.flux` / the native
+    /// `CapabilityRegistry` (cap 1 = Camera, cap 2 = Storage, cap 3 = Router).
+    static let advertisedCapabilities: [(String, UInt32, [String])] = [
+        ("Camera", 1, ["take", "startPreview", "stopPreview"]),
+        ("Storage", 1, ["set", "get", "delete"]),
+        ("Router", 1, ["navigate"]),
+    ]
+}
+
 public enum HelloFrame {
     /// Builds the wire bytes of a `Hello` handshake frame.
     /// - Parameters:
-    ///   - platform: host platform string, e.g. `"ios"`.
-    ///   - device: device model string, e.g. `"iPhone 17 Pro"`.
+    ///   - platform: host platform string, e.g. "ios".
+    ///   - device: device model string, e.g. "iPhone 17 Pro".
     /// - Returns: the frame bytes to send over the WebSocket.
     public static func bytes(platform: String, device: String) -> Data {
         var data = Data()
@@ -42,8 +57,18 @@ public enum HelloFrame {
         data.append(0x01) // FrameKind::Hello
         data.fluxAppendString(platform)
         data.fluxAppendString(device)
-        data.append(0) // cap_count low
-        data.append(0) // cap_count high
+        // cap_count (u16 LE).
+        let caps = advertisedCapabilities
+        data.append(UInt8(caps.count & 0xFF))
+        data.append(UInt8((caps.count >> 8) & 0xFF))
+        for (name, version, features) in caps {
+            data.fluxAppendString(name)
+            data.append(UInt8(version & 0xFF))
+            data.append(UInt8((version >> 8) & 0xFF))
+            data.append(UInt8(features.count & 0xFF))
+            data.append(UInt8((features.count >> 8) & 0xFF))
+            for feature in features { data.fluxAppendString(feature) }
+        }
         return data
     }
 }
