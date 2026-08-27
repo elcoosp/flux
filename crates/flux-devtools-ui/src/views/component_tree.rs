@@ -1,6 +1,6 @@
 //! Component tree view (spec §5.3): the shadow tree node layout frames.
 
-use gpui::{Context, Entity, IntoElement, ParentElement, Render, Styled, View, Window};
+use gpui::{Context, Entity, IntoElement, ParentElement, Render, Styled, Window};
 
 use flux_ir_serde::Rect;
 use flux_syntax::NodeId;
@@ -20,12 +20,12 @@ impl ComponentTreeView {
     }
 
     /// The current reconstructed view frames.
-    fn live(&self, cx: &Context<Self>) -> ReconstructedState {
+    fn live(&self, cx: &Context<'_, Self>) -> ReconstructedState {
         self.state.read(cx).live.read().clone()
     }
 
     /// Renders the view as a standalone pane.
-    pub fn render_pane(&self, cx: &Context<Self>) -> impl IntoElement {
+    pub fn render_pane(&self, cx: &Context<'_, Self>) -> impl IntoElement {
         let live = self.live(cx);
         gpui::div()
             .flex()
@@ -46,7 +46,7 @@ impl ComponentTreeView {
 }
 
 impl Render for ComponentTreeView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         self.render_pane(cx)
     }
 }

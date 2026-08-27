@@ -1,6 +1,6 @@
 //! VM inspector view (spec §5.3): register bank + current instruction.
 
-use gpui::{Context, Entity, IntoElement, ParentElement, Render, Styled, View, Window};
+use gpui::{Context, Entity, IntoElement, ParentElement, Render, Styled, Window};
 
 use crate::state::{DevToolsState, VmState};
 
@@ -16,12 +16,12 @@ impl VmInspectorView {
     }
 
     /// The current VM snapshot for rendering.
-    fn vm_state(&self, cx: &Context<Self>) -> VmState {
+    fn vm_state(&self, cx: &Context<'_, Self>) -> VmState {
         self.state.read(cx).vm_state()
     }
 
     /// Renders the view as a standalone pane (used by the root layout).
-    pub fn render_pane(&self, cx: &Context<Self>) -> impl IntoElement {
+    pub fn render_pane(&self, cx: &Context<'_, Self>) -> impl IntoElement {
         let vm = self.vm_state(cx);
         let offset = vm
             .bytecode_offset
@@ -46,7 +46,7 @@ impl VmInspectorView {
 }
 
 impl Render for VmInspectorView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         self.render_pane(cx)
     }
 }

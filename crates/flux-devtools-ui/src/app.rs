@@ -2,7 +2,11 @@
 
 use std::sync::Arc;
 
-use gpui::{App, Application, Context, Entity, Window, WindowOptions};
+use gpui::{
+    App, AppContext, Context, Entity, ParentElement, Styled, TitlebarOptions, Window, WindowOptions,
+};
+
+use gpui_platform::application;
 
 use crate::state::DevToolsState;
 use crate::views::{ComponentTreeView, SignalGraphView, TimelineView, VmInspectorView};
@@ -13,7 +17,7 @@ struct DevToolsRoot {
 }
 
 impl DevToolsRoot {
-    fn new(state: Entity<DevToolsState>, cx: &mut Context<Self>) -> Self {
+    fn new(state: Entity<DevToolsState>, cx: &mut Context<'_, Self>) -> Self {
         let _ = cx;
         Self { state }
     }
@@ -23,22 +27,20 @@ impl gpui::Render for DevToolsRoot {
     fn render(
         &mut self,
         _window: &mut Window,
-        cx: &mut gpui::Context<Self>,
+        cx: &mut gpui::Context<'_, Self>,
     ) -> impl gpui::IntoElement {
-        let state = self.state.read(cx);
-        let vm = VmInspectorView::new(self.state);
-        let signals = SignalGraphView::new(self.state);
-        let tree = ComponentTreeView::new(self.state);
-        let timeline = TimelineView::new(self.state);
-        let _ = (&state, &vm, &signals, &tree, &timeline);
+        let vm = cx.new(|_| VmInspectorView::new(self.state.clone()));
+        let signals = cx.new(|_| SignalGraphView::new(self.state.clone()));
+        let tree = cx.new(|_| ComponentTreeView::new(self.state.clone()));
+        let timeline = cx.new(|_| TimelineView::new(self.state.clone()));
         gpui::div()
             .flex()
             .flex_row()
             .size_full()
-            .child(vm.render_pane(cx))
-            .child(signals.render_pane(cx))
-            .child(tree.render_pane(cx))
-            .child(timeline.render_pane(cx))
+            .child(vm)
+            .child(signals)
+            .child(tree)
+            .child(timeline)
     }
 }
 
@@ -51,17 +53,20 @@ impl gpui::Render for DevToolsRoot {
 ///
 /// Returns an error if the gpui application fails to initialise.
 pub fn run_app() -> anyhow::Result<()> {
-    Application::new().run(|cx: &mut App| {
+    application().run(|cx: &mut App| {
         let state = cx.new(|_| DevToolsState::new());
         let root = cx.new(|cx| DevToolsRoot::new(state, cx));
         let _ = Arc::new(());
-        cx.open_window(
+        let _ = cx.open_window(
             WindowOptions {
-                title: Some("Flux DevTools".into()),
+                titlebar: Some(TitlebarOptions {
+                    title: Some("Flux DevTools".into()),
+                    ..Default::default()
+                }),
                 ..Default::default()
             },
-            move |_, cx| cx.new(|_| root),
+            move |_, _| root,
         );
-    })?;
+    });
     Ok(())
 }

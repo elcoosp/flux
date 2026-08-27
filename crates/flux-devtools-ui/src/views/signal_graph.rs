@@ -1,6 +1,6 @@
 //! Signal graph view (spec §5.3): the reactive signal cell values.
 
-use gpui::{Context, Entity, IntoElement, ParentElement, Render, Styled, View, Window};
+use gpui::{Context, Entity, IntoElement, ParentElement, Render, Styled, Window};
 
 use crate::state::DevToolsState;
 use crate::time_travel::ReconstructedState;
@@ -17,12 +17,12 @@ impl SignalGraphView {
     }
 
     /// The current reconstructed signal state.
-    fn live(&self, cx: &Context<Self>) -> ReconstructedState {
+    fn live(&self, cx: &Context<'_, Self>) -> ReconstructedState {
         self.state.read(cx).live.read().clone()
     }
 
     /// Renders the view as a standalone pane.
-    pub fn render_pane(&self, cx: &Context<Self>) -> impl IntoElement {
+    pub fn render_pane(&self, cx: &Context<'_, Self>) -> impl IntoElement {
         let live = self.live(cx);
         gpui::div()
             .flex()
@@ -40,7 +40,7 @@ impl SignalGraphView {
 }
 
 impl Render for SignalGraphView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         self.render_pane(cx)
     }
 }

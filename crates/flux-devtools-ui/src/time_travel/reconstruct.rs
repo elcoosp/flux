@@ -96,12 +96,10 @@ pub fn reconstruct_state(
                     state.view_frames.retain(|(id, _)| *id != *node_id);
                 }
             }
-            EnrichedTelemetryEvent::HandlerInvocation { is_start, .. } => {
+            EnrichedTelemetryEvent::HandlerInvocation { is_start: true, .. } => {
                 // A running handler implies the VM is mid-execution; a finished
                 // handler with no pending start leaves pause state unchanged.
-                if *is_start {
-                    state.paused = false;
-                }
+                state.paused = false;
             }
             // Future (non-exhaustive) variants: ignored for reconstruction.
             _ => {}

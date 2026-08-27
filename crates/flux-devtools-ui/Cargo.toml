@@ -13,7 +13,7 @@ repository.workspace = true
 # a compatible toolchain. The time-travel core, wire client and state
 # (everything testable without a display) build and test on stable without it.
 default = []
-gpui-ui = ["dep:gpui"]
+gpui-ui = ["dep:gpui", "dep:gpui_platform"]
 
 [dependencies]
 flux-syntax.workspace = true
@@ -30,6 +30,10 @@ futures-util = "^0.3"
 # Only this crate depends on gpui (ADR-0041); optional + feature-gated because
 # the current gpui pin needs a newer-than-stable toolchain.
 gpui = { git = "https://github.com/zed-industries/zed.git", rev = "1ff7cb669b6351eaf2a5b79ccb40f5cd1676b8f8", optional = true }
+# Desktop launcher companion to `gpui`: provides `current_platform()` used by
+# `gpui_platform::application()` (the replacement for the removed
+# `Application::new()`). Required to launch the DevTools window.
+gpui_platform = { git = "https://github.com/zed-industries/zed.git", rev = "1ff7cb669b6351eaf2a5b79ccb40f5cd1676b8f8", optional = true }
 
 [dev-dependencies]
 tokio.workspace = true

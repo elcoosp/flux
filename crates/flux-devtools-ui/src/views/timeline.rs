@@ -1,6 +1,6 @@
 //! Timeline scrubber view (spec §5.3, §6): the time-travel slider.
 
-use gpui::{Context, Entity, IntoElement, ParentElement, Render, Styled, View, Window};
+use gpui::{Context, Entity, IntoElement, ParentElement, Render, Styled, Window};
 
 use crate::state::DevToolsState;
 
@@ -21,12 +21,12 @@ impl TimelineView {
     }
 
     /// Number of retained timeline events.
-    fn timeline_len(&self, cx: &Context<Self>) -> usize {
+    fn timeline_len(&self, cx: &Context<'_, Self>) -> usize {
         self.state.read(cx).timeline_len()
     }
 
     /// Renders the view as a standalone pane.
-    pub fn render_pane(&self, cx: &Context<Self>) -> impl IntoElement {
+    pub fn render_pane(&self, cx: &Context<'_, Self>) -> impl IntoElement {
         let len = self.timeline_len(cx);
         let at = self.scrub_index.unwrap_or(len.saturating_sub(1));
         gpui::div()
@@ -39,7 +39,7 @@ impl TimelineView {
 }
 
 impl Render for TimelineView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         self.render_pane(cx)
     }
 }
