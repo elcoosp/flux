@@ -3,16 +3,17 @@ package dev.flux.host
 import dev.flux.host.shadow.ShadowTree
 import dev.flux.host.shadow.TraceEvent
 import dev.flux.host.shadow.reconcileDirty
+import dev.flux.host.signal.CellState
 import dev.flux.host.signal.SignalGraph
 import dev.flux.host.transport.FluxTransport
 import dev.flux.host.vm.CapabilityRegistry
 import dev.flux.host.vm.FluxBytecodeVM
+import dev.flux.host.vm.FluxBytecodeVM.RunResult
 import dev.flux.host.vm.FluxValue
 import dev.flux.host.vm.StringResolver
 import dev.flux.host.vm.TableStringResolver
 import dev.flux.host.vm.VmErrorKind
 import dev.flux.host.vm.VmResult
-import dev.flux.host.signal.CellState
 import dev.flux.host.wire.Frame
 import dev.flux.host.wire.FrameDeserializer
 import dev.flux.host.wire.STRING_ID_CANONICAL_CEILING
@@ -32,7 +33,6 @@ import java.lang.ref.WeakReference
 import kotlin.coroutines.EmptyCoroutineContext
 import dev.flux.ui.FluxExecutor as KitExecutor
 import dev.flux.ui.FluxValue as KitValue
-import dev.flux.host.vm.FluxBytecodeVM.RunResult
 
 /**
  * Resolves an awaited future handle to its settled value (ADR-0044, MLP v2 async).
@@ -299,6 +299,12 @@ public class FluxExecutor(
                     reconcile(step.outcome)
                     return
                 }
+                is RunResult.Fault -> {
+                    // Handler faulted (e.g. divisor zero, OOB, type mismatch). The v1
+                    // `run` path reports this as `VmResult.Failure`; here it is terminal —
+                    // do not reconcile the shadow tree on a faulted handler.
+                    return
+                }
                 is RunResult.Suspended -> {
                     // Unified sync/async bridge (ADR-0045): `futureReg` holds the register
                     // containing the result-cell signal id returned by CALL_CAP. If the cell
@@ -308,7 +314,9 @@ public class FluxExecutor(
                     val cellId =
                         when (val r = step.state.registers[step.state.futureReg]) {
                             is FluxValue.IntVal -> r.value.toUInt()
-                            else -> throw dev.flux.host.vm.VmError(VmErrorKind.TYPE_MISMATCH, step.state.resumeIndex.toUInt())
+                            else ->
+                                throw dev.flux.host.vm
+                                    .VmError(VmErrorKind.TYPE_MISMATCH, step.state.resumeIndex.toUInt())
                         }
                     val resolved =
                         when (signals.cellState(cellId)) {

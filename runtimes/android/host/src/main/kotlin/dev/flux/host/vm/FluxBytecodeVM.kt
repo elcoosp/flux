@@ -47,20 +47,20 @@ public object FluxBytecodeVM {
 
     /** The result of a resumable handler dispatch (ADR-0044). */
     public sealed interface RunResult {
-        /** The handler ran to `HALT`. */
-        public val outcome: VmOutcome
-
         /** The handler suspended at an `AWAIT`; resume it with [resume]. */
         public data class Suspended(
             val state: SuspendState,
-        ) : RunResult {
-            override val outcome: VmOutcome
-                get() = error("suspended handlers have no terminal outcome yet")
-        }
+        ) : RunResult
 
         /** Terminal success carrying the final [VmOutcome]. */
         public data class Halt(
-            override val outcome: VmOutcome,
+            val outcome: VmOutcome,
+        ) : RunResult
+
+        /** Terminal fault: the handler threw [VmErrorKind] at [offset] (Rust oracle returns `Err`). */
+        public data class Fault(
+            val kind: VmErrorKind,
+            val offset: UInt,
         ) : RunResult
     }
 
@@ -93,6 +93,7 @@ public object FluxBytecodeVM {
             is RunResult.Halt -> VmResult.Success(tail.outcome)
             is RunResult.Suspended ->
                 VmResult.Failure(VmErrorKind.INVALID_DISPATCH, tail.state.resumeIndex.toUInt())
+            is RunResult.Fault -> VmResult.Failure(tail.kind, tail.offset)
         }
     }
 
@@ -173,8 +174,9 @@ public object FluxBytecodeVM {
             val instr = program[ipIndex]
             if (instr.opcode == Opcode.HALT) break
             if (gas == 0u) {
-                return RunResult.Halt(VmOutcome(signals.snapshot(), regs, ENTRY_GAS - gas))
-                    .also { /* gas exhausted → terminal */ }
+                // Gas budget exhausted before the next instruction: a fault, mirroring
+                // the Rust `flux-vm-ref` oracle (`return Err(VmError::GasExhausted)`).
+                return RunResult.Fault(VmErrorKind.GAS_EXHAUSTED, instr.offset)
             }
             gas -= 1u
             regs[15] = FluxValue.IntVal(gas.toLong())
@@ -192,8 +194,11 @@ public object FluxBytecodeVM {
                         allocated,
                     )
                 } catch (e: VmError) {
-                    return RunResult.Halt(VmOutcome(signals.snapshot(), regs, ENTRY_GAS - gas))
-                        .also { /* fault → terminal */ }
+                    // Faults are terminal failures, mirroring the Rust `flux-vm-ref`
+                    // oracle which returns `Err(VmError)`. Swallowing the fault as a
+                    // `Halt` (success) would disagree with the golden ISA vectors and
+                    // hide genuine opcode errors from the host.
+                    return RunResult.Fault(e.kind, e.offset)
                 }
 
             ipIndex =
@@ -203,7 +208,7 @@ public object FluxBytecodeVM {
                     is StepResult.Suspend -> {
                         return RunResult.Suspended(
                             SuspendState(
-                                program = state_program(program),
+                                program = stateProgram(program),
                                 resumeIndex = result.resumeIndex,
                                 registers = regs.copyOf(),
                                 gasRemaining = gas,
@@ -229,7 +234,7 @@ public object FluxBytecodeVM {
     }
 
     /** Re-serialises a decoded program back to its byte form for the suspend state. */
-    private fun state_program(program: List<Instruction>): ByteArray {
+    private fun stateProgram(program: List<Instruction>): ByteArray {
         val out = ArrayList<Byte>(program.size * 4)
         for (instr in program) {
             out.add(instr.opcode.byte.toByte())

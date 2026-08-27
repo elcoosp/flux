@@ -263,10 +263,17 @@ class RuntimeFixesTest {
                 ),
             )
         val setOut = registry.lookup(2u, 1u.toUShort())!!.call(setArgs, signals)
-        assertEquals(FluxValue.NullVal, setOut, "Storage.set returns Unit")
+        // ADR-0045: `call` returns the result-cell signal id (Storage.set exposes the
+        // value via signal 95), not the value itself.
+        assertEquals(95u, setOut, "Storage.set returns its result-cell id")
         val getArgs = FluxValue.RecordVal(listOf(FluxValue.Field(0u.toUShort(), FluxValue.StrVal(7u))))
-        val got = registry.lookup(2u, 2u.toUShort())!!.call(getArgs, signals)
-        assertEquals(FluxValue.ListVal(listOf(FluxValue.IntVal(1), FluxValue.IntVal(2))), got, "Storage.get returns persisted value")
+        val getOut = registry.lookup(2u, 2u.toUShort())!!.call(getArgs, signals)
+        assertEquals(95u, getOut, "Storage.get returns its result-cell id")
+        assertEquals(
+            FluxValue.ListVal(listOf(FluxValue.IntVal(1), FluxValue.IntVal(2))),
+            signals.read(95u),
+            "Storage.get returns persisted value",
+        )
     }
 
     @Test
@@ -274,7 +281,9 @@ class RuntimeFixesTest {
         val registry = CapabilityRegistry.DEV
         val signals = InMemorySignals()
         val out = registry.lookup(3u, 1u.toUShort())!!.call(FluxValue.StrVal(42u), signals)
-        assertEquals(FluxValue.NullVal, out, "Router.navigate returns Unit")
+        // ADR-0045: `call` returns the result-cell signal id (Router.navigate records the
+        // target in signal 97), not `NullVal`.
+        assertEquals(97u, out, "Router.navigate returns its result-cell id")
         assertEquals(FluxValue.StrVal(42u), signals.read(97u), "Router.navigate records target in signal 97")
     }
 
@@ -282,8 +291,15 @@ class RuntimeFixesTest {
     fun `Camera take echoes for oracle parity`() {
         val registry = CapabilityRegistry.DEV
         val signals = InMemorySignals()
-        val out = registry.lookup(1u, 1u.toUShort())!!.call(FluxValue.RecordVal(listOf(FluxValue.Field(0u.toUShort(), FluxValue.IntVal(7)))), signals)
-        assertEquals(FluxValue.IntVal(7), out, "Camera.take echoes its argument")
+        val out =
+            registry
+                .lookup(
+                    1u,
+                    1u.toUShort(),
+                )!!
+                .call(FluxValue.RecordVal(listOf(FluxValue.Field(0u.toUShort(), FluxValue.IntVal(7)))), signals)
+        // ADR-0045: `call` returns the result-cell signal id (Camera.take echoes arg into signal 99), not the value.
+        assertEquals(99u, out, "Camera.take returns its result-cell id")
         assertEquals(FluxValue.IntVal(7), signals.read(99u), "Camera.take echoes into signal 99")
     }
 
@@ -300,9 +316,9 @@ class RuntimeFixesTest {
                 ),
             )
         registry.lookup(2u, 1u.toUShort())!!.call(value, signals)
-        assertEquals(FluxValue.ListVal(listOf(FluxValue.IntVal(9))), registry.lookup(2u, 2u.toUShort())!!.call(key, signals), "present before delete")
+        assertEquals(FluxValue.ListVal(listOf(FluxValue.IntVal(9))), signals.read(95u), "present before delete")
         registry.lookup(2u, 3u.toUShort())!!.call(key, signals)
-        assertEquals(FluxValue.NullVal, registry.lookup(2u, 2u.toUShort())!!.call(key, signals), "cleared after delete")
+        assertEquals(FluxValue.NullVal, signals.read(95u), "cleared after delete")
     }
 
     // ── G5: lifecycle hooks ──────────────────────────────────────────────────
