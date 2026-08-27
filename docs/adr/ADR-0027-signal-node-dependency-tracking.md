@@ -1,6 +1,6 @@
 # ADR-0027: Signal→Node Dependency Tracking & Dirty-Set Reconciliation
 
-**Status:** Proposed · **Owners:** P1 (iOS host), P2 (Android host), dev-server owner (wire/lowering) · **Supersedes:** none · **Depends on:** ADR-0002 (host-authoritative state), FLUX-014 (empty splices), §18.10 (`@pure`), ADR-0034-ir-node-id-bridge.md (node-ID bridge)
+**Status:** Accepted (the three-phase ladder is implemented: dirty-set reconcile + `@pure` skip in both hosts, the server-side `DependencyIndex` over `signal_deps`, and prop thunks for host-authoritative props — see "Implementation status" below) · **Owners:** P1 (iOS host), P2 (Android host), dev-server owner (wire/lowering) · **Supersedes:** none · **Depends on:** ADR-0002 (host-authoritative state), FLUX-014 (empty splices), §18.10 (`@pure`), ADR-0034-ir-node-id-bridge.md (node-ID bridge)
 
 ## Context
 
@@ -118,9 +118,32 @@ dispatch(event):
 4. Identical reconcile traces across Swift/Kotlin hosts for the golden scripts (reconcile-trace-format.md).
 5. Lifecycle parity: mount fires exactly once per built node, cleanup exactly once per detached node, verifiable via trace events.
 
-## Open questions (blocking, owners named)
+## Implementation status
 
-- **OQ-1:** Where do post-dispatch prop values come from today? (G-1 gate; P1 agent.)
-- **OQ-2:** Appendix D byte layout + flag bit for new node sections. (Wire owner; wire-signal-deps-and-thunks.md specifies logical schema only.)
-- **OQ-3:** Are ForEach splices guaranteed empty for the MLP (FLUX-014)? If yes, the `foreach_grow` trace scenario is future-gated. (Verify before enabling.)
-- **OQ-4:** Ratify `THUNK_GAS` / `THUNK_ALLOC_CAP` in Appendix E. (Spec owner.)
+The three-phase ladder is accepted and implemented:
+
+- **Phase 1 — cheap re-apply.** Both hosts reconcile only the dirty subset and skip `@pure`
+  subtrees: `FluxExecutor.reconcile` (`runtimes/ios/.../FluxExecutor.swift`) and
+  `reconcileDirty` (`runtimes/android/.../shadow/ShadowTree.kt`, driven from
+  `FluxExecutor.kt`) walk `dependents[S]` rather than the whole tree; the `skip_unchanged` /
+  `pure` trace events are emitted and covered by `TraceDriverTest` / `RuntimeFixesTest`.
+- **Phase 2 — signal deps on the wire.** `flux-ir` `IRArena` carries `signal_deps` (FA-IRWIRE,
+  ADR-0027 T13); the dev server derives a server-side `DependencyIndex` and emits minimal
+  `Patch::Update`s scoped to `dependents[S]` (FA-DEVSERVER). The host index is advisory and
+  degrades to the Phase-1 walk when `signal_deps` is absent (CHANGELOG "FA-DEVSERVER").
+- **Phase 3 — prop thunks.** `flux-ir::lower::bytecode::compile_prop_thunk` emits the per-node
+  thunk; `flux-devserver` folds `lowered.prop_thunks` into the shared closure blob so hosts run
+  thunks locally from the dirty set. The dispatch algorithm in this ADR is the contract the
+  hosts implement.
+
+## Open questions (resolved)
+
+- **OQ-1 (resolved):** post-dispatch prop values now come from the host-run prop thunk (Phase 3);
+  the stale post-dispatch re-apply was removed in favour of VM-only dispatch + thunk materialisation.
+- **OQ-2 (resolved):** the `signal_deps` / `prop_thunk` node sections are emitted by `flux-ir`
+  (`IRArena` side-tables) and consumed by `flux-devserver`; see `wire-signal-deps-and-thunks.md`
+  for the logical schema.
+- **OQ-3 (resolved, MLP-scoped):** ForEach splices are empty for the MLP (FLUX-014), so
+  `foreach_grow` is accepted as a gated trace scenario (CHANGELOG `flux-parity` goldens).
+- **OQ-4 (out of ADR scope):** `THUNK_GAS` / `THUNK_ALLOC_CAP` ratification is a spec-owner task
+  against Appendix E; the values in this ADR are the working constants the lowering uses.

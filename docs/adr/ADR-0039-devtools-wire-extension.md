@@ -37,7 +37,7 @@ Both frames reuse the existing `MAGIC`/`PROTOCOL_VERSION` header and the
 byte-compatible with the Swift/Kotlin production decoders' conventions.
 
 The host emits raw IDs (`bytecode_offset`, `NodeId`). Source-span enrichment
-happens **server-side** (see ADR-0042 / Phase 3), so the wire payload stays
+happens **server-side** in the dev-server `debug_bridge` (ADR-0042), so the wire payload stays
 tiny and the host stays release-clean (all instrumentation is `#if DEBUG` /
 `BuildConfig.DEBUG` guarded).
 
@@ -49,7 +49,8 @@ tiny and the host stays release-clean (all instrumentation is `#if DEBUG` /
   `telemetry.rs` module, isolated from the in-progress `frame.rs` work so it
   does not collide with the concurrent FLUX-013/FA-IRWIRE frame edits.
 - The Swift/Kotlin host `FrameDeserializer`s gain parallel decode arms for
-  `0x10`/`0x11` (Phase 2/5), matching the same byte layout.
+  `0x10`/`0x11`, matching the same byte layout (the Swift/Kotlin `FrameDeserializer`s are
+  implemented in `runtimes/ios` / `runtimes/android`).
 
 ## Alternatives considered
 

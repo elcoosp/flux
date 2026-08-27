@@ -37,7 +37,7 @@ extensions, host instrumentation, a dev-server source-map enrichment bridge, a
 ADRs ADR-0039…ADR-0042 (the spec requested ADR-0030…ADR-0033, but those numbers
 are already taken by unrelated topics, so the next free slots were used).
 
-- **Wire protocol (Phase 1, `flux-ir-serde`)** — new `telemetry.rs` module with
+- **Wire protocol (`flux-ir-serde`)** — new `telemetry.rs` module with
   `TelemetryEvent` / `DebugCommand` / `EnrichedTelemetryEvent` and their frame
   types (`TelemetryFrame` host→server, `EnrichedTelemetryFrame` server→DevTools,
   `DebugCommandFrame`). Frame kinds `0x10` (`Telemetry`) and `0x11`
@@ -45,7 +45,7 @@ are already taken by unrelated topics, so the next free slots were used).
   layout kept bit-identical to the Swift/Kotlin host encoders. 40 nextest cases
   green (round-trip + byte-level conformance). `flux-ir-serde::frame.rs` and its
   in-flight `conformance.rs`/`round_trip.rs` were deliberately NOT touched.
-- **Dev server bridge (Phase 3, `flux-devserver`)** — `debug_bridge.rs`:
+- **Dev server bridge (`flux-devserver`)** — `debug_bridge.rs`:
   `SourceMap` built from `LoweredIr` (node spans via `IRArena::span_for_node_id`,
   bytecode-offset→closure-span heuristic), `enrich`/`enrich_with_span`, and a
   pure `DevToolsRouter` (telemetry broadcast + command forwarding). `serve_devtools`
@@ -56,7 +56,7 @@ are already taken by unrelated topics, so the next free slots were used).
   endpoint (added the `debug_bridge` module to `lib.rs`). A new
   `host_telemetry_reaches_devtools_client` tokio integration test proves the
   full host→server→DevTools-client data path over a real WebSocket.
-- **`gpui` desktop crate (Phases 4 & 6, `flux-devtools-ui`)** — new crate with
+- **`gpui` desktop crate (`flux-devtools-ui`)** — new crate with
   `DevToolsState`, `wire_client` (decodes enriched frames, sends `DebugCommand`s),
   a time-travel ring `TimelineBuffer` + `Reconstruct` state simulator (base-state
   replay), and `gpui` views (`vm_inspector`/`signal_graph`/`component_tree`/
@@ -65,7 +65,7 @@ are already taken by unrelated topics, so the next free slots were used).
   core is `gpui`-free so it builds + tests on the workspace's stable toolchain
   (gpui itself needs nightly for `std::hint::cold_path`, so the desktop UI is
   compile-gated on nightly). 15 nextest cases green.
-- **Host instrumentation (Phases 2 & 2k)** — `TelemetryEvent`/`DebugCommand`/
+- **Host instrumentation (iOS + Android)** — `TelemetryEvent`/`DebugCommand`/
   `TelemetryBridge`/`VMTelemetrySink` for iOS (`runtimes/ios/.../Debug/Telemetry.swift`)
   and Android (`.../vm/debug/Telemetry.kt`, `TelemetryBridge.kt`). Both reproduce
   the Rust wire codec exactly. Guarded by `#if DEBUG` / `BuildConfig.DEBUG`.
@@ -79,7 +79,7 @@ are already taken by unrelated topics, so the next free slots were used).
   VM/signal events now flow to the dev server. All three platforms compile
   (iOS `xcodebuild` for the simulator, Android `./gradlew :runtimes:android:host:
   compileKotlin`, Rust nextest).
-- **Adapter debug hook (Phase 5, `adapters/ui-swift`)** — `DebugMetadata.swift`
+- **Adapter debug hook (`adapters/ui-swift`)** — `DebugMetadata.swift`
   adds `NativeViewDebugMetadata` and an `#if DEBUG` `inspectDebugState(of:)`
   extension on `FluxAdapter` (default `nil`) + a concrete `ContainerAdapter`
   implementation. Placed in a new file so the in-flight `AdapterKit.swift` /
@@ -981,12 +981,20 @@ mirroring `when_expr`'s clean handling. `flux-types` dropped its
 block so it unifies with the `then` branch. A regression test
 (`b38_else_block_lowers_to_block_not_elided_call`) locks the fix in.
 
-#### Outstanding Phase 1–4 crates (stubs / in-flight, owned by named flux-N agents)
+#### Crate ownership note (directory-bound agents)
 
-The following workspace crates are owned by other agents (not built by this
-agent, to avoid directory-collision with the dispatched flux-N work):
-`flux-devserver`, `flux-codegen-swift`, `flux-codegen-kotlin`, `flux-cli`,
-`flux-parity` (Phase 6). CI (FLUX-011) is orchestrator-owned.
+These workspace crates are owned by other agents (built by their named flux-N agent, not by
+this one, to avoid directory collisions under the parallel-agent contract):
+
+- `flux-devserver` — implemented (FLUX-019, DONE, this file).
+- `flux-codegen-swift` / `flux-codegen-kotlin` — codegen backends (FLUX-011, bridge fix in
+  this file; lowering gaps owned by `flux-ir`).
+- `flux-cli` — implemented (dev command + `flux-parity-trace` bin shipped in `flux-parity`).
+- `flux-parity` — implemented (FLUX-023, COMPLETE, this file).
+- CI (FLUX-011) — orchestrator-owned.
+
+All of the above are merged and verified; "ownership" here refers to the write-ownership boundary
+in AGENTS.md §3.1, not to unfinished work.
 
 #### FLUX-023 — `flux-parity` structural parity harness (COMPLETE)
 
@@ -1023,7 +1031,7 @@ T16 trace-diff (ADR-0027 / reconcile-trace-format v1):
 - `tests/trace-goldens/` holds the golden corpus: 5 required scenarios
   (`counter_1000`, `noop_dispatch`, `pure_subtree`, `cond_flip`,
   `unrelated_signal`) × 3 phases × 2 platforms (swift + kotlin), plus
-  `foreach_grow` (phase 3 only, OQ-3 gated). Each pair is canonically
+  `foreach_grow` (gated by OQ-3 — ForEach splices are empty for the MLP per FLUX-014). Each pair is canonically
   identical (differing only in dropped `span`), so the comparison proves
   cross-platform reconciliation parity.
 
@@ -1089,8 +1097,7 @@ stays current.
   drives `flux-devserver` → wire → host. Recorded the runtime-packaging gap in
   `docs/adr/ADR-0036-runtime-packaging-gap.md`.
 
-- **FA-DEVSERVER — signal_deps-aware minimal-patch dispatch (ADR-0027 Phase 2,
-  server half) — DONE** (`d68bcca`). `DependencyIndex` (signal → nodes) + minimal
+- **FA-DEVSERVER — signal_deps-aware minimal-patch dispatch (ADR-0027, server half) — DONE** (`d68bcca`). `DependencyIndex` (signal → nodes) + minimal
   `Patch::Update` emission scoped to `dependents[S]`; degrades to coarse frame
   when `signal_deps` is absent. 32/32 tests green. Flag-gated behind an injected
   `signal_deps` seam until FA-IRWIRE lands the real field. **(FA-IRWIRE has now
@@ -1170,9 +1177,9 @@ stays current.
   - New devserver tests: `tests/gen_frames.rs` and `tests/probe_delta_shape.rs`
     (delta-shape / frame fixtures for the Android repro — both marked `TEMP` in-file)
     and `tests/handler_body_hot_reload.rs` reformatted.
-  - **Not yet cleaned (flag):** `watch.rs::compile_and_broadcast` still writes the
-    live `Delta` to `/tmp/flux_real_delta.bin` for repro; that debug write should be
-    removed before merge.
+  - Removed the leftover debug write that dumped every live `Delta` to
+    `/tmp/flux_real_delta.bin` (`watch.rs::compile_and_broadcast`); the trace is
+    gone (flag cleared).
 
 - **flux-types — ADT constructor set (FLUX-012 follow-up) — DONE** (`5747e08` +
   `f89c6c9`). `TypedAST` gained `constructors: HashSet<String>` (every algebraic

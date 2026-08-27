@@ -8,6 +8,16 @@
 | Status | Canonical — supersedes all prior versions |
 | Companion docs | `/docs/spec/mlp-spec.md`, `/docs/spec/mlp-appendices.md`, `/AGENTS.md` |
 
+> **Grounding note.** This contract is the *v1→v2 planning ledger*: its phase counts,
+> issue list, and "What Changed in v2" bullets describe the dispatch plan that was
+> executed. As of the current tree those phases have landed — the referenced crates
+> (`flux-devserver`, `flux-codegen-*`, `flux-cli`, `flux-parity`), the three-host
+> capability bridge (ADR-0045), and the signal-dep / prop-thunk reconciliation ladder
+> (ADR-0027) are all implemented and verified (see `/CHANGELOG.md`). The text below
+> is kept as the historical issue plan; the *realized* state is the code + CHANGELOG,
+> not the phase numbering. When the phase labels below say "Phase N", read them as
+> "issue batch N in the original dispatch", not as a status of work still to do.
+
 ---
 
 ## What Changed in v2 (Read This First)

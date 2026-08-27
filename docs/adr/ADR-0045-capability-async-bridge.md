@@ -1,6 +1,6 @@
 # ADR-0045: Unified sync/async capability bridge (CALL_CAP ↔ AWAIT)
 
-**Status:** Proposed
+**Status:** Accepted (implemented across `flux-vm-ref`, `runtimes/ios`, and `runtimes/android` — see "Implementation status" below)
 **Date:** 2026-08-27
 **Supersedes (refines):** ADR-0044 "First-class async in the reactive VM" — specifies the
 capability half that ADR-0044 left open ("v2 async capability variant", ADR-0044 §"Lowering").
@@ -43,12 +43,14 @@ and without branching in user code.
 - `CapabilityRegistry.dev` (Registry.swift:64) and `CapabilityRegistry.default()`
   (CapabilityRegistry.kt:71) register only synchronous stubs (write a value into a signal, return
   it). No async signature exists.
-- Signal graph has no pending/error cell state yet; ADR-0044 §"Signal graph" plans
-  `CellState { Ready(Value), Pending, Error(...) }` for both hosts
-  (SignalGraph.swift, signal/SignalGraph.kt) — not yet implemented.
-- The oracle does NOT compile: `SuspendState` gained `future_reg` (vm.rs:51) but the `run` resume
-  path at vm.rs:191 constructs it without that field. nextest cannot verify async/await golden
-  vectors until this lands. This is the async agent's in-flight edit and must be made green first.
+- Signal graph carries `CellState { Ready(Value), Pending, Error(...) }` on both hosts:
+  `CellState` is defined in `runtimes/ios/.../SignalGraph.swift` and
+  `runtimes/android/.../signal/SignalGraph.kt`, and the `SignalStore` trait
+  (`flux-vm-ref` `vm.rs`) exposes `cellState` / `markPending` / `resolveCell` /
+  `allocate_cell`. ADR-0044 §"Signal graph" has landed.
+- The oracle compiles and the async/await suspend/resume cycle is green: `SuspendState.future_reg`
+  (vm.rs) is constructed by the `run` resume path, and golden ISA vectors verify the cycle.
+  `CapabilityImpl` (vm.rs:190) returns a result-cell `SignalId` under the v2 contract.
 
 ## Decision Outcome
 
@@ -143,8 +145,8 @@ mutation until `Ready` (ADR-0044 §"Signal graph"). The executor already hops ev
 **Option A — signal-as-future (chosen).** Capability returns a result-cell signal id; `AWAIT`
 parks on cell state. Pros: one `CALL_CAP` opcode, one `AWAIT` opcode, both sync/async; reuses
 existing SignalGraph; `resource`/`derived` fall out (they await a cell); no new `Value` variant;
-release codegen stays a direct native call + signal write. Cons: requires `CellState` enum on both
-hosts (planned, not yet landed).
+release codegen stays a direct native call + signal write. Cons: required `CellState` enum on both
+hosts (now implemented — see `SignalGraph.swift` / `SignalGraph.kt`).
 
 **Option B — `Value::Future(handle)` + handle table.** Capability returns a `Future(u32)` handle
 the executor resolves via a new handle table. Pros: explicit handle lifecycle. Cons: adds a
@@ -172,12 +174,32 @@ hot path; violates the on-device execution model of ADR-0020. Withdrawn.
   the graph already performs.
 
 **Negative:**
-- `CellState { Ready, Pending, Error }` must be added to `SignalGraph` on both hosts (planned in
-  ADR-0044, not yet implemented).
+- `CellState { Ready, Pending, Error }` is added to `SignalGraph` on both hosts (ADR-0044 §"Signal graph" and ADR-0045 are implemented; see `SignalGraph.swift` / `SignalGraph.kt`).
 - `CapabilityImpl` signature changes in 3 runtimes (oracle + Swift + Kotlin) — a coordinated edit,
   not a one-file change.
 - Precondition: the oracle must compile (vm.rs:191 `future_reg`) before async/await capability
   golden vectors can be verified.
+
+## Implementation status
+
+Accepted and implemented on all three runtimes (MLP v2 unified capability bridge,
+commits `9cdc470` / `8c697a4` / `49c5373` and follow-ups):
+
+- **Contract.** `CALL_CAP` (0x90) returns a result-cell signal id, not a raw value. Sync
+  capabilities write `Ready` into the cell before returning; async capabilities return a `Pending`
+  cell and resolve it later. `AWAIT` (0xE0) parks on cell state (ADR-0044 `SuspendState.future_reg`).
+- **Oracle (`flux-vm-ref`).** `CapabilityImpl` (`vm.rs:190`) returns `SignalId`; `CapabilityRegistry`
+  implements the v2 signal-id contract; `SuspendState` / `resume` are green and covered by golden
+  ISA vectors.
+- **iOS (`runtimes/ios`).** `CapabilityImpl` (`Registry.swift:23`) returns `UInt32` (the cell id);
+  `SignalGraph.swift:30` defines `CellState { ready, pending, error(message:) }`; `FluxExecutor`
+  resolves the pending cell via `asyncResolver` and `resume`s the handler (`FluxExecutor.swift:300`).
+- **Android (`runtimes/android`).** `CapabilityImpl` (`CapabilityRegistry.kt:22`) `call` returns the
+  allocated cell id (`signals.allocateCell()`); `SignalGraph.kt:16` defines `CellState`; the executor
+  resumes on cell resolution.
+- **Out of scope (still open).** Capability IDL + codegen declaring `async fn` per method, and
+  `handle_hello` capability-list validation against the compiled tree, remain separate tasks (ADR-0045
+  §6). The bytecode/runtime contract they target is implemented.
 
 ## References
 - ADR-0044-first-class-async.md — suspend frame, AWAIT/RESUME, CellState plan.

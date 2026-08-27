@@ -7,7 +7,7 @@
   Android `FluxBytecodeVM` (FLUX-007)
 - Supersedes: none
 - Superseded by: none
-- Related: ADR-0027 (prop thunks / signal metadata, Phase 2/3), ADR-0028
+- Related: ADR-0027 (prop thunks / signal metadata, T13/T14), ADR-0028
   (host string interning)
 
 ## Context
@@ -15,8 +15,8 @@
 In dev mode, dynamic prop expressions — string interpolations such as
 `"tapped ${count} times"` — collapsed to a static placeholder (`"{…}"`) on the
 wire, because the lowering emitted a single `LOAD_STR_CONST` of the placeholder
-text and never evaluated `count` against the live signal graph. ADR-0027 Phase
-3 introduces **prop thunks**: a closure that evaluates every prop of a node and
+text and never evaluated `count` against the live signal graph. ADR-0027's prop-thunk mechanism (implemented in `flux-ir` `compile_prop_thunk` and folded into
+frames by `flux-devserver`) introduces **prop thunks**: a closure that evaluates every prop of a node and
 leaves an `ALLOC_RECORD` of values in `r1` at `HALT`, which the host runs on
 dirty reconciliation to materialise props locally.
 
@@ -58,7 +58,7 @@ behaviour (`42 → StringId 2279835011`), keeping the oracle self-consistent for
 the conformance suite even though its `Str` output is not the host's real
 interned id.
 
-### Lowering changes (ADR-0027 T14 / Phase 3)
+### Lowering changes (ADR-0027 T14)
 
 `compile_value` for `ExprKind::Str(parts)` now walks each part:
 

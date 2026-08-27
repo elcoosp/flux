@@ -36,8 +36,8 @@ events (configurable).
 
 - Bounded memory regardless of session length.
 - Deterministic scrubbing: replay is a pure fold over the event slice.
-- The dev server must forward/emit base snapshots; Phase 3 wires this through
-  the existing telemetry path.
+- The dev server (`flux-devserver` `debug_bridge`) forwards/emits base snapshots through
+  the existing telemetry path (implemented; see `serve_devtools`).
 
 ## Alternatives considered
 

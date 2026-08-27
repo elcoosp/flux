@@ -38,7 +38,7 @@ threshold (10 events) or a 16 ms window elapses.
 - Zero release impact: the Swift guards compile the sink out entirely; the
   Kotlin sink is a nullable field that is never assigned in release.
 - Asynchronous telemetry: the VM never blocks on a slow WebSocket.
-- The dev server (Phase 3) becomes the single consumer and enricher.
+- The dev server (`flux-devserver` `debug_bridge`, ADR-0042) becomes the single consumer and enricher.
 
 ## Alternatives considered
 
