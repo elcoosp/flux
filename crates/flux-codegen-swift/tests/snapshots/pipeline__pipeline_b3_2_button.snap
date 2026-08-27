@@ -1,13 +1,12 @@
 ---
 source: crates/flux-codegen-swift/tests/pipeline.rs
-assertion_line: 85
 expression: "codegen_example(name, src)"
 ---
 struct Tapped: View {
     @State private var taps: Int = 0
     var body: some View {
-  Button(action: {}) {
-      Text("")
+  Button(action: { taps = (taps + 1) }) {
+      Text("Tapped \(taps) times")
   }
     }
 }

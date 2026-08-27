@@ -7,8 +7,8 @@ expression: "codegen_example(name, src)"
     var count by remember { mutableStateOf<Int>(0) }
     Column {
         Text("Count: ${count}")
-        Button(onClick = { }) {
-            Text("")
+        Button(onClick = { count = (count + 1) }) {
+            Text("Increment")
         }
     }
 }

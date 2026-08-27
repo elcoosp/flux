@@ -89,6 +89,50 @@ fn render_list(items: &[Expr]) -> String {
     format!("[{}]", rendered.join(", "))
 }
 
+/// Renders one statement of a handler/lambda body.
+///
+/// The MLP models handler bodies as a sequence of surface statements
+/// (assignments, `await` expressions, nested calls). Each is rendered as a
+/// standalone Swift statement; this is deliberately distinct from
+/// [`render_expr`], which produces a *value* (and would mis-render an
+/// assignment as `/* unsupported expr */ 0`).
+fn render_stmt(stmt: &Expr) -> String {
+    match &stmt.kind {
+        ExprKind::Assign { target, value } => {
+            format!("{} = {}", render_expr(target), render_expr(value))
+        }
+        ExprKind::Await(inner) => format!("await {}", render_expr(inner)),
+        // A bare expression statement (e.g. a method call) renders as itself.
+        _ => render_expr(stmt),
+    }
+}
+
+/// Extracts the statement body of an `onClick`/`onTap` handler lambda and
+/// renders it as a sequence of Swift statements.
+///
+/// Returns `None` when the handler is absent or empty, so callers can emit a
+/// bare `{}` closure (a button with no behaviour still compiles and parses).
+#[must_use]
+pub(crate) fn render_handler_body(handler: &Expr) -> Option<String> {
+    let ExprKind::Lambda { body, .. } = &handler.kind else {
+        return None;
+    };
+    let mut out = String::new();
+    for item in &body.items {
+        if let flux_parser::BlockItem::Expr(stmt) = item {
+            if !out.is_empty() {
+                out.push('\n');
+            }
+            out.push_str(&render_stmt(stmt));
+        }
+    }
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{render_expr, render_float, render_string};

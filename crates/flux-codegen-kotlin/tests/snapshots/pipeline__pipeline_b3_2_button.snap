@@ -5,7 +5,7 @@ expression: "codegen_example(name, src)"
 @Composable fun Tapped(
 ) {
     var taps by remember { mutableStateOf<Int>(0) }
-    Button(onClick = { }) {
-        Text("")
+    Button(onClick = { taps = (taps + 1) }) {
+        Text("Tapped ${taps} times")
     }
 }

@@ -79,8 +79,12 @@ pub(crate) fn emit_primitive(em: &mut Emitter<'_>, id: NodeId, indent: usize) {
             em.line(indent, &format!("Text({value})"));
         }
         "Button" => {
-            em.line(indent, "Button(onClick = { }) {");
-            em.line(indent + 1, "Text(\"\")");
+            // `text:` (label) and `onClick:` (handler) are passed explicitly; if
+            // absent, the trailing block carries the label and/or handler.
+            let label = render_button_label(args, trailing.as_deref());
+            let handler = collect_handler(args);
+            em.line(indent, &format!("Button(onClick = {{ {handler} }}) {{"));
+            em.line(indent + 1, &format!("Text({label})"));
             em.line(indent, "}");
         }
         "Image" => {
@@ -220,4 +224,72 @@ fn emit_trailing_or_children(
     } else {
         em.emit_children(Emitter::child_ids(node), indent);
     }
+}
+
+/// Renders the button label.
+///
+/// The label is supplied either as the `text:` named argument
+/// (`Button(text: "Increment", …)`) or as a `Text(…)` child of the trailing
+/// block (`Button(…) { Text("Increment") }`). When neither is present, fall back
+/// to an empty string so the generated `Button` still compiles.
+fn render_button_label(args: &[flux_parser::Arg], trailing: Option<&Block>) -> String {
+    // Named `text:` argument takes precedence (matches the canonical example).
+    for arg in args {
+        if let flux_parser::Arg::Named { name, value } = arg {
+            if name.name == "text" {
+                return render_inline(render_expr(value));
+            }
+        }
+    }
+    // Otherwise look for a `Text(…)` child in the trailing block.
+    let Some(block) = trailing else {
+        return "\"\"".to_owned();
+    };
+    for item in &block.items {
+        let flux_parser::BlockItem::Expr(expr) = item else {
+            continue;
+        };
+        let ExprKind::Call { callee, args, .. } = &expr.kind else {
+            continue;
+        };
+        let ExprKind::Ident(ident) = &callee.kind else {
+            continue;
+        };
+        if ident.name != "Text" {
+            continue;
+        }
+        // `Text("…")` (positional) or `Text(text: "…")` (named).
+        if let Some(positional) = args.iter().find_map(|a| match a {
+            flux_parser::Arg::Positional(value) => Some(render_inline(render_expr(value))),
+            _ => None,
+        }) {
+            return positional;
+        }
+        for arg in args {
+            if let flux_parser::Arg::Named { name, value } = arg {
+                if name.name == "text" {
+                    return render_inline(render_expr(value));
+                }
+            }
+        }
+    }
+    "\"\"".to_owned()
+}
+
+/// Finds the `onClick`/`onTap` handler argument and renders its body as Kotlin
+/// statements. Returns an empty string when no handler is present, so the
+/// lambda is still valid (`Button(onClick = { }) { … }`).
+fn collect_handler(args: &[flux_parser::Arg]) -> String {
+    for arg in args {
+        let flux_parser::Arg::Named { name, value } = arg else {
+            continue;
+        };
+        if name.name != "onClick" && name.name != "onTap" {
+            continue;
+        }
+        if let Some(body) = crate::expressions::render_handler_body(value) {
+            return body;
+        }
+    }
+    String::new()
 }

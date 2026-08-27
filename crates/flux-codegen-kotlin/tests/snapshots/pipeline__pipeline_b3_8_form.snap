@@ -7,8 +7,8 @@ expression: "codegen_example(name, src)"
     var value by remember { mutableStateOf<String>("") }
     Column {
         Text("Login")
-        Button(onClick = { }) {
-            Text("")
+        Button(onClick = { value = "" }) {
+            Text("Reset")
         }
     }
 }

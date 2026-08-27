@@ -163,7 +163,10 @@ fn emits_composable_and_state() {
         "missing interpolation"
     );
     assert!(out.contains("Column {"), "missing Column container");
-    assert!(out.contains("Button(onClick = { })"), "missing Button");
+    assert!(
+        out.contains("Button(onClick = { count = (count + 1) })"),
+        "Button must emit its onClick handler body, not an empty closure: {out}"
+    );
 }
 
 /// The `gap` prop becomes a Compose `Arrangement.spacedBy(N.dp)` argument
@@ -192,8 +195,8 @@ fn generated_kotlin_contains_key_substrings() {
     assert!(combined.contains("items("), "missing items()");
     assert!(combined.contains("NavHost"), "missing NavHost");
     assert!(
-        combined.contains("Button(onClick = { })"),
-        "missing Button with onClick"
+        combined.contains("Button(onClick = { count = (count + 1) })"),
+        "missing Button with onClick handler body: {combined}"
     );
 }
 
@@ -231,5 +234,37 @@ fn generated_kotlin_parses() {
     assert!(
         status.success(),
         "kotlinc rejected generated Kotlin:\n{combined}"
+    );
+}
+
+/// Regression test for the Button codegen defect: the `onClick` handler body and
+/// the `text:` label must both reach the generated output. A prior build emitted
+/// an empty `Button(onClick = { }) { Text("") }`, dropping the tap behaviour.
+/// This locks the correct behaviour for both the named-arg form
+/// (`Button(text:, onClick:)`) used by `examples/counter` and the trailing-block
+/// form (`Button(...) { Text(...) }`).
+#[test]
+fn button_emits_handler_and_label() {
+    let src = "component Tapped {\n  state taps: Int = 0\n  Button(text: \"Tap me\", onClick: fn() { taps = taps + 1 })\n}\n";
+    let out = codegen_example("button_regression", src);
+    assert!(
+        out.contains("Button(onClick = { taps = (taps + 1) })"),
+        "missing onClick handler body in:\n{out}"
+    );
+    assert!(
+        out.contains("Text(\"Tap me\")"),
+        "missing button label in:\n{out}"
+    );
+
+    // Trailing-block label form must also work.
+    let src2 = "component Tapped2 {\n  state taps: Int = 0\n  Button(onClick: fn() { taps = taps + 1 }) { Text(\"Block\") }\n}\n";
+    let out2 = codegen_example("button_regression_2", src2);
+    assert!(
+        out2.contains("Button(onClick = { taps = (taps + 1) })"),
+        "missing onClick handler body in trailing form:\n{out2}"
+    );
+    assert!(
+        out2.contains("Text(\"Block\")"),
+        "missing trailing-block label in:\n{out2}"
     );
 }

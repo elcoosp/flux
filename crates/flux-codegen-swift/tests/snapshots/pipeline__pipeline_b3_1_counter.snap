@@ -1,6 +1,5 @@
 ---
 source: crates/flux-codegen-swift/tests/pipeline.rs
-assertion_line: 79
 expression: "codegen_example(name, src)"
 ---
 struct Counter: View {
@@ -8,8 +7,8 @@ struct Counter: View {
     var body: some View {
   VStack {
       Text("Count: \(count)")
-      Button(action: {}) {
-          Text("")
+      Button(action: { count = (count + 1) }) {
+          Text("Increment")
       }
   }
     }

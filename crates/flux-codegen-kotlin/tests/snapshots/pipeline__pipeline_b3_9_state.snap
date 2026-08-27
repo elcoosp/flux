@@ -5,7 +5,7 @@ expression: "codegen_example(name, src)"
 @Composable fun Toggle(
 ) {
     var on by remember { mutableStateOf<Boolean>(false) }
-    Button(onClick = { }) {
-        Text("")
+    Button(onClick = { on = true }) {
+        Text("on = ${on}")
     }
 }

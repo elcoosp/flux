@@ -160,7 +160,10 @@ fn emits_view_structs_and_state() {
         "missing interpolation"
     );
     assert!(out.contains("VStack {"), "missing VStack container");
-    assert!(out.contains("Button(action: {})"), "missing Button");
+    assert!(
+        out.contains("Button(action: { count = (count + 1) })"),
+        "Button must emit its onClick handler body, not an empty closure: {out}"
+    );
 }
 
 /// `swiftc -parse` must accept the generated SwiftUI (syntax-only), per the
@@ -191,5 +194,37 @@ fn generated_swift_parses() {
     assert!(
         status.success(),
         "swiftc -parse rejected generated Swift:\n{combined}"
+    );
+}
+
+/// Regression test for the Button codegen defect: the `onClick` handler body and
+/// the `text:` label must both reach the generated output. A prior build emitted
+/// an empty `Button(action: {}) { Text("") }`, dropping the tap behaviour. This
+/// locks the correct behaviour for both the named-arg form
+/// (`Button(text:, onClick:)`) used by `examples/counter` and the trailing-block
+/// form (`Button(...) { Text(...) }`).
+#[test]
+fn button_emits_handler_and_label() {
+    let src = "component Tapped {\n  state taps: Int = 0\n  Button(text: \"Tap me\", onClick: fn() { taps = taps + 1 })\n}\n";
+    let out = codegen_example("button_regression", src);
+    assert!(
+        out.contains("Button(action: { taps = (taps + 1) })"),
+        "missing onClick handler body in:\n{out}"
+    );
+    assert!(
+        out.contains("Text(\"Tap me\")"),
+        "missing button label in:\n{out}"
+    );
+
+    // Trailing-block label form must also work.
+    let src2 = "component Tapped2 {\n  state taps: Int = 0\n  Button(onClick: fn() { taps = taps + 1 }) { Text(\"Block\") }\n}\n";
+    let out2 = codegen_example("button_regression_2", src2);
+    assert!(
+        out2.contains("Button(action: { taps = (taps + 1) })"),
+        "missing onClick handler body in trailing form:\n{out2}"
+    );
+    assert!(
+        out2.contains("Text(\"Block\")"),
+        "missing trailing-block label in:\n{out2}"
     );
 }
