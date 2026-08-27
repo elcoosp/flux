@@ -1150,3 +1150,63 @@ stays current.
 
 - **i18n — French locale — DONE** (`252d3dd`). Added `fr` locale + locale-aware
   root redirect.
+
+- **Dev server hot-reload + device-reachability fixes (FLUX-019 / flux-cli) — DONE**
+  (atomic commits `6d9488d`…`a8c86d0`, tree `83cab05..HEAD`). All committed as
+  one-commit-per-file via `git commit --only`.
+  - `flux-devserver` `ServerConfig::new` now canonicalizes `root` to an absolute
+    path (falling back to `cwd.join(root)`). A relative `root` made
+    `collect_flux_sources` key sources by relative paths while the FSEvents/kqueue
+    watcher reports absolute paths, so a save's `set_source` updated a *different*
+    `FileId` than the initial compile → the recompile saw stale source and emitted
+    no `Delta` — silently breaking hot reload (FLUX-019 regression).
+  - `ServerConfig` gained `with_ws_host` / `with_ws_port` / `with_http_port`
+    builders; `flux-cli dev` gained `--ws-host` (default `127.0.0.1`; `0.0.0.0`
+    exposes the patch channel on the LAN for physical devices/simulators),
+    `--ws-port`, and `--http-port` (defaulting to `DEFAULT_WS_PORT` /
+    `DEFAULT_HTTP_PORT`).
+  - Removed a per-broadcast `tracing::debug!` in `server.rs` (hot-path log).
+    `watch.rs` error/disconnect branches now emit `WATCH_ERROR` / `WATCH_DISCONNECTED`.
+  - New devserver tests: `tests/gen_frames.rs` and `tests/probe_delta_shape.rs`
+    (delta-shape / frame fixtures for the Android repro — both marked `TEMP` in-file)
+    and `tests/handler_body_hot_reload.rs` reformatted.
+  - **Not yet cleaned (flag):** `watch.rs::compile_and_broadcast` still writes the
+    live `Delta` to `/tmp/flux_real_delta.bin` for repro; that debug write should be
+    removed before merge.
+
+- **flux-types — ADT constructor set (FLUX-012 follow-up) — DONE** (`5747e08` +
+  `f89c6c9`). `TypedAST` gained `constructors: HashSet<String>` (every algebraic
+  data-type value constructor in scope). The handler bytecode compiler uses it to
+  decide whether a `Name(args)` call lowers to an `ALLOC_RECORD` (value record) or a
+  `CALL_CAP` (capability/method) directly from the parse tree, without re-walking
+  the type environment.
+
+- **Swift adapters (`adapters/ui-swift`) — name-based props — DONE**
+  (`18fc9a5` `94fbf9f` `d3dbe4c` `f89c6c9` `0bc1e0e`). `Props` resolves props by the
+  FNV-1a name index (mirrors `flux_ir::lower::prop_index_for_name`) via
+  `getString(named:)` / `getInt(named:)` / `getFloat(named:)` / `getBool(named:)` /
+  `getColor(named:)` / `getRecord(named:)` etc. `Button` / `Column` / `Row` / `Text`
+  switched from positional indices to named lookup (`"text"`, `"gap"`, `"alignment"`,
+  `"color"`, `"enabled"`, `"max_lines"`), so adapters no longer depend on prop
+  position. New `ContainerAdapter` maps a user `Component` root to a plain `UIView`
+  host — the registry fallback for component nodes that have no primitive adapter
+  (keeps every node flowing through `registry.make` + `setChildren`, Appendix F).
+
+- **Android runtime — observable-prop recomposition — DONE**
+  (`6f04066` `0152aaf` `54384f9` `c2ed6c0` `aba60e1` `65c78dd` `65fb3e2` `a3e76f4`
+  `134e78c` `12ff8f8` `0fdb7fc`). `FluxRoot` / `ShadowTreeRenderer` replaced
+  the manual `generation` recomposition counter with per-node observable `propsState`
+  (`ShadowNode.observeProps()`): Compose re-runs a leaf when the executor
+  re-materialises its props (SwiftUI-style). `FluxRoot` bumps `frameVersion` on every
+  applied frame so a *root-replaced* hot reload (unstable node ids across edits)
+  remounts the new tree instead of leaving the stale composable on screen (FLUX-019
+  blank-screen). `ShadowTree` root-replace path reformatted + emits a `Frame` trace;
+  `SignalGraph` visibility corrected to `public override`; `CapabilityRegistry` /
+  `HelloFrame` / `FluxBytecodeVmTest` reformatted (byte-array literal line-wrapping).
+
+- **examples / fixtures / docs** — `examples/counter/main.flux` switched to `{count}`
+  interpolation syntax (was `${count}`); added `crates/flux-cli/main.flux/` fixture
+  (`main.flux` + `flux.toml` + `.fluxignore`); added `docs/flux-architecture.html`
+  (architecture diagram). `notify_fsevent_test.rs` was committed then removed
+  (`4958ac4` → removal commit) — it was a root-level fsevent scratch probe, not
+  project source.
