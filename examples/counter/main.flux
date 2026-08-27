@@ -10,7 +10,7 @@ component Counter {
     state count: Int = 0
 
     Column(gap: 8.0) {
-        Text(text: "tapped ${count} times")
+        Text(text: "tapped {count} times")
         Button(text: "Increment", onClick: fn() { count = count + 1 })
     }
 }
