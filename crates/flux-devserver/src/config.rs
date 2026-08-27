@@ -42,8 +42,21 @@ impl ServerConfig {
     /// a 50 ms watch debounce and a 16 ms coalescing window.
     #[must_use]
     pub fn new(root: impl AsRef<Path>) -> Self {
+        // Resolve `root` to an absolute, canonical path. The file watcher
+        // (FSEvents/kqueue) reports events with absolute paths, while a
+        // relative `root` would make `collect_flux_sources` key sources by
+        // relative paths. Mismatched keys would cause `set_source` (called on
+        // every save) to update a *different* `FileId` than the initial
+        // compile used, so recompiles would see the stale source and emit no
+        // `Delta` — silently breaking hot reload (FLUX-019 regression).
+        let root = root.as_ref().to_path_buf();
+        let root = std::fs::canonicalize(&root).unwrap_or_else(|_| {
+            std::env::current_dir()
+                .map(|cwd| cwd.join(&root))
+                .unwrap_or(root.clone())
+        });
         Self {
-            root: root.as_ref().to_path_buf(),
+            root,
             ws_addr: SocketAddr::from(([127, 0, 0, 1], DEFAULT_WS_PORT)),
             http_addr: SocketAddr::from(([127, 0, 0, 1], DEFAULT_HTTP_PORT)),
             debounce: DEFAULT_DEBOUNCE,
@@ -59,10 +72,46 @@ impl ServerConfig {
         self
     }
 
+    /// Overrides the WebSocket bind host, keeping the current port.
+    ///
+    /// `host` is parsed as an [`std::net::IpAddr`]; `0.0.0.0` binds all
+    /// interfaces so the server is reachable from other machines on the LAN
+    /// (e.g. a physical Android device tethered over USB).
+    #[must_use]
+    pub fn with_ws_host(mut self, host: &str) -> Self {
+        match host.parse::<std::net::IpAddr>() {
+            Ok(ip) => {
+                let port = self.ws_addr.port();
+                self.ws_addr = SocketAddr::new(ip, port);
+            }
+            Err(_) => tracing::warn!(
+                host = host,
+                "ignoring unparseable ws_host; keeping current bind address"
+            ),
+        }
+        self
+    }
+
+    /// Overrides the WebSocket bind port, keeping the current host.
+    #[must_use]
+    pub fn with_ws_port(mut self, port: u16) -> Self {
+        let ip = self.ws_addr.ip();
+        self.ws_addr = SocketAddr::new(ip, port);
+        self
+    }
+
     /// Overrides the HTTP asset-server bind address (port `0` picks a free port).
     #[must_use]
     pub fn with_http_addr(mut self, addr: SocketAddr) -> Self {
         self.http_addr = addr;
+        self
+    }
+
+    /// Overrides the HTTP asset-server bind port, keeping the current host.
+    #[must_use]
+    pub fn with_http_port(mut self, port: u16) -> Self {
+        let ip = self.http_addr.ip();
+        self.http_addr = SocketAddr::new(ip, port);
         self
     }
 
