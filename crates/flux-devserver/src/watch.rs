@@ -94,9 +94,12 @@ fn watch_loop(
                     last_event = Some(Instant::now());
                 }
             }
-            Ok(Err(error)) => tracing::warn!(%error, "file watch error"),
+            Ok(Err(error)) => tracing::warn!(%error, "WATCH_ERROR"),
             Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => return,
+            Err(RecvTimeoutError::Disconnected) => {
+                tracing::warn!("WATCH_DISCONNECTED");
+                return;
+            }
         }
         let settled = last_event.is_some_and(|t| t.elapsed() >= timing.debounce);
         if pending.is_empty() || !settled {
@@ -142,14 +145,20 @@ pub(crate) fn compile_and_broadcast(shared: &Arc<Shared>) -> bool {
         }
     };
     match outcome {
-        Ok(Compiled::Init(frame)) | Ok(Compiled::Delta(frame)) | Err(frame) => {
+        Ok(Compiled::Init(frame)) => {
             shared.broadcast(frame);
             true
         }
-        Ok(Compiled::Unchanged) => {
-            tracing::debug!("recompile produced no patches");
-            false
+        Ok(Compiled::Delta(frame)) => {
+            let _ = std::fs::write("/tmp/flux_real_delta.bin", &frame);
+            shared.broadcast(frame);
+            true
         }
+        Err(frame) => {
+            shared.broadcast(frame);
+            true
+        }
+        Ok(Compiled::Unchanged) => false,
     }
 }
 
