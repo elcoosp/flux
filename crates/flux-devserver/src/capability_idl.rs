@@ -1,117 +1,31 @@
-//! The single source of truth for the Flux capability surface (spec §24,
-//! ADR-0045).
+//! The dev server's view of the Flux capability surface (spec §24, ADR-0045).
 //!
-//! Every capability's id, method ids and names are declared exactly once here.
-//! The native runtimes (Swift/Kotlin `CapabilityRegistry`) and the dev server's
-//! validation manifest all derive their tables from this declaration through
-//! the `codegen_*` functions — no capability id, method id, or name is ever
-//! written by hand in more than one place. This is the "generated wrappers,
-//! not no wrappers" contract: the *metadata* (what capabilities and methods
-//! exist, and their stable ids) is generated into every target; the per-method
-//! *implementation* closures stay hand-written because they are native platform
-//! code (a camera capture is real iOS/Android API, not something Rust can
-//! emit), but they are keyed by the generated `(capId, methodId)` so adding a
-//! capability is a one-line IDL edit.
+//! The canonical capability definitions — [`CapabilityIdl`], [`MethodIdl`],
+//! [`CAPABILITY_IDL`], and [`is_satisfied`] — live in `flux_types::capabilities`
+//! so the compiler (`flux-ir` `CALL_CAP` emission) and the dev server share one
+//! table with no opportunity to drift. This module re-exports that table under
+//! the `crate::capability_idl` path the rest of the dev server already uses, and
+//! adds the dev-server-only codegen helpers plus the parity guards. Every
+//! capability's id, method ids and names are declared exactly once (in
+//! `flux_types::capabilities`); the native runtimes derive their tables from it
+//! through the `codegen_*` functions.
 //!
-//! The `capabilities.flux` stdlib declarations must mirror this table's names;
-//! `tests/capability_codegen_parity` fails if a native registry drifts from
-//! what this module generates.
+//! The `capabilities.flux` stdlib declarations must mirror [`CAPABILITY_IDL`]'s
+//! names; `tests/capability_codegen_parity` fails if a native registry drifts
+//! from what this module generates.
 
-/// One method on a capability: its wire name and numeric id.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct MethodIdl {
-    /// The method name as written in `.flux` and advertised in `Hello`.
-    pub(crate) name: &'static str,
-    /// The numeric method id used by `CALL_CAP`.
-    pub(crate) id: u16,
-}
+pub(crate) use flux_types::capabilities::{CapabilityIdl, is_satisfied};
 
-/// One capability: its wire name, numeric id, and methods.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct CapabilityIdl {
-    /// The capability name as written in `.flux` and advertised in `Hello`.
-    pub(crate) name: &'static str,
-    /// The numeric capability id used by `CALL_CAP`.
-    pub(crate) id: u32,
-    /// The methods this capability exposes.
-    pub(crate) methods: &'static [MethodIdl],
-}
-
-/// The MLP capability set (mirrors `stdlib/capabilities.flux`).
-pub(crate) const CAPABILITY_IDL: &[CapabilityIdl] = &[
-    CapabilityIdl {
-        name: "Camera",
-        id: 1,
-        methods: &[
-            MethodIdl {
-                name: "take",
-                id: 1,
-            },
-            MethodIdl {
-                name: "startPreview",
-                id: 2,
-            },
-            MethodIdl {
-                name: "stopPreview",
-                id: 3,
-            },
-        ],
-    },
-    CapabilityIdl {
-        name: "Storage",
-        id: 2,
-        methods: &[
-            MethodIdl { name: "set", id: 1 },
-            MethodIdl { name: "get", id: 2 },
-            MethodIdl {
-                name: "delete",
-                id: 3,
-            },
-        ],
-    },
-    CapabilityIdl {
-        name: "Router",
-        id: 3,
-        methods: &[MethodIdl {
-            name: "navigate",
-            id: 1,
-        }],
-    },
-];
-
-impl CapabilityIdl {
-    /// Resolves a numeric `(cap_id, method_id)` pair to its wire names.
-    ///
-    /// Returns `None` when the ids are not part of the MLP manifest — a program
-    /// that `CALL_CAP`s an unknown id cannot be satisfied by any host.
-    #[must_use]
-    pub(crate) fn names_for(cap_id: u32, method_id: u16) -> Option<(&'static str, &'static str)> {
-        let cap = CAPABILITY_IDL.iter().find(|c| c.id == cap_id)?;
-        let method = cap.methods.iter().find(|m| m.id == method_id)?;
-        Some((cap.name, method.name))
-    }
-}
-
-/// Whether a host's advertised capabilities cover a required
-/// `(cap_name, method_name)` pair.
-///
-/// `advertised` is the `Hello` frame's `capabilities` list
-/// `(name, version, features)`. A required method is satisfied when some
-/// advertised capability shares its name and lists the method in its features.
-#[must_use]
-pub(crate) fn is_satisfied(
-    advertised: &[(String, u32, Vec<String>)],
-    cap_name: &str,
-    method_name: &str,
-) -> bool {
-    advertised.iter().any(|(name, _version, features)| {
-        name == cap_name && features.iter().any(|f| f == method_name)
-    })
-}
+// Test-only codegen helpers and the parity guards reference the table and the
+// method type by name; keep them available under `#[cfg(test)]` so the lib
+// build (no tests) does not warn about unused imports.
+#[cfg(test)]
+pub(crate) use flux_types::capabilities::{CAPABILITY_IDL, MethodIdl};
 
 /// The capability list a host advertises in its `Hello` handshake, derived from
-/// the IDL (spec §D.12.1 / §24.4). Every runtime builds its advertisement from
-/// this so the wire names/ids stay identical to the dev server's validation.
+/// [`CAPABILITY_IDL`] (spec §D.12.1 / §24.4). Every runtime builds its
+/// advertisement from this so the wire names/ids stay identical to the dev
+/// server's validation.
 #[must_use]
 #[cfg(test)]
 pub(crate) fn hello_capabilities() -> Vec<(String, u32, Vec<String>)> {

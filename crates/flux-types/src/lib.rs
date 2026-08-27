@@ -38,6 +38,11 @@
     unreachable_pub
 )]
 
+/// The canonical Flux capability surface (spec §24, Appendix E). The single
+/// source of truth for capability names, numeric ids, and method ids — shared
+/// by the compiler (`flux-ir` `CALL_CAP` emission) and the dev server so the
+/// wire ids can never drift from the host registries.
+pub mod capabilities;
 mod checker;
 mod env;
 mod error;
@@ -47,6 +52,8 @@ mod prelude;
 mod scheme;
 mod traits;
 mod unify;
+
+pub use capabilities::{CAPABILITY_IDL, CapabilityIdl, MethodIdl, is_satisfied};
 
 pub use checker::{Checker, GenericInstantiation, check_decl, collect_adts};
 pub use env::{AdtDef, Binding, CtorKind, Env, PARAM_BASE, TraitInfo, VariantDef};

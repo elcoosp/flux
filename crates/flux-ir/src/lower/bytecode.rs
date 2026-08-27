@@ -21,6 +21,7 @@ use flux_parser::{
 };
 use flux_syntax::opcode::raw;
 use flux_syntax::{PropIdx, SignalId, Span, StringId, Value};
+use flux_types::CapabilityIdl;
 use std::collections::HashSet;
 
 use crate::lower::error::LoweringError;
@@ -275,22 +276,51 @@ fn empty_constructors() -> &'static HashSet<String> {
 }
 
 /// Derives a stable `cap_id` for a capability/method call from the capability
-/// name, per the CALL_CAP contract shared with the host runtime.
+/// Resolves a capability name to its `CALL_CAP` `cap_id`.
 ///
-/// `cap_id = blake3(name)[..4]` interpreted as little-endian `u32`. The host
-/// registry resolves `(cap_id, method_id)` to an implementation using the same
-/// derivation, so neither side ships a shared ID table (AGENT-044 / ADR-0045).
+/// The numeric id is taken from the canonical [`flux_types::CAPABILITY_IDL`]
+/// table (spec §24 / Appendix E), which is the single source of truth shared by
+/// the compiler, the dev-server Hello handshake, and the native registries.
+/// This keeps the `cap_id` bytes on the wire in exact agreement with the
+/// `(cap_id, method_id)` keys the host `CapabilityRegistry` is built from — a
+/// name hash would silently diverge from those small sequential ids and make
+/// every `CALL_CAP` fault with `TYPE_MISMATCH`.
+///
+/// Names outside the MLP manifest fall back to a blake3-derived id so the
+/// emitter never ICEs on an as-yet-unregistered capability; the type checker is
+/// expected to have rejected such names earlier.
 #[must_use]
 pub(crate) fn cap_id_for(name: &str) -> u32 {
+    if let Some(id) = CapabilityIdl::id_for(name) {
+        return id;
+    }
     let hash = blake3::hash(name.as_bytes());
     u32::from_le_bytes(hash.as_bytes()[..4].try_into().unwrap())
 }
 
-/// Derives a stable `method_id` for a capability method call.
+/// Resolves a capability `(name, method)` pair to its `CALL_CAP` `method_id`.
 ///
-/// `method_id = blake3("cap.method")[..2]` as little-endian `u16`. The reserved
-/// pair `(1, 1)` is the frozen `call_cap_basic` stub and is never produced by
-/// this derivation for a real capability name.
+/// Mirrors [`cap_id_for`]: the numeric id comes from
+/// [`flux_types::CAPABILITY_IDL`], with a blake3 fallback for unregistered
+/// pairs.
+#[must_use]
+pub(crate) fn cap_method_id_for(cap: &str, method: &str) -> u16 {
+    if let Some(id) = CapabilityIdl::method_id_for(cap, method) {
+        return id;
+    }
+    let key = format!("{cap}.{method}");
+    let hash = blake3::hash(key.as_bytes());
+    u16::from_le_bytes(hash.as_bytes()[..2].try_into().unwrap())
+}
+
+/// Derives a stable `method_id` tag for a non-call `base.field` access
+/// (the `GET_FIELD` opcode path).
+///
+/// `method_id = blake3("cap.method")[..2]` as little-endian `u16`. This is a
+/// field-tag derivation, distinct from the `CALL_CAP` method id resolved by
+/// [`cap_method_id_for`]: the host reads a `GET_FIELD` field tag the same way,
+/// so the two sides agree on the tag. It must not consult `CAPABILITY_IDL`,
+/// because a struct/record field access is not a capability method call.
 #[must_use]
 pub(crate) fn method_id_for(cap: &str, method: &str) -> u16 {
     let key = format!("{cap}.{method}");
@@ -949,14 +979,15 @@ impl<'a> Emitter<'a> {
     /// Compiles a call expression, returning the register holding its result.
     ///
     /// - `base.field(args)` → capability method call: `CALL_CAP` with
-    ///   `cap_id = cap_id_for(base)`, `method_id = method_id_for(base, field)`,
+    ///   `cap_id = cap_id_for(base)` (resolved from `CAPABILITY_IDL`),
+    ///   `method_id = cap_method_id_for(base, field)`,
     ///   and `args_reg` an `ALLOC_RECORD` of the explicit call arguments.
     /// - `Name(args)` where `Name` is an ADT value constructor → value
     ///   construction: an `ALLOC_RECORD` of the arguments, returned directly
     ///   (no capability call).
     /// - `Name(args)` otherwise (trait fn / resource fn / capability fn) →
     ///   `CALL_CAP` with `cap_id = cap_id_for(Name)`, `method_id =
-    ///   method_id_for(Name, Name)`.
+    ///   cap_method_id_for(Name, Name)`.
     ///
     /// The receiver is identified by `(cap_id, method_id)`; explicit call
     /// arguments are packed into `args_reg` in source order (the frozen
@@ -1043,7 +1074,7 @@ impl<'a> Emitter<'a> {
         self.code.push(result);
         self.code.extend_from_slice(&cap_id_for(cap).to_le_bytes());
         self.code
-            .extend_from_slice(&method_id_for(cap, method).to_le_bytes());
+            .extend_from_slice(&cap_method_id_for(cap, method).to_le_bytes());
         self.code.push(args_reg);
         Ok(result)
     }
@@ -1409,33 +1440,62 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_handler_syntax_errors_instead_of_noop() {
-        // A capability call is outside the MLP bytecode envelope; it must surface
-        // as an error rather than silently compiling to a no-op.
-        let body = Block {
-            params: vec![],
-            items: vec![BlockItem::Expr(Expr {
-                kind: ExprKind::Call {
-                    callee: Box::new(ident("refetch")),
-                    args: vec![],
-                    trailing: None,
-                },
-                span: span(),
-            })],
+    fn capability_call_lowers_to_manifest_ids() {
+        // Regression for the CALL_CAP id-contract split (compiler hashed names
+        // to ids while the native registries key on the small sequential ids in
+        // `CAPABILITY_IDL`). A handler calling `Router.navigate("settings")` must
+        // emit `CALL_CAP` with `cap_id = 3` and `method_id = 1` — the exact
+        // `(cap_id, method_id)` the host `CapabilityRegistry` is built from — and
+        // NOT a blake3-derived hash (which would be ~809260280 / ~3000 and fault
+        // with `TYPE_MISMATCH` on device).
+        let call = Expr {
+            kind: ExprKind::Call {
+                callee: Box::new(Expr {
+                    kind: ExprKind::Field {
+                        base: Box::new(ident("Router")),
+                        field: Ident {
+                            name: "navigate".to_owned(),
+                            span: span(),
+                        },
+                    },
+                    span: span(),
+                }),
+                args: vec![flux_parser::Arg::Positional(Expr {
+                    kind: ExprKind::Str(vec![flux_parser::StrPart::Text("settings".to_owned())]),
+                    span: span(),
+                })],
+                trailing: None,
+            },
             span: span(),
         };
-        let result = compile_handler(
+        let body = Block {
+            params: vec![],
+            items: vec![BlockItem::Expr(call)],
+            span: span(),
+        };
+        let (bytecode, _) = compile_handler(
             &body,
             &count_scope(),
             &std::collections::HashSet::new(),
             span(),
             &mut |_s| StringTable::new().intern(_s),
-        );
-        let (bytecode, _) =
-            result.expect("handler capability call lowers to CALL_CAP, not a silent no-op");
+        )
+        .expect("Router.navigate lowers to CALL_CAP");
         assert!(
             bytecode.contains(&raw::CALL_CAP),
-            "handler capability call must lower to CALL_CAP (out-of-envelope must not be silently dropped): {bytecode:?}"
+            "Router.navigate must lower to CALL_CAP: {bytecode:?}"
+        );
+        // CALL_CAP layout: opcode, result_reg(u8), cap_id(u32 LE), method_id(u16 LE), args_reg(u8).
+        let pos = bytecode
+            .iter()
+            .position(|b| *b == raw::CALL_CAP)
+            .expect("CALL_CAP opcode present");
+        let cap_id = u32::from_le_bytes(bytecode[pos + 2..pos + 6].try_into().unwrap());
+        let method_id = u16::from_le_bytes(bytecode[pos + 6..pos + 8].try_into().unwrap());
+        assert_eq!(cap_id, 3, "Router cap_id must be 3 (CAPABILITY_IDL)");
+        assert_eq!(
+            method_id, 1,
+            "Router.navigate method_id must be 1 (CAPABILITY_IDL)"
         );
     }
 }
