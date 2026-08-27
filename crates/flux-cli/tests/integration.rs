@@ -1,6 +1,7 @@
 //! Integration tests for the `flux` CLI (FLUX-022, spec §14.3).
 
 use std::path::Path;
+use std::sync::Mutex;
 
 use flux_cli::{Command, Platform, build_schema, run};
 use flux_devserver::DevServer;
@@ -10,9 +11,17 @@ use futures_util::{SinkExt, StreamExt};
 use tempfile::TempDir;
 use tokio_tungstenite::tungstenite::Message;
 
+/// The `init` and `doc` tests mutate the process-wide working directory.
+/// Serialize them against each other (and against any future cwd-touching
+/// test) so a parallel run cannot race on `std::env::set_current_dir`.
+static CWD_GUARD: Mutex<()> = Mutex::new(());
+
 /// `flux init <name>` produces a project that `flux dev`/`flux build` can read.
 #[tokio::test]
 async fn init_creates_consumable_project() {
+    let _guard = CWD_GUARD
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let dir = TempDir::new().expect("temp dir");
     let name = "myapp";
 
@@ -37,6 +46,9 @@ async fn init_creates_consumable_project() {
 /// `flux init` refuses to overwrite a non-empty directory.
 #[tokio::test]
 async fn init_refuses_non_empty_dir() {
+    let _guard = CWD_GUARD
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let dir = TempDir::new().expect("temp dir");
 
     let previous = std::env::current_dir().expect("cwd");
@@ -63,9 +75,13 @@ async fn dev_serves_init_to_client() {
     )
     .expect("write sample");
 
-    let server = DevServer::start(flux_devserver::ServerConfig::new(root))
-        .await
-        .expect("dev server starts");
+    let server = DevServer::start(
+        flux_devserver::ServerConfig::new(root)
+            .with_ws_port(0)
+            .with_http_port(0),
+    )
+    .await
+    .expect("dev server starts");
     let ws_addr = server.ws_addr();
 
     let url = format!("ws://{ws_addr}");
@@ -144,6 +160,9 @@ async fn build_android_writes_generated_kotlin() {
 /// `flux doc` emits valid JSON (asserted by `serde_json::from_str`).
 #[tokio::test]
 async fn doc_emits_valid_json() {
+    let _guard = CWD_GUARD
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .find(|p| p.join("stdlib").is_dir())

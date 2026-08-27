@@ -50,7 +50,7 @@ fn text_node_prop_thunk_interpolates_count_not_increments() {
 
     // The interpolation thunk must NOT write a signal.
     assert!(
-        !thunk.bytecode.iter().any(|b| *b == 0x11), // WRITE_SIGNAL opcode
+        !thunk.bytecode.contains(&0x11), // WRITE_SIGNAL opcode
         "Text prop thunk must not contain WRITE_SIGNAL (got increment handler): {:02x?}",
         thunk.bytecode
     );
