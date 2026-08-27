@@ -5,7 +5,6 @@ import dev.flux.host.shadow.displayText
 import dev.flux.host.signal.SignalGraph
 import dev.flux.host.transport.MockTransport
 import dev.flux.host.wire.FrameBuilder
-import dev.flux.host.wire.FrameDeserializer
 import dev.flux.host.wire.WireValue
 import dev.flux.ui.PropsIndex
 import kotlinx.coroutines.ExperimentalCoroutinesApi
