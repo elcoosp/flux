@@ -4,8 +4,8 @@
 //! → `codegen` — over one of the Appendix B.3 grammar examples (completed
 //! where the spec elides bodies with `{ … }` or omits sibling declarations),
 //! then asserts the generated Compose via an [`insta`] snapshot. A determinism
-//! check and a `kotlinc -Xallow-no-source-files` parse-check (when a Kotlin
-//! toolchain is present) round out the suite.
+//! check and a `kotlinc` compile-check (when a full Android/Compose toolchain
+//! is present — see [`android_toolchain_present`]) round out the suite.
 
 use flux_codegen_kotlin::codegen;
 use flux_ir::lower;
@@ -21,6 +21,16 @@ fn codegen_example(name: &str, src: &str) -> String {
     let typed = type_check(&ast).unwrap_or_else(|e| panic!("type_check failed for {name}: {e:?}"));
     let lowered = lower(&ast, &typed).unwrap_or_else(|e| panic!("lower failed for {name}: {e:?}"));
     codegen(&lowered, &ast)
+}
+
+/// `kotlinc` resolves `androidx.compose.*` imports only when the Android SDK and
+/// the Compose compiler are on its classpath — which only a configured Android
+/// toolchain provides (e.g. the Gradle `android-check` job). The plain Rust
+/// `rust-check` runner has `kotlinc` on PATH but no Android SDK, so a bare
+/// `kotlinc` invocation fails to resolve `androidx`. This guard lets the
+/// `kotlinc` compile-check run only where it can actually succeed.
+fn android_toolchain_present() -> bool {
+    std::env::var_os("ANDROID_HOME").is_some() || std::env::var_os("ANDROID_SDK_ROOT").is_some()
 }
 
 /// The 10 Appendix B.3 grammar examples, written in the project's actual
@@ -220,7 +230,14 @@ fn generated_kotlin_parses() {
         .output()
         .is_err()
     {
-        eprintln!("kotlinc not on PATH; skipping kotlinc parse check");
+        eprintln!("kotlinc not on PATH; skipping kotlinc compile check");
+        return;
+    }
+    if !android_toolchain_present() {
+        eprintln!(
+            "no Android SDK on PATH (ANDROID_HOME/ANDROID_SDK_ROOT unset); \
+             skipping kotlinc compile check (cannot resolve androidx.compose.* without it)"
+        );
         return;
     }
     let dir = std::env::temp_dir();
