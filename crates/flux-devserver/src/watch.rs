@@ -150,7 +150,6 @@ pub(crate) fn compile_and_broadcast(shared: &Arc<Shared>) -> bool {
             true
         }
         Ok(Compiled::Delta(frame)) => {
-            let _ = std::fs::write("/tmp/flux_real_delta.bin", &frame);
             shared.broadcast(frame);
             true
         }
