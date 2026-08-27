@@ -179,6 +179,10 @@ pub enum ExprKind {
     },
     /// `resource(fn { … })`.
     Resource(Box<Expr>),
+    /// `await <expr>` — suspend the handler, surfacing the awaited value as a
+    /// reactive `Pending` until the future resolves (MLP v2 first-class async,
+    /// ADR-0044). Lowers to the `AWAIT` bytecode opcode.
+    Await(Box<Expr>),
     /// `createRef[TextField]()`.
     CreateRef {
         /// Generic arguments, empty when omitted.

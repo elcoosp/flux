@@ -25,6 +25,46 @@ pub struct VmOutcome {
     pub gas_used: u32,
 }
 
+/// The captured continuation of a suspended handler (ADR-0044, MLP v2 async).
+///
+/// The reference VM is a flat register machine with no call stack, so a suspend is
+/// exactly its live interpreter state: the next instruction offset, the register
+/// file, the remaining gas, and the snapshot of signal cells that had been written
+/// before the `AWAIT`. [`resume`] re-enters the interpreter at `resume_ip` with the
+/// delivered value placed in register `r0`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SuspendState {
+    /// The original bytecode program, re-decoded on resume so the tail can be
+    /// executed from `resume_ip` without the caller retaining the bytes.
+    pub program: Vec<u8>,
+    /// Byte offset of the instruction to execute on resume (the byte after `AWAIT`).
+    pub resume_ip: u32,
+    /// Register file at the point of suspension.
+    pub registers: [Value; 16],
+    /// Remaining gas at the point of suspension; continues decrementing on resume.
+    pub gas_remaining: u32,
+    /// Signal cells written before the suspend, replayed into the graph on resume.
+    pub signals: Vec<(SignalId, Value)>,
+    /// The register holding the awaited future handle at the point of suspension.
+    /// The executor reads `registers[future_reg]` to obtain the future it must
+    /// resolve, then resumes with the resolved value in `r0`.
+    pub future_reg: u8,
+}
+
+/// The outcome of a (possibly resumable) handler run.
+///
+/// `Halt` is the v1 terminal result and is byte-for-byte what [`run`] returns.
+/// `Suspended` is new for v2: the handler hit `AWAIT` and must be continued via
+/// [`resume`]. This enum is additive — existing v1 callers that use [`run`] never
+/// observe `Suspended`.
+#[derive(Clone, Debug, PartialEq)]
+pub enum RunResult {
+    /// The handler reached `HALT` and produced a final outcome.
+    Halt(VmOutcome),
+    /// The handler suspended on `AWAIT`; continue it with [`resume`].
+    Suspended(SuspendState),
+}
+
 /// The signal graph a handler reads from and writes to.
 pub trait SignalStore {
     /// Returns the current value of `id`, or `None` if unbound.
@@ -67,38 +107,154 @@ impl InMemorySignals {
 
 const ENTRY_GAS: u32 = 100_000;
 
-/// Runs `bytecode` to completion against `signals`, with `payload` in `r0`.
+/// Returns the byte offset of the instruction that follows `instr` in the program.
+#[must_use]
+fn next_offset(instr: &Instruction) -> u32 {
+    instr.offset + u32::from(instr.opcode.instruction_len())
+}
+
+/// Runs `bytecode` with resumable semantics, returning either a final [`VmOutcome`]
+/// or a [`RunResult::Suspended`] continuation at the first `AWAIT` (ADR-0044).
+///
+/// This is the v2 entry point for async-capable handlers. The v1 [`run`] is a thin
+/// wrapper that asserts the handler never suspends (it always reaches `HALT`), so
+/// existing callers and ISA golden vectors are unaffected.
 ///
 /// # Errors
 ///
-/// Returns a [`VmError`] when the handler faults (gas exhaustion, bad dispatch,
-/// type error, out-of-bounds access, null dereference, or division by zero).
-pub fn run(
+/// Returns a [`VmError`] when the handler faults before halting or suspending
+/// (gas exhaustion, bad dispatch, type error, out-of-bounds access, null
+/// dereference, or division by zero).
+pub fn run_resumable(
     bytecode: &[u8],
     signals: &mut impl SignalStore,
     payload: Value,
-) -> Result<VmOutcome, VmError> {
+) -> Result<RunResult, VmError> {
     let program = decode_program(bytecode)?;
     let offsets: Vec<u32> = program.iter().map(|i| i.offset).collect();
     let mut regs = std::array::from_fn(|_| Value::Null);
     regs[0] = payload;
     regs[15] = Value::Int(i64::from(ENTRY_GAS));
     let mut gas: u32 = ENTRY_GAS;
-    let mut ip_index = 0usize;
+
+    match exec_tail(&program, &offsets, 0, &mut regs, &mut gas, signals)? {
+        ControlFlow::Halt => Ok(finish(regs, gas, signals)),
+        ControlFlow::Suspend {
+            resume_ip,
+            future_reg,
+        } => {
+            let written = snapshot_sorted(signals);
+            Ok(RunResult::Suspended(SuspendState {
+                program: bytecode.to_vec(),
+                resume_ip,
+                registers: regs,
+                gas_remaining: gas,
+                signals: written,
+                future_reg,
+            }))
+        }
+    }
+}
+
+/// Continues a suspended handler (ADR-0044), delivering `value` as the awaited result.
+///
+/// Re-enters the interpreter at [`SuspendState::resume_ip`] with `value` in `r0` and
+/// the captured registers/gas restored. The signal writes captured at suspend time are
+/// folded back into `signals` before resuming so subsequent reads observe them.
+///
+/// # Errors
+///
+/// Returns a [`VmError`] if the resumed handler faults (same fault classes as
+/// [`run_resumable`]).
+pub fn resume(
+    state: SuspendState,
+    signals: &mut impl SignalStore,
+    value: Value,
+) -> Result<RunResult, VmError> {
+    // Replay the signal writes captured at suspend so reads during the resumed tail
+    // see the pre-suspend state.
+    for (id, v) in &state.signals {
+        signals.write(*id, v.clone());
+    }
+    let program = decode_program(&state.program)?;
+    let offsets: Vec<u32> = program.iter().map(|i| i.offset).collect();
+    let mut regs = state.registers;
+    regs[0] = value; // The awaited value lands in r0.
+    let mut gas = state.gas_remaining;
+
+    match exec_tail(
+        &program,
+        &offsets,
+        state.resume_ip,
+        &mut regs,
+        &mut gas,
+        signals,
+    )? {
+        ControlFlow::Halt => Ok(finish(regs, gas, signals)),
+        ControlFlow::Suspend {
+            resume_ip,
+            future_reg,
+        } => {
+            let written = snapshot_sorted(signals);
+            Ok(RunResult::Suspended(SuspendState {
+                program: state.program,
+                resume_ip,
+                registers: regs,
+                gas_remaining: gas,
+                signals: written,
+                future_reg,
+            }))
+        }
+    }
+}
+
+/// How the shared tail interpreter terminated.
+enum ControlFlow {
+    /// Reached `HALT`; the caller assembles the final [`VmOutcome`].
+    Halt,
+    /// Hit `AWAIT`; `resume_ip` is the byte offset of the next instruction and
+    /// `future_reg` is the register holding the awaited future handle.
+    Suspend { resume_ip: u32, future_reg: u8 },
+}
+
+/// Sorts a signal snapshot for deterministic suspension capture.
+fn snapshot_sorted(signals: &mut impl SignalStore) -> Vec<(SignalId, Value)> {
+    let mut out = signals.snapshot();
+    out.sort_by_key(|(k, _)| *k);
+    out
+}
+
+/// Executes instructions starting at `start_offset` until `HALT` or `AWAIT`.
+///
+/// Shared by [`run_resumable`] (entry from offset 0) and [`resume`] (entry from the
+/// captured `resume_ip`). Every opcode except `AWAIT` is evaluated here; `AWAIT`
+/// returns [`ControlFlow::Suspend`] with the offset of the following instruction.
+fn exec_tail(
+    program: &[Instruction],
+    offsets: &[u32],
+    start_offset: u32,
+    regs: &mut [Value; 16],
+    gas: &mut u32,
+    signals: &mut impl SignalStore,
+) -> Result<ControlFlow, VmError> {
+    let start_index = offsets
+        .iter()
+        .position(|&o| o == start_offset)
+        .unwrap_or(program.len());
+    let mut ip_index = start_index;
 
     while ip_index < program.len() {
         let instr: &Instruction = &program[ip_index];
         let op = instr.opcode;
         if op == Opcode::Halt {
-            break;
+            return Ok(ControlFlow::Halt);
         }
-        if gas == 0 {
+        if *gas == 0 {
             return Err(VmError::at(VmErrorKind::GasExhausted, instr.offset));
         }
-        gas -= 1;
-        // Mirror the live gas budget into r15 (Appendix E §E.3; ADR-0021 says the
-        // budget register decrements as instructions run).
-        regs[15] = Value::Int(i64::from(gas));
+        *gas -= 1;
+        // Mirror the live gas budget into r15 (Appendix E §E.3; ADR-0021).
+        regs[15] = Value::Int(i64::from(*gas));
         let next_index = ip_index + 1;
 
         macro_rules! reg {
@@ -108,15 +264,17 @@ pub fn run(
         }
 
         match op {
+            Opcode::Await => {
+                return Ok(ControlFlow::Suspend {
+                    resume_ip: next_offset(instr),
+                    future_reg: instr.u8(1),
+                });
+            }
             Opcode::Nop => {}
             Opcode::ReadSignal => {
                 let dst = instr.u8(0);
                 let id = instr.u32(1);
-                if let Some(v) = signals.read(id) {
-                    regs[usize::from(dst)] = v;
-                } else {
-                    regs[usize::from(dst)] = Value::Null;
-                }
+                regs[usize::from(dst)] = signals.read(id).unwrap_or(Value::Null);
             }
             Opcode::WriteSignal => {
                 let id = instr.u32(0);
@@ -231,7 +389,6 @@ pub fn run(
             }
             Opcode::StrLen => {
                 let id = expect_str(reg!(instr.u8(1)), instr.offset)?;
-                // Length is the id's byte width as a proxy (no live table in the oracle).
                 regs[usize::from(instr.u8(0))] = Value::Int(i64::from(id.ilog10() + 1));
             }
             Opcode::StrConcat => {
@@ -244,14 +401,14 @@ pub fn run(
                 regs[usize::from(instr.u8(0))] = Value::Str(synthetic_str_id(&rendered));
             }
             Opcode::Jump => {
-                ip_index = jump_target(instr, next_index, &offsets, instr.i32(0))?;
+                ip_index = jump_target(instr, next_index, offsets, instr.i32(0))?;
                 continue;
             }
             Opcode::CondJump | Opcode::CondJumpNot => {
                 let taken = truthy(&regs[usize::from(instr.u8(0))]);
                 let want = op == Opcode::CondJump;
                 if taken == want {
-                    ip_index = jump_target(instr, next_index, &offsets, instr.i32(1))?;
+                    ip_index = jump_target(instr, next_index, offsets, instr.i32(1))?;
                     continue;
                 }
             }
@@ -334,7 +491,7 @@ pub fn run(
                     }
                 }
                 if matched {
-                    ip_index = jump_target(instr, next_index, &offsets, instr.i32(5))?;
+                    ip_index = jump_target(instr, next_index, offsets, instr.i32(5))?;
                     continue;
                 }
             }
@@ -365,25 +522,65 @@ pub fn run(
             }
             Opcode::GasCheck => {
                 let budget = instr.u32(0);
-                if gas < budget {
+                if *gas < budget {
                     return Err(VmError::at(VmErrorKind::GasExhausted, instr.offset));
                 }
             }
-            Opcode::Halt => break,
-            // `Opcode` is `#[non_exhaustive]` in flux-syntax; future opcodes are
-            // unreachable here because the decoder only emits known variants and
-            // unknown bytes are rejected at decode time (InvalidDispatch).
-            _ => unreachable!("decoder yields only known opcodes: {:?}", op),
+            Opcode::Halt => return Ok(ControlFlow::Halt),
+            // `Opcode` is `#[non_exhaustive]`; the decoder only yields known variants.
+            _ => return Err(VmError::at(VmErrorKind::InvalidDispatch, instr.offset)),
         }
         ip_index = next_index;
     }
+    Ok(ControlFlow::Halt)
+}
 
+/// Assembles the terminal [`VmOutcome`] from the live interpreter state.
+fn finish(regs: [Value; 16], gas: u32, signals: &mut impl SignalStore) -> RunResult {
     let out_signals = signals.snapshot();
-    Ok(VmOutcome {
+    RunResult::Halt(VmOutcome {
         signals: out_signals,
         registers: regs,
         gas_used: ENTRY_GAS - gas,
     })
+}
+
+/// Runs `bytecode` to completion against `signals`, with `payload` in `r0`.
+///
+/// This is the v1 entry point. v1 handlers never emit `AWAIT` (that opcode is an
+/// MLP v2 addition, ADR-0044), so this always reaches `HALT` and returns a
+/// [`VmOutcome`]. It delegates to the shared [`exec_tail`] interpreter used by the
+/// resumable [`run_resumable`] / [`resume`] path, so the two execution models stay
+/// in lockstep and cannot drift.
+///
+/// # Errors
+///
+/// Returns a [`VmError`] when the handler faults (gas exhaustion, bad dispatch,
+/// type error, out-of-bounds access, null dereference, or division by zero).
+pub fn run(
+    bytecode: &[u8],
+    signals: &mut impl SignalStore,
+    payload: Value,
+) -> Result<VmOutcome, VmError> {
+    let program = decode_program(bytecode)?;
+    let offsets: Vec<u32> = program.iter().map(|i| i.offset).collect();
+    let mut regs = std::array::from_fn(|_| Value::Null);
+    regs[0] = payload;
+    regs[15] = Value::Int(i64::from(ENTRY_GAS));
+    let mut gas: u32 = ENTRY_GAS;
+
+    match exec_tail(&program, &offsets, 0, &mut regs, &mut gas, signals)? {
+        ControlFlow::Halt => {
+            let out_signals = signals.snapshot();
+            Ok(VmOutcome {
+                signals: out_signals,
+                registers: regs,
+                gas_used: ENTRY_GAS - gas,
+            })
+        }
+        // v1 bytecode contains no `AWAIT`, so this arm is unreachable for v1 callers.
+        ControlFlow::Suspend { .. } => Err(VmError::at(VmErrorKind::InvalidDispatch, 0)),
+    }
 }
 
 /// IEEE-754 division: `x/0.0` is `±inf` (ADR-0023), never an error.

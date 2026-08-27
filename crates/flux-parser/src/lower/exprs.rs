@@ -177,6 +177,11 @@ fn reactive_expr(ctx: &Ctx<'_>, pair: Pair<'_, Rule>, span: Span) -> Lowered<Exp
             let arg = next_pair(ctx, &mut inner, span, "resource argument")?;
             ExprKind::Resource(Box::new(expr(ctx, arg)?))
         }
+        Rule::await_expr => {
+            let mut inner = pair.into_inner();
+            let arg = next_pair(ctx, &mut inner, span, "await argument")?;
+            ExprKind::Await(Box::new(expr(ctx, arg)?))
+        }
         Rule::create_ref_expr => ExprKind::CreateRef {
             args: create_ref_args(ctx, pair)?,
         },

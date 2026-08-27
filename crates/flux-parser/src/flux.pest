@@ -17,7 +17,7 @@ keyword = @{
     | "otherwise" | "untrack" | "resource" | "provide" | "derived" | "effect"
     | "import" | "batch" | "false" | "match" | "state" | "trait" | "true"
     | "type" | "when" | "with" | "else" | "let" | "use" | "if"
-    | "fn" | "ForEach" | "useContext" | "props")
+    | "fn" | "ForEach" | "useContext" | "props" | "await")
     ~ word_end
 }
 
@@ -152,7 +152,7 @@ named_arg = { ident ~ ":" ~ expr }
 
 primary = {
     paren_expr | if_expr | when_expr | match_expr | for_expr | provide_expr
-    | use_context_expr | lifecycle_expr | lambda | block_expr | record_lit
+    | use_context_expr | lifecycle_expr | await_expr | lambda | block_expr | record_lit
     | literal | ellipsis | ident
 }
 
@@ -210,3 +210,7 @@ batch_expr      = { "batch" ~ block }
 untrack_expr    = { "untrack" ~ block }
 resource_expr   = { "resource" ~ "(" ~ expr ~ ")" }
 create_ref_expr = { "createRef" ~ generic_args? ~ "(" ~ ")" }
+
+// `await <expr>` suspends the handler until the future resolves (ADR-0044, MLP v2).
+// The awaited value is bound as the result of this expression on resume.
+await_expr = { "await" ~ expr }

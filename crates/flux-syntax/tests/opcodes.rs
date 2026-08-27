@@ -34,7 +34,7 @@ fn test_float_arithmetic_opcodes_match_appendix_e() {
 }
 
 #[test]
-fn test_gas_check_is_the_highest_opcode() {
+fn test_gas_check_encodes_as_c0() {
     assert_eq!(opcode::GAS_CHECK, 0xC0);
 }
 
@@ -110,9 +110,17 @@ fn test_instruction_len_includes_the_opcode_byte() {
 fn test_every_opcode_in_appendix_e_is_declared() {
     assert_eq!(
         Opcode::ALL.len(),
-        55,
-        "Appendix E §E.1 plus ADR-0043 `TO_STRING` define 55 opcodes; update both together"
+        56,
+        "Appendix E §E.1 + ADR-0043 `TO_STRING` + ADR-0044 `AWAIT` define 56 opcodes; update together"
     );
+}
+
+#[test]
+fn test_await_decodes_from_its_byte_with_two_register_operands() {
+    let op = Opcode::from_byte(0xE0).expect("AWAIT is assigned byte 0xE0 (ADR-0044)");
+    assert_eq!(op, Opcode::Await);
+    assert_eq!(op.mnemonic(), "AWAIT");
+    assert_eq!(op.operand_len(), 2, "AWAIT takes result_reg(u8), future_reg(u8)");
 }
 
 #[test]

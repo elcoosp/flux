@@ -249,6 +249,7 @@ fn collect_in_expr(expr: &Expr, scope: &SignalScope, found: &mut Vec<SignalId>) 
         ExprKind::Field { base, .. } => collect_in_expr(base, scope, found),
         ExprKind::Let { value: Some(v), .. } => collect_in_expr(v, scope, found),
         ExprKind::Assign { value, .. } => collect_in_expr(value, scope, found),
+        ExprKind::Await(inner) => collect_in_expr(inner, scope, found),
         _ => {}
     }
 }
@@ -744,6 +745,19 @@ impl<'a> Emitter<'a> {
                 } else {
                     Ok(dst)
                 }
+            }
+            ExprKind::Await(inner) => {
+                // Compile the future expression into a register, then suspend the
+                // handler with `AWAIT`. The VM captures the continuation and, on
+                // resume, deposits the resolved value into `r0` (see flux-vm-ref);
+                // we therefore return register 0 so the surrounding expression reads
+                // the awaited result after suspension.
+                let fut = self.compile_value(inner)?;
+                // AWAIT result_reg(u8)=0, future_reg(u8)
+                self.code.push(raw::AWAIT);
+                self.code.push(0u8);
+                self.code.push(fut);
+                Ok(0u8)
             }
             other => Err(HandlerCompileError::new(
                 format!("unsupported handler operand: {other:?}"),

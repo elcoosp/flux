@@ -74,6 +74,7 @@ impl Opcode {
             raw::MOV => Self::Mov,
             raw::GAS_CHECK => Self::GasCheck,
             raw::TO_STRING => Self::ToString,
+            raw::AWAIT => Self::Await,
             _ => return None,
         };
         Some(opcode)
@@ -140,6 +141,7 @@ impl Opcode {
             Self::SetField | Self::ExtractField => width::REG_U16_REG,
             Self::MatchTag => width::REG_U32_I32,
             Self::CallCap => width::CALL_CAP,
+            Self::Await => width::AWAIT,
         }
     }
 
@@ -208,6 +210,7 @@ impl Opcode {
             Self::Mov => "MOV",
             Self::GasCheck => "GAS_CHECK",
             Self::ToString => "TO_STRING",
+            Self::Await => "AWAIT",
         }
     }
 }

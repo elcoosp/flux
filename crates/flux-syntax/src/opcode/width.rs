@@ -29,3 +29,5 @@ pub(crate) const REG_U16_REG: u8 = 4;
 pub(crate) const REG_U32_I32: u8 = 9;
 /// `reg(u8), u32, u16, reg(u8)`.
 pub(crate) const CALL_CAP: u8 = 8;
+/// `result_reg(u8), future_reg(u8)`.
+pub(crate) const AWAIT: u8 = 2;

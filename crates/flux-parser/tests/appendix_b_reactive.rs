@@ -232,3 +232,43 @@ component Profile {
     assert!(matches!(&props.items[0], BlockItem::Prop { name, .. } if name.name == "width"));
     assert_eq!(props.items.len(), 3);
 }
+
+/// ADR-0044: `await <expr>` parses as `ExprKind::Await` and is usable anywhere an
+/// expression is allowed (here, the body of a `derived` / handler closure).
+#[test]
+fn b38_await_expression_lowers_to_await_ast_node() {
+    let ast = parse_ok(
+        r#"component Profile {
+  state token: String = "abc"
+
+  onMount {
+    let user = await Api.fetch(token)
+  }
+}
+"#,
+    );
+
+    let profile = component(&ast, 0);
+    let BlockItem::Expr(Expr {
+        kind: ExprKind::Lifecycle { kind, body, .. },
+        ..
+    }) = &profile.body.items[1]
+    else {
+        panic!("expected an `onMount` lifecycle expression");
+    };
+    assert_eq!(*kind, LifecycleKind::OnMount);
+
+    // The `let user = await Api.fetch(token)` body contains the `Await` node.
+    let BlockItem::Expr(Expr {
+        kind: ExprKind::Let { value: Some(v), .. },
+        ..
+    }) = &body.items[0]
+    else {
+        panic!("lifecycle body should be a block with a `let`");
+    };
+    // Drill into the `let` initializer to confirm it is `Await`.
+    assert!(
+        matches!(v.kind, ExprKind::Await(_)),
+        "expected `await` to parse as ExprKind::Await"
+    );
+}

@@ -127,3 +127,11 @@ pub const GAS_CHECK: u8 = 0xC0;
 
 /// Convert any value to its interned string representation (ADR-0043).
 pub const TO_STRING: u8 = 0xD0;
+
+/// Suspend the VM, capturing the continuation (ADR-0044, MLP v2 first-class async).
+///
+/// Operands: `result_reg(u8), future_reg(u8)`. On execute the interpreter snapshots
+/// its live state (`ip`, registers, remaining gas, captured signals) and returns a
+/// `Suspended` result instead of `Halt`. The executor arranges for `future_reg`'s
+/// value to be delivered back, then calls `resume` with that value to continue.
+pub const AWAIT: u8 = 0xE0;

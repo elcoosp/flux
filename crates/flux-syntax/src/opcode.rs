@@ -151,13 +151,15 @@ pub enum Opcode {
     GasCheck = raw::GAS_CHECK,
     /// `TO_STRING` — convert any value to its interned string form (ADR-0043).
     ToString = raw::TO_STRING,
+    /// `AWAIT` — suspend the VM, capturing the continuation (ADR-0044, MLP v2).
+    Await = raw::AWAIT,
 }
 
 impl Opcode {
     /// Every opcode defined by Appendix E §E.1, in ascending byte order.
     ///
     /// Useful for exhaustive conformance tests and disassembler tables.
-    pub const ALL: [Self; 55] = [
+    pub const ALL: [Self; 56] = [
         Self::Halt,
         Self::Nop,
         Self::ReadSignal,
@@ -213,5 +215,6 @@ impl Opcode {
         Self::Mov,
         Self::GasCheck,
         Self::ToString,
+        Self::Await,
     ];
 }
