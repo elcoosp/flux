@@ -784,6 +784,14 @@ impl<'a> Emitter<'a> {
                 self.code.push(u8::from(*b));
                 Ok(r)
             }
+            ExprKind::Float(f) => {
+                let r = self.alloc_reg();
+                // LOAD_FLOAT_CONST dst(u8), imm(f64)
+                self.code.push(raw::LOAD_FLOAT_CONST);
+                self.code.push(r);
+                self.code.extend_from_slice(&f.to_le_bytes());
+                Ok(r)
+            }
             ExprKind::Str(parts) => self.compile_str(parts, expr.span),
             ExprKind::Ident(ident) => {
                 // A locally-bound `let` name shadows the signal scope.
@@ -1423,7 +1431,8 @@ mod tests {
             span(),
             &mut |_s| StringTable::new().intern(_s),
         );
-        let (bytecode, _) = result.expect("handler capability call lowers to CALL_CAP, not a silent no-op");
+        let (bytecode, _) =
+            result.expect("handler capability call lowers to CALL_CAP, not a silent no-op");
         assert!(
             bytecode.contains(&raw::CALL_CAP),
             "handler capability call must lower to CALL_CAP (out-of-envelope must not be silently dropped): {bytecode:?}"
