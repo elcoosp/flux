@@ -1,0 +1,7 @@
+[project]
+name = "router"
+entry = "main.flux"
+
+[dev]
+ws_port = 7341
+http_port = 7342
