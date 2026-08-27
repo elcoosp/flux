@@ -51,34 +51,21 @@ public fun helloFrameBytes(
 }
 
 // ===== GENERATED-BEGIN (derived from flux-devserver capability_idl; do not edit) =====
-private val idlCapabilities: List<Triple<String, UInt, List<Pair<String, UInt>>>> =
-    listOf(
-        Triple(
-            "Camera",
-            1u,
-            listOf(
-                "take" to 1u,
-                "startPreview" to 2u,
-                "stopPreview" to 3u,
-            ),
-        ),
-        Triple(
-            "Storage",
-            2u,
-            listOf(
-                "set" to 1u,
-                "get" to 2u,
-                "delete" to 3u,
-            ),
-        ),
-        Triple(
-            "Router",
-            3u,
-            listOf(
-                "navigate" to 1u,
-            ),
-        ),
-    )
+private val idlCapabilities: List<Triple<String, UInt, List<Pair<String, UInt>>>> = listOf(
+    Triple("Camera", 1u, listOf(
+        "take" to 1u,
+        "startPreview" to 2u,
+        "stopPreview" to 3u,
+    )),
+    Triple("Storage", 2u, listOf(
+        "set" to 1u,
+        "get" to 2u,
+        "delete" to 3u,
+    )),
+    Triple("Router", 3u, listOf(
+        "navigate" to 1u,
+    )),
+)
 // ===== GENERATED-END =====
 
 /**

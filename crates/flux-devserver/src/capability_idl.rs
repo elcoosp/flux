@@ -16,11 +16,12 @@
 
 pub(crate) use flux_types::capabilities::{CapabilityIdl, is_satisfied};
 
-// Test-only codegen helpers and the parity guards reference the table and the
-// method type by name; keep them available under `#[cfg(test)]` so the lib
-// build (no tests) does not warn about unused imports.
+// Test-only codegen helpers and the parity guards reference the table by name;
+// keep it available under `#[cfg(test)]` so the lib build (no tests) does not
+// warn about an unused import. `MethodIdl` is referenced only inside
+// `flux_types`, not from this crate, so it is not re-exported here.
 #[cfg(test)]
-pub(crate) use flux_types::capabilities::{CAPABILITY_IDL, MethodIdl};
+pub(crate) use flux_types::capabilities::CAPABILITY_IDL;
 
 /// The capability list a host advertises in its `Hello` handshake, derived from
 /// [`CAPABILITY_IDL`] (spec §D.12.1 / §24.4). Every runtime builds its
@@ -48,7 +49,7 @@ pub(crate) fn hello_capabilities() -> Vec<(String, u32, Vec<String>)> {
 /// asserts the checked-in block equals this output so the two cannot drift.
 #[must_use]
 #[cfg(test)]
-pub fn swift_idl_table() -> String {
+pub(crate) fn swift_idl_table() -> String {
     let mut out = String::from(
         "// ===== GENERATED-BEGIN (derived from flux-devserver capability_idl; do not edit) =====\n",
     );
@@ -71,7 +72,7 @@ pub fn swift_idl_table() -> String {
 /// `CapabilityRegistry.kt` (see [`swift_idl_table`] for the parity contract).
 #[must_use]
 #[cfg(test)]
-pub fn kotlin_idl_table() -> String {
+pub(crate) fn kotlin_idl_table() -> String {
     let mut out = String::from(
         "// ===== GENERATED-BEGIN (derived from flux-devserver capability_idl; do not edit) =====\n",
     );
