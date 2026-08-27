@@ -58,6 +58,27 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
+      - name: Export ANDROID_COMPOSE_CLASSPATH for the kotlinc codegen check
+        # `flux-codegen-kotlin`'s `generated_kotlin_parses` test shells out to
+        # `kotlinc` to compile-check the generated Compose. Bare `kotlinc`
+        # cannot resolve `androidx.compose.*` unless the Compose compiler and
+        # the Android runtime are on its classpath, supplied via the opt-in
+        # ANDROID_COMPOSE_CLASSPATH env var (see that test). This step derives
+        # that classpath from a provisioned Android toolchain and exports it for
+        # the `cargo test` step below — but only when the artifacts actually
+        # exist on disk, so it is a safe no-op until the toolchain is fully
+        # provisioned (a separate infrastructure task) and the test skips
+        # cleanly otherwise.
+        run: |
+          platform_jar="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/platforms/android-37/android.jar"
+          compose_jar="$(find "$HOME/.gradle" -name 'compose-compiler-*.jar' 2>/dev/null | head -n1)"
+          if [ -f "$platform_jar" ] && [ -n "$compose_jar" ]; then
+            echo "ANDROID_COMPOSE_CLASSPATH=${platform_jar}:${compose_jar}" >> "$GITHUB_ENV"
+            echo "exported ANDROID_COMPOSE_CLASSPATH for the kotlinc codegen check"
+          else
+            echo "Android/Compose toolchain not fully provisioned (missing ${platform_jar}${compose_jar:+ or compose-compiler jar}); ANDROID_COMPOSE_CLASSPATH left unset (kotlinc check will skip)"
+          fi
+
       - name: cargo test
         run: cargo test --workspace --all-targets
 
