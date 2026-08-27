@@ -17,8 +17,16 @@ use anyhow::Context;
 /// Returns [`DevServerError::Bind`] (as `anyhow::Error`) when the WS or HTTP
 /// listener cannot bind, or [`DevServerError::Watch`] when `root` cannot be
 /// watched.
-pub(crate) async fn run(root: &Path) -> anyhow::Result<()> {
-    let config = ServerConfig::new(root);
+pub(crate) async fn run(
+    root: &Path,
+    ws_host: &str,
+    ws_port: u16,
+    http_port: u16,
+) -> anyhow::Result<()> {
+    let config = ServerConfig::new(root)
+        .with_ws_host(ws_host)
+        .with_ws_port(ws_port)
+        .with_http_port(http_port);
     let server = DevServer::start(config)
         .await
         .context("starting the flux dev server")?;
