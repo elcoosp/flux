@@ -23,6 +23,13 @@ import dev.flux.host.shadow.ShadowTree
  * On `onPause` the executor stops dispatching; on `onResume` it resumes. When no
  * tree has been built yet it shows a launch-screen placeholder.
  *
+ * Recomposition of the leaves is driven entirely by the shadow node's own
+ * observable props ([dev.flux.host.shadow.ShadowNode.propsState], a Compose
+ * `MutableState` the app injects): when the executor re-materialises a node's
+ * props in place, the leaf composable that read them re-runs. No manual
+ * recomposition counter is needed here — `onTreeChanged` only flips `treeReady`
+ * on the first successful frame.
+ *
  * @property session the retained host session (signal graph, shadow tree,
  *   transport, executor).
  */
@@ -30,35 +37,34 @@ import dev.flux.host.shadow.ShadowTree
 @Suppress("ktlint:standard:function-naming")
 public fun FluxRoot(session: FluxSession) {
     var errorMessage by remember { mutableStateOf<String?>(null) }
-    var treeReady by remember { mutableStateOf(false) }
-    // Bumped on every tree mutation (initial frame + post-dispatch reconcile) so
-    // Compose re-composes and re-reads the shadow node props. Holding only a
-    // `treeReady` boolean would freeze the UI after the first frame, because the
-    // shadow tree is mutated in place (same root node instance) and Compose would
-    // never observe the prop changes a tap produces.
-    var generation by remember { mutableStateOf(0) }
+    // Bumped on every applied frame so the composable re-reads `rootNode` and
+    // displays a freshly mounted tree. A boolean `treeReady` would stay `true`
+    // after the first frame and never re-trigger recomposition, so a hot reload
+    // that replaces the root (node ids are unstable across edits) would mount a
+    // new tree in the shadow layer yet leave the *old* composable subtree on
+    // screen (blank/stale on hot reload, FLUX-019). The counter always changes,
+    // forcing the re-read.
+    var frameVersion by remember { mutableStateOf(0) }
 
     val executor = session.executor
     DisposableEffect(executor) {
         session.start()
         executor.onTreeChanged = {
-            val rn = session.shadowTree.rootNode
-            treeReady = rn != null
-            generation++
+            frameVersion++
         }
         executor.onError = { errorMessage = it }
         onDispose { /* session is retained by the ViewModel; not disposed here */ }
     }
 
-    // Reading `generation` inside the composition makes this composable re-run
-    // whenever the tree changes, so `FluxTreeView` below re-reads the latest
-    // node props (the new `count` value after a tap).
-    generation
-    val rootNode = session.shadowTree.rootNode
+    // `frameVersion` is read here so Compose treats `rootNode` as state-
+    // dependent: every applied frame bumps it, forcing this read to re-run and
+    // the freshly mounted (possibly root-replaced) tree to be displayed.
+    val rootNode = session.shadowTree.rootNode.also { _ -> frameVersion }
     Box(modifier = Modifier.fillMaxSize()) {
         when {
             // Real Compose UI: walk the shadow tree and render native widgets.
-            treeReady && rootNode != null -> FluxTreeView(node = rootNode, generation = generation) { handlerId ->
+            // Leaf recomposition is driven by each node's observable props.
+            rootNode != null -> FluxTreeView(node = rootNode) { handlerId ->
                 executor.dispatch(dev.flux.ui.HandlerEvent(handlerId))
             }
             else -> Text("Flux — connecting…", modifier = Modifier.align(Alignment.Center))
