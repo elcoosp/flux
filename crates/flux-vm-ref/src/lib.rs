@@ -32,7 +32,8 @@ mod vm;
 pub use decode::{Instruction, decode_program};
 pub use error::{VmError, VmErrorKind};
 pub use vm::{
-    InMemorySignals, RunResult, SignalStore, SuspendState, VmOutcome, resume, run, run_resumable,
+    CapabilityImpl, CapabilityRegistry, CellState, InMemorySignals, RunResult, SignalStore,
+    SuspendState, VmOutcome, resume, run, run_resumable,
 };
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 {
   "bytecode_hex": "70000100b0014d00000000000000720000000190020100000001000000",
-  "description": "CALL_CAP registers a callback; stubbed host writes arg[0] into signal 99 and result_reg.",
+  "description": "CALL_CAP registers a callback; stubbed host writes arg[0] into signal 99 and returns the result-cell signal id (99) in result_reg (ADR-0045).",
   "expected_error": null,
   "expected_gas_used": 4,
   "expected_registers": {
@@ -15,7 +15,7 @@
     },
     "r2": {
       "type": "Int",
-      "value": 77
+      "value": 99
     }
   },
   "expected_signals": [

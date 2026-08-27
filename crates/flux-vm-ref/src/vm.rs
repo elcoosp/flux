@@ -65,11 +65,27 @@ pub enum RunResult {
     Suspended(SuspendState),
 }
 
+/// Reactive state of a signal cell (ADR-0045, MLP v2 async capability bridge).
+///
+/// A capability call creates a result cell. A *synchronous* method writes
+/// `Ready(value)` before returning; an *asynchronous* method leaves the cell
+/// `Pending` and the host resolves it later (writing `Ready` or `Error`). `AWAIT`
+/// parks while the cell is `Pending` and consumes the value once `Ready`.
+#[derive(Clone, Debug, PartialEq)]
+pub enum CellState {
+    /// The cell has settled with `value`.
+    Ready(Value),
+    /// The cell is waiting on an in-flight async capability.
+    Pending,
+    /// The capability faulted; `value` is the error payload.
+    Error(Value),
+}
+
 /// The signal graph a handler reads from and writes to.
 pub trait SignalStore {
     /// Returns the current value of `id`, or `None` if unbound.
     fn read(&self, id: SignalId) -> Option<Value>;
-    /// Writes `value` into `id`.
+    /// Writes `value` into `id`, resolving any pending/error cell back to `Ready`.
     fn write(&mut self, id: SignalId, value: Value);
     /// Returns every written signal as a sorted `(id, value)` list.
     ///
@@ -77,23 +93,72 @@ pub trait SignalStore {
     /// total snapshot, not a diff, so the production runtimes can compare
     /// final state against the golden vectors.
     fn snapshot(&self) -> Vec<(SignalId, Value)>;
+    /// Allocates a fresh, unbound signal id for a new capability result cell.
+    fn allocate_cell(&mut self) -> SignalId;
+    /// Returns the reactive [`CellState`] of `id`, defaulting to `Ready(Null)`
+    /// for unbound cells (an `AWAIT` only parks on `Pending`).
+    fn cell_state(&self, id: SignalId) -> CellState;
+    /// Marks `id` as `Pending` (an async capability has started).
+    fn mark_pending(&mut self, id: SignalId);
+    /// Resolves `id` with `value`, flipping it back to `Ready(value)`.
+    fn resolve_cell(&mut self, id: SignalId, value: Value);
 }
 
 /// In-memory [`SignalStore`] used by tests and the dev server.
-#[derive(Clone, Debug, Default)]
-pub struct InMemorySignals(std::collections::HashMap<SignalId, Value>);
+#[derive(Clone, Debug)]
+pub struct InMemorySignals {
+    values: std::collections::HashMap<SignalId, Value>,
+    states: std::collections::HashMap<SignalId, CellState>,
+    next_cell: SignalId,
+}
+
+impl Default for InMemorySignals {
+    fn default() -> Self {
+        Self {
+            values: std::collections::HashMap::new(),
+            states: std::collections::HashMap::new(),
+            // Fresh result cells start well above the low, fixed ids that golden
+            // vectors and handlers use (e.g. 99), so `allocate_cell` never collides.
+            next_cell: 1_000_000,
+        }
+    }
+}
 
 impl SignalStore for InMemorySignals {
     fn read(&self, id: SignalId) -> Option<Value> {
-        self.0.get(&id).cloned()
+        self.values.get(&id).cloned()
     }
     fn write(&mut self, id: SignalId, value: Value) {
-        self.0.insert(id, value);
+        self.values.insert(id, value.clone());
+        self.states.insert(id, CellState::Ready(value));
     }
     fn snapshot(&self) -> Vec<(SignalId, Value)> {
-        let mut out: Vec<(SignalId, Value)> = self.0.iter().map(|(k, v)| (*k, v.clone())).collect();
+        let mut out: Vec<(SignalId, Value)> =
+            self.values.iter().map(|(k, v)| (*k, v.clone())).collect();
         out.sort_by_key(|(k, _)| *k);
         out
+    }
+    fn allocate_cell(&mut self) -> SignalId {
+        // Skip ids already used by the program (golden vectors use low, fixed ids
+        // like 99) by drawing from a high ceiling reserved for runtime allocation.
+        self.next_cell += 1;
+        self.next_cell
+    }
+    fn cell_state(&self, id: SignalId) -> CellState {
+        if let Some(state) = self.states.get(&id) {
+            return state.clone();
+        }
+        match self.values.get(&id) {
+            Some(v) => CellState::Ready(v.clone()),
+            None => CellState::Ready(Value::Null),
+        }
+    }
+    fn mark_pending(&mut self, id: SignalId) {
+        self.states.insert(id, CellState::Pending);
+    }
+    fn resolve_cell(&mut self, id: SignalId, value: Value) {
+        self.values.insert(id, value.clone());
+        self.states.insert(id, CellState::Ready(value));
     }
 }
 
@@ -101,8 +166,100 @@ impl InMemorySignals {
     /// Builds a store from an iterator of `(id, value)` pairs.
     #[must_use]
     pub fn from_signals(signals: impl IntoIterator<Item = (SignalId, Value)>) -> Self {
-        Self(signals.into_iter().collect())
+        let values: std::collections::HashMap<SignalId, Value> = signals.into_iter().collect();
+        let states = values
+            .iter()
+            .map(|(k, v)| (*k, CellState::Ready(v.clone())))
+            .collect();
+        Self {
+            values,
+            states,
+            next_cell: 1_000_000,
+        }
     }
+}
+
+/// A capability implementation invoked by `CALL_CAP` (ADR-0045, unified sync/async bridge).
+///
+/// The impl creates a result cell in `signals` and returns its [`SignalId`]:
+/// - a **synchronous** method writes `Ready(value)` into the cell before returning;
+/// - an **asynchronous** method leaves the cell `Pending`; the host resolves it later
+///   (writing `Ready`/`Error`) which resumes any awaiting handler.
+///
+/// One signature serves both shapes; the VM never branches on sync-vs-async.
+pub type CapabilityImpl =
+    fn(cap_id: u32, method_id: u16, args: &Value, signals: &mut dyn SignalStore) -> SignalId;
+
+/// A data-driven registry mapping `(capId, methodId)` pairs to their [`CapabilityImpl`].
+///
+/// Mirrors the host `CapabilityRegistry` tables (Registry.swift / CapabilityRegistry.kt);
+/// the oracle uses [`CapabilityRegistry::with_parity_stubs`] so existing golden vectors (e.g.
+/// `call_cap_basic`, cap 1/1 → signal 99) stay green under the v2 signal-id contract.
+#[derive(Debug, Default)]
+pub struct CapabilityRegistry {
+    entries: Vec<(u32, u16, CapabilityImpl)>,
+}
+
+impl CapabilityRegistry {
+    /// Looks up the implementation for `(cap_id, method_id)`, or `None` if unregistered
+    /// (the oracle then faults with `TypeMismatch`, matching the "capability must exist" contract).
+    #[must_use]
+    pub fn lookup(&self, cap_id: u32, method_id: u16) -> Option<CapabilityImpl> {
+        self.entries
+            .iter()
+            .rev()
+            .find(|(c, m, _)| *c == cap_id && *m == method_id)
+            .map(|(_, _, f)| *f)
+    }
+
+    /// The default oracle registry: the v1 parity stub `Camera.take` (cap 1, method 1)
+    /// echoes `arg[0]` into signal 99 (already `Ready`) and returns 99.
+    #[must_use]
+    pub fn with_parity_stubs() -> Self {
+        Self {
+            entries: vec![
+                (1, 1, parity_echo_99),
+                // Reference async capability: returns a Pending cell (cap 2, method 99),
+                // exercised by the suspend/resume bridge test.
+                (2, 99, async_deferred),
+            ],
+        }
+    }
+}
+
+/// v1 parity stub: `Camera.take(arg)` writes `arg[0]` into signal 99 and returns 99.
+///
+/// Golden `call_cap_basic` (capId=1, methodId=1) depends on this exact behavior; the
+/// v2 change is that the result register receives the cell id (99) rather than the raw
+/// arg, keeping the echo into signal 99 intact.
+fn parity_echo_99(
+    _cap_id: u32,
+    _method_id: u16,
+    args: &Value,
+    signals: &mut dyn SignalStore,
+) -> SignalId {
+    let arg = match args {
+        Value::Record(fields) if !fields.is_empty() => fields[0].1.clone(),
+        _ => Value::Null,
+    };
+    signals.write(99, arg);
+    // `write` resolves the cell to Ready; the returned id is the result cell.
+    99
+}
+
+/// Reference async capability (cap 2, method 99): allocates a fresh result cell, marks it
+/// `Pending`, and returns its id immediately. The host resolves it later via
+/// `SignalStore::resolve_cell`, which resumes any awaiting handler (ADR-0045 §1). This is
+/// the oracle's reference async method used to exercise the suspend/resume bridge.
+fn async_deferred(
+    _cap_id: u32,
+    _method_id: u16,
+    _args: &Value,
+    signals: &mut dyn SignalStore,
+) -> SignalId {
+    let id = signals.allocate_cell();
+    signals.mark_pending(id);
+    id
 }
 
 const ENTRY_GAS: u32 = 100_000;
@@ -265,10 +422,30 @@ fn exec_tail(
 
         match op {
             Opcode::Await => {
-                return Ok(ControlFlow::Suspend {
-                    resume_ip: next_offset(instr),
-                    future_reg: instr.u8(1),
-                });
+                // `future_reg` holds the register containing the result-cell signal id
+                // returned by CALL_CAP (ADR-0045). Park only while the cell is `Pending`;
+                // a `Ready` cell continues with its value in r0 (one re-entry, no real park),
+                // and an `Error` cell faults the handler rather than resuming.
+                let future_reg = instr.u8(1);
+                let cell_id = match regs[usize::from(future_reg)] {
+                    Value::Int(n) if n >= 0 => n as SignalId,
+                    _ => return Err(VmError::at(VmErrorKind::TypeMismatch, instr.offset)),
+                };
+                let st = signals.cell_state(cell_id);
+                match st {
+                    CellState::Ready(value) => {
+                        regs[0] = value;
+                    }
+                    CellState::Pending => {
+                        return Ok(ControlFlow::Suspend {
+                            resume_ip: next_offset(instr),
+                            future_reg,
+                        });
+                    }
+                    CellState::Error(_) => {
+                        return Err(VmError::at(VmErrorKind::TypeMismatch, instr.offset));
+                    }
+                }
             }
             Opcode::Nop => {}
             Opcode::ReadSignal => {
@@ -470,15 +647,18 @@ fn exec_tail(
                 let cap_id = instr.u32(1);
                 let method_id = instr.u16(5);
                 let args_reg = instr.u8(7);
-                if cap_id == 1 && method_id == 1 {
-                    let arg = match &regs[usize::from(args_reg)] {
-                        Value::Record(fields) if !fields.is_empty() => fields[0].1.clone(),
-                        _ => return Err(VmError::at(VmErrorKind::TypeMismatch, instr.offset)),
-                    };
-                    signals.write(99, arg.clone());
-                    regs[usize::from(result_reg)] = arg;
-                } else {
-                    return Err(VmError::at(VmErrorKind::TypeMismatch, instr.offset));
+                // Unified sync/async capability bridge (ADR-0045): the impl creates a
+                // result cell and returns its signal id; `result_reg` receives that id.
+                // An unregistered `(capId, methodId)` is a type error (the VM cannot
+                // invent a capability), matching the host contract.
+                let args = regs[usize::from(args_reg)].clone();
+                let registry = CapabilityRegistry::with_parity_stubs();
+                match registry.lookup(cap_id, method_id) {
+                    Some(impl_) => {
+                        let id = impl_(cap_id, method_id, &args, signals);
+                        regs[usize::from(result_reg)] = Value::Int(i64::from(id));
+                    }
+                    None => return Err(VmError::at(VmErrorKind::TypeMismatch, instr.offset)),
                 }
             }
             Opcode::MatchTag => {
@@ -563,6 +743,16 @@ pub fn run(
     payload: Value,
 ) -> Result<VmOutcome, VmError> {
     let program = decode_program(bytecode)?;
+    // v1 bytecode never emits `AWAIT` (an MLP v2 opcode, ADR-0044). If one is present the
+    // program is malformed for the v1 entry point: reject it rather than silently running the
+    // resumable interpreter, which would otherwise continue past a `Ready` cell. This keeps
+    // the v1 contract (no suspension) intact while `run_resumable` handles async handlers.
+    if program
+        .iter()
+        .any(|instr| matches!(instr.opcode, Opcode::Await))
+    {
+        return Err(VmError::at(VmErrorKind::InvalidDispatch, 0));
+    }
     let offsets: Vec<u32> = program.iter().map(|i| i.offset).collect();
     let mut regs = std::array::from_fn(|_| Value::Null);
     regs[0] = payload;
