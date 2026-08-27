@@ -40,13 +40,19 @@ fn handler_body_edit_emits_patch_with_updated_bytecode() {
     p.set_source(std::path::Path::new(&path), SRC1.to_string());
     match p.compile() {
         Ok(flux_devserver::Compiled::Init(_)) => {}
-        other => panic!("first compile should be Init, got {:?}", std::mem::discriminant(&other)),
+        other => panic!(
+            "first compile should be Init, got {:?}",
+            std::mem::discriminant(&other)
+        ),
     }
 
     p.set_source(std::path::Path::new(&path), SRC2.to_string());
     let bytes = match p.compile() {
         Ok(flux_devserver::Compiled::Delta(b)) => b,
-        other => panic!("second compile should be Delta, got {:?}", std::mem::discriminant(&other)),
+        other => panic!(
+            "second compile should be Delta, got {:?}",
+            std::mem::discriminant(&other)
+        ),
     };
 
     let delta = Frame::from_delta_bytes(&bytes).expect("delta decode");
