@@ -70,6 +70,46 @@ public struct Props: Sendable, Hashable {
         getRecord(index).flatMap(FluxFount.init(record:))
     }
 
+    /// Stable prop-index for a prop *name* (Appendix C/§F).
+    ///
+    /// Mirrors the Rust `flux_ir::lower::prop_index_for_name`: the index is the
+    /// low 16 bits of FNV-1a (offset `0x811c9dc5`, prime `0x01000193) of the
+    /// prop's ASCII name. This is content-independent — the same name always
+    /// maps to the same index on both server and client — so adapters look up
+    /// props by name rather than by a guessed positional index.
+    public static func propIndex(for name: String) -> PropIdx {
+        var hash: UInt32 = 0x811c_9dc5
+        for byte in name.utf8 {
+            hash ^= UInt32(byte)
+            hash = hash &* 0x0100_0193
+        }
+        return PropIdx(hash & 0xFFFF)
+    }
+
+    /// Resolve a string prop by name.
+    public func getString(named name: String) -> String? { getString(Self.propIndex(for: name)) }
+
+    /// Resolve an integer prop by name.
+    public func getInt(named name: String) -> Int64? { getInt(Self.propIndex(for: name)) }
+
+    /// Resolve a float prop by name.
+    public func getFloat(named name: String) -> Double? { getFloat(Self.propIndex(for: name)) }
+
+    /// Resolve a boolean prop by name.
+    public func getBool(named name: String) -> Bool? { getBool(Self.propIndex(for: name)) }
+
+    /// Resolve a handler-reference prop by name.
+    public func getHandler(named name: String) -> FluxHandlerId? { getHandler(Self.propIndex(for: name)) }
+
+    /// Resolve a record prop by name.
+    public func getRecord(named name: String) -> Props? { getRecord(Self.propIndex(for: name)) }
+
+    /// Resolve a color prop by name.
+    public func getColor(named name: String) -> FluxColor? { getColor(Self.propIndex(for: name)) }
+
+    /// Resolve a font prop by name.
+    public func getFont(named name: String) -> FluxFount? { getFont(Self.propIndex(for: name)) }
+
     public static func == (lhs: Props, rhs: Props) -> Bool { lhs.fields == rhs.fields }
 
     public func hash(into hasher: inout Hasher) { hasher.combine(digest) }
