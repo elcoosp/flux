@@ -270,7 +270,13 @@ struct ShadowTreeReconciler {
         // its thunk's captured `deps`; a static node reads whatever signal refs
         // survive in its shipped props.
         let metaDeps = signalMeta[nodeId]?.deps ?? []
-        signalDeps[nodeId] = Set(metaDeps).union(effectiveProps.compactMap { $0.value.asInt }.compactMap { UInt32(exactly: $0) })
+        var deps = Set(metaDeps).union(effectiveProps.compactMap { $0.value.asInt }.compactMap { UInt32(exactly: $0) })
+        // A `Router` node must re-reconcile whenever its navigation target
+        // changes, so it subscribes to the `Router.navigate` signal (97, ADR-0045).
+        if node.kind == .router {
+            deps.insert(Self.navigationRouteSignalId)
+        }
+        signalDeps[nodeId] = deps
         if let existing = built[nodeId] {
             // A `@pure` node whose props' content hash is unchanged depends on
             // nothing else, so its entire subtree is stable: skip re-reconciling
@@ -411,6 +417,10 @@ struct ShadowTreeReconciler {
     /// in declared order.
     private mutating func collectChildViews(of node: ShadowNode, nodes: [UInt32: ShadowNode], report: inout ReconcileReport) -> [AnyObject] {
         var views: [AnyObject] = []
+        // A `Router` presents only the active-route `Screen` (ADR-0045): it must
+        // not build/reconcile the hidden sibling screens, so we scope the walk to
+        // the single active child id returned by `routerActiveChildId`.
+        let activeChildId = node.kind == .router ? routerActiveChildId(node, nodes: nodes) : nil
         for child in node.children {
             let childIds: [UInt32]
             switch child {
@@ -420,6 +430,7 @@ struct ShadowTreeReconciler {
                 childIds = items.map { $0.node }
             }
             for cid in childIds {
+                guard activeChildId == nil || cid == activeChildId else { continue }
                 reconcile(nodeId: cid, nodes: nodes, report: &report)
                 if let v = built[cid]?.view { views.append(v) }
             }
@@ -432,6 +443,57 @@ struct ShadowTreeReconciler {
     /// never depends on reaching back into the executor.
     private func currentTable()->MaterializationStringTable{
         table
+    }
+
+    /// FNV-1a (32-bit) hash of [name], truncated to `UInt16` — matches the wire
+    /// encoder's `prop_index_for_name` (Appendix C), so a `route` prop decoded
+    /// from the server resolves to the same index here.
+    private static let routePropIndex: UInt16 = {
+        var h: UInt32 = 0x811c_9dc5
+        for b in "route".utf8 {
+            h = (h ^ UInt32(b)) &* 0x0100_0193
+        }
+        return UInt16(truncatingIfNeeded: h)
+    }()
+
+    /// The signal id `Router.navigate` writes its target to (ADR-0045).
+    private static let navigationRouteSignalId: UInt32 = 97
+
+    /// For a `Router` node, returns the id of the single `Screen` child whose
+    /// `route` prop equals the active navigation target (read from signal 97).
+    /// When the signal is unset, malformed, or no screen matches, returns the
+    /// first child so the stack always shows a screen (mirrors Android).
+    private func routerActiveChildId(_ node: ShadowNode, nodes: [UInt32: ShadowNode]) -> UInt32? {
+        guard node.kind == .router else { return nil }
+        var activeRoute: String?
+        if let runtime = executorRef as? FluxRuntime,
+           let record = runtime.graph.read(Self.navigationRouteSignalId),
+           case let .record(fields) = record,
+           case let .str(routeId) = fields.first?.value,
+           let route = currentTable().lookup(routeId) {
+            activeRoute = route
+        }
+        var firstChildId: UInt32?
+        for child in node.children {
+            let childIds: [UInt32]
+            switch child {
+            case let .node(id):
+                childIds = [id]
+            case let .splice(_, items):
+                childIds = items.map { $0.node }
+            }
+            for cid in childIds {
+                if firstChildId == nil { firstChildId = cid }
+                guard let childNode = nodes[cid], childNode.kind == .screen else { continue }
+                guard let prop = childNode.props.first(where: { $0.index == Self.routePropIndex }),
+                      case let .str(id) = prop.value,
+                      let route = currentTable().lookup(id) else { continue }
+                if let active = activeRoute, route == active {
+                    return cid
+                }
+            }
+        }
+        return firstChildId
     }
 
     /// Materialises the props of `node` by running its ADR-0027 prop thunk

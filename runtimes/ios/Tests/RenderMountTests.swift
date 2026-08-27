@@ -19,13 +19,14 @@ import FluxUIKit
 private func mountNode(
     _ id: UInt32,
     componentId: UInt32,
+    kind: NodeKind = .primitive,
     props: [Prop] = [],
     children: [Child] = [],
     handlers: [UInt32] = []
 ) -> ShadowNode {
     ShadowNode(
         id: id,
-        kind: .primitive,
+        kind: kind,
         componentId: componentId,
         props: props,
         childCount: UInt16(children.count),
@@ -109,5 +110,95 @@ final class RenderMountTests: XCTestCase {
             return
         }
         XCTAssertEqual(stack.arrangedSubviews.count, 2, "children must remain after dispatch")
+    }
+
+    /// Builds a router-shaped full `FluxFrame`: a `Router` with two `Screen`
+    /// children (`home` and `settings`), each carrying a `route` prop. When
+    /// [initialRoute] is non-nil, signal 97 (the `Router.navigate` target,
+    /// ADR-0045) is pre-seeded so the router presents that screen from the start.
+    @MainActor
+    private func routerExecutor(initialRoute: String? = nil) -> FluxRuntime {
+        let routeIndex: UInt16 = fnv1aRouteIndex()
+        let home = mountNode(
+            10, componentId: 6, kind: .screen,
+            props: [Prop(index: routeIndex, value: .str(7))]) // route: "home"
+        let settings = mountNode(
+            11, componentId: 6, kind: .screen,
+            props: [Prop(index: routeIndex, value: .str(8))]) // route: "settings"
+        let router = mountNode(20, componentId: 5, kind: .router, children: [.node(10), .node(11)])
+
+        var table = StringTable()
+        table.intern(5, "Router")
+        table.intern(6, "Screen")
+        table.intern(7, "home")
+        table.intern(8, "settings")
+
+        var graph = SignalGraph()
+        if let route = initialRoute {
+            let routeId: UInt32 = route == "settings" ? 8 : 7
+            graph.write(97, .record([(0, .str(routeId))]))
+        }
+
+        let frame = FluxFrame(
+            version: 1, seq: 0, flags: 0x01,
+            root: router,
+            nodes: [20: router, 10: home, 11: settings],
+            patches: [], handlers: [],
+            strings: [
+                StringEntry(stringId: 7, value: "home"),
+                StringEntry(stringId: 8, value: "settings"),
+            ],
+            state: [], files: [], componentNames: [
+                StringEntry(stringId: 5, value: "Router"),
+                StringEntry(stringId: 6, value: "Screen"),
+            ], signalMeta: [:]
+        )
+
+        let executor = FluxRuntime(graph: graph, registry: AdapterRegistry(table: table))
+        executor.apply(frame)
+        return executor
+    }
+
+    /// FNV-1a (32-bit) of "route", truncated to `UInt16` — must match the value
+    /// `ShadowTreeReconciler.routePropIndex` uses to locate a Screen's `route` prop.
+    private func fnv1aRouteIndex() -> UInt16 {
+        var h: UInt32 = 0x811c_9dc5
+        for b in "route".utf8 {
+            h = (h ^ UInt32(b)) &* 0x0100_0193
+        }
+        return UInt16(truncatingIfNeeded: h)
+    }
+
+    /// ADR-0045: a `Router` presents only the active-route `Screen`. With signal
+    /// 97 unset it shows the first screen (`home`); pre-seeding signal 97 with the
+    /// `Router.navigate` target record makes it present the matching `settings`
+    /// screen instead (the same signal the live `navigate` handler writes).
+    @MainActor
+    func testRouterPresentsActiveRouteFromSignal97() async {
+        let homeExecutor = routerExecutor(initialRoute: nil)
+        guard let homeNav = homeExecutor.view(for: 20) as? UINavigationController else {
+            XCTFail("router root view must be a UINavigationController")
+            return
+        }
+        XCTAssertEqual(
+            homeNav.viewControllers.count, 1,
+            "router must show exactly one screen when signal 97 is unset")
+        let homeScreen = homeNav.viewControllers.first
+
+        let settingsExecutor = routerExecutor(initialRoute: "settings")
+        guard let settingsNav = settingsExecutor.view(for: 20) as? UINavigationController else {
+            XCTFail("router root view must be a UINavigationController")
+            return
+        }
+        XCTAssertEqual(
+            settingsNav.viewControllers.count, 1,
+            "router must show exactly one screen when signal 97 targets 'settings'")
+        let settingsScreen = settingsNav.viewControllers.first
+
+        XCTAssertNotNil(homeScreen, "home screen must be present")
+        XCTAssertNotNil(settingsScreen, "settings screen must be present")
+        XCTAssertFalse(
+            settingsScreen === homeScreen,
+            "seeding signal 97 with a different route must swap the visible screen")
     }
 }
