@@ -1,0 +1,79 @@
+---
+source: crates/flux-parity/tests/parity.rs
+assertion_line: 41
+expression: serialized
+---
+verdict: equivalent
+
+ dev    == [
+    Component {
+        name: "PlatformButton",
+        children: [
+            If {
+                cond: "(/* unsupported expr */ 0 == \"ios\")",
+                then_branch: [
+                    Primitive {
+                        name: "CupertinoButton",
+                        props: [],
+                        children: [],
+                    },
+                ],
+                else_branch: [
+                    Primitive {
+                        name: "MaterialButton",
+                        props: [],
+                        children: [],
+                    },
+                ],
+            },
+        ],
+    },
+]
+swift  == [
+    Component {
+        name: "PlatformButton",
+        children: [
+            If {
+                cond: "( /* unsupported expr */ 0 == \"ios\" )",
+                then_branch: [
+                    Primitive {
+                        name: "CupertinoButton",
+                        props: [],
+                        children: [],
+                    },
+                ],
+                else_branch: [
+                    Primitive {
+                        name: "MaterialButton",
+                        props: [],
+                        children: [],
+                    },
+                ],
+            },
+        ],
+    },
+]
+kotlin == [
+    Component {
+        name: "PlatformButton",
+        children: [
+            If {
+                cond: "(/*unsupportedexpr*/0==\"ios\")",
+                then_branch: [
+                    Primitive {
+                        name: "CupertinoButton",
+                        props: [],
+                        children: [],
+                    },
+                ],
+                else_branch: [
+                    Primitive {
+                        name: "MaterialButton",
+                        props: [],
+                        children: [],
+                    },
+                ],
+            },
+        ],
+    },
+]

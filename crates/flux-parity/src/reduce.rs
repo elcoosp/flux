@@ -99,11 +99,8 @@ fn node_from_ast(expr: &Expr, out: &mut Vec<ViewNode>) {
             out.push(ViewNode::If {
                 cond: render_cond(cond),
                 then_branch: block_children(then_block),
-                else_branch: vec![],
+                else_branch: else_children(else_branch.as_deref()),
             });
-            if let Some(else_expr) = else_branch {
-                node_from_ast(else_expr, out);
-            }
         }
         ExprKind::When {
             cond,
@@ -176,16 +173,58 @@ fn render_cond(cond: &Expr) -> String {
     canonicalize_expr(&render_expr(cond))
 }
 
-/// Reads the route literal from a `Screen(route: "...")` call's named args.
+/// Reads the route literal from a `Screen` call's arguments. The route may be a
+/// named `route: "..."` (the canonical B.3.5 form) or the first positional
+/// argument `Screen("home")`.
 fn screen_route_from_args(args: &[flux_parser::Arg]) -> String {
     for arg in args {
-        if let flux_parser::Arg::Named { name, value } = arg {
-            if name.name == "route" {
+        match arg {
+            flux_parser::Arg::Named { name, value } if name.name == "route" => {
                 return canonicalize_expr(&render_expr(value));
             }
+            flux_parser::Arg::Positional(value) => {
+                return canonicalize_expr(&render_expr(value));
+            }
+            _ => {}
         }
     }
     String::new()
+}
+
+/// Reduces an `else` branch expression (if present) into structural children. A
+/// chain `else if …` is itself an `If` node, which `node_from_ast` appends
+/// correctly; a bare `else { … }` is parsed as a `Lambda` whose body is the
+/// block of view expressions (see the `else` lowering in the parser).
+fn else_children(else_branch: Option<&flux_parser::Expr>) -> Vec<ViewNode> {
+    let mut out = Vec::new();
+    if let Some(expr) = else_branch {
+        match &expr.kind {
+            ExprKind::Lambda { body, .. } => out.extend(block_children(body)),
+            ExprKind::If { .. } => out.push(expr_into_if_node(expr)),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Builds the structural [`ViewNode::If`] for an `else if` branch. The `else if`
+/// expression is an `Expr` whose `kind` is `ExprKind::If`; reusing the same arm
+/// logic keeps the two forms consistent.
+fn expr_into_if_node(expr: &flux_parser::Expr) -> ViewNode {
+    if let ExprKind::If {
+        cond,
+        then_block,
+        else_branch,
+    } = &expr.kind
+    {
+        ViewNode::If {
+            cond: render_cond(cond),
+            then_branch: block_children(then_block),
+            else_branch: else_children(else_branch.as_deref()),
+        }
+    } else {
+        unreachable!("expr_into_if_node called on a non-If expression")
+    }
 }
 
 /// Normalizes a codegen backend's view name to the common Flux surface spelling
