@@ -527,7 +527,7 @@ impl Pipeline {
         // frame. Gather the descendants (children first, breadth-first) here.
         let extra_nodes = flatten_extra_nodes(&root, arena);
         let source_map = self.source_map();
-        let signal_meta = signal_meta_for(arena, closures);
+        let signal_meta = signal_meta_for(arena);
         let mut frame: InitFrame = Frame::init(
             &root,
             &extra_nodes,
@@ -555,7 +555,7 @@ impl Pipeline {
             .iter()
             .map(|(id, text)| (id, text.to_owned()))
             .collect();
-        let signal_meta = signal_meta_for(arena, closures);
+        let signal_meta = signal_meta_for(arena);
         // Set the ADR-0027 flag only when this frame actually carries metadata,
         // so hosts without the gate still read a valid (metadata-less) frame.
         let flags = if signal_meta.is_empty() {
@@ -599,41 +599,20 @@ impl Pipeline {
 /// non-empty metadata are emitted, keeping the frame compact when no node reads
 /// a signal.
 ///
-/// `closures` is the exact slice the frame's shared handler blob is built from
-/// (the same order `write_closures` concatenates), so each prop-thunk's
-/// `bytecode_offset`/`bytecode_len` can be set to its real position in that
-/// blob. Without this, the thunk `ClosureRef` ships with `bytecode_offset: 0`
-/// (the lowering default), and a host that slices the shared blob by offset —
-/// the Android host does — reads the *first* closure (a handler) instead of the
-/// thunk, producing a garbage program and an `INDEX_OUT_OF_BOUNDS` VM fault that
-/// falls back to the raw interpolation template (`{...}`). The iOS host keys
-/// thunks by inline bytecode + hash and is unaffected; see the parity note in
-/// `ShadowTreeReconciler.materializeProps`.
-fn signal_meta_for(arena: &IRArena, closures: &[flux_ir::ClosureIR]) -> Vec<NodeSignalMeta> {
-    // Map each closure's content hash to its byte offset/length within the
-    // concatenated blob, mirroring `write_closures` in `flux_ir_serde::frame`.
-    // Keyed by hash (the `ClosureRef` the thunk ships carries a hash, not an id).
-    let mut offset_of: std::collections::HashMap<u64, (u32, u16)> = Default::default();
-    let mut cursor: u32 = 0;
-    for closure in closures {
-        let hash = flux_ir_serde::hash_closure(&closure.bytecode, &closure.captured_signals);
-        offset_of.insert(hash, (cursor, closure.bytecode.len() as u16));
-        cursor += closure.bytecode.len() as u32;
-    }
+/// The prop-thunk `ClosureRef` ships its content `hash` but no `bytecode_offset`:
+/// hosts resolve thunk bytecode by hash from the frame's handler table (the
+/// shared blob is sliced per-handler by the host), so the two native hosts
+/// (iOS, Android) share one resolution rule and never drift (parity contract,
+/// Appendix F). Emitting a `bytecode_offset` here would force offset-based
+/// slicing and diverge from iOS.
+fn signal_meta_for(arena: &IRArena) -> Vec<NodeSignalMeta> {
     let mut metas = Vec::new();
     for id in arena.all_ids() {
         let deps = arena.signal_deps_of(id);
         if deps.is_empty() {
             continue;
         }
-        let mut thunk = arena.prop_thunk_of(id).cloned();
-        // Point the thunk at its real position in the shared blob.
-        if let Some(t) = thunk.as_mut() {
-            if let Some((off, len)) = offset_of.get(&t.hash) {
-                t.bytecode_offset = *off;
-                t.bytecode_len = *len;
-            }
-        }
+        let thunk = arena.prop_thunk_of(id).cloned();
         let layout = arena.prop_layout_of(id).to_vec();
         metas.push(NodeSignalMeta {
             node_id: id,

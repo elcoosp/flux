@@ -26,6 +26,25 @@ import java.lang.ref.WeakReference
 import dev.flux.host.FluxExecutor as HostExecutor
 
 /**
+ * Stable map key for a closure content hash.
+ *
+ * A Flux `ClosureRef.hash` is an 8-byte BLAKE3 digest carried as a Kotlin
+ * `ByteArray`. `ByteArray` has identity-based `hashCode()`/`equals()` on the
+ * JVM, so using it directly as a `HashMap` key misses on equal-content-but-
+ * distinct instances (the signal-meta thunk and the handler table carry the
+ * same hash bytes but as separate `ByteArray`s). We fold the eight bytes into a
+ * single `ULong`, which has value-based equality, mirroring how iOS keys thunk
+ * bytecode by `Data` (content-hashed). Both the insert (handler table) and the
+ * lookup (signal-meta thunk) go through this, so the hash is interpreted
+ * identically on both sides.
+ */
+private fun thunkKey(hash: ByteArray): ULong {
+    var acc = 0uL
+    for (b in hash) acc = (acc shl 8) or (b.toULong() and 0xFFu)
+    return acc
+}
+
+/**
  * The host render tree: a map of [ShadowNode]s keyed by id, plus the adapter
  * registry that translates IR nodes into native views.
  *
@@ -81,7 +100,7 @@ public class ShadowTree(
     // Lookup of prop-thunk bytecode by closure hash, sliced from the frame's
     // shared handler blob. Populated on every applied frame so a dirty node can
     // re-materialise its dynamic props against the live signal graph.
-    internal var thunkBlobs: Map<ByteArray, ByteArray> = emptyMap()
+    internal var thunkBlobs: Map<ULong, ByteArray> = emptyMap()
 
     // Reverse map from a prop-thunk's stable handler id to the node that owns it,
     // so a state-preserving Handler patch updating the thunk body can
@@ -194,16 +213,25 @@ public class ShadowTree(
         // FLAG_NODE_HAS_SIGNAL_DEPS; a Delta without it must NOT wipe the thunk
         // table, or interpolation breaks permanently after the first edit.
         signalMeta = if (!frame.fullTree && frame.signalMeta.isEmpty()) signalMeta else frame.signalMeta
+        // Thunk bytecode is resolved by content hash from the frame's handler
+        // table — every host slices the shared blob per-handler at the handler's
+        // own `ClosureRef` offset, then keys the result by hash (parity contract,
+        // Appendix F; mirrors `ShadowTreeReconciler.materializeProps` on iOS). We
+        // deliberately do NOT slice by `signalMeta.thunk.bytecodeOffset`: that
+        // would re-introduce offset-based resolution and diverge from iOS, which
+        // ignores the offset entirely and looks up by hash. The prop-thunk lives
+        // in the shared blob alongside the handlers, so it is reachable through
+        // the same handler table keyed by its content hash.
         val blob = frame.bytecodeBlob
-        val thunks = LinkedHashMap<ByteArray, ByteArray>()
+        val thunks = LinkedHashMap<ULong, ByteArray>()
         if (blob != null && blob.len > 0) {
-            for (meta in frame.signalMeta.values) {
-                val thunk = meta.thunk ?: continue
-                val start = thunk.bytecodeOffset.toInt()
-                val len = thunk.bytecodeLen.toInt()
+            for (handler in frame.handlers) {
+                val ref = handler.closure
+                val start = ref.bytecodeOffset.toInt()
+                val len = ref.bytecodeLen.toInt()
                 val absStart = blob.offset + start
-                if (start >= 0 && len >= 0 && absStart + len <= blob.data.size) {
-                    thunks[thunk.hash] = blob.data.copyOfRange(absStart, absStart + len)
+                if (start >= 0 && len > 0 && absStart + len <= blob.data.size) {
+                    thunks[thunkKey(ref.hash)] = blob.data.copyOfRange(absStart, absStart + len)
                 }
             }
         }
@@ -213,12 +241,12 @@ public class ShadowTree(
         // Handler patch can find the node to re-materialise. The delta frame
         // carries both `handlers` (id -> hash) and `signalMeta` (node -> thunk
         // hash), which we connect here.
-        val handlerHashToId = LinkedHashMap<ByteArray, UInt>()
-        for (h in frame.handlers) handlerHashToId[h.closure.hash] = h.handlerId
+        val handlerHashToId = LinkedHashMap<ULong, UInt>()
+        for (h in frame.handlers) handlerHashToId[thunkKey(h.closure.hash)] = h.handlerId
         val map = mutableMapOf<UInt, UInt>()
         for ((nid, meta) in frame.signalMeta) {
             val thunk = meta.thunk ?: continue
-            val hid = handlerHashToId[thunk.hash] ?: continue
+            val hid = handlerHashToId[thunkKey(thunk.hash)] ?: continue
             map[hid] = nid
         }
         // Merge (don't replace): a Delta frame carries its own `handlers` +
@@ -668,7 +696,7 @@ public class ShadowTree(
     ): Props {
         val meta = signalMeta[nodeId]
         val thunk = meta?.thunk
-        val bytecode = thunk?.let { thunkBlobs[it.hash] }
+        val bytecode = thunk?.let { thunkBlobs[thunkKey(it.hash)] }
         val host = executorRef as? HostExecutor
         val base: Props =
             if (meta != null && thunk != null && bytecode != null && host != null) {
