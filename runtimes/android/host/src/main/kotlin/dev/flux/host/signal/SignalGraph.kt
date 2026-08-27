@@ -42,15 +42,16 @@ public class SignalGraph : SignalStore {
     private val subscribers = LinkedHashMap<UInt, MutableSet<(FluxValue) -> Unit>>()
     private val pending = LinkedHashSet<UInt>()
     private val states = LinkedHashMap<UInt, CellState>()
+    private var nextCell: UInt = 1_000_000u
 
     /** Returns the current value of [id], or `null` when unbound. */
     override fun read(id: UInt): FluxValue? = values[id]
 
     /** Returns the reactive [CellState] of [id], defaulting to [CellState.Ready]. */
-    public fun cellState(id: UInt): CellState = states[id] ?: CellState.Ready
+    override public fun cellState(id: UInt): CellState = states[id] ?: CellState.Ready
 
     /** Marks [id] as [CellState.Pending] (an async-derived/resource cell went in flight). */
-    public fun markPending(id: UInt) {
+    override public fun markPending(id: UInt) {
         states[id] = CellState.Pending
     }
 
@@ -60,6 +61,21 @@ public class SignalGraph : SignalStore {
         message: String,
     ) {
         states[id] = CellState.Error
+    }
+
+    /** Allocates a fresh, unbound signal id for a new capability result cell (ADR-0045). */
+    override public fun allocateCell(): UInt {
+        nextCell += 1u
+        return nextCell
+    }
+
+    /** Resolves [id] to [value], marking it [CellState.Ready] (an async capability finished). */
+    override public fun resolveCell(
+        id: UInt,
+        value: FluxValue,
+    ) {
+        values[id] = value
+        states[id] = CellState.Ready
     }
 
     /** Writes [value] into [id], recording it for the next [flush]. */

@@ -1,7 +1,11 @@
 package dev.flux.host.vm
 
+import dev.flux.host.signal.CellState
+import dev.flux.host.vm.CapabilityRegistry
 import dev.flux.host.vm.FluxBytecodeVM
 import dev.flux.host.vm.FluxBytecodeVM.RunResult
+import dev.flux.host.vm.FluxValue
+import dev.flux.host.vm.InMemorySignals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -158,39 +162,65 @@ class FluxBytecodeVmTest {
     }
 
     /**
-     * First-class async (ADR-0044): `AWAIT` captures a continuation; `resume` re-enters
-     * the interpreter after the awaited future settles. Mirrors the Rust oracle's
-     * `await_resume` test and the Swift `AsyncSuspendResumeTests`.
+     * First-class async + unified capability bridge (ADR-0044 / ADR-0045): `CALL_CAP`
+     * stores a result-cell signal id in the result register; `AWAIT` parks only while
+     * that cell is `Pending`, and continues with the cell value (in `r0`) when `Ready`.
+     * Mirrors the Rust oracle's `await_resume` test and the Swift `AsyncSuspendResumeTests`.
      *
-     * Bytecode: LOAD_INT_CONST r0, 1 ; WRITE_SIGNAL 1, r0 ; AWAIT r0, r0 ;
-     * LOAD_INT_CONST r0, 42 ; WRITE_SIGNAL 2, r0 ; HALT.
+     * Scenario A (sync cap, (1,1) → signal 99, Ready): no suspension.
+     * Scenario B (async cap, (2,99) → fresh Pending cell): real Suspend + resolveCell + resume.
      */
     @Test
-    fun `await suspends then resumes to halt`() {
-        val awaitBytecode =
+    fun `sync capability does not suspend`() {
+        // CALL_CAP r2, (1,1), args=r0 ; AWAIT r0, r2 ; WRITE_SIGNAL 2, r0 ; HALT
+        val syncBytecode =
             byteArrayOf(
-                0xB0.toByte(), 0, 1, 0, 0, 0, 0, 0, 0, 0, // LOAD_INT_CONST r0, 1
-                0x11, 1, 0, 0, 0, 0, // WRITE_SIGNAL 1, r0
-                0xE0.toByte(), 0, 0, // AWAIT r0, r0
-                0xB0.toByte(), 0, 42, 0, 0, 0, 0, 0, 0, 0, // LOAD_INT_CONST r0, 42
+                0x90.toByte(), 2, 1, 0, 0, 0, 1, 0, 0, // CALL_CAP r2, (1,1), args=r0
+                0xE0.toByte(), 0, 2, // AWAIT r0, r2
                 0x11, 2, 0, 0, 0, 0, // WRITE_SIGNAL 2, r0
                 0x00, // HALT
             )
         val signals = InMemorySignals()
-        signals.write(1u, FluxValue.IntVal(0))
+        val payload = FluxValue.RecordVal(listOf(FluxValue.Field(0u.toUShort(), FluxValue.IntVal(42))))
 
-        val first = FluxBytecodeVM.runResumable(awaitBytecode, signals, FluxValue.NullVal)
-        assertTrue(first is RunResult.Suspended, "expected .suspended on first run")
+        val first = FluxBytecodeVM.runResumable(syncBytecode, signals, payload)
+        assertTrue(first is RunResult.Halt, "sync capability should reach HALT without suspending")
+        first as RunResult.Halt
+        assertEquals(FluxValue.IntVal(42), signals.read(99u), "capability must echo arg[0] into signal 99")
+        assertEquals(FluxValue.IntVal(99), first.outcome.registers[2], "result_reg must hold the cell id 99")
+        assertEquals(FluxValue.IntVal(42), signals.read(2u), "AWAIT on Ready cell must place the value in r0")
+    }
+
+    @Test
+    fun `async capability suspends then resumes to halt`() {
+        // CALL_CAP r2, (2,99), args=r0 ; AWAIT r0, r2 ; WRITE_SIGNAL 2, r0 ; HALT
+        val asyncBytecode =
+            byteArrayOf(
+                0x90.toByte(), 2, 2, 0, 0, 0, 99, 0, 0, // CALL_CAP r2, (2,99), args=r0
+                0xE0.toByte(), 0, 2, // AWAIT r0, r2
+                0x11, 2, 0, 0, 0, 0, // WRITE_SIGNAL 2, r0
+                0x00, // HALT
+            )
+        val signals = InMemorySignals()
+        val payload = FluxValue.RecordVal(listOf(FluxValue.Field(0u.toUShort(), FluxValue.IntVal(42))))
+
+        val first = FluxBytecodeVM.runResumable(asyncBytecode, signals, payload, capabilities = CapabilityRegistry.DEV)
+        assertTrue(first is RunResult.Suspended, "async capability should suspend")
         first as RunResult.Suspended
-        assertEquals(FluxValue.IntVal(1), signals.read(1u), "pre-await signal write must persist")
-        val future = first.state.registers[first.state.futureReg]
-        assertEquals(FluxValue.IntVal(1), future, "futureReg must point at the awaited handle")
+        val cellId =
+            when (val r = first.state.registers[2]) {
+                is FluxValue.IntVal -> r.value.toUInt()
+                else -> error("result_reg must hold the cell id")
+            }
+        assertTrue(cellId >= 1_000_000u, "async capability must allocate a fresh cell id")
+        assertEquals(CellState.Pending, signals.cellState(cellId), "cell must be Pending after async cap")
 
-        val resumed = FluxBytecodeVM.resume(first.state, signals, future)
-        assertTrue(resumed is RunResult.Halt, "expected .halt after resume")
+        signals.resolveCell(cellId, FluxValue.IntVal(7))
+        val resumed = FluxBytecodeVM.resume(first.state, signals, FluxValue.IntVal(7))
+        assertTrue(resumed is RunResult.Halt, "expected .halt after resolve+resume")
         resumed as RunResult.Halt
-        assertEquals(FluxValue.IntVal(42), signals.read(2u), "post-resume body must run after AWAIT")
-        assertTrue(resumed.outcome.signals.isNotEmpty(), "resume must report signal writes")
+        assertEquals(FluxValue.IntVal(7), signals.read(2u), "post-resume body must run with the resolved value")
+        assertTrue(resumed.outcome.signals.isNotEmpty())
     }
 
     /** v1 semantics preserved: a program without `AWAIT` runs straight to `HALT`. */

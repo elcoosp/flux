@@ -1,5 +1,7 @@
 package dev.flux.host.vm
 
+import dev.flux.host.signal.CellState
+
 /**
  * Control-flow result of executing one instruction.
  *
@@ -286,11 +288,10 @@ internal fun executeInstruction(
             if (impl == null) {
                 throw VmError(VmErrorKind.TYPE_MISMATCH, instr.offset)
             }
-            val result = impl.call(regs[argsReg], signals)
-            if (result == null) {
-                throw VmError(VmErrorKind.TYPE_MISMATCH, instr.offset)
-            }
-            regs[resultReg] = result
+            // Unified sync/async contract (ADR-0045): the impl returns the
+            // result-cell signal id; `resultReg` receives it.
+            val cellId = impl.call(regs[argsReg], signals)
+            regs[resultReg] = FluxValue.IntVal(cellId.toLong())
             StepResult.Proceed
         }
         Opcode.MATCH_TAG -> {
@@ -354,6 +355,25 @@ internal fun executeInstruction(
             StepResult.Proceed
         }
         Opcode.HALT -> StepResult.Proceed
-        Opcode.AWAIT -> StepResult.Suspend(nextIndex, instr.u8(1).toInt())
+        Opcode.AWAIT -> {
+            // Unified sync/async bridge (ADR-0045): `futureReg` holds the register
+            // containing the result-cell signal id returned by CALL_CAP. Park only
+            // while the cell is `Pending`; a `Ready` cell continues with its value in
+            // `r0` (one re-entry, no real park); an `Error` cell faults the handler.
+            val futureReg = instr.u8(1).toInt()
+            val cellId =
+                when (val r = regs[futureReg]) {
+                    is FluxValue.IntVal -> r.value.toUInt()
+                    else -> throw VmError(VmErrorKind.TYPE_MISMATCH, instr.offset)
+                }
+            when (signals.cellState(cellId)) {
+                CellState.Ready -> {
+                    regs[0] = signals.read(cellId) ?: FluxValue.NullVal
+                    StepResult.Proceed
+                }
+                CellState.Pending -> StepResult.Suspend(nextIndex, futureReg)
+                CellState.Error -> throw VmError(VmErrorKind.TYPE_MISMATCH, instr.offset)
+            }
+        }
     }
 }

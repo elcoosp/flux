@@ -215,7 +215,10 @@ class RuntimeFixesTest {
             CapabilityRegistry.fromEntries(
                 listOf(
                     CapabilityKey(2u, 5u.toUShort()) to
-                        CapabilityImpl { _args, _signals -> FluxValue.IntVal(42) },
+                        CapabilityImpl { _args, signals ->
+                            signals.write(42u, FluxValue.IntVal(42))
+                            42u
+                        },
                 ),
             )
         val out = FluxBytecodeVM.run(prog, InMemorySignals(), FluxValue.NullVal, capabilities = registry)

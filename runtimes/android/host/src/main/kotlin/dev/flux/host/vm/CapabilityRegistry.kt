@@ -7,30 +7,25 @@ import dev.flux.host.vm.FluxValue.StrVal
 import dev.flux.host.vm.VmErrorKind.TYPE_MISMATCH
 
 /**
- * A host capability implementation invoked by the `CALL_CAP` opcode (Appendix E §E.1).
+ * A host capability implementation invoked by the `CALL_CAP` opcode (Appendix E §E.1),
+ * unified sync/async bridge (ADR-0045).
  *
- * A [call] receives the resolved call arguments and returns the value the VM
- * should place in the instruction's result register. Capabilities model
- * side-effecting or platform-only operations (camera, storage, router
- * navigation, …) that the pure bytecode VM cannot perform itself. The same
- * [CapabilityImpl] signature is used by dev mode (which forwards to the dev
- * server over WebSocket RPC) and release mode (which calls a native impl);
- * only the routing table differs.
+ * [call] receives the call arguments and a mutable view of the live signal store so
+ * it can create a result cell. It returns the **signal id** of that result cell —
+ * never the value directly:
+ * - a **synchronous** method writes `Ready(value)` into the cell and returns its id;
+ * - an **asynchronous** method creates the cell (state `Pending`) and returns its id
+ *   immediately; the host resolves it later via [SignalStore.resolveCell], which
+ * resumes any awaiting handler.
  *
- * Current contract (sync capabilities, ADR-0045): [call] returns a settled
- * [FluxValue] for its method. Async capabilities (camera, permissions, network)
- * are a follow-up on the same `(capId, methodId)` table that returns a
- * result-cell signal id instead; the call sites in [FluxBytecodeVM] are
- * unchanged. Implementations must not capture shared mutable state — they
- * receive the per-call [SignalStore] and any persisted state through the
- * [CapabilityStore] injected into the registry.
+ * One signature serves both shapes; the VM never branches on sync-vs-async.
  */
 public fun interface CapabilityImpl {
-    /** Evaluates the capability against [args] and [signals]. */
+    /** Evaluates the capability against [args] and [signals]; returns the result-cell id. */
     public fun call(
         args: FluxValue,
         signals: SignalStore,
-    ): FluxValue?
+    ): UInt
 }
 
 /**
@@ -106,9 +101,9 @@ public class CapabilityRegistry(
                                             a.fields[0].value
                                         }
                                     else -> null
-                                } ?: return@CapabilityImpl null
+                                } ?: throw VmError(TYPE_MISMATCH, 0u)
                             signals.write(99u, arg)
-                            arg
+                            99u
                         },
                 ),
             )
@@ -138,28 +133,28 @@ public class CapabilityRegistry(
                     ) {
                         this[CapabilityKey(capId, methodId)] = impl
                     }
-                    // Camera.take (1,1): oracle-parity echo into signal 99.
+                    // Camera.take (1,1): oracle-parity echo into signal 99; return its id.
                     put(1u, 1u.toUShort()) { args, signals ->
                         val arg =
                             when (val a = args) {
                                 is RecordVal -> a.fields.firstOrNull()?.value
                                 else -> null
-                            } ?: return@put null
+                            } ?: throw VmError(TYPE_MISMATCH, 0u)
                         signals.write(99u, arg)
-                        arg
+                        99u
                     }
-                    // Camera.startPreview (1,2): record preview flag in signal 96.
+                    // Camera.startPreview (1,2): record preview flag in signal 96; return its id.
                     put(1u, 2u.toUShort()) { _args, signals ->
                         signals.write(96u, FluxValue.BoolVal(true))
-                        NullVal
+                        96u
                     }
-                    // Camera.stopPreview (1,3): clear preview flag.
+                    // Camera.stopPreview (1,3): clear preview flag; return its id.
                     put(1u, 3u.toUShort()) { _args, signals ->
                         signals.write(96u, FluxValue.BoolVal(false))
-                        NullVal
+                        96u
                     }
-                    // Storage.set(key, value) (2,1): persist into the store.
-                    put(2u, 1u.toUShort()) { args, _signals ->
+                    // Storage.set(key, value) (2,1): persist into the store, expose via signal 95.
+                    put(2u, 1u.toUShort()) { args, signals ->
                         val keyId =
                             when (val rec = args) {
                                 is RecordVal ->
@@ -167,17 +162,18 @@ public class CapabilityRegistry(
                                         if (first is StrVal) first.id else null
                                     }
                                 else -> null
-                            } ?: return@put null
+                            } ?: throw VmError(TYPE_MISMATCH, 0u)
                         val value =
                             when (val rec = args) {
                                 is RecordVal -> rec.fields.getOrNull(1)?.value
                                 else -> null
-                            } ?: return@put null
+                            } ?: throw VmError(TYPE_MISMATCH, 0u)
                         store.putStorage(keyId, value)
-                        NullVal
+                        signals.write(95u, value)
+                        95u
                     }
-                    // Storage.get(key) (2,2): read the persisted value.
-                    put(2u, 2u.toUShort()) { args, _signals ->
+                    // Storage.get(key) (2,2): read the persisted value, expose via signal 95.
+                    put(2u, 2u.toUShort()) { args, signals ->
                         val keyId =
                             when (val rec = args) {
                                 is RecordVal ->
@@ -185,11 +181,13 @@ public class CapabilityRegistry(
                                         if (first is StrVal) first.id else null
                                     }
                                 else -> null
-                            } ?: return@put null
-                        store.getStorage(keyId) ?: NullVal
+                            } ?: throw VmError(TYPE_MISMATCH, 0u)
+                        val value = store.getStorage(keyId) ?: FluxValue.NullVal
+                        signals.write(95u, value)
+                        95u
                     }
-                    // Storage.delete(key) (2,3): clear the persisted value.
-                    put(2u, 3u.toUShort()) { args, _signals ->
+                    // Storage.delete(key) (2,3): clear the persisted value, expose `null` via signal 95.
+                    put(2u, 3u.toUShort()) { args, signals ->
                         val keyId =
                             when (val rec = args) {
                                 is RecordVal ->
@@ -197,16 +195,25 @@ public class CapabilityRegistry(
                                         if (first is StrVal) first.id else null
                                     }
                                 else -> null
-                            } ?: return@put null
+                            } ?: throw VmError(TYPE_MISMATCH, 0u)
                         store.putStorage(keyId, null)
-                        NullVal
+                        signals.write(95u, FluxValue.NullVal)
+                        95u
                     }
-                    // Router.navigate(target) (3,1): record target in signal 97.
+                    // Router.navigate(target) (3,1): record target in signal 97; return its id.
                     put(3u, 1u.toUShort()) { args, signals ->
                         signals.write(97u, args)
-                        NullVal
+                        97u
                     }
-                },
+                    // Reference async capability (2,99): allocate a fresh Pending cell, return its id
+                    // immediately (ADR-0045). The host resolves it later via SignalStore.resolveCell,
+                    // resuming the awaiting handler. Mirrors the oracle's `async_deferred`.
+                    put(2u, 99u.toUShort()) { _args, signals ->
+                        val id = signals.allocateCell()
+                        signals.markPending(id)
+                        id
+                    }
+                    },
                 store,
             )
             }

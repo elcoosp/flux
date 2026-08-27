@@ -7,9 +7,12 @@ import dev.flux.host.signal.SignalGraph
 import dev.flux.host.transport.FluxTransport
 import dev.flux.host.vm.CapabilityRegistry
 import dev.flux.host.vm.FluxBytecodeVM
+import dev.flux.host.vm.FluxValue
 import dev.flux.host.vm.StringResolver
 import dev.flux.host.vm.TableStringResolver
+import dev.flux.host.vm.VmErrorKind
 import dev.flux.host.vm.VmResult
+import dev.flux.host.signal.CellState
 import dev.flux.host.wire.Frame
 import dev.flux.host.wire.FrameDeserializer
 import dev.flux.host.wire.STRING_ID_CANONICAL_CEILING
@@ -297,12 +300,30 @@ public class FluxExecutor(
                     return
                 }
                 is RunResult.Suspended -> {
-                    val future = step.state.registers[step.state.futureReg]
+                    // Unified sync/async bridge (ADR-0045): `futureReg` holds the register
+                    // containing the result-cell signal id returned by CALL_CAP. If the cell
+                    // is `Ready` (sync cap) its value is already settled; if `Pending` (async
+                    // cap) the executor resolves the real future through `asyncResolver`,
+                    // settles the cell, then resumes. `Error` cells resolve to `null`.
+                    val cellId =
+                        when (val r = step.state.registers[step.state.futureReg]) {
+                            is FluxValue.IntVal -> r.value.toUInt()
+                            else -> throw dev.flux.host.vm.VmError(VmErrorKind.TYPE_MISMATCH, step.state.resumeIndex.toUInt())
+                        }
                     val resolved =
-                        try {
-                            asyncResolver.resolve(future)
-                        } catch (e: Exception) {
-                            future
+                        when (signals.cellState(cellId)) {
+                            CellState.Ready -> signals.read(cellId) ?: FluxValue.NullVal
+                            CellState.Pending -> {
+                                val settled =
+                                    try {
+                                        asyncResolver.resolve(step.state.registers[step.state.futureReg])
+                                    } catch (e: Exception) {
+                                        FluxValue.NullVal
+                                    }
+                                signals.resolveCell(cellId, settled)
+                                settled
+                            }
+                            CellState.Error -> FluxValue.NullVal
                         }
                     current =
                         FluxBytecodeVM.resume(
