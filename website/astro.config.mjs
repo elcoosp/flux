@@ -8,13 +8,12 @@ import { fluxGrammar } from './src/flux-grammar.mjs';
 
 // Flux documentation site.
 //
-// i18n is Starlight-native (no Lingui/ICU): chrome strings come from the built-in
-// dictionaries (zero effort), sidebar labels use plain `label` strings with a
-// `translations` record per locale (Starlight 0.39+ API), and prose is authored
-// per-locale under `src/content/docs/{en,es}`. Custom UI strings (trace-player
-// buttons, frame-inspector headers) live in `src/content/i18n/{en,es}.json` and
-// are read by the React island via `Astro.currentLocale`.
+// Single English site (dropped the es/fr locales and the ADR ingest). The ADRs
+// live in the repo under docs/adr and are linked from the site rather than
+// copied in. Authoring is plain English under src/content/docs.
 export default defineConfig({
+  // Required by the sitemap integration; replace with the real deployment URL.
+  site: 'https://flux-lang.dev',
   // Register the Flux language so ```flux code blocks highlight across the
   // markdown pipeline (astro-expressive-code reads `markdown.shikiConfig.langs`).
   markdown: {
@@ -26,40 +25,38 @@ export default defineConfig({
     starlight({
       title: 'Flux',
       description:
-        'Flux — a write-once UI language for native iOS and Android. Specs, ADRs, concepts, and an honest recorded-dispatch playground.',
-      defaultLocale: 'root',
-      locales: {
-        root: { label: 'English', lang: 'en' },
-        es: { label: 'Español', lang: 'es' },
-        fr: { label: 'Français', lang: 'fr' },
-      },
-      // Custom component overrides (see src/components/).
-      components: {
-        Hero: './src/components/Hero.astro',
-      },
-      // The sidebar uses BOTH mechanisms documented in the design:
-      //  - autogenerate groups (labels derived from each page's frontmatter `title`)
-      //  - manual items (group headers / index links) with `translations` for locale variants.
+        'Flux — a write-once UI language for native iOS and Android. Get it running in five minutes.',
+      // Manual sidebar groups keep the most useful entry points on top and let
+      // the directory contents autogenerate beneath each header.
       sidebar: [
         {
-          label: 'ADRs',
-          translations: { es: 'ADR', fr: 'ADR' },
-          items: [{ autogenerate: { directory: 'adr' } }],
+          label: 'Get started',
+          items: [
+            { label: 'Introduction', link: '/' },
+            { label: 'Quickstart', link: '/guides/quickstart/' },
+            { label: 'The Counter example', link: '/guides/counter-example/' },
+          ],
         },
         {
           label: 'Concepts',
-          translations: { es: 'Conceptos', fr: 'Concepts' },
           items: [{ autogenerate: { directory: 'concepts' } }],
         },
         {
           label: 'Guides',
-          translations: { es: 'Guías', fr: 'Guides' },
           items: [{ autogenerate: { directory: 'guides' } }],
         },
         {
           label: 'Reference',
-          translations: { es: 'Referencia', fr: 'Référence' },
           items: [{ autogenerate: { directory: 'reference' } }],
+        },
+        {
+          label: 'Architecture decisions',
+          items: [
+            {
+              label: 'Read the ADRs (in-repo)',
+              link: 'https://github.com/flux-lang/flux/tree/main/docs/adr',
+            },
+          ],
         },
       ],
       customCss: ['./src/styles/custom.css'],

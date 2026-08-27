@@ -1,33 +1,47 @@
 ---
-title: Conformance Status
-description: CI-generated reconcile-trace conformance badge across the Swift and Kotlin hosts (ADR-0027).
+title: Project Status
+description: What is working today in Flux — the dev hot-reload path is real and runnable; release codegen and parity tooling are progressing.
 ---
 
 import StatusBadge from '../../components/StatusBadge.astro';
 
-This page is the home of the **CI-generated conformance badge**. A CI job replays
-the `reconcile-trace-format.md` golden scenarios against both hosts and emits a
-badge here confirming Swift ≡ Kotlin byte-identical traces.
+This page tracks what you can actually run today versus what is still in flight.
+
+<StatusBadge status="pass" detail="Dev hot-reload: parse → type-check → lower → diff → patch over WebSocket" />
+
+## Working today
+
+- **Dev server (`flux dev`)** — binds a WebSocket on `:7331` and an HTTP asset
+  server on `:7332` (with a `/health` probe). Saves are diffed and shipped as
+  binary patches to the host. Verified live against `examples/counter`.
+- **Host apps (iOS & Android)** — precompiled native hosts that connect to the dev
+  server, run the embedded bytecode VM, and reconcile a shadow tree of native views.
+  Default connection is `ws://127.0.0.1:7331`.
+- **CLI (`flux init` / `flux dev` / `flux build` / `flux doc`)** — scaffold,
+  serve, and codegen projects.
+- **Release codegen (`flux build ios` / `flux build android`)** — lowers `.flux` to
+  idiomatic SwiftUI / Jetpack Compose source (see the
+  [Counter example](/guides/counter-example/)).
+
+## In progress
+
+- **Host↔server reconcile parity gate (ADR-0027)** — the Swift and Kotlin hosts
+  must produce byte-identical reconcile traces. The golden scenarios
+  (`counter_1000`, `noop_dispatch`, `pure_subtree`, `cond_flip`,
+  `unrelated_signal`) are defined; the CI badge below flips to green when the
+  `flux-parity` tool runs them both and they match.
 
 <StatusBadge status="pending" detail="Swift ≡ Kotlin reconcile parity (ADR-0027)" />
 
-## What is being checked
+## What "state" means here
 
-| Scenario | Assertion |
-|---|---|
-| `counter_1000` | 1,000-node tree, one `Text` reads signal 1 → `dirty` = exactly that Text; 1 update, 0 builds |
-| `noop_dispatch` | handler writes signal 99, nothing reads it → `dirty: []`, all deltas zero |
-| `pure_subtree` | `@pure` subtree; sibling signal written → zero events inside the subtree |
-| `cond_flip` | `If` condition flips → build+detach = branch child counts; exactly 1 `setchildren`; mount/cleanup once each |
-| `unrelated_signal` | signal written, in no node's deps → zero update/build/detach |
+State is [host-authoritative](/concepts/host-authoritative-state/): the server ships
+structure and deltas, the host owns the signal graph. That is why a 1,000-node tree
+costs **one update** when you tap a counter bound to a single signal — independent
+of tree size.
 
-The general rule (from `reconcile-counters-and-budgets.md`): **all counters after
-a dispatch are bounded by `|dependents[S]|` + structural-diff size — never by tree
-size.**
+## Architecture decisions
 
-## Current state
-
-Until the runtime `trace-dump` feature (owned by FA-ANDROID / FLUX-023) lands,
-this badge is `PENDING`. The homepage playground already replays a hand-authored
-fixture trace matching the `counter_1000` shape so the documented behavior is
-demonstrable today.
+Every non-obvious choice is recorded as an ADR in the repo under
+[`docs/adr`](https://github.com/flux-lang/flux/tree/main/docs/adr). They are not
+copied into this site to keep it fast and focused on getting you running.

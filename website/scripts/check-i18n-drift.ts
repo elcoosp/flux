@@ -1,17 +1,12 @@
 /**
  * check-i18n-drift.ts
  *
- * Fails the build if any English doc slug under `src/content/docs/en` lacks a
- * counterpart in every other locale (currently `es`, `fr`). Content-only pages
- * must ship in all locales so the site never serves an untranslated page behind
- * the language switcher.
+ * The site is currently authored in a single (English) locale, so there is no
+ * translation parity to enforce. This script is kept as a no-op safety net: if a
+ * future locale is added under `src/content/docs/<locale>`, re-enable the parity
+ * check in `findMissingTranslations()` and wire it into `pnpm build`.
  *
- * The ADR directory (`en/adr`) is an exception: ADRs are ingested verbatim
- * from the repo and are English-only source-of-truth documents. Other-locale
- * readers get the English ADR with Starlight's built-in untranslated-content
- * notice.
- *
- * Run with: `pnpm check:i18n` (also invoked during `pnpm build` after ingest).
+ * Run with: `pnpm check:i18n` (invoked during `pnpm build` if configured).
  */
 import { readdir } from 'node:fs/promises';
 import { join, dirname, relative, extname } from 'node:path';
@@ -20,14 +15,10 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const docsDir = join(__dirname, '..', 'src', 'content', 'docs');
 
-/** Locales that must mirror every translatable EN page. */
-const TRANSLATION_LOCALES = ['es', 'fr'];
+/** Locales that must mirror every EN page (currently none — single locale). */
+const TRANSLATION_LOCALES: string[] = [];
 
-/** Directories excluded from the parity requirement (English-only by design). */
-const EXEMPT_DIRS = new Set(['adr']);
-
-/** Returns the slug-relative set of doc paths (without extension) for a locale.
- * An empty `locale` refers to the root (default English) content directory. */
+/** Returns the slug-relative set of doc paths (without extension) for a locale. */
 async function slugSet(locale: string): Promise<Set<string>> {
   const localeDir = locale ? join(docsDir, locale) : docsDir;
   const slugs = new Set<string>();
@@ -52,21 +43,13 @@ async function slugSet(locale: string): Promise<Set<string>> {
   return slugs;
 }
 
-/**
- * Verifies that every translatable EN doc exists in all translation locales.
- * Returns a map of locale -> missing slug list (empty when clean).
- */
+/** Verifies that every translatable EN doc exists in all translation locales. */
 export async function findMissingTranslations(): Promise<Record<string, string[]>> {
   const en = await slugSet('');
   const result: Record<string, string[]> = {};
   for (const locale of TRANSLATION_LOCALES) {
     const target = await slugSet(locale);
-    const missing: string[] = [];
-    for (const slug of en) {
-      const topSegment = slug.split('/')[0] ?? '';
-      if (EXEMPT_DIRS.has(topSegment)) continue;
-      if (!target.has(slug)) missing.push(slug);
-    }
+    const missing = [...en].filter((slug) => !target.has(slug));
     result[locale] = missing;
   }
   return result;
@@ -75,27 +58,17 @@ export async function findMissingTranslations(): Promise<Record<string, string[]
 const isMain =
   process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (isMain) {
-  try {
-    const missingByLocale = await findMissingTranslations();
-    const localesWithGaps = Object.entries(missingByLocale).filter(
-      ([, slugs]) => slugs.length > 0,
-    );
-    if (localesWithGaps.length > 0) {
-      console.error('i18n drift detected — missing translations:');
-      for (const [locale, slugs] of localesWithGaps) {
-        console.error(`  [${locale}] ${slugs.length} missing:`);
-        for (const slug of slugs) console.error(`    - ${locale}/${slug}`);
-      }
-      console.error(
-        '\nTranslate the missing pages or add them under src/content/docs/<locale>.',
-      );
-      process.exit(1);
+  const missingByLocale = await findMissingTranslations();
+  const localesWithGaps = Object.entries(missingByLocale).filter(
+    ([, slugs]) => slugs.length > 0,
+  );
+  if (localesWithGaps.length > 0) {
+    console.error('i18n drift detected — missing translations:');
+    for (const [locale, slugs] of localesWithGaps) {
+      console.error(`  [${locale}] ${slugs.length} missing:`);
+      for (const slug of slugs) console.error(`    - ${locale}/${slug}`);
     }
-    console.log(
-      `check-i18n-drift: EN/${TRANSLATION_LOCALES.join('/')} parity OK (ADR mirror exempt).`,
-    );
-  } catch (err) {
-    console.error(err instanceof Error ? err.message : err);
     process.exit(1);
   }
+  console.log('check-i18n-drift: single-locale site — nothing to verify.');
 }

@@ -1,0 +1,144 @@
+---
+title: Quickstart
+description: Get a Flux counter running on the dev hot-reload path on iOS or Android in five minutes.
+---
+
+This guide takes you from a clean checkout to a live, hot-reloading Flux UI on a
+real device or simulator. Every command below has been run against the repo as
+shipped.
+
+## What you need
+
+| Tool | Why | Check |
+|---|---|---|
+| Rust toolchain | Builds the `flux` CLI | `cargo --version` (1.85+) |
+| Xcode 16+ / XcodeGen | Runs the iOS host app | `xcodegen version`, `xcodebuild -version` |
+| Android Studio + JDK 17+ | Runs the Android host app | `./gradlew --version` from the repo root |
+| Node.js 22+ & pnpm | (Optional) build this docs site | `pnpm --version` |
+
+You do **not** need a web browser to run Flux — the UI renders natively on the
+host app, driven by the dev server over a WebSocket.
+
+## 1. Build the CLI
+
+From the repo root:
+
+```bash
+cargo build --bin flux
+```
+
+This produces `target/debug/flux`. (Use `cargo build --release --bin flux` for a
+faster binary.)
+
+## 2. Scaffold a project
+
+```bash
+flux init myapp
+cd myapp
+```
+
+`flux init` writes three files into `myapp/`:
+
+- `main.flux` — an entry `Hello` component with a stateful counter.
+- `flux.toml` — project config (name, entry, dev ports `7331`/`7332`).
+- `.fluxignore` — build output and VCS noise.
+
+You can ignore the scaffold and use the repo's `examples/counter/` instead — it is
+the same shape and is what the rest of these docs reference.
+
+## 3. Start the dev server
+
+```bash
+flux dev
+```
+
+You will see:
+
+```
+Listening on ws://127.0.0.1:7331
+```
+
+The dev server:
+
+- parses and type-checks every `.flux` file,
+- lowers to the Reactive Tree IR,
+- binds a WebSocket on `:7331` (the patch channel) and an HTTP asset server on
+  `:7332` (with a `/health` probe).
+
+Verify it is up (in another shell):
+
+```bash
+curl http://127.0.0.1:7332/health   # -> ok
+```
+
+Edit `main.flux` and save — the server diffs the tree and ships a binary patch
+over the socket. No restart required.
+
+> **Physical device?** Pass `--ws-host 0.0.0.0` and point the host app at your
+> machine's LAN IP, e.g. `ws://192.168.1.42:7331`. The host apps default to
+> `ws://127.0.0.1:7331` (perfect for a simulator/emulator on the same machine).
+
+## 4. Run the host app
+
+The host app is precompiled native code that connects to the dev server and
+renders the IR it receives. Pick your platform.
+
+### iOS
+
+The host project is generated with XcodeGen (a prerequisite: `brew install xcodegen`).
+
+```bash
+# from the repo root
+xcodegen generate            # writes runtimes/ios/FluxApp.xcworkspace
+open runtimes/ios/FluxApp.xcworkspace
+```
+
+In Xcode, pick a simulator (or a tethered device) and press **Run**. The app
+connects to `ws://127.0.0.1:7331` and renders your `Hello` component. Tap
+**Increment** — the label updates live, and editing `main.flux` hot-reloads the
+tree.
+
+### Android
+
+```bash
+# from the repo root
+./gradlew :runtimes:android:app:installDebug   # installs the host on a connected
+                                               # emulator or device
+```
+
+Launch **Flux** from the launcher. It connects to `ws://127.0.0.1:7331` (or the
+LAN IP you set in `runtimes/android/app/.../strings.xml` for a physical device)
+and renders the IR. Tap **Increment** to see hot reload in action.
+
+## 5. Make a change (hot reload)
+
+Open `myapp/main.flux` and change the `Column` gap or the `Text` label, then save.
+The dev server ships a patch and the host updates in place — you never leave the
+running app.
+
+A handler body edit is typically a few hundred bytes on the wire, because props and
+closures are content-addressed (BLAKE3) and cached after the first `Init` frame.
+
+## 6. Build a native release (optional)
+
+When you want real SwiftUI / Jetpack Compose instead of the dev patch path:
+
+```bash
+flux build ios       # -> platforms/ios/Generated/main.swift
+flux build android   # -> platforms/android/Generated/main.kt
+```
+
+`flux build` lowers your `.flux` to idiomatic native source. If `xcodebuild` or
+`gradle` is present it suggests the next build step; otherwise it emits the
+generated sources for you to compile. See the
+[Counter example](/guides/counter-example/) for the exact Swift and Kotlin output
+for the counter.
+
+## Next steps
+
+- Walk the [Counter example](/guides/counter-example/) end to end, including the
+  release codegen.
+- Understand [Dev vs Release](/concepts/dev-vs-release/) and why Flux has two
+  execution modes.
+- Dig into [The Wire](/concepts/the-wire/) for the binary protocol, or the
+  [VM Instruction Set](/reference/isa/) reference.

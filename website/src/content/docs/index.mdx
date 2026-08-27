@@ -1,24 +1,23 @@
 ---
 title: Flux
-description: Flux — a write-once UI language for native iOS and Android. Specifications, ADRs, concepts, and an honest recorded-dispatch playground.
+description: Flux — a write-once UI language for native iOS and Android. Get it running on your machine in five minutes.
 template: splash
 hero:
   tagline: Write once. Run native on iOS and Android.
   actions:
-    - text: Read the concepts
-      link: /concepts/the-wire/
+    - text: Quickstart
+      link: /guides/quickstart/
       icon: right-arrow
-    - text: Try the playground
-      link: /#playground
+    - text: See the Counter
+      link: /guides/counter-example/
       icon: rocket
       variant: minimal
 ---
 
-import { Card, CardGrid, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import { Card, CardGrid, Steps } from '@astrojs/starlight/components';
 import DispatchTracePlayer from '../../components/DispatchTracePlayer.tsx';
 import FrameInspector from '../../components/FrameInspector.astro';
 import ViewNodeTree from '../../components/ViewNodeTree.astro';
-import StatusBadge from '../../components/StatusBadge.astro';
 import { getTranslation } from '../../components/i18n-helper';
 
 export const i18n = getTranslation('en');
@@ -26,37 +25,57 @@ export const counterHex = (await import('../../assets/traces/counter-init.hex?ra
 export const counterSrc = `component Counter {
   state count: Int = 0
 
-  Column(gap: 12) {
-    Text("Count: {count}")
-    Button(text: "Increment", onClick: {
-      count = count + 1
-    })
+  Column(gap: 8.0) {
+    Text(text: "tapped {count} times")
+    Button(text: "Increment", onClick: fn() { count = count + 1 })
   }
 }`;
 export const counterTree = (await import('../../assets/traces/counter-init-tree.json')).default;
 
 <CardGrid stagger>
-  <Card title="Single source of truth" icon="document">
-    Author your UI once in `.flux`. The dev server lowers it to a Reactive Tree
-    IR, diffs it, and ships binary patches over WebSocket to a precompiled host.
+  <Card title="One language, two native apps" icon="document">
+    Author your UI once in `.flux`. In dev, a precompiled host app receives
+    binary patches over WebSocket — no recompile. In release, the same IR is
+    codegen'd to SwiftUI and Jetpack Compose. No webview, no bridge tax.
   </Card>
-  <Card title="Native on both platforms" icon="laptop">
-    The same IR is codegen'd to idiomatic SwiftUI and Jetpack Compose in release
-    builds — no webview, no bridge tax.
-  </Card>
-  <Card title="Spec-driven" icon="open-book">
-    Read the machine-checkable specification and the Architecture Decision Records
-    that justify every non-obvious choice.
+  <Card title="Live hot reload" icon="rocket">
+    Save a `.flux` file and the dev server parses, type-checks, lowers, diffs,
+    and ships a patch in milliseconds. The on-device tree updates in place.
   </Card>
   <Card title="Honest by design" icon="puzzle">
-    Flux cannot compile to the web. The "playground" below replays a *recorded*
-    dispatch, not a live compile.
+    Flux does not compile to the web. The playground below replays a *recorded*
+    dispatch from a real test run so you can see exactly what happens on a tap.
+  </Card>
+  <Card title="Spec-driven" icon="open-book">
+    Every non-obvious choice is justified in an Architecture Decision Record.
+    Read them in the repo — linked from the sidebar — not buried in the site.
   </Card>
 </CardGrid>
 
-<StatusBadge status="pending" detail="Reconcile parity: Swift ≡ Kotlin (ADR-0027)" />
+## Get it running in 5 minutes
 
-## The honest playground
+```bash
+# 1. Build the CLI
+cargo build --bin flux            # produces target/debug/flux
+
+# 2. Scaffold a project
+flux init myapp && cd myapp
+
+# 3. Start the dev server (WebSocket on :7331, HTTP assets on :7332)
+flux dev
+
+# 4. Open the host app on iOS or Android and point it at ws://127.0.0.1:7331
+```
+
+The full walkthrough — including how to build and run the iOS and Android host
+apps — is in the [Quickstart](/guides/quickstart/).
+
+## See a tap become pixels
+
+This is the canonical Flux counter, recorded from a real dispatch. Step through
+the trace: the `Button` tap runs its handler in the host VM, writes the `count`
+signal, and only the `Text` node re-renders — the `Column` and `Button` are left
+untouched.
 
 <DispatchTracePlayer
   client:visible
@@ -75,46 +94,18 @@ export const counterTree = (await import('../../assets/traces/counter-init-tree.
 1. **Dispatch** — a `Button` tap evaluates its handler closure in the host VM,
    writing one or more signals (e.g. `count = count + 1`).
 
-2. **Signals** — the VM reports the written signal ids. Per ADR-0027 they are
-   sorted ascending and emitted as a `signals` trace event.
+2. **Signals** — the VM reports the written signal ids, sorted ascending.
 
 3. **Dirty set** — the host intersects the written signals with each node's
-   `signal_deps` (Phase 2) or re-applies cheaply (Phase 1), emitting a `dirty`
-   list in `(depth asc, id asc)` order.
+   `signal_deps`, emitting a `dirty` list in `(depth asc, id asc)` order.
 
-4. **Update** — only the dirty nodes re-materialize their props (≤ 2
-   materializations, on genuine change) and fire `update`. Clean siblings are
-   untouched — `skip_unchanged`.
+4. **Update** — only the dirty nodes re-materialize their props and fire
+   `update`. Clean siblings are untouched.
 
 5. **step_end** — cumulative counters close the step: `built`, `updated`,
    `skipped_unchanged`, `detached`, `prop_materializations`.
 
 </Steps>
 
-<Tabs>
-  <TabItem label="Swift (release)">
-    ```swift
-    struct Counter: View {
-      @State private var count: Int = 0
-      var body: some View {
-        VStack(spacing: 12) {
-          Text("Count: \\(count)")
-          Button("Increment") { count += 1 }
-        }
-      }
-    }
-    ```
-  </TabItem>
-  <TabItem label="Kotlin (release)">
-    ```kotlin
-    @Composable
-    fun Counter() {
-      var count by remember { mutableStateOf(0) }
-      Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Count: $count")
-        Button(onClick = { count += 1 }) { Text("Increment") }
-      }
-    }
-    ```
-  </TabItem>
-</Tabs>
+On release builds this same component is codegen'd to native code — see the
+[Counter example](/guides/counter-example/) for both the Swift and Kotlin output.

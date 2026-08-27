@@ -6,11 +6,10 @@
   "scripts": {
     "dev": "astro dev",
     "start": "astro dev",
-    "build": "pnpm run ingest && astro build && pnpm run check:i18n",
+    "build": "astro build",
     "preview": "astro preview",
     "astro": "astro",
     "check": "astro check",
-    "ingest": "tsx scripts/ingest-adrs.ts",
     "check:i18n": "tsx scripts/check-i18n-drift.ts",
     "make:fixtures": "tsx scripts/make-fixtures.ts"
   },
