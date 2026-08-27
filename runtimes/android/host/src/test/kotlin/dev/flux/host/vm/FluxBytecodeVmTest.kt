@@ -175,9 +175,24 @@ class FluxBytecodeVmTest {
         // CALL_CAP r2, (1,1), args=r0 ; AWAIT r0, r2 ; WRITE_SIGNAL 2, r0 ; HALT
         val syncBytecode =
             byteArrayOf(
-                0x90.toByte(), 2, 1, 0, 0, 0, 1, 0, 0, // CALL_CAP r2, (1,1), args=r0
-                0xE0.toByte(), 0, 2, // AWAIT r0, r2
-                0x11, 2, 0, 0, 0, 0, // WRITE_SIGNAL 2, r0
+                0x90.toByte(),
+                2,
+                1,
+                0,
+                0,
+                0,
+                1,
+                0,
+                0, // CALL_CAP r2, (1,1), args=r0
+                0xE0.toByte(),
+                0,
+                2, // AWAIT r0, r2
+                0x11,
+                2,
+                0,
+                0,
+                0,
+                0, // WRITE_SIGNAL 2, r0
                 0x00, // HALT
             )
         val signals = InMemorySignals()
@@ -196,9 +211,24 @@ class FluxBytecodeVmTest {
         // CALL_CAP r2, (2,99), args=r0 ; AWAIT r0, r2 ; WRITE_SIGNAL 2, r0 ; HALT
         val asyncBytecode =
             byteArrayOf(
-                0x90.toByte(), 2, 2, 0, 0, 0, 99, 0, 0, // CALL_CAP r2, (2,99), args=r0
-                0xE0.toByte(), 0, 2, // AWAIT r0, r2
-                0x11, 2, 0, 0, 0, 0, // WRITE_SIGNAL 2, r0
+                0x90.toByte(),
+                2,
+                2,
+                0,
+                0,
+                0,
+                99,
+                0,
+                0, // CALL_CAP r2, (2,99), args=r0
+                0xE0.toByte(),
+                0,
+                2, // AWAIT r0, r2
+                0x11,
+                2,
+                0,
+                0,
+                0,
+                0, // WRITE_SIGNAL 2, r0
                 0x00, // HALT
             )
         val signals = InMemorySignals()
@@ -228,8 +258,22 @@ class FluxBytecodeVmTest {
     fun `no await runs straight to halt`() {
         val plain =
             byteArrayOf(
-                0xB0.toByte(), 0, 42, 0, 0, 0, 0, 0, 0, 0, // LOAD_INT_CONST r0, 42
-                0x11, 2, 0, 0, 0, 0, // WRITE_SIGNAL 2, r0
+                0xB0.toByte(),
+                0,
+                42,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0, // LOAD_INT_CONST r0, 42
+                0x11,
+                2,
+                0,
+                0,
+                0,
+                0, // WRITE_SIGNAL 2, r0
                 0x00, // HALT
             )
         val signals = InMemorySignals()
