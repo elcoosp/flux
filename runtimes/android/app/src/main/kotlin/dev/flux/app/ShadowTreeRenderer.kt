@@ -22,58 +22,55 @@ import dev.flux.ui.PropsIndex
  * example shows genuine native views instead of the MLP placeholder.
  *
  * The renderer is a pure projection of the tree: the shadow tree stays the
- * source of truth, and the reconciler mutates it in place (view identity
- * preserved per node id), so this composable re-composes without rebuilding
- * state. Button clicks are forwarded through [onButtonClick] (the executor's
+ * source of truth and is mutated in place (same node instances, new `props`),
+ * so Compose must be told when a node's props change. That signal comes from
+ * the node's [ShadowNode.propsState] observable, which the app supplies as a
+ * Compose `MutableState`. Reading [observeProps] inside a leaf composable makes
+ * Compose re-run that leaf whenever the executor re-materialises its props
+ * (e.g. after a tap increments `count`) — mirroring SwiftUI, which observes the
+ * tree mutation directly. No manual recomposition counter is threaded through
+ * the render functions.
+ *
+ * Button clicks are forwarded through [onButtonClick] (the executor's
  * `dispatch`), which is confined to the reactive dispatcher by the caller.
  *
- * [generation] is a monotonically increasing counter bumped on every tree
- * mutation (initial frame + post-dispatch reconcile). Because the shadow tree
- * is mutated in place, the [node] reference is stable across taps; without
- * [generation] Compose would skip re-executing this subtree (the parameter
- * looks unchanged) and the UI would freeze after the first frame. Passing
- * [generation] forces a re-run whenever the tree changes.
- *
  * @param node the root node to render.
- * @param generation bumped on every tree mutation; forces re-execution.
  * @param onButtonClick invoked with a button's bound handler id on tap.
  */
 @Composable
 public fun FluxTreeView(
     node: ShadowNode?,
-    generation: Int,
     onButtonClick: (handlerId: UInt) -> Unit,
 ) {
-    // Read `generation` so Compose tracks it and re-runs the subtree when the
-    // tree mutates in place (same `node` instance, new `props`).
-    @Suppress("UNUSED_VARIABLE")
-    val _gen = generation
     if (node == null) return
     when (node.kind) {
-        "column" -> RenderColumn(node, generation, onButtonClick)
-        "row" -> RenderRow(node, generation, onButtonClick)
-        "text" -> RenderText(node, generation)
-        "button" -> RenderButton(node, generation, onButtonClick)
+        "column" -> RenderColumn(node, onButtonClick)
+        "row" -> RenderRow(node, onButtonClick)
+        "text" -> RenderText(node)
+        "button" -> RenderButton(node, onButtonClick)
         // Containers without bespoke layout: render their children inline.
-        "screen", "router" -> RenderContainer(node, generation, onButtonClick)
+        "screen", "router" -> RenderContainer(node, onButtonClick)
         // TextField/Image have no live adapter subtree in the MLP host; surface
         // a contained placeholder so the tree stays visible.
-        else -> RenderContainer(node, generation, onButtonClick)
+        else -> RenderContainer(node, onButtonClick)
     }
 }
+
+/** Reads [ShadowNode.props] through its observable [State][androidx.compose.runtime.State]. */
+@Composable
+private fun ShadowNode.observeProps(): dev.flux.ui.Props = propsState.value
 
 /** A vertical [Column] of the node's children, spaced by the `gap` prop. */
 @Composable
 private fun RenderColumn(
     node: ShadowNode,
-    generation: Int,
     onButtonClick: (UInt) -> Unit,
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(gapOf(node)),
     ) {
-        for (child in node.children) FluxTreeView(child, generation, onButtonClick)
+        for (child in node.children) FluxTreeView(child, onButtonClick)
     }
 }
 
@@ -81,24 +78,21 @@ private fun RenderColumn(
 @Composable
 private fun RenderRow(
     node: ShadowNode,
-    generation: Int,
     onButtonClick: (UInt) -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(gapOf(node)),
     ) {
-        for (child in node.children) FluxTreeView(child, generation, onButtonClick)
+        for (child in node.children) FluxTreeView(child, onButtonClick)
     }
 }
 
 /** A [Text] leaf from the node's `text` prop. */
 @Composable
-private fun RenderText(
-    node: ShadowNode,
-    generation: Int,
-) {
-    val text = node.props.getString(PropsIndex.TEXT_TEXT).orEmpty()
+private fun RenderText(node: ShadowNode) {
+    val props = node.observeProps()
+    val text = props.getString(PropsIndex.TEXT_TEXT).orEmpty()
     Text(
         text = text,
         modifier = Modifier.padding(4.dp),
@@ -109,11 +103,11 @@ private fun RenderText(
 @Composable
 private fun RenderButton(
     node: ShadowNode,
-    generation: Int,
     onButtonClick: (UInt) -> Unit,
 ) {
-    val label = node.props.getString(PropsIndex.BUTTON_TEXT).orEmpty()
-    val handlerId = node.props.getHandler(PropsIndex.BUTTON_ON_CLICK)
+    val props = node.observeProps()
+    val label = props.getString(PropsIndex.BUTTON_TEXT).orEmpty()
+    val handlerId = props.getHandler(PropsIndex.BUTTON_ON_CLICK)
     Button(onClick = { onButtonClick(handlerId) }) {
         Text(label)
     }
@@ -123,11 +117,10 @@ private fun RenderButton(
 @Composable
 private fun RenderContainer(
     node: ShadowNode,
-    generation: Int,
     onButtonClick: (UInt) -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        for (child in node.children) FluxTreeView(child, generation, onButtonClick)
+        for (child in node.children) FluxTreeView(child, onButtonClick)
     }
 }
 
