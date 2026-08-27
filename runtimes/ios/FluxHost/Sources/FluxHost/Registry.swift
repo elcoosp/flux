@@ -105,56 +105,68 @@ final class CapabilityRegistry: @unchecked Sendable {
     /// is driven by the reconciler). The `Camera.take` (1,1) echo of its first
     /// argument into signal 99 is preserved for `flux-vm-ref` oracle parity
     /// (`call_cap_basic`).
-    static let dev: CapabilityRegistry = CapabilityRegistry(entries: [
-        (1, 1, { _, _, arg, signals in
-            // Oracle-parity echo: capture arg into signal 99 and return it.
-            signals.write(99, arg)
-            return arg
-        }),
-        (1, 2, { _, _, _, signals in
-            // startPreview: a real build starts the capture session; here we
-            // only record that preview is active (signal 96 = preview flag).
-            signals.write(96, .bool(true))
-            return .null
-        }),
-        (1, 3, { _, _, _, signals in
-            signals.write(96, .bool(false))
-            return .null
-        }),
-        (2, 1, { _, _, arg, signals in
-            // Storage.set(key, value): key is the first record field (a Str id),
-            // value is the second. Persist into the in-memory store.
-            guard case let .record(fields) = arg, fields.count >= 2 else {
-                throw VMError.typeMismatch(offset: 0)
-            }
-            let key = fields[0].value
-            let value = fields[1].value
-            guard case let .str(keyId) = key else { throw VMError.typeMismatch(offset: 0) }
-            store.putStorage(keyId, value)
-            return .null
-        }),
-        (2, 2, { _, _, arg, signals in
-            // Storage.get(key): read the persisted value, or `null` if absent.
-            guard case let .record(fields) = arg, !fields.isEmpty else {
-                throw VMError.typeMismatch(offset: 0)
-            }
-            guard case let .str(keyId) = fields[0].value else { throw VMError.typeMismatch(offset: 0) }
-            return store.getStorage(keyId) ?? .null
-        }),
-        (2, 3, { _, _, arg, signals in
-            // Storage.delete(key): clear the persisted value.
-            guard case let .record(fields) = arg, !fields.isEmpty else {
-                throw VMError.typeMismatch(offset: 0)
-            }
-            guard case let .str(keyId) = fields[0].value else { throw VMError.typeMismatch(offset: 0) }
-            store.putStorage(keyId, nil)
-            return .null
-        }),
-        (3, 1, { _, _, arg, signals in
-            // Router.navigate(target): record the target string id in signal 97;
-            // the reconciler consumes it. Returns `.null`.
-            signals.write(97, arg)
-            return .null
-        }),
-    ])
+    static let dev: CapabilityRegistry = {
+        // The backing store is captured directly by the stateful impl closures
+        // (Storage). It is a `class` (reference type), so each closure shares
+        // the same instance the registry owns. Declared locally because a
+        // `static` property initializer cannot reference the instance's `store`.
+        let store = CapabilityStore()
+        return CapabilityRegistry(entries: [
+            (1, 1, { _, _, arg, signals in
+                // Oracle-parity echo: capture args.fields[0] into signal 99 and
+                // return it. CALL_CAP passes a Record (spec §E.1); `call_cap_basic`
+                // reads field 0, so we echo that.
+                guard case let .record(fields) = arg, let first = fields.first else {
+                    throw VMError.typeMismatch(offset: 0)
+                }
+                signals.write(99, first.value)
+                return first.value
+            }),
+            (1, 2, { _, _, _, signals in
+                // startPreview: a real build starts the capture session; here we
+                // only record that preview is active (signal 96 = preview flag).
+                signals.write(96, .bool(true))
+                return .null
+            }),
+            (1, 3, { _, _, _, signals in
+                signals.write(96, .bool(false))
+                return .null
+            }),
+            (2, 1, { _, _, arg, signals in
+                // Storage.set(key, value): key is the first record field (a Str id),
+                // value is the second. Persist into the in-memory store.
+                guard case let .record(fields) = arg, fields.count >= 2 else {
+                    throw VMError.typeMismatch(offset: 0)
+                }
+                let key = fields[0].value
+                let value = fields[1].value
+                guard case let .str(keyId) = key else { throw VMError.typeMismatch(offset: 0) }
+                store.putStorage(keyId, value)
+                return .null
+            }),
+            (2, 2, { _, _, arg, signals in
+                // Storage.get(key): read the persisted value, or `null` if absent.
+                guard case let .record(fields) = arg, !fields.isEmpty else {
+                    throw VMError.typeMismatch(offset: 0)
+                }
+                guard case let .str(keyId) = fields[0].value else { throw VMError.typeMismatch(offset: 0) }
+                return store.getStorage(keyId) ?? .null
+            }),
+            (2, 3, { _, _, arg, signals in
+                // Storage.delete(key): clear the persisted value.
+                guard case let .record(fields) = arg, !fields.isEmpty else {
+                    throw VMError.typeMismatch(offset: 0)
+                }
+                guard case let .str(keyId) = fields[0].value else { throw VMError.typeMismatch(offset: 0) }
+                store.putStorage(keyId, nil)
+                return .null
+            }),
+            (3, 1, { _, _, arg, signals in
+                // Router.navigate(target): record the target string id in signal 97;
+                // the reconciler consumes it. Returns `.null`.
+                signals.write(97, arg)
+                return .null
+            }),
+        ], store: store)
+    }()
 }

@@ -279,7 +279,7 @@ class RuntimeFixesTest {
     fun `Camera take echoes for oracle parity`() {
         val registry = CapabilityRegistry.DEV
         val signals = InMemorySignals()
-        val out = registry.lookup(1u, 1u.toUShort())!!.call(FluxValue.IntVal(7), signals)
+        val out = registry.lookup(1u, 1u.toUShort())!!.call(FluxValue.RecordVal(listOf(FluxValue.Field(0u.toUShort(), FluxValue.IntVal(7)))), signals)
         assertEquals(FluxValue.IntVal(7), out, "Camera.take echoes its argument")
         assertEquals(FluxValue.IntVal(7), signals.read(99u), "Camera.take echoes into signal 99")
     }

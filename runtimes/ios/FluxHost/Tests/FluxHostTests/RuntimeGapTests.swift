@@ -508,7 +508,7 @@ final class CapabilityRoundTripTests: XCTestCase {
     @MainActor
     func testCameraTakeEchoesForOracleParity() async throws {
         var signals: any SignalStore = InMemorySignals()
-        let out = CapabilityRegistry.dev.lookup(1, 1)!(1, 1, .int(7), &signals)
+        let out = CapabilityRegistry.dev.lookup(1, 1)!(1, 1, .record([(0, .int(7))]), &signals)
         XCTAssertEqual(out, .int(7), "Camera.take (dev) echoes its argument")
         XCTAssertEqual(signals.read(99), .int(7), "Camera.take echoes into signal 99 (oracle parity)")
     }
