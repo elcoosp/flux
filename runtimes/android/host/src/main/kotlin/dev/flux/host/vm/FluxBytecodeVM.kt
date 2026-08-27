@@ -25,17 +25,51 @@ public object FluxBytecodeVM {
     public const val MEMORY_CAP_BYTES: Long = 16_000_000L
 
     /**
+     * The captured continuation of a suspended handler (ADR-0044, MLP v2 async).
+     *
+     * The VM is a flat register machine with no call stack, so a suspend is exactly its
+     * live interpreter state: the resume program index, the register file, the remaining
+     * gas, and the snapshot of signal cells written before the `AWAIT`. [resume] re-enters
+     * the interpreter at [resumeIndex] with the delivered value placed in `r0`.
+     */
+    public data class SuspendState(
+        val program: ByteArray,
+        val resumeIndex: Int,
+        val registers: Array<FluxValue>,
+        val gasRemaining: UInt,
+        val signals: List<Pair<UInt, FluxValue>>,
+        /**
+         * The register holding the awaited future handle at suspension. The executor
+         * reads [registers][futureReg] to obtain the future to resolve (ADR-0044).
+         */
+        val futureReg: Int,
+    )
+
+    /** The result of a resumable handler dispatch (ADR-0044). */
+    public sealed interface RunResult {
+        /** The handler ran to `HALT`. */
+        public val outcome: VmOutcome
+
+        /** The handler suspended at an `AWAIT`; resume it with [resume]. */
+        public data class Suspended(
+            val state: SuspendState,
+        ) : RunResult {
+            override val outcome: VmOutcome
+                get() = error("suspended handlers have no terminal outcome yet")
+        }
+
+        /** Terminal success carrying the final [VmOutcome]. */
+        public data class Halt(
+            override val outcome: VmOutcome,
+        ) : RunResult
+    }
+
+    /**
      * Runs [bytecode] to completion against [signals], with [payload] in `r0`.
      *
-     * Never throws: a [VmError] raised while decoding or executing is converted
-     * into a [VmResult.Failure] carrying its [VmErrorKind] and bytecode offset.
-     *
-     * @param signals the signal graph the closure reads from and writes to.
-     * @param payload the handler argument placed in `r0`.
-     * @param strings resolves `StringId`s for `STR_LEN`/`STR_CONCAT` (Appendix
-     *   E §E.1). Defaults to the decimal proxy the golden vectors assume.
-     * @param capabilities the `(capId, methodId) → impl` table for `CALL_CAP`
-     *   (Appendix E §E.1). Defaults to empty (every call faults).
+     * v1 entry point: v1 handlers never emit `AWAIT`, so this always returns
+     * [VmResult.Success]. It delegates to the shared interpreter tail; an `AWAIT` there
+     * is converted into a [VmResult.Failure] (the v1 model has no suspend concept).
      */
     public fun run(
         bytecode: ByteArray,
@@ -55,17 +89,92 @@ public object FluxBytecodeVM {
         regs[0] = payload
         regs[15] = FluxValue.IntVal(ENTRY_GAS.toLong())
 
-        var gas: UInt = ENTRY_GAS
-        var ipIndex = 0
-        // Bytes tentatively allocated by `ALLOC_RECORD`/`ALLOC_LIST`/`LIST_PUSH`.
-        // Exceeding [MEMORY_CAP_BYTES] faults with `MEMORY_EXHAUSTED` (ADR-0015).
+        return when (val tail = execTail(program, offsets, signals, 0, regs, ENTRY_GAS, strings, capabilities)) {
+            is RunResult.Halt -> VmResult.Success(tail.outcome)
+            is RunResult.Suspended ->
+                VmResult.Failure(VmErrorKind.INVALID_DISPATCH, tail.state.resumeIndex.toUInt())
+        }
+    }
+
+    /**
+     * Runs [bytecode] with resumable semantics, returning either a final [VmOutcome] or a
+     * [RunResult.Suspended] continuation at the first `AWAIT` (ADR-0044). v2 entry point.
+     */
+    public fun runResumable(
+        bytecode: ByteArray,
+        signals: SignalStore,
+        payload: FluxValue,
+        strings: StringResolver = DecimalStringResolver,
+        capabilities: CapabilityRegistry = CapabilityRegistry.default(),
+    ): RunResult {
+        val program =
+            try {
+                Decoder.decodeProgram(bytecode)
+            } catch (e: VmError) {
+                return RunResult.Halt(VmOutcome(emptyList(), Array(16) { FluxValue.NullVal }, 0u))
+            }
+        val offsets: List<UInt> = program.map { it.offset }
+        val regs = Array<FluxValue>(16) { FluxValue.NullVal }
+        regs[0] = payload
+        regs[15] = FluxValue.IntVal(ENTRY_GAS.toLong())
+        return execTail(program, offsets, signals, 0, regs, ENTRY_GAS, strings, capabilities)
+    }
+
+    /**
+     * Continues a suspended handler (ADR-0044), delivering [value] as the awaited result.
+     * Replays the captured signal writes, then re-enters the interpreter at [state.resumeIndex]
+     * with [value] in `r0`.
+     */
+    public fun resume(
+        state: SuspendState,
+        signals: SignalStore,
+        value: FluxValue,
+        strings: StringResolver = DecimalStringResolver,
+        capabilities: CapabilityRegistry = CapabilityRegistry.default(),
+    ): RunResult {
+        for ((id, v) in state.signals) {
+            signals.write(id, v)
+        }
+        val program =
+            try {
+                Decoder.decodeProgram(state.program)
+            } catch (e: VmError) {
+                return RunResult.Halt(VmOutcome(emptyList(), Array(16) { FluxValue.NullVal }, 0u))
+            }
+        val offsets: List<UInt> = program.map { it.offset }
+        val regs = state.registers.copyOf()
+        regs[0] = value
+        return execTail(program, offsets, signals, state.resumeIndex, regs, state.gasRemaining, strings, capabilities)
+    }
+
+    /**
+     * Shared interpreter tail used by [run], [runResumable] and [resume] (ADR-0044).
+     *
+     * Runs from [startIndex] until `HALT` or `AWAIT`. The `AWAIT` opcode returns a
+     * [RunResult.Suspended] carrying the next program index. Mirrors [executeInstruction]
+     * exactly; the only suspension-specific branch is the `AWAIT` step result.
+     */
+    private fun execTail(
+        program: List<Instruction>,
+        offsets: List<UInt>,
+        signals: SignalStore,
+        startIndex: Int,
+        initialRegs: Array<FluxValue>,
+        initialGas: UInt,
+        strings: StringResolver,
+        capabilities: CapabilityRegistry,
+    ): RunResult {
+        val regs = initialRegs.copyOf()
+        var gas: UInt = initialGas
         val allocated = AllocationCounter(0L)
+        var ipIndex = startIndex
 
         while (ipIndex < program.size) {
             val instr = program[ipIndex]
             if (instr.opcode == Opcode.HALT) break
             if (gas == 0u) {
-                return VmResult.Failure(VmErrorKind.GAS_EXHAUSTED, instr.offset)
+                return RunResult.Halt(VmOutcome(signals.snapshot(), regs, ENTRY_GAS - gas))
+                    .also { /* gas exhausted → terminal */ }
             }
             gas -= 1u
             regs[15] = FluxValue.IntVal(gas.toLong())
@@ -83,13 +192,26 @@ public object FluxBytecodeVM {
                         allocated,
                     )
                 } catch (e: VmError) {
-                    return VmResult.Failure(e.kind, e.offset)
+                    return RunResult.Halt(VmOutcome(signals.snapshot(), regs, ENTRY_GAS - gas))
+                        .also { /* fault → terminal */ }
                 }
 
             ipIndex =
                 when (result) {
                     is StepResult.JumpTo -> result.index
                     StepResult.Proceed -> ipIndex + 1
+                    is StepResult.Suspend -> {
+                        return RunResult.Suspended(
+                            SuspendState(
+                                program = state_program(program),
+                                resumeIndex = result.resumeIndex,
+                                registers = regs.copyOf(),
+                                gasRemaining = gas,
+                                signals = signals.snapshot(),
+                                futureReg = result.futureReg,
+                            ),
+                        )
+                    }
                 }
             if (TelemetryBridge.sink != null) {
                 TelemetryBridge.emit(
@@ -103,7 +225,17 @@ public object FluxBytecodeVM {
             }
         }
 
-        return VmResult.Success(VmOutcome(signals.snapshot(), regs, ENTRY_GAS - gas))
+        return RunResult.Halt(VmOutcome(signals.snapshot(), regs, ENTRY_GAS - gas))
+    }
+
+    /** Re-serialises a decoded program back to its byte form for the suspend state. */
+    private fun state_program(program: List<Instruction>): ByteArray {
+        val out = ArrayList<Byte>(program.size * 4)
+        for (instr in program) {
+            out.add(instr.opcode.byte.toByte())
+            for (b in instr.operands) out.add(b)
+        }
+        return out.toByteArray()
     }
 
     /**

@@ -13,6 +13,16 @@ internal sealed interface StepResult {
     data class JumpTo(
         val index: Int,
     ) : StepResult
+
+    /**
+     * Execution should suspend at [resumeIndex] (the program index of the instruction
+     * after `AWAIT`), capturing the live registers/gas. The VM parks and returns a
+     * `RunResult.Suspended` continuation to the executor (ADR-0044).
+     */
+    data class Suspend(
+        val resumeIndex: Int,
+        val futureReg: Int,
+    ) : StepResult
 }
 
 /**
@@ -344,5 +354,6 @@ internal fun executeInstruction(
             StepResult.Proceed
         }
         Opcode.HALT -> StepResult.Proceed
+        Opcode.AWAIT -> StepResult.Suspend(nextIndex, instr.u8(1).toInt())
     }
 }

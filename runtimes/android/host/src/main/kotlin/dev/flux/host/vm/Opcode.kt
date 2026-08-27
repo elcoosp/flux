@@ -83,6 +83,14 @@ public enum class Opcode(
 
     GAS_CHECK(0xC0, 4),
     TO_STRING(0xD0, 2),
+
+    /**
+     * Suspends the VM, capturing the continuation (ADR-0044, MLP v2 first-class async).
+     * `AWAIT resultReg(1), futureReg(1)`: the handler parks after this instruction; the
+     * executor resumes it via [FluxBytecodeVM.resume], which deposits the resolved future
+     * value into `r0`.
+     */
+    AWAIT(0xE0, 2),
     ;
 
     public companion object {

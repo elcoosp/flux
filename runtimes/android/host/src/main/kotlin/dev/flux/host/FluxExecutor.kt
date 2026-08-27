@@ -29,6 +29,26 @@ import java.lang.ref.WeakReference
 import kotlin.coroutines.EmptyCoroutineContext
 import dev.flux.ui.FluxExecutor as KitExecutor
 import dev.flux.ui.FluxValue as KitValue
+import dev.flux.host.vm.FluxBytecodeVM.RunResult
+
+/**
+ * Resolves an awaited future handle to its settled value (ADR-0044, MLP v2 async).
+ *
+ * A handler that hits `AWAIT` parks with the future handle in [SuspendState.futureReg];
+ * the executor reads that register, asks [AsyncResolver.resolve] for the settled value
+ * (a suspending bridge to real platform async — network, timer, capability), and resumes
+ * the VM with the value in `r0`. The default [PassthroughAsyncResolver] treats the handle
+ * as already-settled, which is correct for oracle-style tests and for handlers that await
+ * a plain value rather than a genuine async resource.
+ */
+public interface AsyncResolver {
+    public suspend fun resolve(future: dev.flux.host.vm.FluxValue): dev.flux.host.vm.FluxValue
+}
+
+/** Default [AsyncResolver]: the future handle is its own settled value. */
+public object PassthroughAsyncResolver : AsyncResolver {
+    override suspend fun resolve(future: dev.flux.host.vm.FluxValue): dev.flux.host.vm.FluxValue = future
+}
 
 /**
  * The host executor: the single hub that ties the VM, signal graph, shadow tree
@@ -105,6 +125,17 @@ public class FluxExecutor(
     /** The `(capId, methodId) → impl` capability table threaded into the VM. */
     private val capabilities: CapabilityRegistry = CapabilityRegistry.default()
 
+    /**
+     * The async-future resolver for `await` (ADR-0044). Defaults to the synchronous
+     * pass-through (a future handle is its own settled value); a live host swaps in a
+     * real resolver (network/timer/capability). [PassthroughAsyncResolver] is the named
+     * default for external reuse.
+     */
+    public var asyncResolver: AsyncResolver =
+        object : AsyncResolver {
+            override suspend fun resolve(future: dev.flux.host.vm.FluxValue): dev.flux.host.vm.FluxValue = future
+        }
+
     /** The scope all stateful work runs on ([reactiveDispatcher]); built from it. */
     private val reactiveScope: CoroutineScope = CoroutineScope(SupervisorJob() + reactiveDispatcher.dispatcher)
 
@@ -167,7 +198,7 @@ public class FluxExecutor(
             // A string payload must be interned to a canonical id before the VM.
             is KitValue.Str ->
                 reactiveScope.launch {
-                    dispatch(
+                    dispatchAsync(
                         event.handlerId,
                         dev.flux.host.vm.FluxValue
                             .StrVal(internString(payload.value)),
@@ -175,7 +206,7 @@ public class FluxExecutor(
                 }
             else -> {
                 val vm = payload?.toVmValue(stringIndex) ?: dev.flux.host.vm.FluxValue.NullVal
-                reactiveScope.launch { dispatch(event.handlerId, vm) }
+                reactiveScope.launch { dispatchAsync(event.handlerId, vm) }
             }
         }
     }
@@ -228,6 +259,80 @@ public class FluxExecutor(
                 reactiveDispatcher.dispatcher.dispatch(EmptyCoroutineContext) {
                     onError?.invoke("vm: ${result.kind.name} @${result.offset}")
                 }
+        }
+    }
+
+    /**
+     * Resumable handler dispatch (ADR-0044, MLP v2 async): runs [handlerId] with
+     * [payload] via [FluxBytecodeVM.runResumable], and whenever the handler parks at
+     * an `AWAIT`, resolves the future handle through [asyncResolver] and resumes it
+     * until it reaches `HALT`. The final written signals drive the same dirty-subset
+     * reconcile as the v1 [dispatch].
+     *
+     * Must be called inside a coroutine on the reactive dispatcher (the live
+     * [dispatch] launches it there). A `RunResult.Suspended` is transparent to the
+     * caller: the handler appears to complete only once every `AWAIT` has settled.
+     */
+    @MainThread
+    public suspend fun dispatchAsync(
+        handlerId: UInt,
+        payload: dev.flux.host.vm.FluxValue = dev.flux.host.vm.FluxValue.NullVal,
+    ) {
+        val closure = closureFor(handlerId) ?: return
+        var current =
+            FluxBytecodeVM.runResumable(
+                closure.bytecode,
+                signals,
+                payload,
+                stringResolver,
+                capabilities,
+            )
+        // Settle every `AWAIT` in turn; the loop terminates at `HALT`. Binding `step`
+        // (immutable) inside the `when` keeps the smart-cast valid despite reassigning
+        // `current` (Kotlin cannot smart-cast a `var` that is written in a branch).
+        while (true) {
+            when (val step = current) {
+                is RunResult.Halt -> {
+                    reconcile(step.outcome)
+                    return
+                }
+                is RunResult.Suspended -> {
+                    val future = step.state.registers[step.state.futureReg]
+                    val resolved =
+                        try {
+                            asyncResolver.resolve(future)
+                        } catch (e: Exception) {
+                            future
+                        }
+                    current =
+                        FluxBytecodeVM.resume(
+                            step.state,
+                            signals,
+                            resolved,
+                            stringResolver,
+                            capabilities,
+                        )
+                }
+            }
+        }
+    }
+
+    /**
+     * Reconciles the dirty subset of the shadow tree after a handler wrote [outcome]'s
+     * signals (R1 / ADR-0027): only `dependents[S]` are re-materialised, never the whole
+     * tree. Shared by the v1 [dispatch] and the resumable [dispatchAsync].
+     */
+    private fun reconcile(outcome: dev.flux.host.vm.VmOutcome) {
+        val seq = shadowTree.lastSeq()
+        val written = outcome.signals.map { it.first }.toSet()
+        trace(seq) { TraceEvent.Dispatch(seq = seq, handler = 0u) }
+        trace(seq) { TraceEvent.Signals(seq = seq, ids = written.sortedBy { it }) }
+        if (written.isNotEmpty()) {
+            shadowTree.reconcileDirty(shadowTree.rootNode?.id ?: 0u, written)
+            onTreeChanged?.invoke()
+        } else {
+            trace(seq) { TraceEvent.Dirty(seq = seq, ids = emptyList()) }
+            shadowTree.emitStepEnd()
         }
     }
 
