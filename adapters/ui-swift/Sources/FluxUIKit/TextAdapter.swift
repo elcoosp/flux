@@ -26,13 +26,13 @@ public final class TextAdapter: FluxAdapter {
     }
 
     public func update(_ view: UILabel, from old: Props, to new: Props) {
-        view.text = new.getString(0) ?? old.getString(0)
+        view.text = new.getString(named: "text") ?? old.getString(named: "text")
         applyFont(to: view, props: new)
-        if let color = new.getColor(3) { view.textColor = color.uiColor }
-        if let align = new.getRecord(4).flatMap(FluxAlignment.init(record:)) {
+        if let color = new.getColor(named: "color") { view.textColor = color.uiColor }
+        if let align = new.getRecord(named: "alignment").flatMap(FluxAlignment.init(record:)) {
             view.textAlignment = align.textAlignment
         }
-        if let maxLines = new.getInt(5) { view.numberOfLines = Int(maxLines) }
+        if let maxLines = new.getInt(named: "max_lines") { view.numberOfLines = Int(maxLines) }
     }
 
     public func setChildren(_ children: [AnyObject], on view: UILabel) {
