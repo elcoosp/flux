@@ -25,10 +25,10 @@ public final class ButtonAdapter: FluxAdapter {
     }
 
     public func update(_ view: UIButton, from old: Props, to new: Props) {
-        let title = new.getString(0) ?? old.getString(0) ?? ""
+        let title = new.getString(named: "text") ?? old.getString(named: "text") ?? ""
         view.setTitle(title, for: .normal)
-        view.isEnabled = new.getBool(2) ?? true
-        if let color = new.getColor(3) { view.setTitleColor(color.uiColor, for: .normal) }
+        view.isEnabled = new.getBool(named: "enabled") ?? true
+        if let color = new.getColor(named: "color") { view.setTitleColor(color.uiColor, for: .normal) }
     }
 
     public func setChildren(_ children: [AnyObject], on view: UIButton) {}
