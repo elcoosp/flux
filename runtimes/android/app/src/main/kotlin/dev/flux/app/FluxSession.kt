@@ -38,7 +38,15 @@ public class FluxSession(
 
     /** The render tree the executor drives. */
     public val shadowTree: ShadowTree =
-        ShadowTree(AdapterRegistry.fromStringTable(emptyList()))
+        ShadowTree(AdapterRegistry.fromStringTable(emptyList())).also {
+            // The app's nodes hold their materialized props in a Compose
+            // `MutableState` (the same object the renderer reads), so when the
+            // executor re-materialises props in place the UI re-composes
+            // automatically — mirroring SwiftUI, which observes the tree mutation
+            // directly. No manual recomposition counter is threaded through the
+            // render functions.
+            it.propsStateFactory = { initial -> androidx.compose.runtime.mutableStateOf(initial) }
+        }
 
     /** The dev-mode frame transport. */
     public val transport: FluxTransport = OkHttpTransport(wsUrl)

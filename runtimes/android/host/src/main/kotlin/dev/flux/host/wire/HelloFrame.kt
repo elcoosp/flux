@@ -78,7 +78,6 @@ private val idlCapabilities: List<Triple<String, UInt, List<Pair<String, UInt>>>
  */
 public val advertisedCapabilities: List<Triple<String, UInt, List<String>>> =
     idlCapabilities.map { (name, version, methods) -> Triple(name, version, methods.map { it.first }) }
-}
 
 private fun writeStr(
     out: ArrayList<Byte>,

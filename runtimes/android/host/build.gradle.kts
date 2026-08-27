@@ -19,6 +19,14 @@ dependencies {
     // Adapter contract types (FluxValue, PropsIndex, FluxAdapter, …).
     implementation(project(":adapters:ui-kotlin"))
 
+    // Compose runtime (pure Kotlin, no Android UI toolkit): the shadow tree is
+    // mutated in place, so each node's materialized props are held in a
+    // `MutableState` the Compose renderer observes directly. This is the
+    // platform-neutral state primitive; the host still has no Android-framework
+    // or Compose-UI dependency, so its unit tests run on the plain JVM.
+    implementation(platform(libs.compose.bom))
+    implementation("androidx.compose.runtime:runtime")
+
     // Wire client (dev mode) and MessagePack frame decoding (Appendix D).
     implementation(libs.okhttp)
     implementation(libs.msgpack.core)
