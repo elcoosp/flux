@@ -48,10 +48,10 @@ public class SignalGraph : SignalStore {
     override fun read(id: UInt): FluxValue? = values[id]
 
     /** Returns the reactive [CellState] of [id], defaulting to [CellState.Ready]. */
-    override public fun cellState(id: UInt): CellState = states[id] ?: CellState.Ready
+    public override fun cellState(id: UInt): CellState = states[id] ?: CellState.Ready
 
     /** Marks [id] as [CellState.Pending] (an async-derived/resource cell went in flight). */
-    override public fun markPending(id: UInt) {
+    public override fun markPending(id: UInt) {
         states[id] = CellState.Pending
     }
 
@@ -64,13 +64,13 @@ public class SignalGraph : SignalStore {
     }
 
     /** Allocates a fresh, unbound signal id for a new capability result cell (ADR-0045). */
-    override public fun allocateCell(): UInt {
+    public override fun allocateCell(): UInt {
         nextCell += 1u
         return nextCell
     }
 
     /** Resolves [id] to [value], marking it [CellState.Ready] (an async capability finished). */
-    override public fun resolveCell(
+    public override fun resolveCell(
         id: UInt,
         value: FluxValue,
     ) {
