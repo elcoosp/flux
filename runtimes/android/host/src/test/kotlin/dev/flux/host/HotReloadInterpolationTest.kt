@@ -4,7 +4,6 @@ import dev.flux.host.shadow.ShadowTree
 import dev.flux.host.shadow.displayText
 import dev.flux.host.signal.SignalGraph
 import dev.flux.host.transport.MockTransport
-import dev.flux.host.wire.FrameDeserializer
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
