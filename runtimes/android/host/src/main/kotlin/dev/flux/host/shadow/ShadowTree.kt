@@ -3,12 +3,10 @@ package dev.flux.host.shadow
 import dev.flux.host.AdapterRegistry
 import dev.flux.host.BuildFlags
 import dev.flux.host.StringTableEntry
-import dev.flux.host.signal.SignalGraph
 import dev.flux.host.vm.FluxBytecodeVM
 import dev.flux.host.vm.FluxValue
 import dev.flux.host.vm.StringResolver
 import dev.flux.host.vm.VmResult
-import dev.flux.host.vm.renderToString
 import dev.flux.host.wire.ClosureRef
 import dev.flux.host.wire.Frame
 import dev.flux.host.wire.NodeSignalMeta
@@ -318,14 +316,24 @@ public class ShadowTree(
         // from the merged `patchIndex` in one pass instead, mirroring the
         // `Replace`-root path.
         val oldRootId = root?.id
-        val oldRootRemoved = oldRootId != null &&
-            frame.patches.any { it.tag.toInt() == 0x04 && it.id == oldRootId }
-        val newRootInserted = patchIndex.keys.any { candidate ->
-            patchIndex.values.none { childIdList(it).contains(candidate) }
-        }
+        val oldRootRemoved =
+            oldRootId != null &&
+                frame.patches.any { it.tag.toInt() == 0x04 && it.id == oldRootId }
+        val newRootInserted =
+            patchIndex.keys.any { candidate ->
+                patchIndex.values.none { childIdList(it).contains(candidate) }
+            }
         if (oldRootRemoved && newRootInserted) {
             rebuildFromPatchIndex(patchIndex, executor)
-            emitTrace(TraceEvent.Frame(seq = frame.seq, full = false, root = root?.id, nodes = nodes.size.toUInt(), patches = frame.patches.size.toUInt()))
+            emitTrace(
+                TraceEvent.Frame(
+                    seq = frame.seq,
+                    full = false,
+                    root = root?.id,
+                    nodes = nodes.size.toUInt(),
+                    patches = frame.patches.size.toUInt(),
+                ),
+            )
             emitStepEnd()
             return root
         }
