@@ -49,5 +49,26 @@ jobs:
           yes | sdkmanager --licenses >/dev/null
           sdkmanager "platforms;android-37"
 
+      - name: Export ANDROID_COMPOSE_CLASSPATH for the kotlinc codegen check
+        # Mirrors the guarded export in rust-check.yml. `flux-codegen-kotlin`'s
+        # `generated_kotlin_parses` test shells out to `kotlinc` to compile-check
+        # the generated Compose; bare kotlinc cannot resolve androidx.compose.*
+        # without the Compose compiler + Android runtime on its classpath, supplied
+        # via the opt-in ANDROID_COMPOSE_CLASSPATH env var. After setup-android +
+        # the platform install above, $ANDROID_HOME/platforms/android-37/android.jar
+        # exists; the Compose compiler jar (in ~/.gradle) is provided by the
+        # separate toolchain-provisioning task. This step exports the classpath
+        # only when both artifacts are on disk, so it is a safe no-op until that
+        # lands and activates the real check automatically.
+        run: |
+          platform_jar="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/platforms/android-37/android.jar"
+          compose_jar="$(find "$HOME/.gradle" -name 'compose-compiler-*.jar' 2>/dev/null | head -n1)"
+          if [ -f "$platform_jar" ] && [ -n "$compose_jar" ]; then
+            echo "ANDROID_COMPOSE_CLASSPATH=${platform_jar}:${compose_jar}" >> "$GITHUB_ENV"
+            echo "exported ANDROID_COMPOSE_CLASSPATH for the kotlinc codegen check"
+          else
+            echo "Android/Compose toolchain not fully provisioned (missing ${platform_jar}${compose_jar:+ or compose-compiler jar}); ANDROID_COMPOSE_CLASSPATH left unset"
+          fi
+
       - name: Run adapter & runtime unit tests
         run: ./gradlew :adapters:ui-kotlin:test :runtimes:android:app:test --no-daemon
