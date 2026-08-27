@@ -61,6 +61,20 @@ pub enum Command {
         /// Project root to watch and serve.
         #[arg(long, default_value = ".")]
         root: PathBuf,
+
+        /// WebSocket bind host. Defaults to `127.0.0.1`. Use `0.0.0.0` to
+        /// expose the server on the local network so physical devices and
+        /// simulators can reach it via the host machine's LAN IP.
+        #[arg(long, default_value = "127.0.0.1")]
+        ws_host: String,
+
+        /// WebSocket bind port (the patch channel).
+        #[arg(long, default_value_t = flux_devserver::DEFAULT_WS_PORT)]
+        ws_port: u16,
+
+        /// HTTP asset-server bind port.
+        #[arg(long, default_value_t = flux_devserver::DEFAULT_HTTP_PORT)]
+        http_port: u16,
     },
 
     /// Codegen the project for a native platform.
@@ -115,7 +129,12 @@ impl Platform {
 pub async fn run(command: Command) -> anyhow::Result<()> {
     match command {
         Command::Init { name } => init::run(&name),
-        Command::Dev { root } => dev::run(&root).await,
+        Command::Dev {
+            root,
+            ws_host,
+            ws_port,
+            http_port,
+        } => dev::run(&root, &ws_host, ws_port, http_port).await,
         Command::Build { platform, root } => build::run(platform, &root),
         Command::Doc => doc::run(),
     }
