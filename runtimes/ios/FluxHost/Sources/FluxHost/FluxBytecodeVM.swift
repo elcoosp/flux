@@ -17,6 +17,16 @@ protocol SignalStore {
     func read(_ id: UInt32) -> VMValue?
     /// Writes `value` into `id`.
     mutating func write(_ id: UInt32, _ value: VMValue)
+    /// Allocates a fresh, unbound signal id for a new capability result cell
+    /// (ADR-0045). Drawn from a high ceiling so it never collides with the low,
+    /// fixed ids handlers and golden vectors use (e.g. 99).
+    mutating func allocateCell() -> UInt32
+    /// Returns the reactive `CellState` of `id`, defaulting to `.ready`.
+    func cellState(_ id: UInt32) -> CellState
+    /// Marks `id` as `.pending` (an async capability has started).
+    mutating func markPending(_ id: UInt32)
+    /// Resolves `id` to `value`, marking it `.ready` (an async capability finished).
+    mutating func resolveCell(_ id: UInt32, _ value: VMValue)
     /// Returns every written signal as a sorted `(id, value)` list.
     func snapshot() -> [(UInt32, VMValue)]
 }
@@ -27,14 +37,43 @@ protocol SignalStore {
 /// executor reassigns its copy after each handler dispatch.
 struct InMemorySignals: SignalStore {
     private var store: [UInt32: VMValue]
+    /// Reactive state of each cell (ADR-0045). A `write`/ `resolveCell` resolves a
+    /// cell to `.ready`; an async capability marks its cell `.pending` until the
+    /// host resolves it.
+    private var cellStates: [UInt32: CellState]
+    /// Monotonic id source for `allocateCell`, drawn from a high ceiling so it
+    /// never collides with fixed ids like 99.
+    private var nextCell: UInt32 = 1_000_000
 
     init(store: [UInt32: VMValue] = [:]) {
         self.store = store
+        self.cellStates = [:]
     }
 
     func read(_ id: UInt32) -> VMValue? { store[id] }
 
-    mutating func write(_ id: UInt32, _ value: VMValue) { store[id] = value }
+    mutating func write(_ id: UInt32, _ value: VMValue) {
+        store[id] = value
+        cellStates[id] = .ready
+    }
+
+    mutating func allocateCell() -> UInt32 {
+        nextCell &+= 1
+        return nextCell
+    }
+
+    func cellState(_ id: UInt32) -> CellState {
+        cellStates[id] ?? .ready
+    }
+
+    mutating func markPending(_ id: UInt32) {
+        cellStates[id] = .pending
+    }
+
+    mutating func resolveCell(_ id: UInt32, _ value: VMValue) {
+        store[id] = value
+        cellStates[id] = .ready
+    }
 
     func snapshot() -> [(UInt32, VMValue)] {
         store.map { ($0.key, $0.value) }.sorted { $0.0 < $1.0 }
@@ -429,9 +468,13 @@ enum FluxBytecodeVM {
                     // the rest of the loop uses `S` directly, avoiding the
                     // existential on the hot path), then copy the writes back.
                     var boxed: any SignalStore = signals
-                    let result = try impl(capID, methodID, reg(argsReg), &boxed)
+                    let cellId = try impl(capID, methodID, reg(argsReg), &boxed)
                     signals = boxed as! S
-                    regs[Int(resultReg)] = result
+                    // Unified sync/async contract (ADR-0045): the impl creates a
+                    // result cell and returns its signal id; `resultReg` receives that
+                    // id. A sync method has already written `Ready` into it; an async
+                    // method has left it `Pending` for the host to resolve later.
+                    regs[Int(resultReg)] = .int(Int64(cellId))
                 } catch let err as VMError {
                     throw err
                 } catch {
@@ -614,17 +657,31 @@ enum FluxBytecodeVM {
                 break
 
             case .await:
-                // Capture the continuation and park. The executor resumes via
-                // `FluxBytecodeVM.resume`, which deposits the resolved value into `r0`.
-                let written = signals.snapshot()
-                return .success(.suspended(SuspendState(
-                    program: programBytes,
-                    resumeOffset: UInt32(instr.offset) + UInt32(instr.opCode.instructionLen),
-                    registers: regs,
-                    gasRemaining: gas,
-                    signals: written,
-                    futureReg: instr.u8(1)
-                )))
+                // Unified sync/async bridge (ADR-0045): `futureReg` holds the register
+                // containing the result-cell signal id returned by CALL_CAP. Park only
+                // while the cell is `.pending`; a `.ready` cell continues with its value
+                // in `r0` (one re-entry, no real park); a `.error` cell faults the handler.
+                let cellId: UInt32
+                switch regs[Int(instr.u8(1))] {
+                case .int(let n): cellId = UInt32(truncatingIfNeeded: n)
+                default: return .failure(.typeMismatch(offset: instr.offset))
+                }
+                switch signals.cellState(cellId) {
+                case .ready:
+                    regs[0] = signals.read(cellId) ?? .null
+                case .pending:
+                    let written = signals.snapshot()
+                    return .success(.suspended(SuspendState(
+                        program: programBytes,
+                        resumeOffset: UInt32(instr.offset) + UInt32(instr.opCode.instructionLen),
+                        registers: regs,
+                        gasRemaining: gas,
+                        signals: written,
+                        futureReg: instr.u8(1)
+                    )))
+                case .error:
+                    return .failure(.typeMismatch(offset: instr.offset))
+                }
 
             case .nop:
                 break
@@ -861,9 +918,11 @@ enum FluxBytecodeVM {
                 }
                 do {
                     var boxed: any SignalStore = signals
-                    let result = try impl(capID, methodID, reg(argsReg), &boxed)
+                    let cellId = try impl(capID, methodID, reg(argsReg), &boxed)
                     signals = boxed as! S
-                    regs[Int(resultReg)] = result
+                    // Unified sync/async contract (ADR-0045): the impl returns the
+                    // result-cell signal id; `resultReg` receives it.
+                    regs[Int(resultReg)] = .int(Int64(cellId))
                 } catch let err as VMError {
                     return .failure(err)
                 } catch {
@@ -1162,7 +1221,7 @@ enum FluxBytecodeVM {
                 }
                 do {
                     let result = try impl(capID, methodID, reg(argsReg), &signals)
-                    regs[Int(resultReg)] = result
+                    regs[Int(resultReg)] = .int(Int64(result))
                 } catch let err as VMError { throw err } catch { throw VMError.typeMismatch(offset: instr.offset) }
             case opcodeIndex[.matchTag]!:
                 let val = reg(instr.u8(0))

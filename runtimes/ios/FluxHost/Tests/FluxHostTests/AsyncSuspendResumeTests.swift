@@ -1,62 +1,93 @@
 //  AsyncSuspendResumeTests.swift
-//  First-class async (ADR-0044): the reference VM captures a continuation at
-//  `AWAIT` and resumes it after the awaited future settles. This test drives
-//  `FluxBytecodeVM.runResumable` / `resume` directly — synchronously and
-//  deterministically — to prove the suspend/resume round-trip without depending
-//  on the executor's async event loop.
+//  First-class async (ADR-0044) + unified capability bridge (ADR-0045): the
+//  reference VM captures a continuation at `AWAIT` and resumes it after the
+//  awaited result cell settles. This test drives `FluxBytecodeVM.runResumable` /
+//  `resume` directly — synchronously and deterministically — to prove the
+//  suspend/resume round-trip and the CALL_CAP → signal-cell contract without
+//  depending on the executor's async event loop.
 //
-//  Handler bytecode under test:
-//    LOAD_INT_CONST r0, 1      ; the "future" handle, also written to signal 1
-//    WRITE_SIGNAL 1, r0
-//    AWAIT r0, r0              ; park; executor reads future from r0, resumes
-//    LOAD_INT_CONST r0, 42     ; post-resume body
-//    WRITE_SIGNAL 2, r0
-//    HALT
+//  The contract exercised here:
+//    CALL_CAP resultReg, capId, methodId, argsReg  →  resultReg = result-cell signal id
+//    AWAIT   r0, resultReg                          →  park while that cell is `.pending`;
+//                                                      a `.ready` cell continues with its
+//                                                      value in r0 (no real park); `.error` faults.
+//
+//  Scenario A (sync cap, cap 1/1 → signal 99, Ready): no suspension.
+//  Scenario B (async cap, cap 2/99 → fresh Pending cell): real Suspend + resolveCell + resume.
 
 import XCTest
 
-@testable import FluxHost
+@Testable import FluxHost
 
 final class AsyncSuspendResumeTests: XCTestCase {
-    /// Bytecode: see file header. `AWAIT` is `0xE0` with operands (result_reg, future_reg).
-    private let awaitBytecode: [UInt8] = [
-        0xB0, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // LOAD_INT_CONST r0, 1
-        0x11, 0x01, 0x00, 0x00, 0x00, 0x00,                         // WRITE_SIGNAL 1, r0
-        0xE0, 0x00, 0x00,                                           // AWAIT r0, r0
-        0xB0, 0x00, 0x2A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // LOAD_INT_CONST r0, 42
+    /// CALL_CAP(cap 1,1) writes `arg[0]` into signal 99 (Ready) and returns 99;
+    /// AWAIT on that cell is Ready → continues with the value in r0.
+    private let syncBytecode: [UInt8] = [
+        0x90, 0x02, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, // CALL_CAP r2, (1,1), args=r0
+        0xE0, 0x00, 0x02,                                           // AWAIT r0, r2 (future = cell id in r2)
         0x11, 0x02, 0x00, 0x00, 0x00, 0x00,                         // WRITE_SIGNAL 2, r0
         0x00,                                                        // HALT
     ]
 
-    /// The VM parks at `AWAIT`, the executor resolves the future (here the future
-    /// value is just `1`), and the post-resume body writes signal 2 = 42.
+    /// CALL_CAP(cap 2,99) allocates a fresh Pending cell and returns its id;
+    /// AWAIT on it Parks; the host resolveCell(...) then Resume.
+    private let asyncBytecode: [UInt8] = [
+        0x90, 0x02, 0x02, 0x00, 0x00, 0x00, 0x63, 0x00, 0x00, 0x00, // CALL_CAP r2, (2,99), args=r0
+        0xE0, 0x00, 0x02,                                           // AWAIT r0, r2
+        0x11, 0x02, 0x00, 0x00, 0x00, 0x00,                         // WRITE_SIGNAL 2, r0
+        0x00,                                                        // HALT
+    ]
+
+    /// A synchronous capability resolves immediately: CALL_CAP returns the cell id,
+    /// AWAIT sees a `.ready` cell and continues with its value, no suspension.
     @MainActor
-    func testAwaitSuspendsThenResumesToHalt() {
+    func testSyncCapabilityDoesNotSuspend() {
         var graph = SignalGraph()
-        graph.write(1, .int(0))
+        let payload = VMValue.record([(0, .int(42))])
 
-        let first = FluxBytecodeVM.runResumable(awaitBytecode, signals: &graph, payload: .null)
+        let first = FluxBytecodeVM.runResumable(syncBytecode, signals: &graph, payload: payload)
+        guard case let .success(.halt(outcome)) = first else {
+            XCTFail("sync capability should reach HALT without suspending, got \(String(describing: first))")
+            return
+        }
+
+        // The capability echoed arg[0] into signal 99, and result_reg (r2) holds 99.
+        XCTAssertEqual(graph.read(99), .int(42), "capability must echo arg[0] into signal 99")
+        XCTAssertEqual(outcome.registers[2], .int(99), "result_reg must hold the cell id 99")
+        // AWAIT on the Ready cell placed the value in r0 → written to signal 2.
+        XCTAssertEqual(graph.read(2), .int(42), "AWAIT on Ready cell must place the value in r0")
+    }
+
+    /// An asynchronous capability returns a Pending cell; AWAIT suspends. The host
+    /// resolves the cell with `resolveCell`, then `resume` continues with the value.
+    @MainActor
+    func testAsyncCapabilitySuspendsThenResumesToHalt() {
+        var graph = SignalGraph()
+        let payload = VMValue.record([(0, .int(42))])
+
+        let first = FluxBytecodeVM.runResumable(asyncBytecode, signals: &graph, payload: payload)
         guard case let .success(.suspended(state)) = first else {
-            XCTFail("expected .suspended on first run, got \(String(describing: first))")
+            XCTFail("async capability should suspend, got \(String(describing: first))")
             return
         }
 
-        // The pre-await write to signal 1 landed, and the future reg holds the handle.
-        XCTAssertEqual(graph.read(1), .int(1), "pre-await signal write must persist")
-        let future = state.registers[Int(state.futureReg)]
-        XCTAssertEqual(future, .int(1), "futureReg must point at the awaited handle")
+        // result_reg (r2) holds the freshly allocated Pending cell id.
+        guard case let .int(cellId) = state.registers[2] else {
+            XCTFail("result_reg must hold the cell id")
+            return
+        }
+        XCTAssert(cellId >= 1_000_000, "async capability must allocate a fresh cell id")
+        XCTAssertEqual(graph.cellState(cellId), .pending, "cell must be Pending after async cap")
 
-        // Resume with the resolved future value.
-        let resumed = FluxBytecodeVM.resume(state, signals: &graph, value: future)
+        // Host resolves the cell, then resumes.
+        graph.resolveCell(cellId, .int(7))
+        let resumed = FluxBytecodeVM.resume(state, signals: &graph, value: .int(7))
         guard case let .success(.halt(outcome)) = resumed else {
-            XCTFail("expected .halt after resume, got \(String(describing: resumed))")
+            XCTFail("expected .halt after resolve+resume, got \(String(describing: resumed))")
             return
         }
-
-        // Post-resume body executed: signal 2 = 42, and the resumed VM saw the
-        // delivered value in r0 (it overwrote it, so we assert the side effect).
-        XCTAssertEqual(graph.read(2), .int(42), "post-resume body must run after AWAIT")
-        XCTAssertFalse(outcome.signals.isEmpty, "resume must report signal writes")
+        XCTAssertEqual(graph.read(2), .int(7), "post-resume body must run with the resolved value")
+        XCTAssertFalse(outcome.signals.isEmpty)
     }
 
     /// v1 semantics are preserved: a program that never emits `AWAIT` runs to `HALT`

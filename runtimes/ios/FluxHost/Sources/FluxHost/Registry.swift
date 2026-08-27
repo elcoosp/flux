@@ -9,26 +9,23 @@
 
 import Foundation
 
-/// A capability implementation invoked by `CALL_CAP`.
+/// A capability implementation invoked by `CALL_CAP` (ADR-0045, unified sync/async bridge).
 ///
-/// Receives the `(capId, methodId)` that selected it, the call's argument
-/// register value, and a mutable view of the live signal store so it can read
-/// or write state (e.g. a `Storage` capability persisting a value). Returns the
-/// value placed into the caller's result register.
+/// Receives the `(capId, methodId)` that selected it, the call's argument register
+/// value, and a mutable view of the live signal store so it can create a result cell.
+/// Returns the **signal id** of that result cell — never the value directly:
+/// - a **synchronous** method writes `Ready(value)` into the cell and returns its id;
+/// - an **asynchronous** method creates the cell (state `Pending`) and returns its id
+///   immediately; the host resolves it later via `SignalStore.resolveCell`, which
+///   resumes any awaiting handler.
 ///
-/// Current contract (sync capabilities, ADR-0045): the impl returns a settled
-/// `VMValue` for its method. Async capabilities (camera, permissions, network)
-/// are a follow-up on the same `(capId, methodId)` table that returns a
-/// result-cell signal id instead; the call sites in `FluxBytecodeVM` are
-/// unchanged. Implementations must not capture shared mutable state — they
-/// receive the per-call `signals` and any persisted state through the
-/// `CapabilityStore` injected into the registry.
+/// One signature serves both shapes; the VM never branches on sync-vs-async.
 typealias CapabilityImpl = (
     _ capId: UInt32,
     _ methodId: UInt16,
     _ argument: VMValue,
     _ signals: inout SignalStore
-) throws -> VMValue
+) throws -> UInt32
 
 /// Backing state for stateful capabilities (e.g. `Storage`), shared by every
 /// impl registered in a registry. Kept separate from the signal graph so
@@ -114,27 +111,27 @@ final class CapabilityRegistry: @unchecked Sendable {
         return CapabilityRegistry(entries: [
             (1, 1, { _, _, arg, signals in
                 // Oracle-parity echo: capture args.fields[0] into signal 99 and
-                // return it. CALL_CAP passes a Record (spec §E.1); `call_cap_basic`
-                // reads field 0, so we echo that.
+                // return that result-cell id. CALL_CAP passes a Record (spec §E.1);
+                // `call_cap_basic` reads field 0, so we echo that.
                 guard case let .record(fields) = arg, let first = fields.first else {
                     throw VMError.typeMismatch(offset: 0)
                 }
                 signals.write(99, first.value)
-                return first.value
+                return 99
             }),
             (1, 2, { _, _, _, signals in
-                // startPreview: a real build starts the capture session; here we
-                // only record that preview is active (signal 96 = preview flag).
+                // startPreview: records that preview is active (signal 96 = preview flag).
                 signals.write(96, .bool(true))
-                return .null
+                return 96
             }),
             (1, 3, { _, _, _, signals in
                 signals.write(96, .bool(false))
-                return .null
+                return 96
             }),
             (2, 1, { _, _, arg, signals in
                 // Storage.set(key, value): key is the first record field (a Str id),
-                // value is the second. Persist into the in-memory store.
+                // value is the second. Persist into the in-memory store, then expose
+                // the value through signal 95 (the Storage result cell).
                 guard case let .record(fields) = arg, fields.count >= 2 else {
                     throw VMError.typeMismatch(offset: 0)
                 }
@@ -142,30 +139,44 @@ final class CapabilityRegistry: @unchecked Sendable {
                 let value = fields[1].value
                 guard case let .str(keyId) = key else { throw VMError.typeMismatch(offset: 0) }
                 store.putStorage(keyId, value)
-                return .null
+                signals.write(95, value)
+                return 95
             }),
             (2, 2, { _, _, arg, signals in
-                // Storage.get(key): read the persisted value, or `null` if absent.
+                // Storage.get(key): read the persisted value, defaulting to `null`, and
+                // expose it through signal 95.
                 guard case let .record(fields) = arg, !fields.isEmpty else {
                     throw VMError.typeMismatch(offset: 0)
                 }
                 guard case let .str(keyId) = fields[0].value else { throw VMError.typeMismatch(offset: 0) }
-                return store.getStorage(keyId) ?? .null
+                let value = store.getStorage(keyId) ?? .null
+                signals.write(95, value)
+                return 95
             }),
             (2, 3, { _, _, arg, signals in
-                // Storage.delete(key): clear the persisted value.
+                // Storage.delete(key): clear the persisted value and surface `null`.
                 guard case let .record(fields) = arg, !fields.isEmpty else {
                     throw VMError.typeMismatch(offset: 0)
                 }
                 guard case let .str(keyId) = fields[0].value else { throw VMError.typeMismatch(offset: 0) }
                 store.putStorage(keyId, nil)
-                return .null
+                signals.write(95, .null)
+                return 95
             }),
             (3, 1, { _, _, arg, signals in
                 // Router.navigate(target): record the target string id in signal 97;
-                // the reconciler consumes it. Returns `.null`.
+                // the reconciler consumes it. Returns signal 97's id.
                 signals.write(97, arg)
-                return .null
+                return 97
+            }),
+            (2, 99, { _, _, _, signals in
+                // Reference async capability: allocates a fresh result cell, marks it
+                // `Pending`, and returns its id immediately (ADR-0045). The host
+                // resolves it later via `SignalStore.resolveCell`, resuming the
+                // awaiting handler. Mirrors the oracle's `async_deferred` (cap 2, method 99).
+                let id = signals.allocateCell()
+                signals.markPending(id)
+                return id
             }),
         ], store: store)
     }()

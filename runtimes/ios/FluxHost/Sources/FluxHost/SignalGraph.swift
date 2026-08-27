@@ -43,6 +43,9 @@ public struct SignalGraph: SignalStore {
     private var observers: [SignalId: [Subscription: () -> Void]]
     /// Monotonic id source for subscriptions.
     private var nextSub: UInt64
+    /// Monotonic id source for `allocateCell`, drawn from a high ceiling so it
+    /// never collides with fixed ids like 97/99.
+    private var nextCell: UInt32 = 1_000_000
     /// Reactive state of each cell (ADR-0044). A successful `write` resolves a
     /// cell back to `.ready`; async-derived/resource cells are `.pending` while
     /// their future is in flight.
@@ -54,6 +57,7 @@ public struct SignalGraph: SignalStore {
         self.observers = [:]
         self.nextSub = 1
         self.cellStates = [:]
+        self.nextCell = 1_000_000
     }
 
     /// Reads a signal's current value, or `nil` if it has never been written.
@@ -87,6 +91,19 @@ public struct SignalGraph: SignalStore {
         #endif
         let subs = observers[id] ?? [:]
         for notify in subs.values { notify() }
+    }
+
+    /// Allocates a fresh, unbound signal id for a new capability result cell (ADR-0045).
+    /// Drawn from a high ceiling so it never collides with fixed ids like 97/99.
+    mutating func allocateCell() -> UInt32 {
+        nextCell &+= 1
+        return nextCell
+    }
+
+    /// Resolves `id` to `value`, marking it `.ready` (an async capability finished).
+    mutating func resolveCell(_ id: UInt32, _ value: VMValue) {
+        values[id] = value
+        cellStates[id] = .ready
     }
 
     /// Seeds a value without notifying observers (used for initial state seeds
