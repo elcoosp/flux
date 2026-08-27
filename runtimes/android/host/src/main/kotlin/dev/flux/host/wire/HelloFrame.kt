@@ -50,20 +50,35 @@ public fun helloFrameBytes(
     return out.toByteArray()
 }
 
+// ===== GENERATED-BEGIN (derived from flux-devserver capability_idl; do not edit) =====
+private val idlCapabilities: List<Triple<String, UInt, List<Pair<String, UInt>>>> = listOf(
+    Triple("Camera", 1u, listOf(
+        "take" to 1u,
+        "startPreview" to 2u,
+        "stopPreview" to 3u,
+    )),
+    Triple("Storage", 2u, listOf(
+        "set" to 1u,
+        "get" to 2u,
+        "delete" to 3u,
+    )),
+    Triple("Router", 3u, listOf(
+        "navigate" to 1u,
+    )),
+)
+// ===== GENERATED-END =====
+
 /**
  * The capabilities this host build advertises (Appendix D §D.12.1, §24.4),
  * as `(name, version, features)` triples. The dev server validates the set
  * against the compiled `.flux` requirements; a mismatch is a clear `Error`
- * frame rather than a silent runtime fault. The ids match the stable
- * capability ids from `stdlib/capabilities.flux` / the native
- * `CapabilityRegistry` (cap 1 = Camera, cap 2 = Storage, cap 3 = Router).
+ * frame rather than a silent runtime fault. The ids/names here are generated
+ * from the framework's capability IDL and match the native `CapabilityRegistry`
+ * table and `stdlib/capabilities.flux`.
  */
 public val advertisedCapabilities: List<Triple<String, UInt, List<String>>> =
-    listOf(
-        Triple("Camera", 1u, listOf("take", "startPreview", "stopPreview")),
-        Triple("Storage", 1u, listOf("set", "get", "delete")),
-        Triple("Router", 1u, listOf("navigate")),
-    )
+    idlCapabilities.map { (name, version, methods) -> Triple(name, version, methods.map { it.first }) }
+}
 
 private fun writeStr(
     out: ArrayList<Byte>,

@@ -153,7 +153,7 @@ fn missing_capabilities(
     let mut missing = Vec::new();
     for &(cap_id, method_id) in required {
         let Some((cap_name, method_name)) =
-            crate::capability_manifest::names_for(cap_id, method_id)
+            crate::capability_manifest::CapabilityIdl::names_for(cap_id, method_id)
         else {
             // Unknown id: cannot be satisfied by any host. Report it plainly so
             // the author learns the id is not part of the MLP manifest.

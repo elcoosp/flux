@@ -26,18 +26,34 @@ extension Data {
 }
 
 extension HelloFrame {
+    // ===== GENERATED-BEGIN (derived from flux-devserver capability_idl; do not edit) =====
+    private static let idlCapabilities: [(String, UInt32, [(String, UInt16)])] = [
+        ("Camera", 1, [
+            ("take", 1),
+            ("startPreview", 2),
+            ("stopPreview", 3),
+        ]),
+        ("Storage", 2, [
+            ("set", 1),
+            ("get", 2),
+            ("delete", 3),
+        ]),
+        ("Router", 3, [
+            ("navigate", 1),
+        ]),
+    ]
+    // ===== GENERATED-END =====
+
     /// The capabilities this host build advertises (Appendix D §D.12.1, §24.4).
     ///
     /// Each entry is `(name, version, features)`. The dev server validates the
     /// set against the compiled `.flux` requirements; a mismatch is a clear
-    /// `Error` frame rather than a silent runtime fault. The ids here match the
-    /// stable capability ids from `stdlib/capabilities.flux` / the native
-    /// `CapabilityRegistry` (cap 1 = Camera, cap 2 = Storage, cap 3 = Router).
-    static let advertisedCapabilities: [(String, UInt32, [String])] = [
-        ("Camera", 1, ["take", "startPreview", "stopPreview"]),
-        ("Storage", 1, ["set", "get", "delete"]),
-        ("Router", 1, ["navigate"]),
-    ]
+    /// `Error` frame rather than a silent runtime fault. The ids/names here
+    /// are generated from the framework's capability IDL and match the native
+    /// `CapabilityRegistry` table and `stdlib/capabilities.flux`.
+    static let advertisedCapabilities: [(String, UInt32, [String])] = idlCapabilities.map {
+        ($0.0, $0.1, $0.2.map { $0.0 })
+    }
 }
 
 public enum HelloFrame {

@@ -44,6 +44,7 @@
 )]
 
 mod assets;
+pub(crate) mod capability_idl;
 mod capability_manifest;
 mod config;
 mod debug_bridge;
