@@ -51,6 +51,39 @@ struct VmOutcome {
     let gasUsed: UInt32
 }
 
+/// The captured continuation of a suspended handler (ADR-0044, MLP v2 async).
+///
+/// The VM is a flat register machine with no call stack, so a suspend is exactly its
+/// live interpreter state: the next instruction offset, the register file, the
+/// remaining gas, and the snapshot of signal cells written before the `AWAIT`.
+/// `FluxBytecodeVM.resume` re-enters the interpreter at `resumeOffset` with the
+/// delivered value placed in `r0`. This is a value type so it can cross the executor's
+/// background→main queue boundary safely.
+struct SuspendState {
+    /// The original bytecode program, re-decoded on resume so the tail can be
+    /// executed from `resumeOffset` without the caller retaining the bytes.
+    let program: [UInt8]
+    /// Byte offset of the instruction to execute on resume (the byte after `AWAIT`).
+    let resumeOffset: UInt32
+    /// Register file at the point of suspension.
+    let registers: [VMValue]
+    /// Remaining gas at the point of suspension; continues decrementing on resume.
+    let gasRemaining: UInt32
+    /// Signal cells written before the suspend, replayed into the graph on resume.
+    let signals: [(UInt32, VMValue)]
+    /// The register holding the awaited future handle at suspension. The executor
+    /// reads `registers[futureReg]` to obtain the future to resolve (ADR-0044).
+    let futureReg: UInt8
+}
+
+/// The result of a resumable handler dispatch (ADR-0044).
+enum RunResult {
+    /// The handler ran to `HALT`.
+    case halt(VmOutcome)
+    /// The handler suspended at an `AWAIT`; resume it with `FluxBytecodeVM.resume`.
+    case suspended(SuspendState)
+}
+
 /// The native Flux bytecode VM.
 enum FluxBytecodeVM {
     /// The handler entry gas budget (Appendix E §E.3).
@@ -448,6 +481,10 @@ enum FluxBytecodeVM {
                 if gas < budget {
                     throw VMError.gasExhausted(offset: instr.offset)
                 }
+            default:
+                // v1 handlers never emit `AWAIT`; treat any unassigned opcode as
+                // a malformed program (ADR-0044). v2 async runs through `execTailWith`.
+                throw VMError.invalidDispatch(offset: instr.offset)
             }
 
             ip = nextIP
@@ -461,6 +498,430 @@ enum FluxBytecodeVM {
             registers: regs,
             gasUsed: entryGas - gas
         )
+    }
+
+    /// Runs `bytecode` with resumable semantics, returning either a final `VmOutcome`
+    /// or a `RunResult.suspended` continuation at the first `AWAIT` (ADR-0044).
+    ///
+    /// This is the v2 entry point for async-capable handlers. The v1 `run` is a thin
+    /// wrapper that asserts the handler never suspends; it delegates here and converts a
+    /// `suspended` result into the v1 `invalidDispatch` fault so v1 callers see no change.
+    ///
+    /// The loop mirrors `run` exactly; the only divergence is the `await` case, which
+    /// captures the continuation and returns instead of stepping. Keep the two in
+    /// lockstep — any opcode added to `run` must also be added here.
+    static func runResumable<S: SignalStore>(
+        _ bytecode: [UInt8],
+        signals: inout S,
+        payload: VMValue,
+        stringTable: any StringResolvable = EmptyStringTable(),
+        capRegistry: CapabilityRegistry = .dev
+    ) -> Result<RunResult, VMError> {
+        let program: [Instruction]
+        do { program = try Instruction.decode(bytecode) }
+        catch let err as VMError { return .failure(err) }
+        catch { return .failure(.invalidDispatch(offset: 0)) }
+        return execTail(program, signals: &signals, startOffset: 0, payload: payload,
+                        stringTable: stringTable, capRegistry: capRegistry, programBytes: bytecode)
+    }
+
+    /// Continues a suspended handler (ADR-0044), delivering `value` as the awaited result.
+    ///
+    /// Replays the captured signal writes, then re-enters the interpreter at
+    /// `state.resumeOffset` with `value` placed in `r0`.
+    static func resume<S: SignalStore>(
+        _ state: SuspendState,
+        signals: inout S,
+        value: VMValue,
+        stringTable: any StringResolvable = EmptyStringTable(),
+        capRegistry: CapabilityRegistry = .dev
+    ) -> Result<RunResult, VMError> {
+        for (id, v) in state.signals { signals.write(id, v) }
+        let program: [Instruction]
+        do { program = try Instruction.decode(state.program) }
+        catch let err as VMError { return .failure(err) }
+        catch { return .failure(.invalidDispatch(offset: 0)) }
+        var regs = state.registers
+        regs[0] = value
+        // `execTail` takes the register file by value; rebuild via a `runResumable`-style
+        // re-entry would clobber the captured regs, so call the shared helper with them.
+        return execTailWith(program, signals: &signals, startOffset: Int(state.resumeOffset),
+                            registers: regs, gas: state.gasRemaining, payload: value,
+                            stringTable: stringTable, capRegistry: capRegistry, programBytes: state.program)
+    }
+
+    /// Shared interpreter tail used by `run`, `runResumable` and `resume` (ADR-0044).
+    ///
+    /// Runs from `startOffset` until `HALT` or `AWAIT`. Mirrors the opcode semantics of
+    /// `run` exactly; the `await` case returns `RunResult.suspended` with the offset of
+    /// the following instruction. `programBytes` is retained in the suspend state so the
+    /// executor can resume without retaining the program itself.
+    private static func execTail<S: SignalStore>(
+        _ program: [Instruction],
+        signals: inout S,
+        startOffset: Int,
+        payload: VMValue,
+        stringTable: any StringResolvable,
+        capRegistry: CapabilityRegistry,
+        programBytes: [UInt8]
+    ) -> Result<RunResult, VMError> {
+        var regs = [VMValue](repeating: .null, count: 16)
+        regs[0] = payload
+        let gas = entryGas
+        regs[15] = .int(Int64(gas))
+        return execTailWith(program, signals: &signals, startOffset: startOffset,
+                             registers: regs, gas: gas, payload: payload,
+                             stringTable: stringTable, capRegistry: capRegistry, programBytes: programBytes)
+    }
+
+    /// Core interpreter tail: runs from `startOffset` with a caller-supplied live
+    /// `registers`/`gas` (used by `resume` to restore the captured continuation).
+    private static func execTailWith<S: SignalStore>(
+        _ program: [Instruction],
+        signals: inout S,
+        startOffset: Int,
+        registers: [VMValue],
+        gas: UInt32,
+        payload: VMValue,
+        stringTable: any StringResolvable,
+        capRegistry: CapabilityRegistry,
+        programBytes: [UInt8]
+    ) -> Result<RunResult, VMError> {
+        let offsets = program.map { $0.offset }
+        guard let startIndex = offsets.firstIndex(of: startOffset) else {
+            return .failure(.invalidDispatch(offset: startOffset))
+        }
+        var regs = registers
+        var gas = gas
+        var allocated: UInt64 = 0
+        var stringTable = stringTable
+        var ip = startIndex
+
+        do {
+        while ip < program.count {
+            let instr = program[ip]
+            let op = instr.opCode
+            if op == .halt { break }
+            if gas == 0 { return .failure(.gasExhausted(offset: instr.offset)) }
+            gas -= 1
+            regs[15] = .int(Int64(gas))
+            let nextIP = ip + 1
+
+            let reg = { (r: UInt8) -> VMValue in regs[Int(r)] }
+
+            switch op {
+            case .halt:
+                break
+
+            case .await:
+                // Capture the continuation and park. The executor resumes via
+                // `FluxBytecodeVM.resume`, which deposits the resolved value into `r0`.
+                let written = signals.snapshot()
+                return .success(.suspended(SuspendState(
+                    program: programBytes,
+                    resumeOffset: UInt32(instr.offset) + UInt32(instr.opCode.instructionLen),
+                    registers: regs,
+                    gasRemaining: gas,
+                    signals: written,
+                    futureReg: instr.u8(1)
+                )))
+
+            case .nop:
+                break
+
+            case .readSignal:
+                let dst = instr.u8(0)
+                let id = instr.u32(1)
+                regs[Int(dst)] = signals.read(id) ?? .null
+
+            case .writeSignal:
+                let id = instr.u32(0)
+                let src = instr.u8(4)
+                signals.write(id, reg(src))
+
+            case .addI64, .subI64, .mulI64, .divI64, .modI64:
+                let dst = instr.u8(0)
+                let a = try requireInt(reg(instr.u8(1)), at: instr.offset)
+                let b = try requireInt(reg(instr.u8(2)), at: instr.offset)
+                let r: Int64
+                switch op {
+                case .addI64: r = a &+ b
+                case .subI64: r = a &- b
+                case .mulI64: r = a &* b
+                case .divI64:
+                    if b == 0 { return .failure(.divByZero(offset: instr.offset)) }
+                    r = wrappingDiv(a, b)
+                case .modI64:
+                    if b == 0 { return .failure(.divByZero(offset: instr.offset)) }
+                    r = wrappingRem(a, b)
+                default:
+                    return .failure(.invalidDispatch(offset: instr.offset))
+                }
+                regs[Int(dst)] = .int(r)
+
+            case .negI64:
+                let dst = instr.u8(0)
+                let v = try requireInt(reg(instr.u8(1)), at: instr.offset)
+                regs[Int(dst)] = .int(0 &- v)
+
+            case .eqI64, .ltI64, .gtI64, .lteI64, .gteI64:
+                let dst = instr.u8(0)
+                let a = try requireInt(reg(instr.u8(1)), at: instr.offset)
+                let b = try requireInt(reg(instr.u8(2)), at: instr.offset)
+                let r: Bool
+                switch op {
+                case .eqI64: r = a == b
+                case .ltI64: r = a < b
+                case .gtI64: r = a > b
+                case .lteI64: r = a <= b
+                case .gteI64: r = a >= b
+                default:
+                    return .failure(.invalidDispatch(offset: instr.offset))
+                }
+                regs[Int(dst)] = .bool(r)
+
+            case .addF64, .subF64, .mulF64, .divF64:
+                let dst = instr.u8(0)
+                let a = try requireFloat(reg(instr.u8(1)), at: instr.offset)
+                let b = try requireFloat(reg(instr.u8(2)), at: instr.offset)
+                let r: Double
+                switch op {
+                case .addF64: r = a + b
+                case .subF64: r = a - b
+                case .mulF64: r = a * b
+                case .divF64: r = fdiv(a, b)
+                default:
+                    return .failure(.invalidDispatch(offset: instr.offset))
+                }
+                regs[Int(dst)] = .float(r)
+
+            case .negF64:
+                let dst = instr.u8(0)
+                let v = try requireFloat(reg(instr.u8(1)), at: instr.offset)
+                regs[Int(dst)] = .float(-v)
+
+            case .eqF64, .ltF64, .gtF64:
+                let dst = instr.u8(0)
+                let a = try requireFloat(reg(instr.u8(1)), at: instr.offset)
+                let b = try requireFloat(reg(instr.u8(2)), at: instr.offset)
+                let r: Bool
+                switch op {
+                case .eqF64: r = (a == b) || (a.isNaN && b.isNaN)
+                case .ltF64: r = a < b
+                case .gtF64: r = a > b
+                default:
+                    return .failure(.invalidDispatch(offset: instr.offset))
+                }
+                regs[Int(dst)] = .bool(r)
+
+            case .i64ToF64:
+                let dst = instr.u8(0)
+                let v = try requireInt(reg(instr.u8(1)), at: instr.offset)
+                regs[Int(dst)] = .float(Double(v))
+
+            case .f64ToI64:
+                let dst = instr.u8(0)
+                let v = try requireFloat(reg(instr.u8(1)), at: instr.offset)
+                regs[Int(dst)] = .int(Int64(v))
+
+            case .andBool:
+                let dst = instr.u8(0)
+                let x = try requireBool(reg(instr.u8(1)), at: instr.offset)
+                let y = try requireBool(reg(instr.u8(2)), at: instr.offset)
+                regs[Int(dst)] = .bool(x && y)
+
+            case .orBool:
+                let dst = instr.u8(0)
+                let x = try requireBool(reg(instr.u8(1)), at: instr.offset)
+                let y = try requireBool(reg(instr.u8(2)), at: instr.offset)
+                regs[Int(dst)] = .bool(x || y)
+
+            case .notBool:
+                let dst = instr.u8(0)
+                let v = try requireBool(reg(instr.u8(1)), at: instr.offset)
+                regs[Int(dst)] = .bool(!v)
+
+            case .strIntern:
+                regs[Int(instr.u8(0))] = .str(instr.u32(1))
+
+            case .strEq:
+                let dst = instr.u8(0)
+                let x = try requireStr(reg(instr.u8(1)), at: instr.offset)
+                let y = try requireStr(reg(instr.u8(2)), at: instr.offset)
+                regs[Int(dst)] = .bool(x == y)
+
+            case .strLen:
+                let dst = instr.u8(0)
+                let id = try requireStr(reg(instr.u8(1)), at: instr.offset)
+                let len: Int
+                if let resolved = stringTable.lookup(id) {
+                    len = resolved.utf8.count
+                } else {
+                    len = digitCount(id)
+                }
+                regs[Int(dst)] = .int(Int64(len))
+
+            case .strConcat:
+                let dst = instr.u8(0)
+                let x = try requireStr(reg(instr.u8(1)), at: instr.offset)
+                let y = try requireStr(reg(instr.u8(2)), at: instr.offset)
+                guard let a = stringTable.lookup(x), let b = stringTable.lookup(y) else {
+                    return .failure(.memoryExhausted(offset: instr.offset))
+                }
+                let combined = a + b
+                let newId = stringTable.intern(combined)
+                regs[Int(dst)] = .str(newId)
+
+            case .toString:
+                let dst = instr.u8(0)
+                let src = reg(instr.u8(1))
+                let rendered = renderForToString(src, table: stringTable)
+                regs[Int(dst)] = .str(stringTable.intern(rendered))
+
+            case .jump:
+                ip = try jumpTarget(instr, nextIP: nextIP, offsets: offsets, delta: instr.i32(0))
+                continue
+
+            case .condJump, .condJumpNot:
+                let taken = truthy(reg(instr.u8(0)))
+                let want = op == .condJump
+                if taken == want {
+                    ip = try jumpTarget(instr, nextIP: nextIP, offsets: offsets, delta: instr.i32(1))
+                    continue
+                }
+
+            case .allocRecord:
+                let dst = instr.u8(0)
+                let count = Int(instr.u16(1))
+                allocated &+= UInt64(count) &* 16
+                if allocated > allocationBudget { return .failure(.memoryExhausted(offset: instr.offset)) }
+                var fields: [(UInt16, VMValue)] = []
+                fields.reserveCapacity(count)
+                for i in 0..<count { fields.append((UInt16(i), .null)) }
+                regs[Int(dst)] = .record(fields)
+
+            case .getField:
+                let dst = instr.u8(0)
+                let idx = Int(instr.u16(1))
+                let field = try getField(reg(instr.u8(3)), idx: idx, at: instr.offset)
+                regs[Int(dst)] = field
+
+            case .setField:
+                let obj = instr.u8(0)
+                let idx = Int(instr.u16(1))
+                let val = reg(instr.u8(3))
+                try setField(&regs[Int(obj)], idx: idx, value: val, at: instr.offset)
+
+            case .recordEq:
+                let dst = instr.u8(0)
+                let x = try requireRecord(reg(instr.u8(1)), at: instr.offset)
+                let y = try requireRecord(reg(instr.u8(2)), at: instr.offset)
+                regs[Int(dst)] = .bool(recordsEqual(x, y))
+
+            case .allocList:
+                allocated &+= 8
+                if allocated > allocationBudget { return .failure(.memoryExhausted(offset: instr.offset)) }
+                regs[Int(instr.u8(0))] = .list([])
+
+            case .listPush:
+                let list = instr.u8(0)
+                let val = reg(instr.u8(1))
+                allocated &+= 8
+                if allocated > allocationBudget { return .failure(.memoryExhausted(offset: instr.offset)) }
+                guard case var .list(items) = regs[Int(list)] else {
+                    return .failure(.typeMismatch(offset: instr.offset))
+                }
+                items.append(val)
+                regs[Int(list)] = .list(items)
+
+            case .listGet:
+                let dst = instr.u8(0)
+                let items = try requireList(reg(instr.u8(1)), at: instr.offset)
+                let i = Int(instr.u8(2))
+                guard i < items.count else { return .failure(.indexOutOfBounds(offset: instr.offset)) }
+                regs[Int(dst)] = items[i]
+
+            case .listLen:
+                let items = try requireList(reg(instr.u8(1)), at: instr.offset)
+                regs[Int(instr.u8(0))] = .int(Int64(items.count))
+
+            case .listConcat:
+                let dst = instr.u8(0)
+                let a = try requireList(reg(instr.u8(1)), at: instr.offset)
+                let b = try requireList(reg(instr.u8(2)), at: instr.offset)
+                regs[Int(dst)] = .list(a + b)
+
+            case .callCap:
+                let resultReg = instr.u8(0)
+                let capID = instr.u32(1)
+                let methodID = instr.u16(5)
+                let argsReg = instr.u8(7)
+                guard let impl = capRegistry.lookup(capID, methodID) else {
+                    return .failure(.typeMismatch(offset: instr.offset))
+                }
+                do {
+                    var boxed: any SignalStore = signals
+                    let result = try impl(capID, methodID, reg(argsReg), &boxed)
+                    signals = boxed as! S
+                    regs[Int(resultReg)] = result
+                } catch let err as VMError {
+                    return .failure(err)
+                } catch {
+                    return .failure(.typeMismatch(offset: instr.offset))
+                }
+
+            case .matchTag:
+                let val = reg(instr.u8(0))
+                let tag = instr.u32(1)
+                var matched = false
+                if case let .record(fields) = val, let first = fields.first {
+                    if case let .int(t) = first.value, t == Int64(tag) { matched = true }
+                }
+                if matched {
+                    ip = try jumpTarget(instr, nextIP: nextIP, offsets: offsets, delta: instr.i32(5))
+                    continue
+                }
+
+            case .extractField:
+                let dst = instr.u8(0)
+                let idx = Int(instr.u16(1))
+                let field = try getField(reg(instr.u8(3)), idx: idx, at: instr.offset)
+                regs[Int(dst)] = field
+
+            case .loadIntConst:
+                regs[Int(instr.u8(0))] = .int(instr.i64(1))
+
+            case .loadFloatConst:
+                regs[Int(instr.u8(0))] = .float(instr.f64(1))
+
+            case .loadBoolConst:
+                regs[Int(instr.u8(0))] = .bool(instr.u8(1) != 0)
+
+            case .loadStrConst:
+                regs[Int(instr.u8(0))] = .str(instr.u32(1))
+
+            case .loadNull:
+                regs[Int(instr.u8(0))] = .null
+
+            case .mov:
+                regs[Int(instr.u8(0))] = reg(instr.u8(1))
+
+            case .gasCheck:
+                let budget = instr.u32(0)
+                if gas < budget { return .failure(.gasExhausted(offset: instr.offset)) }
+            }
+        }
+        } catch let err as VMError {
+            return .failure(err)
+        } catch {
+            return .failure(.invalidDispatch(offset: 0))
+        }
+
+        return .success(.halt(VmOutcome(
+            signals: signals.snapshot(),
+            registers: regs,
+            gasUsed: entryGas - gas
+        )))
     }
 
     /// The opcode → contiguous integer index used by `runViaDispatchTable`.

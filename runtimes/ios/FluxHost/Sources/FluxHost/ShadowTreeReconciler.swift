@@ -54,6 +54,19 @@ struct ShadowTreeReconciler {
     /// `reconcileDirty`.
     private var signalDeps: [UInt32: Set<UInt32>] = [:]
 
+    /// Reverse map from a prop-thunk's stable handler id to the node that owns
+    /// it, so a state-preserving `Patch::Handler` updating the thunk body can
+    /// re-materialise the node's dynamic props immediately (FR hot-reload).
+    /// Keyed by the server-assigned handler id — stable across edits — NOT the
+    /// thunk's content hash, which changes whenever the body changes.
+    private var thunkHandlerToNode: [UInt32: UInt32] = [:]
+
+    /// The node id of the root view in the currently applied tree. Tracked so a
+    /// Delta frame (which may ship a `Replace` of the root when node ids are not
+    /// stable across edits) can rebuild and re-present the root view instead of
+    /// tearing it down and leaving a blank screen (hot-reload blank-screen bug).
+    private var currentRootId: UInt32?
+
     /// The interning string table for this reconciler. Kept in sync from every
     /// applied frame's `strings` so prop resolution never depends on reaching
     /// back into the executor. A reference type (ADR-0027 T14) so the VM can
@@ -109,7 +122,17 @@ struct ShadowTreeReconciler {
         // dirty reconciliations can re-materialise dynamic props without the
         // full frame.
         signalMeta = frame.signalMeta
-        componentNames = Dictionary(frame.componentNames.map { ($0.stringId, $0.value) }, uniquingKeysWith: { $1 })
+        // Merge the frame's component-name table into the retained map rather
+        // than replacing it. A Delta (patch) frame carries an *empty*
+        // `componentNames`, so a straight assignment would wipe the table the
+        // Init frame populated — and the next reconcile could no longer resolve a
+        // primitive's `componentId` to its adapter name (e.g. "Column" →
+        // `UIStackView`), falling back to an empty `ContainerAdapter` and leaving
+        // a blank screen on hot-reload (FLUX-019). Init seeds it; every later
+        // frame only adds/refreshes entries.
+        for entry in frame.componentNames {
+            componentNames[entry.stringId] = entry.value
+        }
         var blobs: [Data: [UInt8]] = [:]
         for handler in frame.handlers {
             if let bytecode = handler.bytecode {
@@ -117,16 +140,102 @@ struct ShadowTreeReconciler {
             }
         }
         thunkBlobs = blobs
+        // Join the frame's handler ids (stable across edits) to each node's
+        // prop-thunk (identified by its content hash) so a state-preserving
+        // `Handler` patch can find the node to re-materialise. The delta frame
+        // carries both `handlers` (id → hash + bytecode) and `signalMeta`
+        // (node → thunk hash), which we connect here.
+        var handlerHashToId: [Data: UInt32] = [:]
+        for handler in frame.handlers {
+            handlerHashToId[Data(handler.closure.hash)] = handler.handlerId
+        }
+        var map: [UInt32: UInt32] = [:]
+        for (nid, meta) in frame.signalMeta where meta.thunk != nil {
+            if let hid = handlerHashToId[Data(meta.thunk!.hash)] {
+                map[hid] = nid
+            }
+        }
+        // Merge (don't replace): a delta frame carries its own handlers/signalMeta
+        // and must update the reverse map, but a delta that only ships a
+        // `Handler` patch (no structural change) has an empty `signalMeta`, so
+        // replacing here would wipe the map built by the Init frame and the
+        // `applyPatch(.handler)` re-materialize would never find its node.
+        for (hid, nid) in map {
+            thunkHandlerToNode[hid] = nid
+        }
+        // A Delta frame carries an EMPTY `nodes` map (only patches). The
+        // reconciler's authoritative table is `nodeTable`, retained from the
+        // last full frame. Patch targets (`.replace`/`.insert`) carry their new
+        // node inline, so merge those over `nodeTable` and hand the merged map to
+        // `applyPatch` (and to the Delta root reconcile below) — otherwise
+        // `reconcile` looks the node up in an empty map and silently drops the
+        // structural patch (blank screen on hot-reload). `nodeTable` is only
+        // updated by a full frame, so a Delta never clobbers it.
+        var patchNodes = nodeTable
+        for patch in frame.patches {
+            switch patch {
+            case let .replace(_, node), let .insert(_, _, node):
+                patchNodes[node.id] = node
+            default:
+                break
+            }
+        }
         // Keep the latest full node table so removal can resolve a node's
         // `cleanupHandler` (§18.4) even from a patch frame that only lists deltas.
         // Only a full-tree frame (root != nil) carries the authoritative table;
         // a patch frame has an empty `nodes` and must not clobber it.
         if let root = frame.root {
             nodeTable = frame.nodes
+            currentRootId = root.id
             reconcile(nodeId: root.id, nodes: frame.nodes, report: &report)
+        } else if let rootId = currentRootId {
+            // A Delta frame carries an EMPTY `nodes` map (only patches). Node ids
+            // are not stable across edits in the current pipeline (they derive
+            // from byte-accurate source spans), so a text edit shifts every id
+            // and the differ emits a `Replace` of the whole subtree rather than a
+            // minimal `.handler` patch. The differ's `emit_replace` puts the
+            // *new* node's id in `Patch::Replace.id`, so the old root id can no
+            // longer be found in `built`/`patchNodes` after application. We
+            // therefore retarget `currentRootId` to the new root: it is the
+            // replaced/inserted node id that is not referenced as a child of any
+            // other node in `patchNodes`. Then reconcile from that id so the new
+            // root view is built and presented. Without this the old root is
+            // torn down, `currentRootId` keeps pointing at the destroyed id, and
+            // the screen goes blank (hot-reload blank-screen bug).
+            var candidateRoots: Set<UInt32> = []
+            var childIds: Set<UInt32> = []
+            for patch in frame.patches {
+                switch patch {
+                case let .replace(_, node), let .insert(_, _, node):
+                    candidateRoots.insert(node.id)
+                    for child in node.children {
+                        if case let .node(cid) = child { childIds.insert(cid) }
+                    }
+                default:
+                    break
+                }
+            }
+            // The new root is a replaced/inserted node that is itself not a child
+            // of another replaced/inserted node.
+            let newRootId = candidateRoots.subtracting(childIds).first ?? rootId
+            // The node ids are not stable across edits (they derive from
+            // byte-accurate source spans), so a text edit shifts every id and the
+            // differ emits a `Replace` of the *whole* subtree. The incremental
+            // reconcile would then try to reuse stale `built` entries keyed by the
+            // old (now-gone) child ids and produce empty view shells — blank
+            // screen on hot-reload. When the root is replaced we therefore rebuild
+            // the entire tree fresh from `patchNodes` (the same path the Init
+            // frame takes, which renders correctly), then adopt `patchNodes` as
+            // the new authoritative table. This is a full rebuild rather than a
+            // surgical patch, which is acceptable for the cold hot-reload case
+            // where every id changed.
+            built.removeAll()
+            nodeTable = patchNodes
+            currentRootId = newRootId
+            reconcile(nodeId: newRootId, nodes: patchNodes, report: &report)
         }
         for patch in frame.patches {
-            applyPatch(patch, nodes: frame.nodes, report: &report)
+            applyPatch(patch, nodes: patchNodes, report: &report)
         }
         return report
     }
@@ -134,6 +243,16 @@ struct ShadowTreeReconciler {
     /// The currently built native view for `nodeId`, if any (for test assertions).
     func view(for nodeId: UInt32)->AnyObject?{
         built[nodeId]?.view
+    }
+
+    /// The native view of the currently applied root, resolved from the
+    /// reconciler's own `currentRootId` (kept correct across both full and Delta
+    /// frames). The executor's `rootView` delegates here so a Delta that replaces
+    /// the root (node ids unstable across edits) still presents the new root
+    /// instead of reading a stale, destroyed id and going blank.
+    var rootView: AnyObject? {
+        guard let id = currentRootId else { return nil }
+        return built[id]?.view
     }
 
     /// Reconciles the node `nodeId` (resolved from `nodes`) against the built
@@ -145,7 +264,7 @@ struct ShadowTreeReconciler {
         // this runs the thunk against the live signal graph; for static nodes it
         // returns the shipped props unchanged. Reused everywhere below so the
         // signal deps, kit props, and stored runtime props stay consistent.
-        let effectiveProps = materializeProps(for: nodeId, node: node)
+        let effectiveProps = materializeProps(for: nodeId, fallbackProps: node.props)
         // Record which signals this node's props read, so a later signal write can
         // mark it dirty without walking the whole tree (R1). A dynamic node uses
         // its thunk's captured `deps`; a static node reads whatever signal refs
@@ -245,7 +364,7 @@ struct ShadowTreeReconciler {
         // Materialise dynamic props (ADR-0027 T14) so a signal write re-evaluates
         // interpolations against the new graph value. For static nodes this is the
         // shipped props unchanged.
-        let effectiveProps = materializeProps(for: nodeId, node: node)
+        let effectiveProps = materializeProps(for: nodeId, fallbackProps: node.props)
 
         // Visit children first to find dirty descendants and collect their views.
         var childViews: [AnyObject] = []
@@ -324,19 +443,19 @@ struct ShadowTreeReconciler {
     /// its field position; `meta.layout` maps that position to the on-wire
     /// `PropIdx`. A node with no thunk (pure literals / control-only) returns its
     /// shipped props unchanged.
-    private func materializeProps(for nodeId: UInt32, node: ShadowNode) -> [Prop] {
+    private func materializeProps(for nodeId: UInt32, fallbackProps: [Prop]) -> [Prop] {
         guard let meta = signalMeta[nodeId], let thunk = meta.thunk else {
             #if DEBUG
-            NSLog("[materialize] node \(nodeId) no thunk (meta=\(signalMeta[nodeId] != nil)) -> shipped \(node.props.count) props")
+            NSLog("[materialize] node \(nodeId) no thunk (meta=\(signalMeta[nodeId] != nil)) -> shipped \(fallbackProps.count) props")
             #endif
-            return node.props
+            return fallbackProps
         }
         guard let bytecode = thunkBlobs[Data(thunk.hash)],
               let runtime = executorRef as? FluxRuntime else {
             #if DEBUG
             NSLog("[materialize] node \(nodeId) thunk present but bytecode missing (blobs=\(thunkBlobs.count), hash=\(Data(thunk.hash).map { String(format: "%02x", $0) }.joined()))")
             #endif
-            return node.props
+            return fallbackProps
         }
         #if DEBUG
         NSLog("[materialize] node \(nodeId) RUNNING thunk hash=\(Data(thunk.hash).map { String(format: "%02x", $0) }.joined()) bcLen=\(bytecode.count) deps=\(meta.deps) layout=\(meta.layout)")
@@ -358,7 +477,7 @@ struct ShadowTreeReconciler {
                 #if DEBUG
                 NSLog("[materialize] node \(nodeId) thunk result r1 not a record: \(outcome.registers[1])")
                 #endif
-                return node.props
+                return fallbackProps
             }
             var props: [Prop] = []
             props.reserveCapacity(meta.layout.count)
@@ -380,7 +499,7 @@ struct ShadowTreeReconciler {
             #endif
             // Materialisation is best-effort: degrade to shipped props rather
             // than leaving the view stale or crashing the reconcile.
-            return node.props
+            return fallbackProps
         }
     }
 
@@ -424,9 +543,20 @@ struct ShadowTreeReconciler {
             parent.adapter.setChildren(views, on: parent.view)
 
         case let .handler(id, _):
-            // Handler bytecode is stored by the executor; the node id is (re)bound
-            // when its view is built. Nothing to mutate on existing views here.
-            _ = id
+            // A state-preserving handler swap. `apply` already re-registered the
+            // new bytecode via `frame.handlers`, so the executor's closure table
+            // is current. If this handler is a node's prop thunk, re-materialise
+            // that node's dynamic props so a thunk-body edit (e.g. a changed
+            // string literal) takes effect immediately, without waiting for a
+            // signal change (FR hot-reload). Non-thunk handlers (e.g. `onClick`)
+            // need no view mutation here.
+            guard let nodeId = thunkHandlerToNode[id], let existing = built[nodeId] else { return }
+            let newProps = materializeProps(for: nodeId, fallbackProps: existing.runtimeProps)
+            let oldKit = kitProps(existing.runtimeProps, table: currentTable())
+            let newKit = kitProps(newProps, table: currentTable())
+            existing.adapter.update(existing.view, from: oldKit, to: newKit)
+            existing.runtimeProps = newProps
+            report.updated.append(nodeId)
         }
     }
 }

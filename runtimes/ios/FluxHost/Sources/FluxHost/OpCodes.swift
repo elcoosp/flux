@@ -81,6 +81,12 @@ enum OpCode: UInt8, CaseIterable, Equatable {
 
     case toString = 0xD0
 
+    /// Suspends the VM, capturing the continuation (ADR-0044, MLP v2 first-class async).
+    /// `AWAIT resultReg(u8), futureReg(u8)`: the handler parks after this instruction;
+    /// the executor resumes it via `FluxBytecodeVM.resume`, which deposits the resolved
+    /// future value into `r0`.
+    case await = 0xE0
+
     /// The Appendix E mnemonic, e.g. `"ADD_I64"`.
     var mnemonic: String {
         switch self {
@@ -139,6 +145,7 @@ enum OpCode: UInt8, CaseIterable, Equatable {
         case .mov: "MOV"
         case .gasCheck: "GAS_CHECK"
         case .toString: "TO_STRING"
+        case .await: "AWAIT"
         }
     }
 
@@ -165,6 +172,7 @@ enum OpCode: UInt8, CaseIterable, Equatable {
         case .getField, .setField, .extractField: 4
         case .matchTag: 9
         case .callCap: 8
+        case .await: 2
         }
     }
 

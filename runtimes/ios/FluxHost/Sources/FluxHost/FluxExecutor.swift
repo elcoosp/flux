@@ -25,6 +25,30 @@ struct DispatchResult: Sendable {
     let error: VMError?
 }
 
+/// Resolves an awaited future handle to its settled value (ADR-0044, MLP v2 async).
+///
+/// When a handler suspends on `AWAIT`, the VM captures the future handle from the
+/// instruction's `future_reg` register and hands it here. The conforming type bridges
+/// that handle to the real asynchronous work (a network capability, a timer, a
+/// `CapabilityRegistry` async impl) and returns the resolved `VMValue`. The runtime
+/// then resumes the handler with the value in `r0`.
+///
+/// The default [`PassthroughAsyncResolver`] treats the handle as already-resolved, so
+/// synchronous-style `await` (and headless tests) work without a transport. A live
+/// host overrides `asyncResolver` with a bridge to its real async capability surface.
+protocol AsyncResolver: Sendable {
+    /// Resolves `future` to its settled value, possibly after awaiting real async work.
+    func resolve(_ future: VMValue) async -> VMValue
+}
+
+/// Default resolver: the awaited value is treated as already settled.
+///
+/// Used headless and in tests where `await` is exercised without a real async
+/// backend; the future handle flows straight back as the resolved value.
+struct PassthroughAsyncResolver: AsyncResolver {
+    func resolve(_ future: VMValue) async -> VMValue { future }
+}
+
 /// Owns the signal graph, the adapter registry, the string table and the
 /// reconciler, and applies decoded frames to them. Main-actor isolated so all
 /// UIKit view mutations happen on the main actor after evaluation.
@@ -46,6 +70,10 @@ public final class FluxRuntime: FluxExecutor {
     /// minted by the server's authoritative string table. Defaults to the offline
     /// `NoOpStringInterner` (id `0`) so headless evaluation needs no transport.
     private(set) var interner: any AnyStringInterner = NoOpStringInterner()
+    /// The async-future resolver for `await` (ADR-0044). Defaults to the synchronous
+    /// pass-through; a live host replaces it with a bridge to its real async
+    /// capability surface (network/timer/etc.).
+    private(set) var asyncResolver: any AsyncResolver = PassthroughAsyncResolver()
     /// Handler id → (closure descriptor + bytecode blob + pre-decoded instruction
     /// stream). The decoded `[Instruction]` is produced once at registration (R3)
     /// and reused on every dispatch, so the per-tap hot path never re-decodes. A
@@ -67,9 +95,12 @@ public final class FluxRuntime: FluxExecutor {
     private(set) var lastReconcile: ReconcileReport = ReconcileReport()
     /// The root native view of the currently applied tree, or `nil` before any
     /// `Init` frame has built one. The host mounts this on screen.
+    ///
+    /// Delegates to the reconciler's own root tracking so a Delta that replaces
+    /// the root (node ids unstable across edits) still presents the live root
+    /// view rather than a stale, destroyed id.
     public var rootView: UIView? {
-        guard let id = currentRootId else { return nil }
-        return reconciler.view(for: id) as? UIView
+        reconciler.rootView as? UIView
     }
     /// Invoked on the main actor after a successful frame application or a
     /// dirty-set reconcile, so the host can mount/update the on-screen view
@@ -149,6 +180,42 @@ public final class FluxRuntime: FluxExecutor {
         if let root = frame.root {
             currentNodes = frame.nodes
             currentRootId = root.id
+        } else if let liveRoot = currentRootId {
+            // A patch frame (root == nil) may still replace the root node — this
+            // happens whenever node ids are not stable across edits (the differ
+            // then emits a `Replace` of the whole tree). The differ's
+            // `emit_replace` puts the *new* node's id in `Patch::Replace.id`, so
+            // the old root id is gone after application. Retarget `currentRootId`
+            // (and merge every replaced/inserted node into `currentNodes`) to the
+            // replaced/inserted node that is not a child of any other
+            // replaced/inserted node — that is the new root. `currentNodes` must
+            // carry the *whole* new subtree (not just the root) so the
+            // dirty-set reconcile on a later tap (`reconcileDirty`) can walk it
+            // and re-materialise the changed node; otherwise the tap would write
+            // the signal but nothing would re-render (FR hot-reload + tap).
+            var candidateRoots: Set<UInt32> = []
+            var childIds: Set<UInt32> = []
+            var replacedNodes: [UInt32: ShadowNode] = [:]
+            for patch in frame.patches {
+                switch patch {
+                case let .replace(_, node), let .insert(_, _, node):
+                    candidateRoots.insert(node.id)
+                    replacedNodes[node.id] = node
+                    for child in node.children {
+                        if case let .node(cid) = child { childIds.insert(cid) }
+                    }
+                default:
+                    break
+                }
+            }
+            // Every replaced/inserted node enters `currentNodes` so the tap path
+            // has a complete tree to reconcile against.
+            for (nid, node) in replacedNodes {
+                currentNodes[nid] = node
+            }
+            if let newRoot = candidateRoots.subtracting(childIds).first {
+                currentRootId = newRoot
+            }
         }
         // Register every handler carried by the frame so native controls can
         // fire them later (G1 — logic hot-swap). The handler section on the wire
@@ -198,6 +265,50 @@ public final class FluxRuntime: FluxExecutor {
         } catch {
             // Should be unreachable: run only throws VMError.
             return (nil, VMError(kind: .invalidDispatch, offset: 0))
+        }
+    }
+
+    /// Runs a handler with resumable semantics, driving every `AWAIT` to completion
+    /// (ADR-0044, MLP v2 async).
+    ///
+    /// Unlike `evaluate` (which runs the v1 non-suspending VM), this uses
+    /// `FluxBytecodeVM.runResumable` and loops: on each `Suspended` continuation it
+    /// reads the future handle from `state.futureReg`, asks `asyncResolver` to settle
+    /// it (real async work), then `resume`s the handler with the value in `r0`. The
+    /// loop terminates at `HALT`. Does NOT reconcile — the caller folds signals and
+    /// reconciles, exactly like the v1 `dispatch` path.
+    ///
+    /// - Returns: the final `VmOutcome`, or the `VMError` that faulted.
+    private func runHandlerAsync(
+        bytecode: [UInt8],
+        payload: VMValue
+    ) async -> (outcome: VmOutcome?, error: VMError?) {
+        var store = graph
+        var current: Result<RunResult, VMError> = FluxBytecodeVM.runResumable(
+            bytecode,
+            signals: &store,
+            payload: payload,
+            stringTable: table,
+            capRegistry: .dev
+        )
+        while true {
+            switch current {
+            case let .success(.halt(outcome)):
+                graph = store
+                return (outcome, nil)
+            case let .success(.suspended(state)):
+                let future = state.registers[Int(state.futureReg)]
+                let resolved = await asyncResolver.resolve(future)
+                current = FluxBytecodeVM.resume(
+                    state,
+                    signals: &store,
+                    value: resolved,
+                    stringTable: table,
+                    capRegistry: .dev
+                )
+            case let .failure(err):
+                return (nil, err)
+            }
         }
     }
 
@@ -262,9 +373,8 @@ public final class FluxRuntime: FluxExecutor {
             lastReconcile = ReconcileReport()
             return
         }
-        // Reuse the cached decode from registration (R3); fall back to a one-off
-        // decode only if caching was impossible.
-        let instructions = entry.decoded ?? (try? Instruction.decode(entry.bytecode)) ?? []
+        // The raw `entry.bytecode` is handed to `runHandlerAsync`, which re-decodes
+        // internally (R3 cache is irrelevant for the resumable VM's own decode).
         Task { @MainActor in
             // Convert the native event payload to the runtime's id-based value,
             // interning any resolved string through the dev server's canonical
@@ -274,10 +384,26 @@ public final class FluxRuntime: FluxExecutor {
             } else {
                 .null
             }
-            let result = dispatch(instructions: instructions, payload: payload)
+            // Run the handler with resumable semantics (ADR-0044): every `AWAIT`
+            // is settled by `asyncResolver` and the handler is resumed until `HALT`.
+            let (outcome, error) = await runHandlerAsync(bytecode: entry.bytecode, payload: payload)
+            guard let outcome else {
+                #if DEBUG
+                NSLog("[executor] async dispatch FAILED: \(String(describing: error))")
+                #endif
+                lastError = error
+                lastReconcile = ReconcileReport()
+                onTreeChanged?()
+                return
+            }
+            // Fold VM-written signals back into the live graph (runHandlerAsync has
+            // already committed its working copy, but folding keeps `graph` and the
+            // reconcile in lockstep for any observer that read mid-flight).
+            let written = outcome.signals
+            for (id, value) in written { graph.write(id, value) }
             // R1: re-reconcile only the nodes whose signal dependencies were just
             // written, instead of re-walking the whole tree on every tap.
-            let dirty = Set(result.signals.map { $0.0 })
+            let dirty = Set(written.map { $0.0 })
             if !dirty.isEmpty, let rootId = currentRootId {
                 let report = reconciler.reconcileDirty(rootId: rootId, nodes: currentNodes, signalIds: dirty)
                 lastReconcile = report
