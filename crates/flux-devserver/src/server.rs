@@ -55,11 +55,6 @@ impl Shared {
     pub(crate) fn broadcast(&self, frame: Vec<u8>) {
         let mut clients = self.clients.lock();
         clients.retain(|tx| tx.send(frame.clone()).is_ok());
-        tracing::debug!(
-            clients = clients.len(),
-            bytes = frame.len(),
-            "broadcast frame"
-        );
     }
 
     pub(crate) fn is_shutdown(&self) -> bool {
