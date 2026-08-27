@@ -2,6 +2,7 @@ package dev.flux.host
 
 import dev.flux.host.ReactiveDispatcher
 import dev.flux.host.shadow.ShadowTree
+import dev.flux.host.shadow.reconcileDirty
 import dev.flux.host.signal.SignalGraph
 import dev.flux.host.transport.MockTransport
 import dev.flux.host.vm.CapabilityImpl
@@ -573,4 +574,91 @@ class RuntimeFixesTest {
             0, // WRITE_SIGNAL 1, r0
             0x00, // HALT
         )
+
+// ── G7: Router.navigate signal (97) swaps the visible Screen ───────────────
+
+@Test
+fun `router navigates to the screen matching signal 97`() =
+    runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val signals = SignalGraph()
+        signals.seed(emptyList())
+
+        // `route` prop index is FNV-1a("route"); the wire interns the literal.
+        val routeProp = fnv1aRoutePropIndex()
+        val homeId = 10u
+        val settingsId = 11u
+
+        val bytes =
+            FrameBuilder()
+                .apply {
+                    magic()
+                    version(1)
+                    seq(0)
+                    flags(fullTree = true, hasPure = false)
+                    patchCount(0)
+                    handlerCount(0)
+                    stringCount(stdlibEntries.size + 2)
+                    for ((id, kind) in stdlibEntries) stringEntry(id, kind)
+                    stringEntry(homeId, "home")
+                    stringEntry(settingsId, "settings")
+                    // Root Router (component 600) with two Screen children.
+                    node(
+                        id = 1u,
+                        kind = 0x12u,
+                        component = 600u,
+                        props = emptyList(),
+                        childIds = listOf(2u, 3u),
+                    )
+                    node(
+                        id = 2u,
+                        kind = 0x12u,
+                        component = 500u,
+                        props = listOf(routeProp to WireValue.StrVal(homeId)),
+                        childIds = emptyList(),
+                    )
+                    node(
+                        id = 3u,
+                        kind = 0x12u,
+                        component = 500u,
+                        props = listOf(routeProp to WireValue.StrVal(settingsId)),
+                        childIds = emptyList(),
+                    )
+                }.build()
+
+        val tree = ShadowTree(AdapterRegistry.fromStringTable(stdlibEntries.map { (id, k) -> StringTableEntry(id, k) }))
+        val transport = MockTransport()
+        val executor =
+            FluxExecutor(tree, signals, transport, vmScope = scope, reactiveDispatcher = ReactiveDispatcher.test(dispatcher))
+        executor.onError = { throw AssertionError("executor error: $it") }
+        executor.receiveFrame(bytes)
+        dispatcher.scheduler.runCurrent()
+
+        // With signal 97 unset, the router shows its first screen (home, id 2).
+        val routerView = tree.rootNode?.view ?: error("router root not built")
+        assertEquals(1, routerView.children().size, "router should show exactly one screen")
+        assertEquals(2u, routerView.children().first().nodeId, "default visible screen should be home")
+
+        // Router.navigate("settings") writes the route record to signal 97.
+        signals.write(
+            97u,
+            FluxValue.RecordVal(listOf(FluxValue.Field(0u, FluxValue.StrVal(settingsId)))),
+        )
+        signals.flush()
+        tree.reconcileDirty(tree.rootNode?.id ?: 0u, setOf(97u))
+
+        // The router must now show only the settings screen (id 3).
+        assertEquals(1, routerView.children().size, "router should show exactly one screen after navigation")
+        assertEquals(3u, routerView.children().first().nodeId, "visible screen should have swapped to settings")
+    }
+
+/** FNV-1a (32-bit) hash of "route", matching the wire's `prop_index_for_name`. */
+private fun fnv1aRoutePropIndex(): UShort {
+    var h: UInt = 0x811c9dc5u
+    for (b in "route".toByteArray(Charsets.UTF_8)) {
+        h = (h xor b.toUInt()) * 0x1000193u
+    }
+    return h.toUShort()
+}
 }

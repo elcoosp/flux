@@ -73,6 +73,16 @@ public fun ShadowTree.reconcileDirty(
         withAdapter(node.kind, node.componentId, node.view) { adapter, view ->
             adapter.update(view, newKit)
         }
+        // A `Router` node re-reconciles when its navigation signal (97) changes;
+        // re-attach only the active-route child so the visible stack swaps.
+        if (node.kind == ROUTER_KIND) {
+            val active = routerActiveChild(node)
+            if (active != null) {
+                withAdapter(node.kind, node.componentId, node.view) { adapter, view ->
+                    adapter.setChildren(view, listOf(active.id), listOf(active.view))
+                }
+            }
+        }
         emitTrace(TraceEvent.Update(seq = lastSeq, id = id))
     }
     emitStepEnd()

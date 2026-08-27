@@ -83,6 +83,19 @@ public class ShadowTree(
     internal var stringLookupTable: MutableMap<UInt, String> = HashMap()
     internal var stringLookup: (UInt) -> String? = { stringLookupTable[it] }
 
+    /**
+     * The `kind` tag the wire assigns a `Router` node (Appendix F.6). Tests and
+     * the adapter registry use the same string, so it lives in one place.
+     */
+    internal val ROUTER_KIND: String = "router"
+
+    /**
+     * The signal `Router.navigate(target)` writes its target into (ADR-0045).
+     * The registry stores the whole argument record there; this tree reads the
+     * record's first field (the route string id) to decide which `Screen` shows.
+     */
+    internal val NAVIGATION_ROUTE_SIGNAL_ID: UInt = 97u
+
     // How many times each node's view has been reconciled (built or updated).
     // Used by the `@pure` skip (§18.10) and observable in tests.
     internal val reconciled = LinkedHashMap<UInt, Int>()
@@ -565,9 +578,15 @@ public class ShadowTree(
         // `signal_meta`, never as an `IntVal` prop, so ignoring it leaves the
         // node with an empty dependency set and it is never re-materialised on
         // a tap (the label freezes at "tapped 0 times").
+        // A `Router` node must re-reconcile whenever its navigation target
+        // changes, so it subscribes to the `Router.navigate` result signal
+        // (97, ADR-0045). The reconciler reads that signal to pick which child
+        // `Screen` is visible (see `routerActiveChild`).
+        val isRouter = adapter?.kind == ROUTER_KIND
         val deps =
             (signalMeta[wire.id]?.deps?.toMutableSet() ?: mutableSetOf()).apply {
                 addAll(signalDepsFrom(wire.props))
+                if (isRouter) add(NAVIGATION_ROUTE_SIGNAL_ID)
             }
         val node =
             ShadowNode(
@@ -598,7 +617,14 @@ public class ShadowTree(
             node.children.add(build(childWire, index, executor, depth + 1u))
         }
         withAdapter(wire.kind, wire.componentId, view) { a, v ->
-            a.setChildren(v, node.children.map { it.id }, node.children.map { it.view })
+            if (adapter?.kind == ROUTER_KIND) {
+                val active = routerActiveChild(node)
+                if (active != null) {
+                    a.setChildren(v, listOf(active.id), listOf(active.view))
+                }
+            } else {
+                a.setChildren(v, node.children.map { it.id }, node.children.map { it.view })
+            }
         }
         withAdapter(wire.kind, wire.componentId, view) { a, v -> a.bindHandler(v, props, WeakReference(executor)) }
         (executor as? HostExecutor)?.onNodeCreated(wire.id)
@@ -740,6 +766,65 @@ public class ShadowTree(
             }
         val deps = meta?.deps ?: emptyList()
         return base
+    }
+
+    /**
+     * Resolves the active route string from the `Router.navigate` signal (97).
+     *
+     * `Router.navigate(target)` writes the argument **record** to signal 97
+     * (ADR-0045); the route is that record's first field, an interned string id.
+     * Returns the resolved route literal, or `null` when the signal is unset or
+     * malformed (in which case callers fall back to the first child screen).
+     */
+    private fun activeRouteFromSignal(): String? {
+        val host = executorRef as? HostExecutor ?: return null
+        val raw = host.materializationSignals.read(NAVIGATION_ROUTE_SIGNAL_ID) ?: return null
+        val record = raw as? dev.flux.host.vm.FluxValue.RecordVal ?: return null
+        val field = record.fields.firstOrNull()?.value ?: return null
+        val strId = (field as? dev.flux.host.vm.FluxValue.StrVal)?.id ?: return null
+        return stringLookup(strId)
+    }
+
+    /**
+     * Reads a `Screen` node's `route` prop (an interned string id) as a literal.
+     * Returns `null` when the node is not a screen or carries no `route`.
+     */
+    private fun routeOf(node: ShadowNode): String? {
+        val field = node.wireProps.fields.firstOrNull { it.first == ROUTE_PROP_INDEX } ?: return null
+        val strId = (field.second as? dev.flux.host.wire.WireValue.StrVal)?.id ?: return null
+        return stringLookup(strId)
+    }
+
+    /**
+     * For a `Router` node, returns the single child `Screen` whose `route` prop
+     * matches the active navigation signal (97). When no screen matches — or the
+     * signal is unset — returns the first child so the stack always shows a
+     * screen. The result drives `setChildren`, which reconciles the visible stack
+     * to exactly this screen (Appendix F.6, keyed by node id, no view recreation).
+     */
+    internal fun routerActiveChild(node: ShadowNode): ShadowNode? {
+        val active = activeRouteFromSignal()
+        val children = node.children
+        if (active != null) {
+            for (child in children) {
+                if (routeOf(child) == active) return child
+            }
+        }
+        return children.firstOrNull()
+    }
+
+    private companion object {
+        /** FNV-1a prop-index for the `route` prop name (matches the wire encoder). */
+        val ROUTE_PROP_INDEX: UShort = fnv1aPropIndexForName("route")
+
+        /** FNV-1a (32-bit) hash of [name], matching the wire's `prop_index_for_name`. */
+        fun fnv1aPropIndexForName(name: String): UShort {
+            var h: UInt = 0x811c9dc5u
+            for (b in name.toByteArray(Charsets.UTF_8)) {
+                h = (h xor b.toUInt()) * 0x1000193u
+            }
+            return h.toUShort()
+        }
     }
 
     /** Converts a VM [FluxValue] (thunk result) into the kit [dev.flux.ui.FluxValue],
