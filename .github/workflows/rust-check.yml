@@ -8,6 +8,10 @@ name: rust-check
 #   * cargo doc
 # Globs are workspace-wide, so as soon as a crate's real source lands (Phase 1+)
 # it is automatically covered — no manifest edits required.
+#
+# Toolchain: nightly. The `flux-devtools-ui` crate's `gpui-ui` feature pins gpui
+# at a `main` commit that uses unstable std features (e.g. `std::hint::cold_path`),
+# so the clippy gate must run on nightly. See `Cargo.toml` for the gpui pin note.
 
 on:
   push:
@@ -41,7 +45,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt, clippy
 

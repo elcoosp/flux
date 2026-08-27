@@ -19,6 +19,10 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+# `rust-version` is the edition-2024 language floor. The actual toolchain is
+# nightly (see `rust-toolchain.toml`): the `flux-devtools-ui` crate's `gpui-ui`
+# feature pins gpui at a `main` commit that uses unstable std features
+# (e.g. `std::hint::cold_path`), so stable cannot build `--all-features`.
 rust-version = "1.86"
 license = "Apache-2.0"
 repository = "https://github.com/elcoosp/flux"
