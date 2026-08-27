@@ -23,8 +23,8 @@ public final class ColumnAdapter: FluxAdapter {
     }
 
     public func update(_ view: UIStackView, from old: Props, to new: Props) {
-        view.spacing = CGFloat(new.getFloat(0) ?? 0)
-        if let align = new.getRecord(1).flatMap(FluxAlignment.init(record:)) {
+        view.spacing = CGFloat(new.getFloat(named: "gap") ?? 0)
+        if let align = new.getRecord(named: "alignment").flatMap(FluxAlignment.init(record:)) {
             view.alignment = align.stackAlignment
         }
     }
