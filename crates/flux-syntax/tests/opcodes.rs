@@ -120,7 +120,11 @@ fn test_await_decodes_from_its_byte_with_two_register_operands() {
     let op = Opcode::from_byte(0xE0).expect("AWAIT is assigned byte 0xE0 (ADR-0044)");
     assert_eq!(op, Opcode::Await);
     assert_eq!(op.mnemonic(), "AWAIT");
-    assert_eq!(op.operand_len(), 2, "AWAIT takes result_reg(u8), future_reg(u8)");
+    assert_eq!(
+        op.operand_len(),
+        2,
+        "AWAIT takes result_reg(u8), future_reg(u8)"
+    );
 }
 
 #[test]

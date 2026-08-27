@@ -127,11 +127,7 @@ pub(crate) fn render_handler_body(handler: &Expr) -> Option<String> {
             out.push_str(&render_stmt(stmt));
         }
     }
-    if out.is_empty() {
-        None
-    } else {
-        Some(out)
-    }
+    if out.is_empty() { None } else { Some(out) }
 }
 
 #[cfg(test)]

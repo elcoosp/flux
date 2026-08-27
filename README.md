@@ -146,9 +146,9 @@ binary patches to the connected host app over `ws://`.
 
 ---
 
-## Testing & quality bar
+## Testing & quality standards
 
-This repo follows a strict TDD + senior-engineer bar (see `AGENTS.md`):
+This repo follows a strict TDD + quality standard (see `AGENTS.md`):
 
 - **Every public function has a test.** 399 nextest tests across the workspace
   (unit, `proptest` property, `insta` snapshot, `criterion` benchmark, parity).
