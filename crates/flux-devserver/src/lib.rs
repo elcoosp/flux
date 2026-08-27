@@ -44,6 +44,7 @@
 )]
 
 mod assets;
+mod capability_manifest;
 mod config;
 mod debug_bridge;
 mod dispatch;

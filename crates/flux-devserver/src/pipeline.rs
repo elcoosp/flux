@@ -185,6 +185,63 @@ impl Pipeline {
         self.last_good.is_some()
     }
 
+    /// The capability methods the last-good tree actually requires.
+    ///
+    /// Enumerates every `CALL_CAP` in the compiled handler and prop-thunk
+    /// bytecode (Appendix E §E.1), returning each distinct `(cap_id,
+    /// method_id)` pair it needs from the host. The dev server checks this
+    /// against the capabilities a connecting host advertises in its `Hello`,
+    /// so a host missing a required camera/storage/router method fails the
+    /// handshake with an actionable `Error` frame instead of crashing at the
+    /// first `CALL_CAP` (spec §D.12.1 / §24.4).
+    ///
+    /// Returns an empty vector before the first successful compile.
+    #[must_use]
+    pub fn required_capabilities(&self) -> Vec<(u32, u16)> {
+        use flux_syntax::opcode::Opcode;
+
+        let Some(ir) = &self.last_good else {
+            return Vec::new();
+        };
+        let mut seen: Vec<(u32, u16)> = Vec::new();
+        let mut visit = |bytecode: &[u8]| {
+            let mut ip = 0usize;
+            while ip < bytecode.len() {
+                let Some(op) = Opcode::from_byte(bytecode[ip]) else {
+                    break;
+                };
+                let n = op.operand_len() as usize;
+                let start = ip + 1;
+                let end = start + n;
+                if op == Opcode::CallCap && end <= bytecode.len() {
+                    // Layout: result_reg(u8) | cap_id(u32 LE) | method_id(u16 LE) | args_reg(u8).
+                    let cap_id = u32::from_le_bytes([
+                        bytecode[start + 1],
+                        bytecode[start + 2],
+                        bytecode[start + 3],
+                        bytecode[start + 4],
+                    ]);
+                    let method_id = u16::from_le_bytes([bytecode[start + 5], bytecode[start + 6]]);
+                    if !seen.contains(&(cap_id, method_id)) {
+                        seen.push((cap_id, method_id));
+                    }
+                }
+                if end > bytecode.len() {
+                    break;
+                }
+                ip = end;
+            }
+        };
+        for closure in ir.closures.values() {
+            visit(&closure.bytecode);
+        }
+        for thunk in ir.prop_thunks.values() {
+            visit(&thunk.bytecode);
+        }
+        seen.sort_unstable();
+        seen
+    }
+
     /// One lowered program per source file from the last good compile, for the
     /// release codegen path (`flux build`).
     ///
@@ -639,7 +696,9 @@ fn signal_meta_for(arena: &IRArena) -> Vec<NodeSignalMeta> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use flux_ir::{ClosureIR, InstanceRegistry, LoweredIr};
     use flux_parser::Decl;
+    use flux_syntax::Span;
 
     #[test]
     fn compiled_sources_is_empty_before_first_compile() {
@@ -705,5 +764,54 @@ mod tests {
             1,
             "codegen store keeps the last good sources"
         );
+    }
+
+    #[test]
+    fn required_capabilities_extracts_call_cap_pairs() {
+        // A handler closure whose bytecode CALL_CAPs cap 2 method 2 and cap 3
+        // method 1, plus a prop thunk CALL_CAPing cap 2 method 2 again (deduped),
+        // and a trailing HALT.
+        let call_cap = |cap_id: u32, method_id: u16| -> Vec<u8> {
+            let mut b = vec![0x90u8, 0x00];
+            b.extend_from_slice(&cap_id.to_le_bytes());
+            b.extend_from_slice(&method_id.to_le_bytes());
+            b.push(0x00); // args_reg
+            b
+        };
+        let mut bytecode = call_cap(2, 2);
+        bytecode.extend_from_slice(&call_cap(3, 1));
+        bytecode.push(0x00); // HALT
+
+        let thunk_bytecode = call_cap(2, 2); // duplicate of cap 2 method 2
+
+        let ir = LoweredIr {
+            arena: IRArena::new(),
+            closures: std::collections::HashMap::from([(
+                flux_syntax::HandlerId::from(1u32),
+                ClosureIR::new(
+                    flux_syntax::HandlerId::from(1u32),
+                    bytecode,
+                    Vec::new(),
+                    Span::new(0, 0, 0),
+                ),
+            )]),
+            prop_thunks: std::collections::HashMap::from([(
+                flux_syntax::NodeId::from(2u32),
+                ClosureIR::new(
+                    flux_syntax::HandlerId::from(2u32),
+                    thunk_bytecode,
+                    Vec::new(),
+                    Span::new(0, 0, 0),
+                ),
+            )]),
+            state_seed: Vec::new(),
+            component_names: Vec::new(),
+            instances: InstanceRegistry::new(),
+        };
+
+        let mut pipeline = Pipeline::new("/tmp/project", false);
+        pipeline.last_good = Some(ir);
+        let required = pipeline.required_capabilities();
+        assert_eq!(required, vec![(2, 2), (3, 1)], "CALL_CAP pairs, deduped");
     }
 }

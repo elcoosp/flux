@@ -113,6 +113,26 @@ async fn handle_hello(bytes: &[u8], shared: &Arc<Shared>) -> Option<Vec<u8>> {
         let shared = Arc::clone(shared);
         return blocking(move || shared.pipeline.lock().error_frame(&malformed_hello())).await;
     };
+    // Validate the host advertises every capability the compiled tree
+    // CALL_CAPs (spec §D.12.1 / §24.4). A missing method surfaces as a clear
+    // `Error` frame here, not as a silent VM fault at the first call.
+    let shared_req = Arc::clone(shared);
+    let required = blocking(move || shared_req.pipeline.lock().required_capabilities()).await;
+    let missing = match required {
+        Some(required) => missing_capabilities(&hello.capabilities, &required),
+        None => return None,
+    };
+    if !missing.is_empty() {
+        let diagnostic = capability_mismatch(&hello, &missing);
+        tracing::warn!(
+            platform = %hello.platform,
+            device = %hello.device,
+            missing = ?missing,
+            "host handshake rejected: missing required capabilities"
+        );
+        let shared = Arc::clone(shared);
+        return blocking(move || shared.pipeline.lock().error_frame(&diagnostic)).await;
+    }
     tracing::info!(
         platform = %hello.platform,
         device = %hello.device,
@@ -122,6 +142,72 @@ async fn handle_hello(bytes: &[u8], shared: &Arc<Shared>) -> Option<Vec<u8>> {
     );
     let shared = Arc::clone(shared);
     blocking(move || init_reply(&shared)).await.flatten()
+}
+
+/// The `(capability, method)` names a host fails to advertise but the tree
+/// requires, in stable sorted order.
+fn missing_capabilities(
+    advertised: &[(String, u32, Vec<String>)],
+    required: &[(u32, u16)],
+) -> Vec<(String, String)> {
+    let mut missing = Vec::new();
+    for &(cap_id, method_id) in required {
+        let Some((cap_name, method_name)) =
+            crate::capability_manifest::names_for(cap_id, method_id)
+        else {
+            // Unknown id: cannot be satisfied by any host. Report it plainly so
+            // the author learns the id is not part of the MLP manifest.
+            missing.push(("unknown".to_owned(), format!("{cap_id}.{method_id}")));
+            continue;
+        };
+        if !crate::capability_manifest::is_satisfied(advertised, cap_name, method_name) {
+            missing.push((cap_name.to_owned(), method_name.to_owned()));
+        }
+    }
+    missing.sort_unstable();
+    missing
+}
+
+/// Builds the diagnostic for a host that omits required capabilities.
+fn capability_mismatch(
+    hello: &flux_ir_serde::HelloFrame,
+    missing: &[(String, String)],
+) -> crate::error::Diagnostic {
+    let list: Vec<String> = missing
+        .iter()
+        .map(|(cap, method)| format!("{cap}.{method}"))
+        .collect();
+    crate::error::Diagnostic::new(
+        format!(
+            "host {} ({}) is missing required capabilities: {} — \
+             hint: the app's .flux tree CALL_CAPs these, but the host only advertises {}. \
+             Rebuild the host against the current stdlib/capabilities.flux, or add the \
+             missing capability to the host build",
+            hello.platform,
+            hello.device,
+            list.join(", "),
+            advertised_summary(&hello.capabilities),
+        ),
+        None,
+    )
+}
+
+/// One-line summary of what a host advertised, used in the mismatch hint.
+fn advertised_summary(advertised: &[(String, u32, Vec<String>)]) -> String {
+    if advertised.is_empty() {
+        return "nothing".to_owned();
+    }
+    advertised
+        .iter()
+        .map(|(name, _v, feats)| {
+            if feats.is_empty() {
+                name.clone()
+            } else {
+                format!("{name}({})", feats.join(", "))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Runs `work` on Tokio's blocking pool, returning `None` if the pool task was
