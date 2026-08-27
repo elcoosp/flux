@@ -57,7 +57,7 @@ pub use kind::TcType;
 pub use scheme::{Scheme, Supply, generalise, instantiate};
 pub use unify::{UnifyError, unify};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// A type-checked syntax tree.
 ///
@@ -74,6 +74,13 @@ pub struct TypedAST {
     pub types: HashMap<NodeId, TypeKind>,
     /// Every generic instantiation discovered while checking, in order.
     pub instantiations: Vec<GenericInstantiation>,
+    /// Names of every algebraic-data-type value constructor (variant) in
+    /// scope. The handler bytecode compiler uses this set to decide whether a
+    /// `Name(args)` call lowers to a value record (`ALLOC_RECORD` + field sets)
+    /// or to a capability/method invocation (`CALL_CAP`). Kept as a flat name
+    /// set so the compiler can resolve the form from the parse tree alone,
+    /// without re-walking the type environment.
+    pub constructors: HashSet<String>,
 }
 
 impl TypedAST {
@@ -141,6 +148,7 @@ pub fn type_check(ast: &Ast) -> Result<TypedAST, TypeError> {
         ast: ast.clone(),
         types,
         instantiations: checker.instantiations,
+        constructors: checker.env.variants.keys().cloned().collect(),
     })
 }
 
