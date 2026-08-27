@@ -21,6 +21,7 @@ use flux_parser::{
 };
 use flux_syntax::opcode::raw;
 use flux_syntax::{PropIdx, SignalId, Span, StringId, Value};
+use std::collections::HashSet;
 
 use crate::lower::error::LoweringError;
 
@@ -81,10 +82,11 @@ pub(crate) fn hash_closure_placeholder(bytecode: &[u8], captured: &[flux_syntax:
 pub fn compile_handler(
     body: &Block,
     scope: &SignalScope,
+    constructors: &HashSet<String>,
     span: Span,
     str_interner: StringInterner<'_>,
 ) -> Result<(Vec<u8>, Vec<SignalId>), HandlerCompileError> {
-    let mut emitter = Emitter::new(scope, str_interner);
+    let mut emitter = Emitter::new(scope, constructors, str_interner);
     for item in &body.items {
         match item {
             BlockItem::State(decl) => {
@@ -265,10 +267,47 @@ fn collect_in_block(block: &flux_parser::Block, scope: &SignalScope, found: &mut
     }
 }
 
+/// A shared, empty constructor set for emitters that never resolve calls
+/// (prop thunks). `compile_handler` always passes the real set from `TypedAST`.
+fn empty_constructors() -> &'static HashSet<String> {
+    static EMPTY: std::sync::LazyLock<HashSet<String>> = std::sync::LazyLock::new(HashSet::new);
+    &EMPTY
+}
+
+/// Derives a stable `cap_id` for a capability/method call from the capability
+/// name, per the CALL_CAP contract shared with the host runtime.
+///
+/// `cap_id = blake3(name)[..4]` interpreted as little-endian `u32`. The host
+/// registry resolves `(cap_id, method_id)` to an implementation using the same
+/// derivation, so neither side ships a shared ID table (AGENT-044 / ADR-0045).
+#[must_use]
+pub(crate) fn cap_id_for(name: &str) -> u32 {
+    let hash = blake3::hash(name.as_bytes());
+    u32::from_le_bytes(hash.as_bytes()[..4].try_into().unwrap())
+}
+
+/// Derives a stable `method_id` for a capability method call.
+///
+/// `method_id = blake3("cap.method")[..2]` as little-endian `u16`. The reserved
+/// pair `(1, 1)` is the frozen `call_cap_basic` stub and is never produced by
+/// this derivation for a real capability name.
+#[must_use]
+pub(crate) fn method_id_for(cap: &str, method: &str) -> u16 {
+    let key = format!("{cap}.{method}");
+    let hash = blake3::hash(key.as_bytes());
+    u16::from_le_bytes(hash.as_bytes()[..2].try_into().unwrap())
+}
+
 /// Bytecode emitter: walks expressions, appends raw opcode bytes, and records
 /// captured signal IDs.
 struct Emitter<'a> {
     scope: &'a SignalScope,
+    /// Names of every in-scope ADT value constructor. Used to decide whether a
+    /// `Name(args)` call lowers to a value record or a capability invocation.
+    constructors: &'a HashSet<String>,
+    /// Locally-bound `let` names → register. Checked before the signal scope so
+    /// `let x = …; … x …` reads the binding rather than a (non-existent) signal.
+    locals: std::collections::HashMap<String, u8>,
     code: Vec<u8>,
     captured: Vec<SignalId>,
     reg: u8,
@@ -280,9 +319,15 @@ struct Emitter<'a> {
 }
 
 impl<'a> Emitter<'a> {
-    fn new(scope: &'a SignalScope, str_interner: StringInterner<'a>) -> Self {
+    fn new(
+        scope: &'a SignalScope,
+        constructors: &'a HashSet<String>,
+        str_interner: StringInterner<'a>,
+    ) -> Self {
         Self {
             scope,
+            constructors,
+            locals: std::collections::HashMap::new(),
             code: Vec::new(),
             captured: Vec::new(),
             // r0 = payload, r15 = gas; start allocating at r1.
@@ -296,10 +341,13 @@ impl<'a> Emitter<'a> {
     /// A thunk's `r1` holds the `ALLOC_RECORD` of prop values at `HALT`, so
     /// value registers must not clobber `r1`. We therefore allocate working
     /// registers from `r2` upward and emit the record into `r1` explicitly via
-    /// [`emit_alloc_record`].
+    /// [`emit_alloc_record`]. Prop thunks never emit capability calls, so they
+    /// receive an empty constructor set and no locals.
     fn for_thunk(scope: &'a SignalScope, str_interner: StringInterner<'a>) -> Self {
         Self {
             scope,
+            constructors: empty_constructors(),
+            locals: std::collections::HashMap::new(),
             code: Vec::new(),
             captured: Vec::new(),
             reg: 2,
@@ -410,6 +458,46 @@ impl<'a> Emitter<'a> {
                 self.compile_if(cond, then_block, else_expr.as_ref())
             }
             ExprKind::Match { scrutinee, arms } => self.compile_match(scrutinee, arms),
+            // `let x = expr` binds `x` to the compiled value in the local scope.
+            // Subsequent `Ident(x)` reads resolve to that register before the
+            // signal scope (see `compile_value`).
+            ExprKind::Let { pattern, value } => {
+                let name = match pattern {
+                    flux_parser::LetPattern::Ident(ident) => ident.name.clone(),
+                    _ => {
+                        return Err(HandlerCompileError::new(
+                            "only identifier `let` bindings are supported in handlers".to_owned(),
+                            expr.span,
+                        ));
+                    }
+                };
+                let reg = match value {
+                    Some(v) => self.compile_value(v)?,
+                    // A bare `let x` with no initialiser has no value to bind.
+                    None => {
+                        return Err(HandlerCompileError::new(
+                            "a `let` binding in a handler must have an initialiser".to_owned(),
+                            expr.span,
+                        ));
+                    }
+                };
+                self.locals.insert(name, reg);
+                Ok(())
+            }
+            // A bare call expression as a statement (e.g. `router.navigate(..)`,
+            // `refetch()`, `Auth.login(..)`) — emit it for its side effect and
+            // discard the result register.
+            ExprKind::Call { .. } => {
+                self.compile_call(expr)?;
+                Ok(())
+            }
+            // `...` is the spec's elision marker (Appendix B.3.8). A handler body
+            // that is deliberately elided compiles to a `NOP` so the lower pass
+            // succeeds without inventing behaviour the source omitted.
+            ExprKind::Elided => {
+                self.code.push(raw::NOP);
+                Ok(())
+            }
             _ => Err(HandlerCompileError::new(
                 "unsupported handler expression".to_owned(),
                 expr.span,
@@ -698,12 +786,33 @@ impl<'a> Emitter<'a> {
             }
             ExprKind::Str(parts) => self.compile_str(parts, expr.span),
             ExprKind::Ident(ident) => {
+                // A locally-bound `let` name shadows the signal scope.
+                if let Some(&reg) = self.locals.get(&ident.name) {
+                    return Ok(reg);
+                }
                 let id = self.signal_of(&ident.name, ident.span)?;
                 let r = self.alloc_reg();
                 // READ_SIGNAL dst(u8), signal_id(u32)
                 self.code.push(raw::READ_SIGNAL);
                 self.code.push(r);
                 self.code.extend_from_slice(&id.to_le_bytes());
+                Ok(r)
+            }
+            ExprKind::Call { .. } => self.compile_call(expr),
+            // A field access used as a value (`base.field` not in call position)
+            // — compile the receiver and read the field. Method calls resolve
+            // through `compile_call` (the `Field` is the callee there).
+            ExprKind::Field { base, field } => {
+                let base_reg = self.compile_value(base)?;
+                let r = self.alloc_reg();
+                // GET_FIELD dst(u8), idx(u16), src(u8)
+                self.code.push(raw::GET_FIELD);
+                self.code.push(r);
+                // Field name → a stable 16-bit tag via blake3, mirroring the
+                // method-id derivation so the host resolves it consistently.
+                let tag = method_id_for("", &field.name);
+                self.code.extend_from_slice(&tag.to_le_bytes());
+                self.code.push(base_reg);
                 Ok(r)
             }
             ExprKind::Binary { op, lhs, rhs } => {
@@ -827,6 +936,108 @@ impl<'a> Emitter<'a> {
         self.code.push(r);
         self.code.extend_from_slice(&id.to_le_bytes());
         r
+    }
+
+    /// Compiles a call expression, returning the register holding its result.
+    ///
+    /// - `base.field(args)` → capability method call: `CALL_CAP` with
+    ///   `cap_id = cap_id_for(base)`, `method_id = method_id_for(base, field)`,
+    ///   and `args_reg` an `ALLOC_RECORD` of the explicit call arguments.
+    /// - `Name(args)` where `Name` is an ADT value constructor → value
+    ///   construction: an `ALLOC_RECORD` of the arguments, returned directly
+    ///   (no capability call).
+    /// - `Name(args)` otherwise (trait fn / resource fn / capability fn) →
+    ///   `CALL_CAP` with `cap_id = cap_id_for(Name)`, `method_id =
+    ///   method_id_for(Name, Name)`.
+    ///
+    /// The receiver is identified by `(cap_id, method_id)`; explicit call
+    /// arguments are packed into `args_reg` in source order (the frozen
+    /// `call_cap_basic` host contract reads field 0 as the first argument).
+    fn compile_call(&mut self, expr: &Expr) -> Result<u8, HandlerCompileError> {
+        let (callee, args) = match &expr.kind {
+            ExprKind::Call { callee, args, .. } => (callee, args),
+            _ => {
+                return Err(HandlerCompileError::new(
+                    "compile_call requires a Call expression".to_owned(),
+                    expr.span,
+                ));
+            }
+        };
+
+        // Compile the explicit positional/named arguments into registers.
+        let mut arg_regs = Vec::with_capacity(args.len());
+        for arg in args {
+            match arg {
+                flux_parser::Arg::Positional(e) => arg_regs.push(self.compile_value(e)?),
+                flux_parser::Arg::Named { value, .. } => arg_regs.push(self.compile_value(value)?),
+                _ => {
+                    // `#[non_exhaustive] Arg` gained a variant this build does
+                    // not yet pattern-match. Lower it to a Null placeholder
+                    // register rather than ICE — consistent with the handler
+                    // literal path's `Value::Null` fallback (FLUX-014).
+                    let r = self.alloc_reg();
+                    self.code.push(raw::LOAD_NULL);
+                    self.code.push(r);
+                    arg_regs.push(r)
+                }
+            }
+        }
+
+        match &callee.kind {
+            ExprKind::Field { base, field } => {
+                let cap = match &base.kind {
+                    ExprKind::Ident(ident) => ident.name.clone(),
+                    _ => {
+                        return Err(HandlerCompileError::new(
+                            "capability method calls must have an identifier receiver".to_owned(),
+                            base.span,
+                        ));
+                    }
+                };
+                self.emit_call_cap(&cap, &field.name, &arg_regs)
+            }
+            ExprKind::Ident(ident) => {
+                if self.constructors.contains(&ident.name) {
+                    // Value construction: build the record directly.
+                    let dst = self.alloc_reg();
+                    self.emit_alloc_record(dst, arg_regs.len() as u16);
+                    for (idx, reg) in arg_regs.iter().enumerate() {
+                        self.emit_set_field(dst, idx as u16, *reg);
+                    }
+                    Ok(dst)
+                } else {
+                    self.emit_call_cap(&ident.name, &ident.name, &arg_regs)
+                }
+            }
+            other => Err(HandlerCompileError::new(
+                format!("unsupported call callee in handler: {other:?}"),
+                callee.span,
+            )),
+        }
+    }
+
+    /// Emits `CALL_CAP result_reg, cap_id, method_id, args_reg`, where
+    /// `args_reg` holds an `ALLOC_RECORD` of the supplied argument registers.
+    fn emit_call_cap(
+        &mut self,
+        cap: &str,
+        method: &str,
+        arg_regs: &[u8],
+    ) -> Result<u8, HandlerCompileError> {
+        let args_reg = self.alloc_reg();
+        self.emit_alloc_record(args_reg, arg_regs.len() as u16);
+        for (idx, reg) in arg_regs.iter().enumerate() {
+            self.emit_set_field(args_reg, idx as u16, *reg);
+        }
+        let result = self.alloc_reg();
+        // CALL_CAP result_reg(u8), cap_id(u32), method_id(u16), args_reg(u8)
+        self.code.push(raw::CALL_CAP);
+        self.code.push(result);
+        self.code.extend_from_slice(&cap_id_for(cap).to_le_bytes());
+        self.code
+            .extend_from_slice(&method_id_for(cap, method).to_le_bytes());
+        self.code.push(args_reg);
+        Ok(result)
     }
 }
 
@@ -968,9 +1179,13 @@ mod tests {
             span: span(),
         };
 
-        let (bytecode, captured) = compile_handler(&body, &count_scope(), span(), &mut |_s| {
-            StringTable::new().intern(_s)
-        })
+        let (bytecode, captured) = compile_handler(
+            &body,
+            &count_scope(),
+            &std::collections::HashSet::new(),
+            span(),
+            &mut |_s| StringTable::new().intern(_s),
+        )
         .expect("compiles");
         assert!(
             captured.contains(&SignalId::from(1u32)),
@@ -1060,9 +1275,13 @@ mod tests {
             span: span(),
         };
 
-        let (bytecode, _) = compile_handler(&body, &scope, span(), &mut |_s| {
-            StringTable::new().intern(_s)
-        })
+        let (bytecode, _) = compile_handler(
+            &body,
+            &scope,
+            &std::collections::HashSet::new(),
+            span(),
+            &mut |_s| StringTable::new().intern(_s),
+        )
         .expect("compiles match");
         let match_tags = bytecode.iter().filter(|&&b| b == raw::MATCH_TAG).count();
         assert_eq!(match_tags, 2, "one MATCH_TAG per arm in {bytecode:?}");
@@ -1197,12 +1416,17 @@ mod tests {
             })],
             span: span(),
         };
-        let result = compile_handler(&body, &count_scope(), span(), &mut |_s| {
-            StringTable::new().intern(_s)
-        });
+        let result = compile_handler(
+            &body,
+            &count_scope(),
+            &std::collections::HashSet::new(),
+            span(),
+            &mut |_s| StringTable::new().intern(_s),
+        );
+        let (bytecode, _) = result.expect("handler capability call lowers to CALL_CAP, not a silent no-op");
         assert!(
-            result.is_err(),
-            "out-of-envelope handler must error, not silently no-op"
+            bytecode.contains(&raw::CALL_CAP),
+            "handler capability call must lower to CALL_CAP (out-of-envelope must not be silently dropped): {bytecode:?}"
         );
     }
 }

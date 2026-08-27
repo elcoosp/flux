@@ -79,6 +79,12 @@ pub struct LoweredIr {
     /// (reusing the handler-closure machinery) and is referenced from the
     /// node's `prop_thunk` closure reference on the wire.
     pub prop_thunks: std::collections::HashMap<flux_syntax::NodeId, ClosureIR>,
+    /// Initial values for state signals, keyed by their allocated id.
+    pub state_seed: Vec<(flux_syntax::SignalId, flux_syntax::Value)>,
+    /// Component-name interning: `(ComponentId, name)` pairs so the dev server
+    /// can ship them in the Init frame's string table (Appendix D §D.9), letting
+    /// a host resolve each node's adapter from its `ComponentId`.
+    pub component_names: Vec<(flux_syntax::ComponentId, String)>,
     /// Live component-instance registry.
     pub instances: InstanceRegistry,
 }
@@ -142,6 +148,8 @@ struct Lowerer<'a> {
     prop_thunks: std::collections::HashMap<flux_syntax::NodeId, ClosureIR>,
     /// Signals owned by the enclosing component, named for handler capture.
     signal_scope: Vec<(String, flux_syntax::SignalId)>,
+    /// Initial values for state signals, paired with their allocated id.
+    state_seed: Vec<(flux_syntax::SignalId, flux_syntax::Value)>,
     /// Per-component signal allocator (resets each component).
     signal_counter: flux_syntax::SignalId,
     /// Handler allocator (monotonic across the whole program).
@@ -158,6 +166,7 @@ impl<'a> Lowerer<'a> {
             closures: std::collections::HashMap::new(),
             prop_thunks: std::collections::HashMap::new(),
             signal_scope: Vec::new(),
+            state_seed: Vec::new(),
             signal_counter: flux_syntax::SignalId::from(0u32),
             handler_counter: flux_syntax::HandlerId::from(0u32),
         }
@@ -169,6 +178,12 @@ impl<'a> Lowerer<'a> {
             arena,
             closures: self.closures,
             prop_thunks: self.prop_thunks,
+            state_seed: self.state_seed,
+            component_names: self
+                .name_to_component
+                .iter()
+                .map(|(name, id)| (*id, name.clone()))
+                .collect(),
             instances: InstanceRegistry::new(),
         }
     }
@@ -330,6 +345,9 @@ impl<'a> Lowerer<'a> {
             match item {
                 flux_parser::BlockItem::State(decl) => {
                     let sig = self.next_signal();
+                    let mut init_handlers: Vec<flux_syntax::HandlerId> = Vec::new();
+                    let init_value = self.lower_value(&decl.init, owner, &mut init_handlers)?;
+                    self.state_seed.push((sig, init_value));
                     self.signal_scope.push((decl.name.name.clone(), sig));
                 }
                 flux_parser::BlockItem::Prop { .. } => {
@@ -592,8 +610,13 @@ impl<'a> Lowerer<'a> {
             flux_parser::ExprKind::Lambda { params: _, body } => {
                 let handler = self.next_handler();
                 let mut intern = |s: &str| self.builder.intern_string(s);
-                let (bytecode, captured) =
-                    compile_handler(body, &self.signal_scope, expr.span, &mut intern)?;
+                let (bytecode, captured) = compile_handler(
+                    body,
+                    &self.signal_scope,
+                    &std::collections::HashSet::new(),
+                    expr.span,
+                    &mut intern,
+                )?;
                 let closure = ClosureIR::new(handler, bytecode, captured, expr.span);
                 self.closures.insert(handler, closure);
                 handlers.push(handler);
