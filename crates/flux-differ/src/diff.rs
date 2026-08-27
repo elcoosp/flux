@@ -41,7 +41,7 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
             // Same child set: only order may differ.
             if child_order(&o) == child_order(&n) {
                 if props_equal {
-                    if handlers_equal(&o, &n) {
+                    if handlers_equal(old, new, &o.handlers(), &n.handlers()) {
                         continue; // truly identical
                     }
                     // Only handler bodies changed → state-preserving fast path.
@@ -65,7 +65,7 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
         // Child set differs (an add/remove handled by the loops below) but the
         // parent node itself may still carry prop/handler changes.
         if props_equal {
-            if handlers_equal(&o, &n) {
+            if handlers_equal(old, new, &o.handlers(), &n.handlers()) {
                 continue;
             }
             emit_handler(&mut patches, new, n.handlers(), o.handlers());
@@ -234,11 +234,31 @@ fn props_diff(o: &NodeView<'_>, n: &NodeView<'_>) -> PropDiff {
     PropDiff { changes, removals }
 }
 
-/// `true` when both views bind the same handler ids.
-fn handlers_equal(o: &NodeView<'_>, n: &NodeView<'_>) -> bool {
-    let o_h: AHashSet<HandlerId> = o.handlers().into_iter().collect();
-    let n_h: AHashSet<HandlerId> = n.handlers().into_iter().collect();
-    o_h == n_h
+/// `true` when both nodes bind the same handler ids AND every shared handler's
+/// closure body is byte-identical.
+///
+/// Comparing content — not just ids — is required for hot reload: a prop
+/// thunk (e.g. an interpolated string literal) keeps its stable `HandlerId`
+/// across edits while its bytecode changes. An id-only compare would report
+/// "no change" and suppress the `Patch::Handler` that drives the host's
+/// re-materialize, silently breaking hot reload (FLUX-019 regression).
+fn handlers_equal(
+    old: &IRArena,
+    new: &IRArena,
+    o_handlers: &[HandlerId],
+    n_handlers: &[HandlerId],
+) -> bool {
+    let o_set: AHashSet<HandlerId> = o_handlers.iter().copied().collect();
+    let n_set: AHashSet<HandlerId> = n_handlers.iter().copied().collect();
+    if o_set != n_set {
+        return false;
+    }
+    o_set
+        .iter()
+        .all(|hid| match (old.closure(*hid), new.closure(*hid)) {
+            (Some(a), Some(b)) => a.bytecode == b.bytecode,
+            _ => false,
+        })
 }
 
 #[cfg(test)]

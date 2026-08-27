@@ -464,8 +464,20 @@ impl Pipeline {
                 Some(base) => merge_arenas(base, &lowered.arena),
             });
         }
+        // Populate the arena's closure table. `lowered.closures` (and the
+        // prop_thunks folded in below) are the authoritative closure bodies, but
+        // `IRArena::closure()` reads from the arena's own `closures` map, which
+        // lowering never fills via `add_closure`. Without this, the differ's
+        // `handlers_equal`/`emit_handler` look up `None` for every handler id
+        // and emit no `Patch::Handler` on a handler-body edit — so a `count + 1`
+        // -> `count + 2` change ships no closure update and both hosts keep
+        // running the stale init-time body (FLUX-014 regression).
+        let mut arena = merged.unwrap_or_default();
+        for c in &closures {
+            arena.add_closure(c.clone());
+        }
         Ok(TreeCompilation {
-            arena: merged.unwrap_or_default(),
+            arena,
             closures,
             state_seed,
             sources,
