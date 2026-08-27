@@ -3,8 +3,12 @@ package dev.flux.host.shadow
 import dev.flux.host.AdapterRegistry
 import dev.flux.host.BuildFlags
 import dev.flux.host.StringTableEntry
+import dev.flux.host.signal.SignalGraph
 import dev.flux.host.vm.FluxBytecodeVM
+import dev.flux.host.vm.FluxValue
+import dev.flux.host.vm.StringResolver
 import dev.flux.host.vm.VmResult
+import dev.flux.host.vm.renderToString
 import dev.flux.host.wire.ClosureRef
 import dev.flux.host.wire.Frame
 import dev.flux.host.wire.NodeSignalMeta
@@ -56,8 +60,11 @@ public class ShadowTree(
 
     // Resolves interned string ids (wire `StrVal`) to their text. Rebuilt from
     // each frame's string table in `applyFrame` so `kitFromWire` can materialize
-    // real strings instead of raw ids (Appendix D §D.9).
-    internal var stringLookup: (UInt) -> String? = { null }
+    // real strings instead of raw ids (Appendix D §D.9). Kept in a persistent
+    // map so a Delta frame can *merge* its changed strings into the strings
+    // already shipped by earlier frames, rather than dropping them.
+    internal var stringLookupTable: MutableMap<UInt, String> = HashMap()
+    internal var stringLookup: (UInt) -> String? = { stringLookupTable[it] }
 
     // How many times each node's view has been reconciled (built or updated).
     // Used by the `@pure` skip (§18.10) and observable in tests.
@@ -105,6 +112,14 @@ public class ShadowTree(
      */
     public var trace: ((TraceEvent) -> Unit)? = null
 
+    /**
+     * Creates the `MutableState` backing each node's [ShadowNode.props]. Defaults
+     * to a plain `mutableStateOf`; the app overrides it (it is the same object
+     * the renderer reads, so Compose observes in-place prop mutations).
+     */
+    public var propsStateFactory: (Props) -> androidx.compose.runtime.MutableState<Props> =
+        { androidx.compose.runtime.mutableStateOf(it) }
+
     /** The current root node, or `null` before an Init frame is applied. */
     public val rootNode: ShadowNode? get() = root
 
@@ -147,22 +162,38 @@ public class ShadowTree(
         executorRef = executor
         lastSeq = frame.seq
         if (frame.strings.isNotEmpty()) {
-            registry = registry.withEntries(frame.strings.map { StringTableEntry(it.id, it.text) })
-            val table = frame.strings.associate { it.id to it.text }
-            stringLookup = { id -> table[id] }
+            // String literals live in a SEPARATE id space from `ComponentId`s
+            // (a StringId and a ComponentId can share a numeric value, §D.9).
+            // They feed only the string resolver — feeding them to the adapter
+            // registry would overwrite a component-name binding at the same id
+            // and break resolution (e.g. a literal at id 2 clobbering the
+            // "Column" component, surfacing as
+            // `no adapter registered for component 2`). A Delta frame carries
+            // only its changed strings, so merge rather than replace to keep
+            // strings from earlier frames resolvable.
+            val merged = HashMap(stringLookupTable)
+            for ((id, text) in frame.strings) merged[id] = text
+            stringLookupTable = merged
+            stringLookup = { id -> merged[id] }
         }
         // Appendix D §D.9: the Init frame's `component_names` section binds each
         // `ComponentId` to its adapter name. These are a SEPARATE id space from
         // the string literals in `frame.strings` and must not leak into the
         // string resolver (a ComponentId and a StringId can share a numeric
-        // value). Feed them only to the registry.
+        // value). Feed them only to the registry, and only when the frame
+        // actually carries them — a Delta without `componentNames` must keep the
+        // registrations established by the Init frame, or every component loses
+        // its adapter after the first edit.
         if (frame.componentNames.isNotEmpty()) {
             registry = registry.withEntries(frame.componentNames.map { StringTableEntry(it.id, it.text) })
         }
         // ADR-0027 (FA-IRWIRE): cache the per-node signal metadata and slice each
         // prop-thunk's bytecode from the shared handler blob so dirty reconciles
         // can re-materialise dynamic props without a full frame.
-        signalMeta = frame.signalMeta
+        // Hot-reload (Delta) frames only carry `signalMeta` when their flags set
+        // FLAG_NODE_HAS_SIGNAL_DEPS; a Delta without it must NOT wipe the thunk
+        // table, or interpolation breaks permanently after the first edit.
+        signalMeta = if (!frame.fullTree && frame.signalMeta.isEmpty()) signalMeta else frame.signalMeta
         val blob = frame.bytecodeBlob
         val thunks = LinkedHashMap<ByteArray, ByteArray>()
         if (blob != null && blob.len > 0) {
@@ -190,7 +221,15 @@ public class ShadowTree(
             val hid = handlerHashToId[thunk.hash] ?: continue
             map[hid] = nid
         }
-        thunkHandlerToNode = map
+        // Merge (don't replace): a Delta frame carries its own `handlers` +
+        // `signalMeta` and must refresh the reverse map, but a Delta that only
+        // ships a `Handler` patch (no structural change) has an empty
+        // `signalMeta`, so a straight assignment would wipe the map the Init
+        // frame built — and `applyPatch(.handler)` would then never find its
+        // node to re-materialise (FR hot-reload; mirrors the iOS fix). Stale
+        // entries pointing at old (destroyed) ids are harmless: `applyPatch`
+        // checks `nodes[nodeId]` and no-ops when missing.
+        for ((hid, nid) in map) thunkHandlerToNode[hid] = nid
         if (frame.fullTree && frame.root != null) {
             val index = LinkedHashMap<UInt, WireNode>()
             index[frame.root.id] = frame.root
@@ -224,12 +263,78 @@ public class ShadowTree(
                 patches = frame.patches.size.toUInt(),
             ),
         )
+        // Node ids are not stable across edits (they derive from byte-accurate
+        // source spans), so a text edit shifts every id and the differ emits a
+        // `Replace` of the *whole* subtree rather than a minimal `.handler`
+        // patch. Each such `Replace` carries its `WireNode` inline, but with
+        // child *id references* (not inline subtrees), and a whole-tree replace
+        // arrives as several `Replace` patches (root + every descendant). Build a
+        // single merged index of every `Replace`/`Insert` node in this frame so a
+        // replaced root can resolve its children through the index instead of a
+        // one-node map (which dropped children and left empty shells — blank
+        // screen on hot reload, FLUX-019). When the replaced id is the current
+        // root, reassign `root` so the renderer mounts the new tree.
+        val patchIndex = LinkedHashMap<UInt, WireNode>()
+        for (patch in frame.patches) {
+            when (patch.tag.toInt()) {
+                0x01, 0x03 -> patch.node?.let { patchIndex[it.id] = it }
+            }
+        }
+        // A source edit shifts every node id (ids derive from byte-accurate
+        // spans), so the differ emits `Remove` patches for the entire old tree
+        // followed by `Insert` patches for the new one. Applying those
+        // sequentially tears the old root down first, so every `Insert` finds
+        // its parent already removed and silently no-ops — the tree goes
+        // empty/stale and the UI never reflects the edit (hot-reload
+        // regression, FLUX-019). Detect that whole-tree pattern and rebuild
+        // from the merged `patchIndex` in one pass instead, mirroring the
+        // `Replace`-root path.
+        val oldRootId = root?.id
+        val oldRootRemoved = oldRootId != null &&
+            frame.patches.any { it.tag.toInt() == 0x04 && it.id == oldRootId }
+        val newRootInserted = patchIndex.keys.any { candidate ->
+            patchIndex.values.none { childIdList(it).contains(candidate) }
+        }
+        if (oldRootRemoved && newRootInserted) {
+            rebuildFromPatchIndex(patchIndex, executor)
+            emitTrace(TraceEvent.Frame(seq = frame.seq, full = false, root = root?.id, nodes = nodes.size.toUInt(), patches = frame.patches.size.toUInt()))
+            emitStepEnd()
+            return root
+        }
         if (frame.patches.isNotEmpty()) {
-            for (patch in frame.patches) applyPatch(patch, executor)
+            for (patch in frame.patches) applyPatch(patch, patchIndex, executor)
             emitTrace(TraceEvent.ApplyPatch(seq = frame.seq, patches = frame.patches.size.toUInt()))
             emitStepEnd()
         }
         return root
+    }
+
+    /**
+     * Rebuilds the entire tree from a merged index of `Replace`/`Insert` nodes
+     * (the whole-subtree hot-reload pattern where node ids are unstable across
+     * edits). Finds the new root — the node not referenced as a child of any
+     * other node in the index — builds it and its descendants recursively
+     * through the index, then reassigns [root] and refreshes the [nodes] and
+     * [parents] maps. The old tree is destroyed first so no stale node survives
+     * the hot reload.
+     *
+     * This is the `Insert`-based analogue of the `Replace`-root path: both
+     * represent a total tree swap, and both must rebuild from the merged index
+     * rather than applying `Remove`/`Insert` patches sequentially (which would
+     * drop every inserted node once its parent was torn down).
+     */
+    private fun rebuildFromPatchIndex(
+        patchIndex: Map<UInt, WireNode>,
+        executor: FluxExecutor,
+    ) {
+        val childIds = patchIndex.values.flatMap { childIdList(it) }.toSet()
+        val rootId = patchIndex.keys.firstOrNull { it !in childIds } ?: return
+        root?.let { destroySubtree(it) }
+        nodes.clear()
+        parents.clear()
+        val newRoot = build(patchIndex[rootId]!!, patchIndex, executor, depth = 0u)
+        root = newRoot
+        collect(newRoot)
     }
 
     private fun collect(node: ShadowNode) {
@@ -242,13 +347,30 @@ public class ShadowTree(
 
     private fun applyPatch(
         patch: Patch,
+        patchIndex: Map<UInt, WireNode>,
         executor: FluxExecutor,
     ) {
         executorRef = executor
         when (patch.tag.toInt()) {
             0x01 -> { // Replace
                 val wire = patch.node ?: return
-                val built = build(wire, mapOf(wire.id to wire), executor, depth = 0u)
+                // Whole-tree (root) replacement: node ids are unstable across
+                // edits, so a text edit ships a `Replace` of the current root
+                // id. Tear the old subtree down and reassign `root` so the
+                // renderer mounts the freshly built tree (blank-screen-on-hot-
+                // reload bug, FLUX-019). The merged `patchIndex` lets the new
+                // root resolve its children (they arrive as sibling `Replace`
+                // patches), unlike a one-node map which produced empty shells.
+                if (patch.id == root?.id) {
+                    root?.let { destroySubtree(it) }
+                    val built = build(wire, patchIndex, executor, depth = 0u)
+                    root = built
+                    nodes.clear()
+                    parents.clear()
+                    collect(built)
+                    return
+                }
+                val built = build(wire, patchIndex, executor, depth = 0u)
                 val existing = nodes[patch.id]
                 if (existing != null) {
                     val parentId = parents[patch.id]
@@ -423,7 +545,7 @@ public class ShadowTree(
                 key = null,
                 isPure = wire.isPure,
                 wireProps = WireProps(wire.props, childIds),
-                props = props,
+                propsState = propsStateFactory(props),
                 view = view,
                 signalDeps = deps,
             )
@@ -544,32 +666,44 @@ public class ShadowTree(
         wireProps: List<Pair<UShort, dev.flux.host.wire.WireValue>>,
         nodeId: UInt,
     ): Props {
-        val meta = signalMeta[nodeId] ?: return kitFromWire(wireProps, stringLookup)
-        val thunk = meta.thunk ?: return kitFromWire(wireProps, stringLookup)
-        val bytecode = thunkBlobs[thunk.hash] ?: return kitFromWire(wireProps, stringLookup)
-        val host = executorRef as? HostExecutor ?: return kitFromWire(wireProps, stringLookup)
-        val result =
-            FluxBytecodeVM.run(
-                bytecode,
-                host.materializationSignals,
-                dev.flux.host.vm.FluxValue.NullVal,
-                host.materializationStrings,
-            )
-        if (result !is VmResult.Success) return kitFromWire(wireProps, stringLookup)
-        val record =
-            result.outcome.registers.getOrNull(1) as? dev.flux.host.vm.FluxValue.RecordVal
-                ?: return kitFromWire(wireProps, stringLookup)
-        val fields = ArrayList<dev.flux.ui.Props.Field>(meta.layout.size)
-        for ((pos, propIdx) in meta.layout.withIndex()) {
-            if (pos >= record.fields.size) break
-            fields.add(
-                dev.flux.ui.Props.Field(
-                    propIdx,
-                    record.fields[pos].value.toKitValue(host.materializationStrings),
-                ),
-            )
-        }
-        return Props(fields)
+        val meta = signalMeta[nodeId]
+        val thunk = meta?.thunk
+        val bytecode = thunk?.let { thunkBlobs[it.hash] }
+        val host = executorRef as? HostExecutor
+        val base: Props =
+            if (meta != null && thunk != null && bytecode != null && host != null) {
+                val result =
+                    FluxBytecodeVM.run(
+                        bytecode,
+                        host.materializationSignals,
+                        dev.flux.host.vm.FluxValue.NullVal,
+                        host.materializationStrings,
+                    )
+                val record =
+                    (result as? VmResult.Success)
+                        ?.outcome
+                        ?.registers
+                        ?.getOrNull(1) as? dev.flux.host.vm.FluxValue.RecordVal
+                if (record != null) {
+                    val fields = ArrayList<dev.flux.ui.Props.Field>(meta.layout.size)
+                    for ((pos, propIdx) in meta.layout.withIndex()) {
+                        if (pos >= record.fields.size) break
+                        fields.add(
+                            dev.flux.ui.Props.Field(
+                                propIdx,
+                                record.fields[pos].value.toKitValue(host.materializationStrings),
+                            ),
+                        )
+                    }
+                    Props(fields)
+                } else {
+                    kitFromWire(wireProps, stringLookup)
+                }
+            } else {
+                kitFromWire(wireProps, stringLookup)
+            }
+        val deps = meta?.deps ?: emptyList()
+        return base
     }
 
     /** Converts a VM [FluxValue] (thunk result) into the kit [dev.flux.ui.FluxValue],
