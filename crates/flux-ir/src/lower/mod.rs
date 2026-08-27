@@ -355,17 +355,18 @@ impl<'a> Lowerer<'a> {
                     // component body; they only appear inside trailing call
                     // blocks, which lower_call handles directly.
                 }
-                flux_parser::BlockItem::Expr(expr) => {
-                    // `let`, `onMount`, `onCleanup`, `effect`, `provide`,
-                    // `useContext`, `resource`, `createRef` are not UI producers
-                    // (they bind refs, declare lifecycle hooks, or surface
-                    // capabilities) and contribute no child node. Codegen reads
-                    // them from the AST directly. Only UI-producing expressions
-                    // become children of the reactive tree.
-                    if is_ui_expr(&expr.kind) {
-                        let child = self.lower_expr(expr, owner)?;
-                        children.push(child);
-                    }
+                flux_parser::BlockItem::Expr(expr) if is_ui_expr(&expr.kind) => {
+                    // Only UI-producing expressions become children of the
+                    // reactive tree. Non-UI producers (`let`, `onMount`,
+                    // `onCleanup`, `effect`, `provide`, `useContext`,
+                    // `resource`, `createRef`) bind refs, declare lifecycle
+                    // hooks, or surface capabilities and contribute no child
+                    // node; codegen reads them from the AST directly.
+                    let child = self.lower_expr(expr, owner)?;
+                    children.push(child);
+                }
+                flux_parser::BlockItem::Expr(_) => {
+                    // Non-UI expression: no child node (see note above).
                 }
                 #[allow(unreachable_patterns)]
                 _ => {}
