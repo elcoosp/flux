@@ -127,7 +127,7 @@ pub struct ExprTag(pub u8);
 /// tree nodes (components, primitives, screens, routers) as opposed to the
 /// expression-flow nodes tagged by [`ExprTag`]. Valid discriminants are the
 /// `NodeKind` wire tags (Appendix D §D.3). [`NodeTag::into_u8`] sets
-/// [`DECL_TAG_FAMILY_BIT`] on the discriminant, so a declaration tag and an
+/// the declaration family bit (`0x80`) on the discriminant, so a declaration tag and an
 /// expression tag carrying the same numeric value always hash to distinct
 /// [`NodeId`]s — the families can never be confused at the ID level.
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
@@ -135,14 +135,14 @@ pub struct DeclTag(pub u8);
 
 /// A node-kind tag that can be folded into a stable [`NodeId`].
 ///
-/// Implemented only by [`ExprTag`] and [`DeclTag`]; the [`sealed::Sealed`]
+/// Implemented only by [`ExprTag`] and [`DeclTag`]; a private `Sealed`
 /// supertrait keeps the set closed so external crates cannot invent a third
 /// tag family and silently drift out of sync with the wire protocol.
 pub trait NodeTag: sealed::Sealed {
     /// Returns the `u8` folded into the node-ID hash.
     ///
-    /// The returned byte already encodes the tag family (see
-    /// [`DECL_TAG_FAMILY_BIT`]), so two different families never collide even
+    /// The returned byte already encodes the tag family (declarations carry
+    /// the `0x80` family bit), so two different families never collide even
     /// when their [`NodeKind`](crate::NodeKind) discriminant is identical.
     fn into_u8(self) -> u8;
 }

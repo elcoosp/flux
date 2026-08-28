@@ -2,17 +2,14 @@
 //!
 //! Parsing is a two-phase, allocation-light pipeline:
 //!
-//! 1. [`lexer::lex`] performs a single left-to-right pass over the source,
-//!    resolving indentation into [`Indent`]/[`Dedent`]/[`Newline`] layout
+//! 1. `lexer::lex` performs a single left-to-right pass over the source,
+//!    resolving indentation into `Indent`/`Dedent`/`Newline` layout
 //!    tokens so the recursive-descent parser can delimit component bodies and
 //!    view-call children without braces.
-//! 2. [`parse_source`] is a hand-written recursive-descent parser that builds
+//! 2. `parser::parse_source` is a hand-written recursive-descent parser that
+//!    builds
 //!    the [`Ast`] (see [`ast`]). Every parse failure carries a [`ParseError`]
-//!    with the what/where/why/how diagnostics required by AGENTS.md §3.7.
-//!
-//! [`Indent`]: crate::lexer::TokenKind::Indent
-//! [`Dedent`]: crate::lexer::TokenKind::Dedent
-//! [`Newline`]: crate::lexer::TokenKind::Newline
+//!    with the what/where/why/how diagnostics required by AGENTS.md §3.11.
 
 pub mod ast;
 pub mod error;

@@ -2,17 +2,13 @@
 //!
 //! Consumes the token stream produced by [`crate::lexer`] and builds the
 //! surface [`Ast`] (see [`crate::ast`]). The lexer already resolved
-//! indentation into [`Indent`] / [`Dedent`] / [`Newline`] tokens at brace
+//! indentation into `Indent` / `Dedent` / `Newline` tokens at brace
 //! depth zero, so this parser delimits component bodies and view children by
 //! layout while keeping `{}` for code blocks, handler bodies and record types.
 //!
 //! The produced AST is shape-compatible with the previously emitted surface
 //! tree, so every downstream consumer (type checker, lowerer, codegen, parity)
 //! is unaffected by the syntax change.
-//!
-//! [`Indent`]: crate::lexer::TokenKind::Indent
-//! [`Dedent`]: crate::lexer::TokenKind::Dedent
-//! [`Newline`]: crate::lexer::TokenKind::Newline
 
 use flux_syntax::Span;
 

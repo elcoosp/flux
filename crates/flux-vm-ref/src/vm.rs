@@ -729,7 +729,7 @@ fn finish(regs: [Value; 16], gas: u32, signals: &mut impl SignalStore) -> RunRes
 ///
 /// This is the v1 entry point. v1 handlers never emit `AWAIT` (that opcode is an
 /// MLP v2 addition, ADR-0044), so this always reaches `HALT` and returns a
-/// [`VmOutcome`]. It delegates to the shared [`exec_tail`] interpreter used by the
+/// [`VmOutcome`]. It delegates to the shared `exec_tail` interpreter used by the
 /// resumable [`run_resumable`] / [`resume`] path, so the two execution models stay
 /// in lockstep and cannot drift.
 ///

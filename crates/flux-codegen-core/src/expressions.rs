@@ -4,7 +4,7 @@
 //! condition expressions and string interpolations are re-rendered from the
 //! surface AST. The interpolation syntax differs per backend, so the
 //! interpolation helper is parameterised by a [`flux_parser::StrPart`] walker
-//! supplied by the [`Backend`](crate::backend::Backend). Kotlin turns `{expr}`
+//! supplied by the [`Backend`]. Kotlin turns `{expr}`
 //! into `${expr}`; Swift into `\(expr)`.
 //!
 //! This module is language-neutral: it builds the string body and asks the

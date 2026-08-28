@@ -115,7 +115,7 @@ pub trait Backend {
 
     /// A trailing style modifier appended after a `Button`'s label block
     /// (e.g. Swift `.buttonStyle(.borderedProminent)`). Empty for backends whose
-    /// style is already part of [`button_open`]. Emitting it *after* the closing
+    /// style is already part of [`Backend::button_open`]. Emitting it *after* the closing
     /// `}` keeps the parity recognizer from mistaking the label block for a
     /// sibling child.
     #[must_use]

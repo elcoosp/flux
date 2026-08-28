@@ -6,13 +6,14 @@
 //! `Provider`, `When`, `Switch`) is described exactly once here. The Kotlin and
 //! Swift codegen backends derive their emitters from this table through the
 //! [`Backend`](crate::backend::Backend) trait, so adding a primitive is a
-//! one-line edit to [`PRIMITIVES`] — not a touch to two duplicated `match`
+//! one-line edit to `PRIMITIVES` — not a touch to two duplicated `match`
 //! statements.
 //!
 //! The shape mirrors the project's existing capability registry
 //! (`flux_types::capabilities::CAPABILITY_IDL`): one declarative table, two
 //! backends reading it. A parity test
-//! ([`crate::parity::primitives_cover_prelude`]) fails if `PRIMITIVES` ever
+//! (`registry_covers_every_prelude_primitive` in the `parity` module) fails if
+//! `PRIMITIVES` ever
 //! drifts from what the prelude registers, so the two cannot silently diverge.
 
 use flux_syntax::NodeKind;
@@ -55,8 +56,9 @@ pub struct PrimitiveSpec {
     pub node_kind: NodeKind,
     /// The primitive category, driving shared emission logic.
     pub kind: PrimitiveKind,
-    /// The native view name on this backend (e.g. `VStack` for `Column` on
-    /// Swift). Supplied per-backend via [`Backend::native_name`].
+    /// The native view name on the Kotlin backend (e.g. `Column` for `Column`).
+    /// Backends select between this and [`Self::swift_view`] via
+    /// [`Backend::native_name`](crate::Backend::native_name).
     pub kotlin_view: &'static str,
     /// The native view name on the Swift backend.
     pub swift_view: &'static str,

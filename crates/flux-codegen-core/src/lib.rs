@@ -13,8 +13,8 @@
 //! The primitive registry ([`primitives`]) is the single source of truth,
 //! mirroring the project's capability-IDL pattern
 //! (`flux_types::capabilities`): one declarative table, two backends reading it,
-//! and a parity guard ([`parity`]) that fails if the table drifts from what the
-//! prelude registers.
+//! and a parity guard (the `parity` test module) that fails if the table drifts
+//! from what the prelude registers.
 
 #![forbid(unsafe_code)]
 #![warn(
@@ -31,6 +31,7 @@ pub mod error;
 pub mod expressions;
 pub mod model;
 pub mod primitives;
+pub mod view_tree;
 
 #[cfg(test)]
 mod parity;
@@ -40,3 +41,4 @@ pub use bridge::Bridge;
 pub use emitter::Emitter;
 pub use error::CodegenError;
 pub use primitives::PrimitiveSpec;
+pub use view_tree::{ViewNode, view_tree};

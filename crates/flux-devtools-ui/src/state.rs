@@ -24,7 +24,7 @@ pub struct VmState {
 
 /// The DevTools central state: the live timeline plus the reconstructed view.
 ///
-/// The gpui [`crate::app`] owns this behind a shared lock; views read it on
+/// The gpui app layer (`run_app`) owns this behind a shared lock; views read it on
 /// every frame and the wire client writes into it as telemetry arrives. All
 /// mutation goes through [`DevToolsState::handle_telemetry`], which also pushes
 /// into the [`TimelineBuffer`] for time-travel.

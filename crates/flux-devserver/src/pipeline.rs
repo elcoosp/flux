@@ -278,10 +278,11 @@ impl Pipeline {
             .unwrap_or_default()
     }
 
-    /// Builds the DevTools [`SourceMap`] from the last-good lowered IR so the
+    /// Builds the DevTools [`SourceMap`](crate::SourceMap) from the last-good
+    /// lowered IR so the
     /// debug bridge can enrich telemetry with `.flux` source spans (Phase 3).
     ///
-    /// Prefers [`last_good`] (the retained tree); falls back to the first
+    /// Prefers the retained last-good tree; falls back to the first
     /// compiled source; returns an empty map when nothing has compiled yet.
     #[must_use]
     pub fn devtools_source_map(&self) -> crate::debug_bridge::SourceMap {

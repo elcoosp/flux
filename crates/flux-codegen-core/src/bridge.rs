@@ -1,7 +1,7 @@
 //! Node-ID bridge (ADR-0027) from the lowered arena back to the surface AST.
 //!
-//! [`flux_ir`] lowers every component-body expression under [`EXPR_TAG`] and
-//! every component declaration under [`COMPONENT_TAG`], always with parent `0`.
+//! [`flux_ir`] lowers every component-body expression under `EXPR_TAG` and
+//! every component declaration under `COMPONENT_TAG`, always with parent `0`.
 //! Lowered nodes therefore carry the exact [`NodeId`]s the type checker
 //! assigned. We rebuild those IDs from the AST so each packed node can recover
 //! its originating surface construct (its name, props, interpolations,
