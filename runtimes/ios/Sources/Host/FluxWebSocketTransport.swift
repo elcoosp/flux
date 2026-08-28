@@ -54,10 +54,14 @@ public final class FluxWebSocketTransport: FluxTransport {
         let hello = HelloFrame.bytes(platform: "ios", device: UIDevice.current.model)
         task.send(.data(hello)) { [weak self] error in
             if let error {
+                #if DEBUG
                 NSLog("[FluxTransport] Hello send FAILED: \(error.localizedDescription)")
+                #endif
                 Task { @MainActor in self?.handleDrop() }
             } else {
+                #if DEBUG
                 NSLog("[FluxTransport] Hello send OK (sent \(hello.count) bytes)")
+                #endif
             }
         }
         receiveLoop(task)
@@ -90,6 +94,10 @@ public final class FluxWebSocketTransport: FluxTransport {
             Task { @MainActor in
                 switch result {
                 case .success(.data(let data)):
+                    #if DEBUG
+                    let k: UInt8 = data.count > 5 ? data[5] : 0
+                    NSLog("[FluxRT] onFrame: received \(data.count) bytes, kind=\(k)")
+                    #endif
                     self.onFrame?(data)
                     self.receiveLoop(task)
                 case .success(.string):

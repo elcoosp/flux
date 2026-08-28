@@ -108,6 +108,17 @@ public final class FluxRuntime: FluxExecutor {
     /// attached (e.g. headless tests).
     public var onTreeChanged: (@MainActor () -> Void)?
 
+    #if DEBUG
+    /// DEBUG-only: dispatches a button handler by id, used by the host's
+    /// synthetic long-press so navigation can be exercised without relying on
+    /// `simctl io tap` (which doesn't deliver synthetic touches to this
+    /// SwiftUI-hosted app). Kept here because `FluxEvent` is a `FluxHost` type
+    /// not visible from the `Host` presentation module.
+    public func debugDispatch(handlerId: UInt32, nodeId: UInt32) {
+        dispatch(FluxEvent(handlerId: handlerId, nodeId: nodeId))
+    }
+    #endif
+
     /// Creates an executor backed by `graph` and an `AdapterRegistry` built from
     /// `table`.
     public init(graph: SignalGraph, registry: AdapterRegistry) {
@@ -141,6 +152,10 @@ public final class FluxRuntime: FluxExecutor {
     /// - Parameter data: the raw frame bytes from the transport.
     public func handleFrame(_ data: Data) {
         let bytes = [UInt8](data)
+        #if DEBUG
+        let kind: UInt8 = bytes.count > 5 ? bytes[5] : 0
+        NSLog("[FluxRT] handleFrame: \(bytes.count) bytes, kind=\(kind)")
+        #endif
         if bytes.count >= 6, bytes[5] == frameKindStringInterned {
             // A `StringInterned` reply is only meaningful for the async
             // server-intern RPC (brittleness 4c), which is not used by the
@@ -170,6 +185,9 @@ public final class FluxRuntime: FluxExecutor {
         // banner and keep the last good tree on screen; do not reconcile an
         // empty payload (that would blank the UI). Appendix E §E.6.
         if let serverError = frame.error {
+            #if DEBUG
+            NSLog("[FluxRT] apply: SERVER ERROR frame: \(serverError.message)")
+            #endif
             self.serverError = serverError
             return []
         }
@@ -232,6 +250,14 @@ public final class FluxRuntime: FluxExecutor {
         // rebuilds the tree, while a patch frame (root == nil) applies only its
         // patches. The reconciler no-ops the tree build when root is absent.
         let report = reconciler.apply(frame)
+        #if DEBUG
+        let dbg = FileManager.default.temporaryDirectory.appendingPathComponent("flux_apply.log")
+        try? "[apply] rootId=\(currentRootId.map { String($0) } ?? "nil") built=\(report.built.count)\n".write(to: dbg, atomically: true, encoding: .utf8)
+        UserDefaults.standard.set("[apply] rootId=\(currentRootId.map { String($0) } ?? "nil") built=\(report.built.count)\n", forKey: "flux_apply")
+        #endif
+        #if DEBUG
+        NSLog("[FluxRT] apply: rootId=\(currentRootId.map { String($0) } ?? "nil") rootViewBuilt=\(reconciler.rootView != nil) built=\(report.built.count) updated=\(report.updated.count)")
+        #endif
         // Signal the host that a new/updated native tree is ready to mount.
         onTreeChanged?()
         return report.built + report.updated
@@ -368,6 +394,9 @@ public final class FluxRuntime: FluxExecutor {
     /// RPC; that runs off the synchronous entry point inside a `Task`, so the
     /// kit's `dispatch` call returns immediately and never blocks the UI thread.
     public func dispatch(_ event: FluxEvent) {
+        #if DEBUG
+        NSLog("[FluxRT] executor.dispatch(event) handlerId=\(event.handlerId) nodeId=\(event.nodeId)")
+        #endif
         guard let entry = handlerClosures[event.handlerId] else {
             lastError = VMError(kind: .invalidDispatch, offset: 0)
             lastReconcile = ReconcileReport()
@@ -401,11 +430,19 @@ public final class FluxRuntime: FluxExecutor {
             // reconcile in lockstep for any observer that read mid-flight).
             let written = outcome.signals
             for (id, value) in written { graph.write(id, value) }
+            #if DEBUG
+            let writtenDesc = written.map { "\($0.0)=\($0.1)" }.joined(separator: ", ")
+            NSLog("[FluxRT] dispatch wrote signals: [\(writtenDesc)] currentRootId=\(currentRootId.map { String($0) } ?? "nil")")
+            #endif
             // R1: re-reconcile only the nodes whose signal dependencies were just
             // written, instead of re-walking the whole tree on every tap.
             let dirty = Set(written.map { $0.0 })
             if !dirty.isEmpty, let rootId = currentRootId {
-                let report = reconciler.reconcileDirty(rootId: rootId, nodes: currentNodes, signalIds: dirty)
+                let report = reconciler.reconcileDirty(rootId: rootId, signalIds: dirty)
+                #if DEBUG
+                NSLog("[FluxRT] dispatch reconcileDirty: dirty=\(dirty) built=\(report.built.count) updated=\(report.updated.count) detached=\(report.detached.count)")
+                UserDefaults.standard.set("[dispatch] rootId=\(rootId) dirty=\(dirty) built=\(report.built) updated=\(report.updated) detached=\(report.detached)\n", forKey: "flux_dispatch")
+                #endif
                 lastReconcile = report
             } else {
                 lastReconcile = ReconcileReport()

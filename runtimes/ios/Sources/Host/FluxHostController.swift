@@ -47,6 +47,27 @@ final class FluxHostController: UIViewController {
             self?.presentRoot()
         }
         presentRoot()
+        #if DEBUG
+        // Synthetic-navigation probe: `simctl io tap` does not deliver synthetic
+        // touches to this SwiftUI-hosted app, so a host-side `touch` of
+        // `<tmp>/flux_nav_trigger` (written by ButtonAdapter) dispatches the
+        // on-screen button's handler, exercising the full live navigate path.
+        Timer.scheduledTimer(withTimeInterval: 0.3, repeats: true) { [weak self] _ in
+            guard let self,
+                  let tmp = UserDefaults.standard.string(forKey: "flux_tmpdir") else { return }
+            let trigger = URL(fileURLWithPath: tmp).appendingPathComponent("flux_nav_trigger")
+            guard FileManager.default.fileExists(atPath: trigger.path) else { return }
+            try? FileManager.default.removeItem(at: trigger)
+            guard let raw = UserDefaults.standard.string(forKey: "flux_handler"),
+                  let comma = raw.firstIndex(of: ",") else { return }
+            let hStr = raw[..<comma]
+            let nStr = raw[raw.index(after: comma)...]
+            guard let h = UInt32(hStr), let n = UInt32(nStr) else { return }
+            Task { @MainActor in
+                self.executor.debugDispatch(handlerId: h, nodeId: n)
+            }
+        }
+        #endif
     }
 
     /// Mounts the executor's current root view, filling the controller's view.
@@ -56,7 +77,15 @@ final class FluxHostController: UIViewController {
     /// re-parenting churn, no dropped view state). Only when the tree has no
     /// mounted root (first frame) is the view attached.
     private func presentRoot() {
-        guard let root = executor.rootView else { return }
+        guard let root = executor.rootView else {
+            #if DEBUG
+            NSLog("[FluxRT] presentRoot: rootView is nil, nothing to mount")
+            #endif
+            return
+        }
+        #if DEBUG
+        NSLog("[FluxRT] presentRoot: mounting root \(root)")
+        #endif
         if root.superview === view { return }
         view.subviews.forEach { $0.removeFromSuperview() }
         root.translatesAutoresizingMaskIntoConstraints = false

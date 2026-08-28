@@ -12,10 +12,10 @@ use flux_cli::Cli;
 use tracing::Event;
 use tracing::Level;
 use tracing::Subscriber;
+use tracing_subscriber::fmt::FmtContext;
 use tracing_subscriber::fmt::format::FormatEvent;
 use tracing_subscriber::fmt::format::FormatFields;
 use tracing_subscriber::fmt::format::Writer;
-use tracing_subscriber::fmt::FmtContext;
 use tracing_subscriber::registry::LookupSpan;
 
 /// A `tracing` event formatter with a high-contrast palette.
@@ -28,7 +28,7 @@ use tracing_subscriber::registry::LookupSpan;
 /// (including terminal themes with saturated backgrounds).
 ///
 /// Whether ANSI is emitted is decided once, up front, from the real TTY/NO_COLOR
-/// state (see [`build_subscriber`]) and threaded in via [`Self::use_ansi`], so
+/// state (see [`install_tracing`]) and threaded in via the `use_ansi` field, so
 /// piped/log-file output is always plain text regardless of how the writer is
 /// configured internally.
 struct HighContrastFormat {
