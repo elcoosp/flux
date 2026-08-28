@@ -43,6 +43,7 @@ mod model;
 mod nodes;
 mod printers;
 mod program;
+mod sumtypes;
 
 pub use codegen::codegen;
 pub use error::CodegenError;

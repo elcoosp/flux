@@ -2,14 +2,21 @@
 source: crates/flux-codegen-kotlin/tests/pipeline.rs
 expression: "codegen_example(name, src)"
 ---
+sealed interface Shape
+    data class Circle(val field0: Int) : Shape
+    data class Rect(val field0: Int, val field1: Int) : Shape
+
 @Composable fun AreaView(
      shape: Shape
 ) {
     Column {
         when (shape) {
-            Circle(r) ->
+            is Circle ->
+                val r = shape.field0
                 Text("circle")
-            Rect(w, h) ->
+            is Rect ->
+                val w = shape.field0
+                val h = shape.field1
                 Text("rect")
         }
     }

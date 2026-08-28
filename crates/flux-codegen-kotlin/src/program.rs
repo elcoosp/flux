@@ -67,6 +67,9 @@ impl<'a> Emitter<'a> {
     /// Emits an entire program: one composable per component, in the order the
     /// lowering pass packed them.
     pub(crate) fn emit_program(&mut self) {
+        // Algebraic data types precede the components so their sealed interfaces
+        // are in scope where referenced.
+        crate::sumtypes::emit_sum_types(self);
         let ids: Vec<NodeId> = self.lowered.arena.all_ids().collect();
         let mut first = true;
         for id in ids {
@@ -76,7 +79,7 @@ impl<'a> Emitter<'a> {
             if node.kind() != flux_syntax::NodeKind::Component {
                 continue;
             }
-            if !first {
+            if !(first && self.bridge.types().is_empty()) {
                 self.out.push('\n');
             }
             first = false;
@@ -151,7 +154,7 @@ impl<'a> Emitter<'a> {
             flux_syntax::NodeKind::Primitive => crate::nodes::emit_primitive(self, id, indent),
             flux_syntax::NodeKind::If => crate::nodes::emit_if(self, id, indent),
             flux_syntax::NodeKind::ForEach => crate::nodes::emit_for_each(self, id, indent),
-            flux_syntax::NodeKind::Match => crate::nodes::emit_match(self, id, indent),
+            flux_syntax::NodeKind::Match => crate::sumtypes::emit_match(self, id, indent),
             flux_syntax::NodeKind::Router => crate::nodes::emit_router(self, id, indent),
             flux_syntax::NodeKind::Screen => crate::nodes::emit_screen(self, id, indent),
             _ => {}
@@ -162,11 +165,16 @@ impl<'a> Emitter<'a> {
     ///
     /// The indentation prefix is taken from a precomputed `&str` table
     /// ([`KOTLIN_INDENT_TABLE`]) so no per-line allocation occurs. The output
-    /// is byte-identical to the previous `String::repeat(indent)` form.
+    /// is byte-identical to the previous `String::repeat` form.
     pub(crate) fn line(&mut self, indent: usize, text: &str) {
         self.out.push_str(Self::indent_prefix(indent));
         self.out.push_str(text);
         self.out.push('\n');
+    }
+
+    /// Appends a raw string (e.g. a blank separator line) with no indentation.
+    pub(crate) fn push_raw(&mut self, s: &str) {
+        self.out.push_str(s);
     }
 
     /// Returns the flattened child node ids of `node` (resolving splices).

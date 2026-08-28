@@ -4,9 +4,7 @@
 //! Keeping them in their own module keeps [`crate::nodes`] focused on the tree
 //! traversal and within the project's 300-line file budget.
 
-use flux_parser::{Expr, ExprKind, MatchPattern};
-
-use crate::expressions::render_expr;
+use flux_parser::{Expr, ExprKind};
 
 /// Renders a prop value that is a string literal for inline use (Text, Image).
 ///
@@ -37,31 +35,4 @@ pub(crate) fn key_extractor_of(key: &Expr) -> String {
         }
     }
     "{ it }".to_owned()
-}
-
-/// Renders a match pattern as a Kotlin `when` branch label.
-#[must_use]
-pub(crate) fn render_pattern(pattern: &MatchPattern) -> String {
-    use flux_parser::MatchPatternKind;
-    match &pattern.kind {
-        MatchPatternKind::Wildcard => "else".to_owned(),
-        MatchPatternKind::Variant { name, fields } => {
-            let binds: Vec<String> = fields
-                .iter()
-                .map(|p| match p {
-                    flux_parser::Pattern::Ident(id) => id.name.clone(),
-                    flux_parser::Pattern::Wildcard(_) => "_".to_owned(),
-                    _ => "_".to_owned(),
-                })
-                .collect();
-            if binds.is_empty() {
-                name.name.clone()
-            } else {
-                format!("{}({})", name.name, binds.join(", "))
-            }
-        }
-        MatchPatternKind::Literal(expr) => render_expr(expr),
-        MatchPatternKind::Guard { name, .. } => name.name.clone(),
-        _ => "else".to_owned(),
-    }
 }

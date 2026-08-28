@@ -10,7 +10,7 @@ use flux_syntax::NodeId;
 
 use crate::expressions::render_expr;
 use crate::model::composable_name;
-use crate::printers::{key_extractor_of, render_inline, render_pattern};
+use crate::printers::{key_extractor_of, render_inline};
 use crate::program::Emitter;
 
 /// Emits a primitive composable (Text, Button, Image, Column, …) with a
@@ -161,24 +161,6 @@ pub(crate) fn emit_for_each(em: &mut Emitter<'_>, id: NodeId, indent: usize) {
         &format!("items({collection}, key = {key_extractor}) {{ item ->"),
     );
     em.emit_block_body(body, indent + 1);
-    em.line(indent, "}");
-}
-
-/// Emits a `when` expression over an algebraic data type (per spec FR-011).
-pub(crate) fn emit_match(em: &mut Emitter<'_>, id: NodeId, indent: usize) {
-    let Some(expr) = em.bridge.expr(id) else {
-        return;
-    };
-    let ExprKind::Match { scrutinee, arms } = &expr.kind else {
-        return;
-    };
-    let subject = render_expr(scrutinee);
-    em.line(indent, &format!("when ({subject}) {{"));
-    for arm in arms {
-        let pattern = render_pattern(&arm.pattern);
-        em.line(indent + 1, &format!("{pattern} ->"));
-        em.emit_expr_body(&arm.body, indent + 2);
-    }
     em.line(indent, "}");
 }
 
