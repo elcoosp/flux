@@ -13,46 +13,55 @@
     --cyan:#22d3ee; --emerald:#34d399; --violet:#a78bfa; --amber:#fbbf24;
     --rose:#fb7185; --orange:#fb923c; --slate:#cbd5e1;
   }
-  body { font-family:'JetBrains Mono',monospace; background:var(--bg); color:var(--txt); min-height:100vh; padding:2rem; line-height:1.5; }
-  .wrap { max-width:1340px; margin:0 auto; }
-  .header { margin-bottom:1.25rem; }
+  body { font-family:'JetBrains Mono',monospace; background:var(--bg); color:var(--txt); min-height:100vh; padding:1.5rem; line-height:1.5; }
+  .wrap { max-width:1500px; margin:0 auto; }
+  .header { margin-bottom:1rem; }
   .hrow { display:flex; align-items:center; gap:1rem; }
   .pulse { width:12px; height:12px; border-radius:50%; background:var(--emerald); animation:pulse 2s infinite; }
   @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.4;} }
   h1 { font-size:1.5rem; font-weight:700; letter-spacing:-.025em; }
-  .sub { color:var(--dim); font-size:.82rem; margin-left:1.75rem; max-width:1000px; }
-  .toolbar { display:flex; flex-wrap:wrap; gap:.6rem; margin:1.25rem 0 .5rem; align-items:center; }
+  .sub { color:var(--dim); font-size:.82rem; margin-left:1.75rem; max-width:1100px; }
+
+  .toolbar { display:flex; flex-wrap:wrap; gap:.6rem; margin:1rem 0 .75rem; align-items:center; }
   .btn { background:var(--panel); border:1px solid var(--border); color:var(--slate); padding:.5rem .8rem; border-radius:.5rem; font:inherit; font-size:.72rem; cursor:pointer; transition:.15s; }
   .btn:hover { border-color:var(--cyan); color:var(--cyan); }
   .btn.on { border-color:var(--emerald); color:var(--emerald); }
-  .legend-inline { display:flex; flex-wrap:wrap; gap:1rem; margin-left:auto; font-size:.68rem; color:var(--faint); }
-  .legend-inline span { display:inline-flex; align-items:center; gap:.35rem; }
-  .dot { width:9px; height:9px; border-radius:2px; display:inline-block; }
-  .stage { display:grid; grid-template-columns:1.45fr 1fr; gap:1.25rem; margin-top:1rem; align-items:start; }
-  @media (max-width:980px){ .stage{ grid-template-columns:1fr; } }
-  .diagram { background:var(--panel); border:1px solid var(--border); border-radius:1rem; padding:.5rem; position:relative; overflow:hidden; }
+
+  /* diagram takes the full width */
+  .diagram { background:var(--panel); border:1px solid var(--border); border-radius:1rem; padding:.5rem; position:relative; }
   .diagram svg { width:100%; height:auto; display:block; }
+
+  /* movable floating legend */
+  .legend { position:absolute; top:1rem; right:1rem; width:300px; background:rgba(15,23,42,.94); border:1px solid var(--border); border-radius:.75rem; padding:.9rem 1rem; box-shadow:0 8px 30px rgba(0,0,0,.5); cursor:grab; z-index:20; user-select:none; }
+  .legend.drag { cursor:grabbing; }
+  .legend h3 { font-size:.85rem; font-weight:600; margin-bottom:.5rem; display:flex; align-items:center; justify-content:space-between; }
+  .legend .grip { color:var(--ghost); font-size:.7rem; letter-spacing:1px; }
+  .legend .row { display:flex; align-items:center; gap:.5rem; font-size:.68rem; color:var(--dim); margin-bottom:.3rem; }
+  .legend .row i { width:12px; height:12px; border-radius:3px; flex:none; }
+  .legend .note { color:var(--faint); font-size:.64rem; margin-top:.5rem; line-height:1.4; }
+
   .node { cursor:pointer; transition:.15s; }
   .node rect, .node path { transition:.15s; }
-  .node:hover rect, .node:hover path { filter:brightness(1.35); }
-  .node.sel rect, .node.sel path { stroke-width:2.6px; }
-  .node.dim { opacity:.28; }
+  .node:hover rect, .node:hover path { filter:brightness(1.4); }
+  .node.sel rect, .node.sel path { stroke-width:3px; }
+  .node.dim { opacity:.25; }
   .edge { transition:.15s; }
-  .edge.dim { opacity:.12; }
-  .card { background:var(--panel); border:1px solid var(--border); border-radius:1rem; padding:1.25rem; min-height:420px; position:sticky; top:1rem; }
+  .edge.dim { opacity:.1; }
+
+  /* detail panel below the diagram, full width */
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:1rem; padding:1.25rem; margin-top:1.25rem; min-height:120px; }
   .card h2 { font-size:1rem; font-weight:600; margin-bottom:.25rem; }
   .card .loc { color:var(--amber); font-size:.7rem; margin-bottom:.9rem; word-break:break-all; }
-  .card .loc a { color:var(--amber); text-decoration:none; } .card .loc a:hover{ text-decoration:underline; }
-  .tag { display:inline-block; font-size:.62rem; padding:.12rem .45rem; border-radius:.3rem; border:1px solid var(--border); color:var(--dim); margin-right:.3rem; margin-bottom:.4rem; }
   .card p { color:var(--slate); font-size:.74rem; margin-bottom:.7rem; }
   .kv { font-size:.7rem; color:var(--dim); margin-bottom:.4rem; }
   .kv b { color:var(--cyan); font-weight:600; }
   .fn { background:#0b1220; border:1px solid var(--border); border-radius:.45rem; padding:.5rem .6rem; font-size:.68rem; color:var(--slate); margin-bottom:.4rem; }
-  .fn .ret { color:var(--violet); }
-  .fn .nm { color:var(--cyan); }
-  .empty-hint { color:var(--ghost); font-size:.8rem; margin-top:4rem; text-align:center; }
+  .fn .ret { color:var(--violet); } .fn .nm { color:var(--cyan); }
+  .tag { display:inline-block; font-size:.62rem; padding:.12rem .45rem; border-radius:.3rem; border:1px solid var(--border); color:var(--dim); margin-right:.3rem; margin-bottom:.4rem; }
+  .empty-hint { color:var(--ghost); font-size:.8rem; }
+
   .sec { color:var(--txt); font-size:1.05rem; font-weight:600; margin-top:2.5rem; margin-bottom:.3rem; }
-  .sec-note { color:var(--faint); font-size:.74rem; margin-bottom:.6rem; max-width:1040px; }
+  .sec-note { color:var(--faint); font-size:.74rem; margin-bottom:.6rem; max-width:1180px; }
   .cards-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:1rem; margin-top:1.25rem; }
   .mini { background:var(--panel); border:1px solid var(--border); border-radius:.75rem; padding:1.1rem; }
   .mini-h { display:flex; align-items:center; gap:.5rem; margin-bottom:.6rem; }
@@ -60,8 +69,7 @@
   .mini h3 { font-size:.82rem; font-weight:600; }
   .mini ul { list-style:none; color:var(--dim); font-size:.7rem; line-height:1.55; }
   .mini li::before { content:"• "; color:var(--ghost); }
-  .footer { text-align:center; margin-top:2rem; color:var(--ghost); font-size:.7rem; }
-  /* dispatch simulator */
+
   .sim { background:var(--panel); border:1px solid var(--border); border-radius:1rem; padding:1.25rem; margin-top:1.25rem; }
   .sim h3 { font-size:.9rem; font-weight:600; margin-bottom:.4rem; }
   .sim .desc { color:var(--dim); font-size:.72rem; margin-bottom:1rem; }
@@ -76,6 +84,7 @@
   .progress > div { height:100%; width:0; background:linear-gradient(90deg,var(--cyan),var(--emerald)); transition:.25s; }
   .log { font-size:.66rem; color:var(--faint); margin-top:.7rem; white-space:pre-wrap; min-height:2.5rem; }
   kbd { background:#0b1220; border:1px solid var(--border); border-radius:.3rem; padding:.05rem .3rem; font-size:.65rem; color:var(--slate); }
+  .footer { text-align:center; margin-top:2rem; color:var(--ghost); font-size:.7rem; }
 </style>
 </head>
 <body>
@@ -89,238 +98,220 @@
     <button class="btn" id="btnLane">Group by lane</button>
     <button class="btn" id="btnWalk">Animate a tap</button>
     <button class="btn" id="btnReset">Reset</button>
-    <div class="legend-inline">
-      <span><i class="dot" style="background:rgba(8,51,68,.6);border:1px solid var(--cyan)"></i>Rust server</span>
-      <span><i class="dot" style="background:rgba(6,78,59,.6);border:1px solid var(--emerald)"></i>Native runtime</span>
-      <span><i class="dot" style="background:rgba(120,53,15,.5);border:1px solid var(--amber)"></i>Wire (App. D)</span>
-      <span><i class="dot" style="background:rgba(76,29,149,.6);border:1px solid var(--violet)"></i>Value / signal</span>
-      <span><i class="dot" style="background:rgba(136,19,55,.6);border:1px solid var(--rose)"></i>Fault / report</span>
-    </div>
   </div>
 
-  <div class="stage">
-    <div class="diagram">
-      <svg id="map" viewBox="0 0 1280 1180" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-          <marker id="ah" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#64748b"/></marker>
-          <marker id="ahc" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#22d3ee"/></marker>
-          <marker id="ahr" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#fb7185"/></marker>
-          <marker id="aha" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#a78bfa"/></marker>
-          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width=".5"/></pattern>
-        </defs>
-        <rect width="1280" height="1180" fill="url(#grid)"/>
-
-        <!-- lane boundaries -->
-        <rect id="ln-rust" x="30" y="40" width="470" height="470" rx="12" fill="rgba(8,51,68,.10)" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="8,4"/>
-        <text x="44" y="58" fill="#22d3ee" font-size="11" font-weight="600">Rust Dev Server (crates/)</text>
-        <rect id="ln-ios" x="30" y="600" width="600" height="560" rx="12" fill="rgba(6,78,59,.08)" stroke="#34d399" stroke-width="1.5" stroke-dasharray="8,4"/>
-        <text x="44" y="620" fill="#34d399" font-size="11" font-weight="600">iOS · SwiftPM FluxHost · @MainActor</text>
-        <rect id="ln-and" x="650" y="600" width="600" height="560" rx="12" fill="rgba(6,78,59,.08)" stroke="#34d399" stroke-width="1.5" stroke-dasharray="8,4"/>
-        <text x="664" y="620" fill="#34d399" font-size="11" font-weight="600">Android · Kotlin host · Dispatchers.Main</text>
-
-        <!-- ============ RUST SERVER NODES ============ -->
-        <g class="node" data-id="cli" data-lane="rust">
-          <rect x="50" y="70" width="200" height="42" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
-          <text x="62" y="90" fill="#e2e8f0" font-size="10.5">flux-cli · dev subcmd</text>
-          <text x="62" y="105" fill="#64748b" font-size="8">cli/src/lib.rs · ws flags</text>
-        </g>
-        <g class="node" data-id="pipeline" data-lane="rust">
-          <rect x="50" y="128" width="300" height="150" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
-          <text x="62" y="148" fill="#e2e8f0" font-size="11" font-weight="600">flux-devserver · Pipeline</text>
-          <text x="62" y="163" fill="#64748b" font-size="8">pipeline.rs:429 compile()</text>
-          <rect x="64" y="170" width="272" height="22" rx="4" fill="rgba(8,51,68,.5)"/><text x="74" y="185" font-size="8.5">parse → type_check → lower</text>
-          <rect x="64" y="196" width="272" height="22" rx="4" fill="rgba(8,51,68,.5)"/><text x="74" y="211" font-size="8.5">diff → frame (last_good + seq)</text>
-          <rect x="64" y="222" width="272" height="22" rx="4" fill="rgba(8,51,68,.5)"/><text x="74" y="237" font-size="8.5">Init / Delta / Unchanged</text>
-          <rect x="64" y="248" width="272" height="20" rx="4" fill="rgba(8,51,68,.5)"/><text x="74" y="262" font-size="8.5">set_source · timings()</text>
-        </g>
-        <g class="node" data-id="dispatch" data-lane="rust">
-          <rect x="50" y="290" width="300" height="120" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
-          <text x="62" y="310" fill="#e2e8f0" font-size="11" font-weight="600">dispatch.rs · ADR-0027</text>
-          <text x="62" y="325" fill="#64748b" font-size="8">handle_dispatch_report:345</text>
-          <text x="62" y="343" fill="#94a3b8" font-size="8">DependencyIndex (Signal→NodeId)</text>
-          <text x="62" y="358" fill="#94a3b8" font-size="8">emit_minimal_updates:226</text>
-          <text x="62" y="373" fill="#94a3b8" font-size="8">patch scope = |dependents[S]|</text>
-          <text x="62" y="388" fill="#64748b" font-size="7.5">noop when written has no readers</text>
-        </g>
-        <g class="node" data-id="differ" data-lane="rust">
-          <rect x="372" y="128" width="118" height="84" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
-          <text x="384" y="148" fill="#e2e8f0" font-size="10">flux-differ</text>
-          <text x="384" y="162" fill="#64748b" font-size="8">diff.rs:20</text>
-          <text x="384" y="178" fill="#94a3b8" font-size="8">Update/Reorder/</text>
-          <text x="384" y="190" fill="#94a3b8" font-size="8">Replace/Remove</text>
-          <text x="384" y="204" fill="#94a3b8" font-size="8">props_hash skip</text>
-        </g>
-        <g class="node" data-id="irserde" data-lane="rust">
-          <rect x="372" y="224" width="118" height="62" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
-          <text x="384" y="244" fill="#e2e8f0" font-size="10">flux-ir-serde</text>
-          <text x="384" y="258" fill="#64748b" font-size="8">frame.rs</text>
-          <text x="384" y="272" fill="#94a3b8" font-size="8">Init/Delta/Hello</text>
-        </g>
-        <g class="node" data-id="wire" data-lane="wire">
-          <rect x="50" y="430" width="1178" height="56" rx="6" fill="#0f172a" stroke="#fbbf24" stroke-width="1.5"/>
-          <text x="66" y="452" fill="#e2e8f0" font-size="11" font-weight="600">WIRE PROTOCOL — Appendix D · magic 0x465C5558 · LE</text>
-          <text x="66" y="470" fill="#a16207" font-size="8">Frame = version·seq·flags·[root Node]·patches·handler-section(bytecode blob + ClosureRefs)·strings·stateΔ·files — Value tags 0x00–0x07 · Child = Node id | Splice keyed u64 (D.4) · Patch D.2 · ClosureRef D.7 · DispatchReport 0x06 (D.12.6)</text>
-        </g>
-        <g class="node" data-id="codegen" data-lane="rust">
-          <rect x="372" y="290" width="118" height="120" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
-          <text x="384" y="310" fill="#e2e8f0" font-size="10" font-weight="600">codegen-*</text>
-          <text x="384" y="324" fill="#64748b" font-size="8">bridge.rs (ADR-0027)</text>
-          <text x="384" y="340" fill="#94a3b8" font-size="8">EXPR_TAG=10</text>
-          <text x="384" y="354" fill="#94a3b8" font-size="8">COMPONENT_TAG=3</text>
-          <text x="384" y="368" fill="#94a3b8" font-size="8">codegen.rs → SwiftUI</text>
-          <text x="384" y="382" fill="#94a3b8" font-size="8">/ Compose</text>
-          <text x="384" y="398" fill="#64748b" font-size="8">bytecode.rs:83</text>
-        </g>
-        <g class="node" data-id="vmref" data-lane="rust">
-          <rect x="50" y="560" width="200" height="42" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
-          <text x="62" y="580" fill="#e2e8f0" font-size="10.5">flux-vm-ref · oracle</text>
-          <text x="62" y="594" fill="#a78bfa" font-size="8">vm.rs:285 run_resumable</text>
-        </g>
-        <g class="node" data-id="parity" data-lane="rust">
-          <rect x="50" y="612" width="200" height="42" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
-          <text x="62" y="632" fill="#e2e8f0" font-size="10.5">flux-parity (FLUX-023)</text>
-          <text x="62" y="646" fill="#a78bfa" font-size="8">reduce.rs:23 from_ast</text>
-        </g>
-
-        <!-- ============ iOS RUNTIME NODES ============ -->
-        <g class="node" data-id="iostransport" data-lane="ios">
-          <rect x="50" y="650" width="560" height="40" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
-          <text x="62" y="668" fill="#e2e8f0" font-size="10">FluxWebSocketTransport — Hello + 1s reconnect</text>
-          <text x="62" y="683" fill="#64748b" font-size="7.5">Sources/Host/FluxWebSocketTransport.swift</text>
-        </g>
-        <g class="node" data-id="iosdeser" data-lane="ios">
-          <rect x="50" y="702" width="560" height="40" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
-          <text x="62" y="720" fill="#e2e8f0" font-size="10">FrameDeserializer — bytes → FluxFrame (mirrors Rust)</text>
-          <text x="62" y="735" fill="#64748b" font-size="7.5">FrameDeserializer.swift · WireModels.swift</text>
-        </g>
-        <g class="node" data-id="iosexec" data-lane="ios">
-          <rect x="50" y="754" width="560" height="48" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
-          <text x="62" y="773" fill="#e2e8f0" font-size="10">FluxRuntime : FluxExecutor — apply / dispatch</text>
-          <text x="62" y="789" fill="#64748b" font-size="7.5">FluxExecutor.swift:370 dispatch(_:) · caches [Instruction] (R3)</text>
-          <text x="62" y="797" fill="#94a3b8" font-size="7.5">reconcileDirty only signal-dependent subtrees (R1)</text>
-        </g>
-        <g class="node" data-id="iosvm" data-lane="ios">
-          <rect x="66" y="814" width="528" height="40" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
-          <text x="78" y="832" fill="#e2e8f0" font-size="10">FluxBytecodeVM.run — gas r15, 16 MiB alloc budget</text>
-          <text x="78" y="847" fill="#64748b" font-size="7.5">FluxBytecodeVM.swift · mirrors flux-vm-ref oracle</text>
-        </g>
-        <g class="node" data-id="iossignal" data-lane="ios">
-          <rect x="66" y="866" width="255" height="40" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
-          <text x="78" y="884" fill="#e2e8f0" font-size="10">SignalGraph</text>
-          <text x="78" y="899" fill="#a78bfa" font-size="7.5">SignalStore · observe() (R-graph)</text>
-        </g>
-        <g class="node" data-id="iosvalue" data-lane="ios">
-          <rect x="339" y="866" width="255" height="40" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
-          <text x="351" y="884" fill="#e2e8f0" font-size="10">VMValue (D.5)</text>
-          <text x="351" y="899" fill="#a78bfa" font-size="7.5">int/float/bool/str/list/record</text>
-        </g>
-        <g class="node" data-id="iosrecon" data-lane="ios">
-          <rect x="66" y="918" width="528" height="58" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
-          <text x="78" y="938" fill="#e2e8f0" font-size="10">ShadowTreeReconciler — keyed by NodeId</text>
-          <text x="78" y="954" fill="#64748b" font-size="7.5">reconcileDirty:351 · @pure skip (G6) · materializeProps</text>
-          <text x="78" y="968" fill="#64748b" font-size="7.5">AdapterKit.swift → FluxUIKit (Text/Button/…)</text>
-        </g>
-
-        <!-- ============ ANDROID RUNTIME NODES ============ -->
-        <g class="node" data-id="andtransport" data-lane="and">
-          <rect x="670" y="650" width="560" height="40" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
-          <text x="682" y="668" fill="#e2e8f0" font-size="10">FluxTransport — WS, off-main deserialize (Default)</text>
-          <text x="682" y="683" fill="#64748b" font-size="7.5">host/.../transport · receiveFrame hops to dispatcher</text>
-        </g>
-        <g class="node" data-id="anddeser" data-lane="and">
-          <rect x="670" y="702" width="560" height="40" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
-          <text x="682" y="720" fill="#e2e8f0" font-size="10">FrameDeserializer — bytes → Frame (same D layout)</text>
-          <text x="682" y="735" fill="#64748b" font-size="7.5">host/.../wire</text>
-        </g>
-        <g class="node" data-id="andexec" data-lane="and">
-          <rect x="670" y="754" width="560" height="48" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
-          <text x="682" y="773" fill="#e2e8f0" font-size="10">FluxExecutor — apply / dispatch</text>
-          <text x="682" y="789" fill="#64748b" font-size="7.5">FluxExecutor.kt:201/229 · last-wins hot-swap (T7)</text>
-          <text x="682" y="797" fill="#94a3b8" font-size="7.5">@MainThread · ReactiveDispatcher (R-graph)</text>
-        </g>
-        <g class="node" data-id="andvm" data-lane="and">
-          <rect x="686" y="814" width="528" height="40" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
-          <text x="698" y="832" fill="#e2e8f0" font-size="10">FluxBytecodeVM.run — VmResult, 16 MiB cap</text>
-          <text x="698" y="847" fill="#64748b" font-size="7.5">host/.../vm/FluxBytecodeVM.kt · mirrors oracle</text>
-        </g>
-        <g class="node" data-id="andsignal" data-lane="and">
-          <rect x="686" y="866" width="255" height="40" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
-          <text x="698" y="884" fill="#e2e8f0" font-size="10">SignalGraph</text>
-          <text x="698" y="899" fill="#a78bfa" font-size="7.5">SignalStore impl</text>
-        </g>
-        <g class="node" data-id="andvalue" data-lane="and">
-          <rect x="959" y="866" width="255" height="40" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
-          <text x="971" y="884" fill="#e2e8f0" font-size="10">FluxValue (D.5)</text>
-          <text x="971" y="899" fill="#a78bfa" font-size="7.5">IntVal/FloatVal/… mirror</text>
-        </g>
-        <g class="node" data-id="andrecon" data-lane="and">
-          <rect x="686" y="918" width="528" height="58" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
-          <text x="698" y="938" fill="#e2e8f0" font-size="10">ShadowTree.reconcileDirty — keyed by NodeId</text>
-          <text x="698" y="954" fill="#64748b" font-size="7.5">DirtyReconciler.kt:48 · @pure skip (G6) · materializeProps</text>
-          <text x="698" y="968" fill="#64748b" font-size="7.5">host/.../shadow → adapters/ui-kotlin (Compose)</text>
-        </g>
-
-        <!-- edges -->
-        <path id="e1" class="edge" d="M250 112 L200 126" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
-        <path id="e2" class="edge" d="M350 200 L440 168" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
-        <path id="e3" class="edge" d="M350 320 L440 252" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
-        <path id="e4" class="edge" d="M430 286 L430 224" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
-        <path id="e5" class="edge" d="M430 352 L430 290" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
-        <path id="e6" class="edge" d="M430 410 L430 486" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#ah)"/>
-        <path id="e7" class="edge" d="M200 486 L200 558" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#aha)"/>
-        <path id="e8" class="edge" d="M200 602 L200 610" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#aha)"/>
-
-        <!-- server -> ios/and over wire -->
-        <path id="e9" class="edge" d="M330 486 L330 648" stroke="#fbbf24" stroke-width="1.8" marker-end="url(#ahc)"/>
-        <path id="e10" class="edge" d="M950 486 L950 648" stroke="#fbbf24" stroke-width="1.8" marker-end="url(#ahc)"/>
-
-        <!-- internal ios -->
-        <path id="e11" class="edge" d="M330 690 L330 700" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
-        <path id="e12" class="edge" d="M330 742 L330 752" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
-        <path id="e13" class="edge" d="M330 802 L330 812" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
-        <path id="e14" class="edge" d="M193 854 L193 864" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#aha)"/>
-        <path id="e15" class="edge" d="M466 854 L466 864" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#aha)"/>
-        <path id="e16" class="edge" d="M330 976 L330 916" stroke="#34d399" stroke-width="1.5" marker-end="url(#ah)"/>
-        <!-- internal and -->
-        <path id="e17" class="edge" d="M950 690 L950 700" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
-        <path id="e18" class="edge" d="M950 742 L950 752" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
-        <path id="e19" class="edge" d="M950 802 L950 812" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
-        <path id="e20" class="edge" d="M813 854 L813 864" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#aha)"/>
-        <path id="e21" class="edge" d="M1086 854 L1086 864" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#aha)"/>
-        <path id="e22" class="edge" d="M950 976 L950 916" stroke="#34d399" stroke-width="1.5" marker-end="url(#ah)"/>
-
-        <!-- DispatchReport reverse (rose) -->
-        <path id="e23" class="edge" d="M200 778 C 20 778, 20 320, 372 340" fill="none" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#ahr)"/>
-        <path id="e24" class="edge" d="M950 778 C 1160 778, 1160 320, 490 340" fill="none" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#ahr)"/>
-        <text x="40" y="540" fill="#fb7185" font-size="8">DispatchReport ↑ (written sig)</text>
-        <text x="1000" y="540" fill="#fb7185" font-size="8">DispatchReport ↑ (written sig)</text>
-
-        <!-- Legend -->
-        <g class="node" data-id="legend" data-lane="legend">
-          <rect x="900" y="980" width="360" height="170" rx="8" fill="rgba(15,23,42,.7)" stroke="#1e293b"/>
-          <text x="914" y="1000" fill="#e2e8f0" font-size="10" font-weight="600">Legend</text>
-          <rect x="914" y="1010" width="14" height="10" rx="2" fill="rgba(8,51,68,.5)" stroke="#22d3ee"/><text x="934" y="1018" fill="#94a3b8" font-size="8">Rust toolchain</text>
-          <rect x="914" y="1026" width="14" height="10" rx="2" fill="rgba(6,78,59,.5)" stroke="#34d399"/><text x="934" y="1034" fill="#94a3b8" font-size="8">Native runtime (iOS≈Android)</text>
-          <rect x="914" y="1042" width="14" height="10" rx="2" fill="rgba(120,53,15,.4)" stroke="#fbbf24"/><text x="934" y="1050" fill="#94a3b8" font-size="8">Wire protocol (Appendix D)</text>
-          <rect x="914" y="1058" width="14" height="10" rx="2" fill="rgba(76,29,149,.5)" stroke="#a78bfa"/><text x="934" y="1066" fill="#94a3b8" font-size="8">Value / signal model</text>
-          <line x1="914" y1="1080" x2="928" y2="1080" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="4,3"/><text x="934" y="1083" fill="#94a3b8" font-size="8">DispatchReport (host→server)</text>
-          <rect x="914" y="1092" width="14" height="10" rx="2" fill="rgba(136,19,55,.5)" stroke="#fb7185"/><text x="934" y="1100" fill="#94a3b8" font-size="8">Fault / lifecycle boundary</text>
-          <text x="914" y="1124" fill="#64748b" font-size="8">vm-ref oracle → ISA conformance.</text>
-          <text x="914" y="1138" fill="#64748b" font-size="8">Codegen → SwiftUI / Compose.</text>
-          <text x="914" y="1152" fill="#64748b" font-size="8">parity → one ViewNode (BR-004).</text>
-        </g>
-      </svg>
+  <div class="diagram">
+    <!-- movable legend -->
+    <div class="legend" id="legend">
+      <h3>Legend <span class="grip">⠿ drag</span></h3>
+      <div class="row"><i style="background:rgba(8,51,68,.6);border:1px solid var(--cyan)"></i>Rust dev server</div>
+      <div class="row"><i style="background:rgba(6,78,59,.6);border:1px solid var(--emerald)"></i>Native runtime (iOS≈Android)</div>
+      <div class="row"><i style="background:rgba(120,53,15,.5);border:1px solid var(--amber)"></i>Wire protocol (Appendix D)</div>
+      <div class="row"><i style="background:rgba(76,29,149,.6);border:1px solid var(--violet)"></i>Value / signal model</div>
+      <div class="row"><i style="background:rgba(136,19,55,.6);border:1px solid var(--rose)"></i>Fault / DispatchReport</div>
+      <div class="note">Drag this panel anywhere over the diagram. Click a box to read its file:line. Arrows: grey = data flow, amber = wire, violet = signal/value, rose dashed = host→server DispatchReport.</div>
     </div>
 
-    <div class="card" id="detail">
-      <div class="empty-hint">Select a component on the left to read its real implementation.<br><br>Each panel cites the file:line I read during the codebase deep-dive, plus the load-bearing functions and the cross-host parity guarantees.</div>
-    </div>
+    <svg id="map" viewBox="0 0 1280 1080" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <marker id="ah" markerWidth="11" markerHeight="8" refX="9" refY="4" orient="auto"><polygon points="0 0,11 4,0 8" fill="#cbd5e1"/></marker>
+        <marker id="ahc" markerWidth="11" markerHeight="8" refX="9" refY="4" orient="auto"><polygon points="0 0,11 4,0 8" fill="#22d3ee"/></marker>
+        <marker id="ahr" markerWidth="11" markerHeight="8" refX="9" refY="4" orient="auto"><polygon points="0 0,11 4,0 8" fill="#fb7185"/></marker>
+        <marker id="aha" markerWidth="11" markerHeight="8" refX="9" refY="4" orient="auto"><polygon points="0 0,11 4,0 8" fill="#a78bfa"/></marker>
+        <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width=".5"/></pattern>
+      </defs>
+      <rect width="1280" height="1080" fill="url(#grid)"/>
+
+      <!-- lane boundaries -->
+      <rect id="ln-rust" x="30" y="40" width="470" height="430" rx="12" fill="rgba(8,51,68,.10)" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="8,4"/>
+      <text x="44" y="58" fill="#22d3ee" font-size="12" font-weight="600">Rust Dev Server (crates/)</text>
+      <rect id="ln-ios" x="30" y="500" width="600" height="560" rx="12" fill="rgba(6,78,59,.08)" stroke="#34d399" stroke-width="1.5" stroke-dasharray="8,4"/>
+      <text x="44" y="520" fill="#34d399" font-size="12" font-weight="600">iOS · SwiftPM FluxHost · @MainActor</text>
+      <rect id="ln-and" x="650" y="500" width="600" height="560" rx="12" fill="rgba(6,78,59,.08)" stroke="#34d399" stroke-width="1.5" stroke-dasharray="8,4"/>
+      <text x="664" y="520" fill="#34d399" font-size="12" font-weight="600">Android · Kotlin host · Dispatchers.Main</text>
+
+      <!-- ============ RUST SERVER NODES ============ -->
+      <g class="node" data-id="cli" data-lane="rust">
+        <rect x="50" y="72" width="210" height="46" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="64" y="93" fill="#e2e8f0" font-size="11">flux-cli · dev subcmd</text>
+        <text x="64" y="109" fill="#64748b" font-size="8.5">cli/src/lib.rs · ws flags</text>
+      </g>
+      <g class="node" data-id="pipeline" data-lane="rust">
+        <rect x="50" y="134" width="300" height="150" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="64" y="156" fill="#e2e8f0" font-size="11.5" font-weight="600">flux-devserver · Pipeline</text>
+        <text x="64" y="171" fill="#64748b" font-size="8.5">pipeline.rs:429 compile()</text>
+        <rect x="64" y="180" width="272" height="22" rx="4" fill="rgba(8,51,68,.5)"/><text x="74" y="195" font-size="9">parse → type_check → lower</text>
+        <rect x="64" y="206" width="272" height="22" rx="4" fill="rgba(8,51,68,.5)"/><text x="74" y="221" font-size="9">diff → frame (last_good + seq)</text>
+        <rect x="64" y="232" width="272" height="22" rx="4" fill="rgba(8,51,68,.5)"/><text x="74" y="247" font-size="9">Init / Delta / Unchanged</text>
+        <rect x="64" y="258" width="272" height="20" rx="4" fill="rgba(8,51,68,.5)"/><text x="74" y="272" font-size="9">set_source · timings()</text>
+      </g>
+      <g class="node" data-id="dispatch" data-lane="rust">
+        <rect x="50" y="298" width="300" height="120" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="64" y="320" fill="#e2e8f0" font-size="11.5" font-weight="600">dispatch.rs · ADR-0027</text>
+        <text x="64" y="335" fill="#64748b" font-size="8.5">handle_dispatch_report:345</text>
+        <text x="64" y="353" fill="#94a3b8" font-size="8.5">DependencyIndex (Signal→NodeId)</text>
+        <text x="64" y="368" fill="#94a3b8" font-size="8.5">emit_minimal_updates:226</text>
+        <text x="64" y="383" fill="#94a3b8" font-size="8.5">patch scope = |dependents[S]|</text>
+        <text x="64" y="398" fill="#64748b" font-size="8">noop when written has no readers</text>
+      </g>
+      <g class="node" data-id="differ" data-lane="rust">
+        <rect x="372" y="134" width="118" height="84" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="384" y="156" fill="#e2e8f0" font-size="10.5">flux-differ</text>
+        <text x="384" y="170" fill="#64748b" font-size="8.5">diff.rs:20</text>
+        <text x="384" y="186" fill="#94a3b8" font-size="8.5">Update/Reorder/</text>
+        <text x="384" y="198" fill="#94a3b8" font-size="8.5">Replace/Remove</text>
+        <text x="384" y="212" fill="#94a3b8" font-size="8.5">props_hash skip</text>
+      </g>
+      <g class="node" data-id="irserde" data-lane="rust">
+        <rect x="372" y="230" width="118" height="62" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="384" y="252" fill="#e2e8f0" font-size="10.5">flux-ir-serde</text>
+        <text x="384" y="266" fill="#64748b" font-size="8.5">frame.rs</text>
+        <text x="384" y="280" fill="#94a3b8" font-size="8.5">Init/Delta/Hello</text>
+      </g>
+      <g class="node" data-id="wire" data-lane="wire">
+        <rect x="50" y="432" width="1178" height="54" rx="6" fill="#0f172a" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="66" y="454" fill="#e2e8f0" font-size="11" font-weight="600">WIRE PROTOCOL — Appendix D · magic 0x465C5558 · LE</text>
+        <text x="66" y="471" fill="#a16207" font-size="8">Frame = version·seq·flags·[root Node]·patches·handler-section(bytecode blob + ClosureRefs)·strings·stateΔ·files — Value tags 0x00–0x07 · Child = Node id | Splice keyed u64 (D.4) · Patch D.2 · ClosureRef D.7 · DispatchReport 0x06 (D.12.6)</text>
+      </g>
+      <g class="node" data-id="codegen" data-lane="rust">
+        <rect x="372" y="298" width="118" height="120" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="384" y="320" fill="#e2e8f0" font-size="10.5" font-weight="600">codegen-*</text>
+        <text x="384" y="334" fill="#64748b" font-size="8.5">bridge.rs (ADR-0027)</text>
+        <text x="384" y="350" fill="#94a3b8" font-size="8.5">EXPR_TAG=10</text>
+        <text x="384" y="364" fill="#94a3b8" font-size="8.5">COMPONENT_TAG=3</text>
+        <text x="384" y="378" fill="#94a3b8" font-size="8.5">codegen.rs → SwiftUI</text>
+        <text x="384" y="392" fill="#94a3b8" font-size="8.5">/ Compose</text>
+        <text x="384" y="408" fill="#64748b" font-size="8.5">bytecode.rs:83</text>
+      </g>
+      <g class="node" data-id="vmref" data-lane="rust">
+        <rect x="50" y="940" width="220" height="46" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="64" y="962" fill="#e2e8f0" font-size="11">flux-vm-ref · oracle</text>
+        <text x="64" y="977" fill="#a78bfa" font-size="8.5">vm.rs:285 run_resumable</text>
+      </g>
+      <g class="node" data-id="parity" data-lane="rust">
+        <rect x="50" y="996" width="220" height="46" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="64" y="1018" fill="#e2e8f0" font-size="11">flux-parity (FLUX-023)</text>
+        <text x="64" y="1033" fill="#a78bfa" font-size="8.5">reduce.rs:23 from_ast</text>
+      </g>
+
+      <!-- ============ iOS RUNTIME NODES ============ -->
+      <g class="node" data-id="iostransport" data-lane="ios">
+        <rect x="50" y="550" width="560" height="44" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+        <text x="64" y="569" fill="#e2e8f0" font-size="11">FluxWebSocketTransport — Hello + 1s reconnect</text>
+        <text x="64" y="584" fill="#64748b" font-size="8">Sources/Host/FluxWebSocketTransport.swift</text>
+      </g>
+      <g class="node" data-id="iosdeser" data-lane="ios">
+        <rect x="50" y="606" width="560" height="44" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+        <text x="64" y="625" fill="#e2e8f0" font-size="11">FrameDeserializer — bytes → FluxFrame (mirrors Rust)</text>
+        <text x="64" y="640" fill="#64748b" font-size="8">FrameDeserializer.swift · WireModels.swift</text>
+      </g>
+      <g class="node" data-id="iosexec" data-lane="ios">
+        <rect x="50" y="662" width="560" height="52" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+        <text x="64" y="682" fill="#e2e8f0" font-size="11">FluxRuntime : FluxExecutor — apply / dispatch</text>
+        <text x="64" y="698" fill="#64748b" font-size="8">FluxExecutor.swift:370 dispatch(_:) · caches [Instruction] (R3)</text>
+        <text x="64" y="710" fill="#94a3b8" font-size="8">reconcileDirty only signal-dependent subtrees (R1)</text>
+      </g>
+      <g class="node" data-id="iosvm" data-lane="ios">
+        <rect x="66" y="726" width="528" height="44" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+        <text x="80" y="745" fill="#e2e8f0" font-size="11">FluxBytecodeVM.run — gas r15, 16 MiB alloc budget</text>
+        <text x="80" y="760" fill="#64748b" font-size="8">FluxBytecodeVM.swift · mirrors flux-vm-ref oracle</text>
+      </g>
+      <g class="node" data-id="iossignal" data-lane="ios">
+        <rect x="66" y="782" width="255" height="44" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="80" y="801" fill="#e2e8f0" font-size="11">SignalGraph</text>
+        <text x="80" y="816" fill="#a78bfa" font-size="8">SignalStore · observe() (R-graph)</text>
+      </g>
+      <g class="node" data-id="iosvalue" data-lane="ios">
+        <rect x="339" y="782" width="255" height="44" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="353" y="801" fill="#e2e8f0" font-size="11">VMValue (D.5)</text>
+        <text x="353" y="816" fill="#a78bfa" font-size="8">int/float/bool/str/list/record</text>
+      </g>
+      <g class="node" data-id="iosrecon" data-lane="ios">
+        <rect x="66" y="838" width="528" height="62" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+        <text x="80" y="859" fill="#e2e8f0" font-size="11">ShadowTreeReconciler — keyed by NodeId</text>
+        <text x="80" y="875" fill="#64748b" font-size="8">reconcileDirty:351 · @pure skip (G6) · materializeProps</text>
+        <text x="80" y="891" fill="#64748b" font-size="8">AdapterKit.swift → FluxUIKit (Text/Button/…)</text>
+      </g>
+
+      <!-- ============ ANDROID RUNTIME NODES ============ -->
+      <g class="node" data-id="andtransport" data-lane="and">
+        <rect x="670" y="550" width="560" height="44" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+        <text x="684" y="569" fill="#e2e8f0" font-size="11">FluxTransport — WS, off-main deserialize (Default)</text>
+        <text x="684" y="584" fill="#64748b" font-size="8">host/.../transport · receiveFrame hops to dispatcher</text>
+      </g>
+      <g class="node" data-id="anddeser" data-lane="and">
+        <rect x="670" y="606" width="560" height="44" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+        <text x="684" y="625" fill="#e2e8f0" font-size="11">FrameDeserializer — bytes → Frame (same D layout)</text>
+        <text x="684" y="640" fill="#64748b" font-size="8">host/.../wire</text>
+      </g>
+      <g class="node" data-id="andexec" data-lane="and">
+        <rect x="670" y="662" width="560" height="52" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+        <text x="684" y="682" fill="#e2e8f0" font-size="11">FluxExecutor — apply / dispatch</text>
+        <text x="684" y="698" fill="#64748b" font-size="8">FluxExecutor.kt:201/229 · last-wins hot-swap (T7)</text>
+        <text x="684" y="710" fill="#94a3b8" font-size="8">@MainThread · ReactiveDispatcher (R-graph)</text>
+      </g>
+      <g class="node" data-id="andvm" data-lane="and">
+        <rect x="686" y="726" width="528" height="44" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+        <text x="700" y="745" fill="#e2e8f0" font-size="11">FluxBytecodeVM.run — VmResult, 16 MiB cap</text>
+        <text x="700" y="760" fill="#64748b" font-size="8">host/.../vm/FluxBytecodeVM.kt · mirrors oracle</text>
+      </g>
+      <g class="node" data-id="andsignal" data-lane="and">
+        <rect x="686" y="782" width="255" height="44" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="700" y="801" fill="#e2e8f0" font-size="11">SignalGraph</text>
+        <text x="700" y="816" fill="#a78bfa" font-size="8">SignalStore impl</text>
+      </g>
+      <g class="node" data-id="andvalue" data-lane="and">
+        <rect x="959" y="782" width="255" height="44" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
+        <text x="973" y="801" fill="#e2e8f0" font-size="11">FluxValue (D.5)</text>
+        <text x="973" y="816" fill="#a78bfa" font-size="8">IntVal/FloatVal/… mirror</text>
+      </g>
+      <g class="node" data-id="andrecon" data-lane="and">
+        <rect x="686" y="838" width="528" height="62" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+        <text x="700" y="859" fill="#e2e8f0" font-size="11">ShadowTree.reconcileDirty — keyed by NodeId</text>
+        <text x="700" y="875" fill="#64748b" font-size="8">DirtyReconciler.kt:48 · @pure skip (G6) · materializeProps</text>
+        <text x="700" y="891" fill="#64748b" font-size="8">host/.../shadow → adapters/ui-kotlin (Compose)</text>
+      </g>
+
+      <!-- ============ EDGES (drawn behind nodes, brighter & thicker) ============ -->
+      <path id="e1" class="edge" d="M260 118 L200 132" stroke="#cbd5e1" stroke-width="2" marker-end="url(#ah)"/>
+      <path id="e2" class="edge" d="M350 206 L440 174" stroke="#cbd5e1" stroke-width="2" marker-end="url(#ah)"/>
+      <path id="e3" class="edge" d="M350 326 L440 258" stroke="#cbd5e1" stroke-width="2" marker-end="url(#ah)"/>
+      <path id="e4" class="edge" d="M430 292 L430 230" stroke="#cbd5e1" stroke-width="2" marker-end="url(#ah)"/>
+      <path id="e5" class="edge" d="M430 358 L430 296" stroke="#cbd5e1" stroke-width="2" marker-end="url(#ah)"/>
+      <path id="e6" class="edge" d="M430 404 L430 432" stroke="#fbbf24" stroke-width="2.2" marker-end="url(#ahc)"/>
+      <!-- server -> ios / android over wire -->
+      <path id="e9" class="edge" d="M330 486 L330 548" stroke="#fbbf24" stroke-width="2.4" marker-end="url(#ahc)"/>
+      <path id="e10" class="edge" d="M950 486 L950 548" stroke="#fbbf24" stroke-width="2.4" marker-end="url(#ahc)"/>
+      <!-- internal ios -->
+      <path id="e11" class="edge" d="M330 594 L330 604" stroke="#cbd5e1" stroke-width="2" marker-end="url(#ah)"/>
+      <path id="e12" class="edge" d="M330 650 L330 660" stroke="#cbd5e1" stroke-width="2" marker-end="url(#ah)"/>
+      <path id="e13" class="edge" d="M330 714 L330 724" stroke="#cbd5e1" stroke-width="2" marker-end="url(#ah)"/>
+      <path id="e14" class="edge" d="M193 770 L193 780" stroke="#a78bfa" stroke-width="2" marker-end="url(#aha)"/>
+      <path id="e15" class="edge" d="M466 770 L466 780" stroke="#a78bfa" stroke-width="2" marker-end="url(#aha)"/>
+      <path id="e16" class="edge" d="M330 900 L330 836" stroke="#34d399" stroke-width="2" marker-end="url(#ah)"/>
+      <!-- internal and -->
+      <path id="e17" class="edge" d="M950 594 L950 604" stroke="#cbd5e1" stroke-width="2" marker-end="url(#ah)"/>
+      <path id="e18" class="edge" d="M950 650 L950 660" stroke="#cbd5e1" stroke-width="2" marker-end="url(#ah)"/>
+      <path id="e19" class="edge" d="M950 714 L950 724" stroke="#cbd5e1" stroke-width="2" marker-end="url(#ah)"/>
+      <path id="e20" class="edge" d="M813 770 L813 780" stroke="#a78bfa" stroke-width="2" marker-end="url(#aha)"/>
+      <path id="e21" class="edge" d="M1086 770 L1086 780" stroke="#a78bfa" stroke-width="2" marker-end="url(#aha)"/>
+      <path id="e22" class="edge" d="M950 900 L950 836" stroke="#34d399" stroke-width="2" marker-end="url(#ah)"/>
+      <!-- DispatchReport reverse (rose dashed) -->
+      <path id="e23" class="edge" d="M200 714 C 20 714, 20 340, 372 360" fill="none" stroke="#fb7185" stroke-width="2" stroke-dasharray="6,4" marker-end="url(#ahr)"/>
+      <path id="e24" class="edge" d="M950 714 C 1160 714, 1160 340, 490 360" fill="none" stroke="#fb7185" stroke-width="2" stroke-dasharray="6,4" marker-end="url(#ahr)"/>
+      <text x="40" y="500" fill="#fb7185" font-size="8.5">DispatchReport ↑</text>
+      <text x="1000" y="500" fill="#fb7185" font-size="8.5">DispatchReport ↑</text>
+    </svg>
+  </div>
+
+  <div class="card" id="detail">
+    <div class="empty-hint">Select a component on the diagram to read its real implementation. Each panel cites the file:line I read during the codebase deep-dive, plus the load-bearing functions and the cross-host parity guarantees.</div>
   </div>
 
   <!-- DISPATCH SIMULATOR -->
   <div class="sim">
     <h3>Per-tap dispatch hot path — animated</h3>
-    <div class="desc">What actually runs when a native control fires a handler. Click <kbd>Animate a tap</kbd> in the toolbar (or here) to walk the guard rails. Grounded in <code>FluxExecutor.swift:370</code> / <code>FluxExecutor.kt:201</code> and <code>FluxBytecodeVM</code> on both hosts.</div>
+    <div class="desc">What actually runs when a native control fires a handler. Click <kbd>Animate a tap</kbd> above (or a button here) to walk the guard rails. Grounded in <code>FluxExecutor.swift:370</code> / <code>FluxExecutor.kt:201</code> and <code>FluxBytecodeVM</code> on both hosts.</div>
     <div class="simstage" id="simstage"></div>
     <div class="progress"><div id="simprog"></div></div>
     <div class="log" id="simlog">idle — press play.</div>
@@ -471,7 +462,6 @@ const NODES = {
 const EDGES = {
   e1:["cli","pipeline"], e2:["pipeline","differ"], e3:["pipeline","dispatch"],
   e4:["dispatch","irserde"], e5:["codegen","irserde"], e6:["irserde","wire"],
-  e7:["vmref","parity"], e8:["parity","parity"],
   e9:["wire","iostransport"], e10:["wire","andtransport"],
   e11:["iostransport","iosdeser"], e12:["iosdeser","iosexec"], e13:["iosexec","iosvm"],
   e14:["iosvm","iossignal"], e15:["iosvm","iosvalue"], e16:["iosexec","iosrecon"],
@@ -480,7 +470,6 @@ const EDGES = {
   e23:["iosexec","dispatch"], e24:["andexec","dispatch"]
 };
 
-const svg = document.getElementById('map');
 const detail = document.getElementById('detail');
 let selected = null, laneMode = false;
 
@@ -490,12 +479,10 @@ function showDetail(id){
   let tags = n.tags.map(t=>`<span class="tag">${t}</span>`).join('');
   let fns = (n.fns||[]).map(f=>{
     if(f[0]==='fun'||f[0]==='fn') return `<div class="fn"><span class="nm">${f[1]}</span> <span class="ret">${f[2]||''}</span></div>`;
-    if(f[0]==='class'||f[0]==='struct'||f[0]==='enum'||f[0]==='interface'||f[0]==='sealed'||f[0]==='type'||f[0]==='data'||f[0]==='const') return `<div class="fn"><span class="ret">${f[0]}</span> <span class="nm">${f[1]}</span> ${f[2]?`<span class="ret">${f[2]}</span>`:''}</div>`;
-    return `<div class="fn">${f[0]} ${f[1]}</div>`;
+    return `<div class="fn"><span class="ret">${f[0]}</span> <span class="nm">${f[1]}</span> ${f[2]?`<span class="ret">${f[2]}</span>`:''}</div>`;
   }).join('');
-  let notes = (n.notes||[]).map(x=>`<div class="kv">• <b></b>${x}</div>`).join('');
+  let notes = (n.notes||[]).map(x=>`<div class="kv">• ${x}</div>`).join('');
   detail.innerHTML = `<h2>${n.title}</h2><div class="loc">${n.loc}</div>${tags}<p>${n.summary}</p><div style="margin:.6rem 0">${fns}</div>${notes}`;
-  // highlight selection
   document.querySelectorAll('.node').forEach(g=>{
     if(g.dataset.id===id) g.classList.add('sel'); else g.classList.remove('sel');
   });
@@ -506,25 +493,16 @@ function dimForSelection(id){
   if(laneMode){ laneHighlight(NODES[id].lane); return; }
   const keep = new Set([id]);
   for(const k in EDGES){ if(EDGES[k][0]===id) keep.add(EDGES[k][1]); if(EDGES[k][1]===id) keep.add(EDGES[k][0]); }
-  document.querySelectorAll('.node').forEach(g=>{
-    g.classList.toggle('dim', !keep.has(g.dataset.id));
-  });
-  for(const k in EDGES){
-    document.getElementById(k).classList.toggle('dim', !(EDGES[k][0]===id||EDGES[k][1]===id));
-  }
+  document.querySelectorAll('.node').forEach(g=> g.classList.toggle('dim', !keep.has(g.dataset.id)));
+  for(const k in EDGES) document.getElementById(k).classList.toggle('dim', !(EDGES[k][0]===id||EDGES[k][1]===id));
 }
 
 function laneHighlight(lane){
   document.querySelectorAll('.node').forEach(g=> g.classList.toggle('dim', g.dataset.lane!==lane));
-  for(const k in EDGES){
-    const e=EDGES[k]; const on = NODES[e[0]].lane===lane && NODES[e[1]].lane===lane;
-    document.getElementById(k).classList.toggle('dim', !on);
-  }
+  for(const k in EDGES){ const e=EDGES[k]; const on = NODES[e[0]].lane===lane && NODES[e[1]].lane===lane; document.getElementById(k).classList.toggle('dim', !on); }
 }
 
-document.querySelectorAll('.node').forEach(g=>{
-  g.addEventListener('click', ()=> showDetail(g.dataset.id));
-});
+document.querySelectorAll('.node').forEach(g=> g.addEventListener('click', ()=> showDetail(g.dataset.id)));
 
 /* ---- toolbar ---- */
 document.getElementById('btnLane').addEventListener('click', e=>{
@@ -538,9 +516,32 @@ document.getElementById('btnReset').addEventListener('click', ()=>{
   selected=null; laneMode=false; document.getElementById('btnLane').classList.remove('on');
   document.querySelectorAll('.node').forEach(g=>g.classList.remove('dim','sel'));
   for(const k in EDGES) document.getElementById(k).classList.remove('dim');
-  detail.innerHTML = '<div class="empty-hint">Select a component on the left to read its real implementation.<br><br>Each panel cites the file:line I read during the codebase deep-dive, plus the load-bearing functions and the cross-host parity guarantees.</div>';
+  detail.innerHTML = '<div class="empty-hint">Select a component on the diagram to read its real implementation. Each panel cites the file:line I read during the codebase deep-dive, plus the load-bearing functions and the cross-host parity guarantees.</div>';
 });
 document.getElementById('btnWalk').addEventListener('click', ()=> runSim(false));
+
+/* ---- movable legend ---- */
+(function(){
+  const legend = document.getElementById('legend');
+  let dragging=false, sx=0, sy=0, ox=0, oy=0;
+  legend.addEventListener('pointerdown', e=>{
+    if(e.target.closest('h3')===null && e.target.classList.contains('grip')===false && e.target.tagName!=='H3') return;
+    dragging=true; legend.classList.add('drag');
+    const r=legend.getBoundingClientRect(); const pr=legend.parentElement.getBoundingClientRect();
+    ox=r.left-pr.left; oy=r.top-pr.top; sx=e.clientX; sy=e.clientY;
+    legend.style.right='auto'; legend.style.bottom='auto'; legend.style.left=ox+'px'; legend.style.top=oy+'px';
+    legend.setPointerCapture(e.pointerId);
+  });
+  legend.addEventListener('pointermove', e=>{
+    if(!dragging) return;
+    let nx=ox+(e.clientX-sx), ny=oy+(e.clientY-sy);
+    const pr=legend.parentElement.getBoundingClientRect();
+    nx=Math.max(0,Math.min(nx, pr.width-legend.offsetWidth));
+    ny=Math.max(0,Math.min(ny, pr.height-legend.offsetHeight));
+    legend.style.left=nx+'px'; legend.style.top=ny+'px';
+  });
+  legend.addEventListener('pointerup', e=>{ dragging=false; legend.classList.remove('drag'); });
+})();
 
 /* ---- dispatch simulator ---- */
 const STEPS_OK = [
@@ -565,12 +566,10 @@ const STEPS_FAULT = [
   {t:"lastError captured", c:"fault", d:"no VM error escapes"},
   {t:"red banner, last good tree stays", c:"fault", d:"Appendix E §E.6"}
 ];
-
 const stage = document.getElementById('simstage');
 const prog = document.getElementById('simprog');
 const log = document.getElementById('simlog');
 let simTimer=null;
-
 function renderSim(steps, i){
   stage.innerHTML='';
   steps.slice(0,i+1).forEach((s,idx)=>{
@@ -581,7 +580,6 @@ function renderSim(steps, i){
   prog.style.width = ((i+1)/steps.length*100)+'%';
   log.textContent = 'step '+(i+1)+'/'+steps.length+': '+steps[i].t+(steps[i].d?'  —  '+steps[i].d:'');
 }
-
 function runSim(fault){
   if(simTimer) clearInterval(simTimer);
   const steps = fault?STEPS_FAULT:STEPS_OK;
@@ -597,7 +595,6 @@ function runSim(fault){
 document.getElementById('btnPlay').addEventListener('click', ()=>runSim(false));
 document.getElementById('btnPlayFault').addEventListener('click', ()=>runSim(true));
 
-// open the pipeline by default so the panel isn't empty
 showDetail('pipeline');
 </script>
 </body>
