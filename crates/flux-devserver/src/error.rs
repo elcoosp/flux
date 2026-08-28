@@ -110,4 +110,30 @@ mod tests {
             "display must include the span location"
         );
     }
+
+    #[test]
+    fn flux_error_capability_converts_to_diagnostic() {
+        // A denied-capability FluxError must become a single Diagnostic carrying
+        // its class and the required permission token, without panicking, so the
+        // host shows a red banner instead of crashing.
+        let flux_err = flux_types::capability_denied(
+            1,
+            1,
+            Some("Camera".to_owned()),
+            Some("take".to_owned()),
+            ".camera".to_owned(),
+        );
+        let diag: Diagnostic = flux_err.into();
+        assert_eq!(diag.span, None, "capability denials carry no source span");
+        assert!(
+            diag.message.contains("capability"),
+            "diagnostic must carry the error class: {}",
+            diag.message
+        );
+        assert!(
+            diag.message.contains(".camera"),
+            "diagnostic must name the missing permission: {}",
+            diag.message
+        );
+    }
 }

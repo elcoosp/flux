@@ -17,19 +17,22 @@
 // machinery (ADR-0044 / ADR-0045) and return a `Result` on failure.
 
 capability Camera {
-  // Synchronous dev stand-in returns a deterministic `Data` payload; release
-  // builds capture a real frame.
+  // requires: .camera — every Camera method (take/startPreview/stopPreview) needs
+  // the OS camera grant; a denied grant returns a `Capability` error, never a crash.
   fn take() -> Data
   fn startPreview() -> Unit
   fn stopPreview() -> Unit
 }
 
 capability Storage {
+  // requires: .storage — every Storage method (set/get/delete) needs the OS
+  // storage grant; a denied grant returns a `Capability` error, never a crash.
   fn set(key: String, value: Data) -> Unit
   fn get(key: String) -> Option[Data]
   fn delete(key: String) -> Unit
 }
 
 capability Router {
+  // requires: .none — navigation is always permitted; no OS grant gates it.
   fn navigate(target: String) -> Unit
 }

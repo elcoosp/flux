@@ -47,6 +47,7 @@ use flux_syntax::{FileId, Patch, SignalId, StringId, Value};
 
 use crate::dispatch::{DependencyIndex, DispatchReport, NodeSignalDeps, emit_minimal_updates};
 use crate::error::Diagnostic;
+use flux_types::{CompileError, FluxError};
 use host_strings::HostStrings;
 use tree::{display_path, flatten_extra_nodes, merge_arenas, root_node};
 
@@ -584,29 +585,23 @@ impl Pipeline {
         display: &str,
     ) -> Result<(LoweredIr, Ast), Diagnostic> {
         let started = Instant::now();
-        let ast = flux_parser::parse(source, file_id, display).map_err(|e| {
-            Diagnostic::new(
-                format!("parse error in {display}: {}", e.render()),
-                Some(e.span),
-            )
-        })?;
+        let ast = flux_parser::parse(source, file_id, display)
+            .map_err(|e| Diagnostic::from(FluxError::from(e)))?;
         self.timings.parse = started.elapsed();
 
         let started = Instant::now();
-        let typed = flux_types::type_check(&ast).map_err(|e| {
-            Diagnostic::new(
-                format!("type error in {display}: {}", e.message),
-                Some(e.span),
-            )
-        })?;
+        let typed =
+            flux_types::type_check(&ast).map_err(|e| Diagnostic::from(FluxError::from(e)))?;
         self.timings.type_check = started.elapsed();
 
         let started = Instant::now();
-        let lowered = lower(&ast, &typed).map_err(|e| match e {
-            flux_ir::LoweringError::Lower { message, span } => Diagnostic::new(
-                format!("lowering error in {display}: {message}"),
-                Some(span),
-            ),
+        let lowered = lower(&ast, &typed).map_err(|e| {
+            let flux_ir::LoweringError::Lower { message, span } = e;
+            // `LoweringError` lives in `flux-ir`, which depends on `flux-types`, so
+            // a `From` into `FluxError` would be a cycle; build the `Compile`
+            // variant directly instead (AGENTS.md §3.5 / LANE-I).
+            let err = FluxError::Compile(CompileError::from_lowering(message, span));
+            Diagnostic::from(err)
         })?;
         self.timings.lower = started.elapsed();
         Ok((lowered, ast))

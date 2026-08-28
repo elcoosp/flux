@@ -175,8 +175,8 @@ impl PermissionKind {
 /// `AVCaptureDevice.authorizationStatus` / `PHPhotoLibrary`; Android
 /// `ContextCompat.checkSelfPermission`); tests inject a stub. The registry
 /// closure calls [`PermissionChecker::is_granted`] *before* resolving a
-/// `CALL_CAP`, so a denied permission surfaces as a [`FluxError::Capability`]
-/// and never reaches native code.
+/// `CALL_CAP`, so a denied permission surfaces as a `Capability` error (variant
+/// of [`crate::error::FluxError`]) and never reaches native code.
 ///
 /// The checker is per-`(cap_id, method_id)` because the grant required depends
 /// on which capability method is being invoked.
@@ -248,7 +248,8 @@ mod tests {
 
         // Collect `capability <Name>` -> `requires: <token>` pairs from the file.
         let mut current: Option<&str> = None;
-        let mut requires: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let mut requires: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
         for line in src.lines() {
             let trimmed = line.trim();
             if let Some(rest) = trimmed.strip_prefix("capability ") {
@@ -258,7 +259,7 @@ mod tests {
                 if let Some(name) = current {
                     // Only the first whitespace-delimited token is the permission
                     // marker (e.g. `.camera`); the rest is a human description.
-                    let token = rest.trim().split_whitespace().next().unwrap_or("").to_owned();
+                    let token = rest.split_whitespace().next().unwrap_or("").to_owned();
                     requires.insert(name.to_owned(), token);
                 }
             }
@@ -293,7 +294,10 @@ mod tests {
             PermissionKind::from_token(".storage"),
             Some(PermissionKind::Storage)
         );
-        assert_eq!(PermissionKind::from_token(".none"), Some(PermissionKind::None));
+        assert_eq!(
+            PermissionKind::from_token(".none"),
+            Some(PermissionKind::None)
+        );
         assert_eq!(PermissionKind::from_token(".nope"), None);
         assert_eq!(PermissionKind::Camera.token(), ".camera");
         assert_eq!(PermissionKind::Storage.token(), ".storage");
@@ -336,7 +340,7 @@ mod tests {
                 "<unknown>".to_owned(),
             ));
         };
-        if checker.is_granted(permission) {
+        if permission == PermissionKind::None || checker.is_granted(permission) {
             Ok(())
         } else {
             let names = CapabilityIdl::names_for(cap_id, method_id);

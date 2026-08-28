@@ -172,6 +172,28 @@ mod tests {
         assert!(resolve(Path::new("/tmp/project"), "../secrets.txt").is_none());
     }
 
+    #[tokio::test]
+    async fn traversal_request_returns_rejected_status() {
+        // A `../../etc/passwd`-style request must be refused: the server must not
+        // serve files outside the project root. The traversal guard rejects before
+        // any filesystem read, returning 400 with an explanatory body.
+        let response = serve_asset(
+            State(PathBuf::from("/tmp/project")),
+            AxumPath("../../etc/passwd".to_string()),
+            HeaderMap::new(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body is readable");
+        let text = String::from_utf8_lossy(&body);
+        assert!(
+            text.contains("escapes the project root"),
+            "traversal rejection must explain the guard: {text}"
+        );
+    }
+
     #[test]
     fn nested_asset_resolves_under_root() {
         assert_eq!(
