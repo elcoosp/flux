@@ -1,9 +1,8 @@
 ---
 source: crates/flux-codegen-swift/tests/pipeline.rs
-assertion_line: 133
 expression: "codegen_example(name, src)"
 ---
-struct List<T>: View {
+struct List: View {
     let items: List<T>
     var body: some View {
   VStack {

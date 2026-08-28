@@ -227,3 +227,34 @@ fn button_emits_handler_and_label() {
         "missing trailing-block label in:\n{out2}"
     );
 }
+
+/// Roadmap Phase 1: a generic component emits one specialised native struct per
+/// instantiation, and call sites resolve to the specialised name (so the runtime
+/// keeps the type argument and the host sees distinct component kinds).
+#[test]
+fn generic_component_emits_specialised_structs() {
+    let src = "trait Numeric[T] { fn zero() -> T }\n\ncompo Counter[T: Numeric](initial: T)\n  state count: T = initial\n\ncompo IntCase\n  Counter(initial: 0)\n\ncompo FloatCase\n  Counter(initial: 0.0)\n\n";
+    let out = codegen_example("generic_mono", src);
+    assert!(
+        out.contains("struct Counter_Int: View"),
+        "expected a specialised Int struct in:\n{out}"
+    );
+    assert!(
+        out.contains("struct Counter_Float: View"),
+        "expected a specialised Float struct in:\n{out}"
+    );
+    // The generic template must NOT ship as a parametric native type.
+    assert!(
+        !out.contains("struct Counter<T>"),
+        "generic template must not emit a parametric native type in:\n{out}"
+    );
+    // Caller sites resolve to the specialised names via component_names.
+    assert!(
+        out.contains("Counter_Int(initial: 0)"),
+        "Int call site must resolve to Counter_Int(initial: 0) in:\n{out}"
+    );
+    assert!(
+        out.contains("Counter_Float(initial: 0.0)"),
+        "Float call site must resolve to Counter_Float(initial: 0.0) in:\n{out}"
+    );
+}

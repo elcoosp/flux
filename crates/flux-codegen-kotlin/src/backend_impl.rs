@@ -6,6 +6,8 @@
 //! binding, the `NavHost`/`composable` navigation API, the scalar spells, and
 //! the `@Composable fun` / `sealed interface` header forms.
 
+use std::collections::HashMap;
+
 use flux_codegen_core::backend::Backend;
 use flux_codegen_core::emitter::Emitter;
 use flux_codegen_core::model::{ComponentMeta, native_type};
@@ -163,11 +165,12 @@ impl Backend for Kotlin {
         name: &str,
         generics: &str,
         meta: &ComponentMeta<'_>,
+        subst: &HashMap<String, String>,
     ) {
         em.append_line(&format!("@Composable fun {name}{generics}("));
         let mut first_prop = true;
         for prop in meta.props() {
-            let ty = native_type::<Self>(&prop.ty);
+            let ty = native_type::<Self>(&prop.ty, subst);
             let comma = if first_prop { "" } else { "," };
             first_prop = false;
             em.append_line(&format!("    {comma} {0}: {1}", prop.name.name, ty));
@@ -188,7 +191,13 @@ impl Backend for Kotlin {
         em.append_line(&format!("@Composable fun FluxComponent_{id}() {{ }}"));
     }
 
-    fn emit_state_cell(em: &mut Emitter<'_, Self>, name: &str, ty: &str, init: &str) {
+    fn emit_state_cell(
+        em: &mut Emitter<'_, Self>,
+        name: &str,
+        ty: &str,
+        init: &str,
+        _subst: &HashMap<String, String>,
+    ) {
         em.append_line(&format!(
             "    var {name} by remember {{ mutableStateOf<{ty}>({init}) }}"
         ));
@@ -206,7 +215,9 @@ impl Backend for Kotlin {
                     .fields
                     .iter()
                     .enumerate()
-                    .map(|(i, t)| format!("val field{i}: {}", native_type::<Self>(t)))
+                    .map(|(i, t)| {
+                        format!("val field{i}: {}", native_type::<Self>(t, &HashMap::new()))
+                    })
                     .collect();
                 em.append_line(&format!(
                     "    data class {vname}({}) : {name}",

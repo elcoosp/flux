@@ -13,6 +13,8 @@
 //! needed). Component/sum-type hooks take `&mut Emitter<Self>` so they can write
 //! into the shared output buffer through the emitter's `line`/`push_raw` helpers.
 
+use std::collections::HashMap;
+
 use flux_parser::{Expr, TypeDecl};
 
 use crate::emitter::Emitter;
@@ -167,11 +169,14 @@ pub trait Backend {
 
     /// Emits the component declaration header up to and including the props
     /// (for Kotlin also the `) {` open; for Swift just `struct …: View {`).
+    /// `subst` maps generic parameters to their concrete arguments for a
+    /// specialised monomorphisation (so `initial: T` renders `initial: Int`).
     fn emit_component_header(
         em: &mut Emitter<'_, Self>,
         name: &str,
         generics: &str,
         meta: &ComponentMeta<'_>,
+        subst: &HashMap<String, String>,
     ) where
         Self: Sized;
 
@@ -192,8 +197,14 @@ pub trait Backend {
         Self: Sized;
 
     /// Emits one state-cell declaration (`var … by remember` / `@State private var`).
-    fn emit_state_cell(em: &mut Emitter<'_, Self>, name: &str, ty: &str, init: &str)
-    where
+    /// `subst` maps generic parameters to their concrete arguments.
+    fn emit_state_cell(
+        em: &mut Emitter<'_, Self>,
+        name: &str,
+        ty: &str,
+        init: &str,
+        subst: &HashMap<String, String>,
+    ) where
         Self: Sized;
 
     /// Emits one algebraic data type as a native `sealed`/`enum` declaration.

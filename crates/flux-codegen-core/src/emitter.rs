@@ -25,6 +25,7 @@ use crate::bridge::Bridge;
 use crate::expressions::{render_expr, render_handler_body};
 use crate::model::{ComponentMeta, native_type};
 use crate::primitives::{PrimitiveKind, PrimitiveSpec};
+use flux_ir::lower::Monomorphization;
 
 /// State threaded through a single [`Emitter::emit_program`] run.
 pub struct Emitter<'a, B: Backend> {
@@ -36,6 +37,14 @@ pub struct Emitter<'a, B: Backend> {
     bridge: &'a Bridge,
     /// The accumulated native source.
     out: String,
+    /// The `NodeId` of the component currently being emitted (so a stateless
+    /// helper can recover the node's children without threading `id` everywhere).
+    current_id: NodeId,
+    /// Generic-parameter → concrete-arg substitution for the component currently
+    /// being emitted (empty for a non-generic or the generic template; maps e.g.
+    /// `T` → `Int` when emitting the `Counter_Int` monomorphisation). Applied by
+    /// `native_type` so a specialised struct carries concrete prop/state types.
+    subst: HashMap<String, String>,
 }
 
 impl<'a, B: Backend> std::fmt::Debug for Emitter<'a, B> {
@@ -55,6 +64,8 @@ impl<'a, B: Backend> Emitter<'a, B> {
             lowered,
             bridge,
             out: String::new(),
+            current_id: NodeId::from(0u32),
+            subst: HashMap::new(),
         }
     }
 
@@ -87,22 +98,99 @@ impl<'a, B: Backend> Emitter<'a, B> {
 
     /// Emits one component.
     fn emit_component(&mut self, id: NodeId) {
-        let node = self.lowered.arena.get(id).expect("component node");
         let Some(comp) = self.bridge.component(id) else {
             B::emit_placeholder_component(self, id);
             return;
         };
+        self.current_id = id;
         let meta = ComponentMeta::new(comp);
         let name = &comp.name.name;
         let generics = meta.generic_clause();
-        B::emit_component_header(self, name, &generics, &meta);
-        if !meta.is_pure {
-            self.emit_state(&meta);
+
+        // Roadmap Phase 1 (monomorphisation): a generic declaration (`Counter[T]`)
+        // never ships as one parametric native type. For each concrete type
+        // argument resolved by the type checker we emit a *separate*,
+        // non-generic native struct (`Counter_Int`), so the runtime keeps the
+        // type argument and the host gets a distinct component kind.
+        //
+        // The specialised names come from `LoweredIr::monomorphizations` (the
+        // source of truth the lowering pass built from `TypedAST::instantiations`);
+        // they match the `component_names` entries the caller nodes already carry,
+        // so call sites such as `Counter(initial: 0)` resolve to `Counter_Int`
+        // without any emitter-side mapping. When a generic has no recorded
+        // instantiations we fall back to emitting it parametrically so the
+        // generated source still compiles (a generic declared but never used).
+        if !generics.is_empty() {
+            let monos: Vec<Monomorphization> = self
+                .lowered
+                .monomorphizations
+                .iter()
+                .filter(|m| m.name == *name)
+                .cloned()
+                .collect();
+            if monos.is_empty() {
+                Self::emit_one_component(self, name, "", &meta);
+            } else {
+                for mono in &monos {
+                    // Build the parameter→argument substitution for this
+                    // instantiation: the generic's declared params in source order
+                    // paired with the resolved concrete args, so prop/state types
+                    // render concretely (e.g. `T` → `Int`).
+                    let subst = mono
+                        .args
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, arg)| {
+                            meta.decl
+                                .generics
+                                .get(i)
+                                .map(|g| (g.name.name.clone(), arg.clone()))
+                        })
+                        .collect();
+                    Self::emit_one_component_subst(self, &mono.mangled, "", &meta, subst);
+                }
+            }
+            return;
         }
-        B::emit_body_open(self);
+
+        Self::emit_one_component(self, name, &generics, &meta);
+    }
+
+    /// Emits a single component declaration (header + state + body + footer) at
+    /// `name`, with `generics` as its `<…>` clause (empty for a specialised
+    /// monomorphisation). Uses the emitter's current `subst` for type rendering.
+    fn emit_one_component(
+        em: &mut Emitter<'_, B>,
+        name: &str,
+        generics: &str,
+        meta: &ComponentMeta<'_>,
+    ) {
+        Self::emit_one_component_subst(em, name, generics, meta, HashMap::new());
+    }
+
+    /// Like [`emit_one_component`](Self::emit_one_component) but with an explicit
+    /// generic-parameter substitution (used when emitting a specialised struct).
+    fn emit_one_component_subst(
+        em: &mut Emitter<'_, B>,
+        name: &str,
+        generics: &str,
+        meta: &ComponentMeta<'_>,
+        subst: HashMap<String, String>,
+    ) {
+        // Emit the header with the param substitution, then store it on `em` so
+        // `emit_state` (which reads `self.subst`) renders concrete types too.
+        // Passing `&subst` before the move avoids re-borrowing `em` both ways.
+        B::emit_component_header(em, name, generics, meta, &subst);
+        em.subst = subst;
+        if !meta.is_pure {
+            em.emit_state(meta);
+        }
+        B::emit_body_open(em);
         let body_indent = B::component_body_indent();
-        self.emit_children(Self::child_ids(node), body_indent);
-        B::emit_component_footer(self);
+        let node = em.lowered.arena.get(em.current_id).expect("component node");
+        em.emit_children(Self::child_ids(node), body_indent);
+        B::emit_component_footer(em);
+        em.subst = HashMap::new();
     }
 
     /// Dispatches a single node to its structural renderer.
@@ -114,7 +202,20 @@ impl<'a, B: Backend> Emitter<'a, B> {
             flux_syntax::NodeKind::Component => {
                 if let Some(comp) = self.bridge.component(id) {
                     let name = &comp.name.name;
-                    self.line(indent, &format!("{name}()"));
+                    // A specialised (monomorphised) call site carries the
+                    // specialised component id in `component_names`, which is the
+                    // name the host actually reconciles (e.g. `Counter_Int`). When
+                    // the id maps to a distinct name, use it; otherwise fall back
+                    // to the generic source name. This is what makes
+                    // `Counter(initial: 0)` emit `Counter_Int()` (roadmap Phase 1).
+                    let resolved = self
+                        .lowered
+                        .component_names
+                        .iter()
+                        .find(|(cid, _)| *cid == node.component_id())
+                        .map(|(_, n)| n.clone())
+                        .unwrap_or_else(|| name.to_owned());
+                    self.line(indent, &format!("{resolved}()"));
                 }
             }
             flux_syntax::NodeKind::Primitive => self.emit_primitive(id, indent),
@@ -260,11 +361,12 @@ impl<'a, B: Backend> Emitter<'a, B> {
     fn emit_state(&mut self, meta: &ComponentMeta<'_>) {
         for state in meta.states() {
             let ty = match &state.ty {
-                Some(t) => native_type::<B>(t),
+                Some(t) => native_type::<B>(t, &self.subst),
                 None => B::any_type().to_owned(),
             };
             let init = render_expr::<B>(&state.init);
-            B::emit_state_cell(self, &state.name.name, &ty, &init);
+            let subst_ref = self.subst.clone();
+            B::emit_state_cell(self, &state.name.name, &ty, &init, &subst_ref);
         }
     }
 
@@ -292,8 +394,29 @@ impl<'a, B: Backend> Emitter<'a, B> {
             // rendered so the generated source stays faithful; the parity reducer
             // treats non-container user calls as childless, which matches the dev
             // path (a component call's own subtree lives in its definition).
+            //
+            // For a *specialised* call (`Counter[Int]`) the node already carries
+            // the specialised `ComponentId` (`Counter_Int`) in `component_names`,
+            // so we resolve the emitted name through that table rather than the
+            // bare generic callee (`Counter`). That is what makes the call site
+            // `Counter_Int()` match the specialised struct the declaration emitted
+            // (roadmap Phase 1).
+            let resolved = self
+                .lowered
+                .component_names
+                .iter()
+                .find(|(cid, _)| {
+                    *cid == self
+                        .lowered
+                        .arena
+                        .get(id)
+                        .expect("component node")
+                        .component_id()
+                })
+                .map(|(_, n)| n.clone())
+                .unwrap_or_else(|| name.clone());
             let args = Self::render_args(args);
-            self.line(indent, &format!("{name}({args})"));
+            self.line(indent, &format!("{resolved}({args})"));
             return;
         };
         let native = B::native_name(spec);

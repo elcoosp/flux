@@ -4,6 +4,8 @@
 //! are recovered from the AST via the node-ID bridge; only the type *spelling*
 //! differs per backend, so [`native_type`] is parameterised by [`Backend`].
 
+use std::collections::HashMap;
+
 use flux_parser::{Annotation, ComponentDecl, PropDecl, StateDecl, Type};
 
 use crate::backend::Backend;
@@ -65,9 +67,12 @@ impl<'a> ComponentMeta<'a> {
     }
 }
 
-/// Maps a Flux surface type to the native spelling for backend `B`.
+/// Maps a Flux surface type to the native spelling for backend `B`, applying
+/// `subst` (a generic-parameter → concrete-arg replacement) so a specialised
+/// monomorphisation (`Counter_Int`) renders concrete prop/state types
+/// (`initial: Int`) rather than the generic parameter (`initial: T`).
 #[must_use]
-pub fn native_type<B: Backend>(ty: &Type) -> String {
+pub fn native_type<B: Backend>(ty: &Type, subst: &HashMap<String, String>) -> String {
     match &ty.kind {
         flux_parser::TypeKindAst::Primitive(name) => match name.as_str() {
             "Int" => B::int_type().to_owned(),
@@ -79,22 +84,32 @@ pub fn native_type<B: Backend>(ty: &Type) -> String {
         },
         flux_parser::TypeKindAst::Named { name, args } => {
             if args.is_empty() {
+                // A bare type reference: substitute a generic parameter if one
+                // matches (e.g. `T` → `Int`), else keep the name.
+                if let Some(concrete) = subst.get(&name.name) {
+                    return concrete.clone();
+                }
                 name.name.clone()
             } else {
-                let rendered: Vec<String> = args.iter().map(native_type::<B>).collect();
+                let rendered: Vec<String> =
+                    args.iter().map(|a| native_type::<B>(a, subst)).collect();
                 format!("{}<{}>", name.name, rendered.join(", "))
             }
         }
         flux_parser::TypeKindAst::Record(fields) => {
             let rendered: Vec<String> = fields
                 .iter()
-                .map(|(n, t)| format!("{}: {}", n.name, native_type::<B>(t)))
+                .map(|(n, t)| format!("{}: {}", n.name, native_type::<B>(t, subst)))
                 .collect();
             B::record_type(&rendered)
         }
         flux_parser::TypeKindAst::Fn { params, ret } => {
-            let rendered: Vec<String> = params.iter().map(native_type::<B>).collect();
-            format!("({}) -> {}", rendered.join(", "), native_type::<B>(ret))
+            let rendered: Vec<String> = params.iter().map(|a| native_type::<B>(a, subst)).collect();
+            format!(
+                "({}) -> {}",
+                rendered.join(", "),
+                native_type::<B>(ret, subst)
+            )
         }
         _ => B::any_type().to_owned(),
     }

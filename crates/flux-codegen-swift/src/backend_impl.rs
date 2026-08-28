@@ -5,6 +5,8 @@
 //! `NavigationStack` navigation API, the scalar spells, and the `struct …: View`
 //! / `enum` header forms.
 
+use std::collections::HashMap;
+
 use flux_codegen_core::backend::Backend;
 use flux_codegen_core::emitter::Emitter;
 use flux_codegen_core::model::{ComponentMeta, native_type};
@@ -161,11 +163,12 @@ impl Backend for Swift {
         name: &str,
         generics: &str,
         meta: &ComponentMeta<'_>,
+        subst: &HashMap<String, String>,
     ) {
         em.append_line(&format!("struct {name}{generics}: View {{"));
         for prop in meta.props() {
-            let ty = native_type::<Self>(&prop.ty);
-            em.append_line(&format!("    let {}: {}", prop.name.name, ty));
+            let ty = native_type::<Self>(&prop.ty, subst);
+            em.append_line(&format!("    let {}: {ty}", prop.name.name));
         }
     }
 
@@ -184,7 +187,13 @@ impl Backend for Swift {
         em.append_line("}");
     }
 
-    fn emit_state_cell(em: &mut Emitter<'_, Self>, name: &str, ty: &str, init: &str) {
+    fn emit_state_cell(
+        em: &mut Emitter<'_, Self>,
+        name: &str,
+        ty: &str,
+        init: &str,
+        _subst: &HashMap<String, String>,
+    ) {
         em.append_line(&format!("    @State private var {name}: {ty} = {init}"));
     }
 
@@ -200,7 +209,7 @@ impl Backend for Swift {
                     .fields
                     .iter()
                     .enumerate()
-                    .map(|(i, t)| format!("field{i}: {}", native_type::<Self>(t)))
+                    .map(|(i, t)| format!("field{i}: {}", native_type::<Self>(t, &HashMap::new())))
                     .collect();
                 em.line(1, &format!("case {vname}({})", params.join(", ")));
             }
