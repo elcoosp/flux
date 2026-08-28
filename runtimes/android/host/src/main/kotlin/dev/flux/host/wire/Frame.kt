@@ -124,7 +124,7 @@ public sealed interface WireChild {
  *   full-tree frame. Children are referenced by id; the runtime resolves them
  *   from `root + extraNodes` (Appendix D §D.12.2 Init carries the whole tree).
  */
-public data class Frame(
+public data class FluxFrame(
     val version: UByte,
     val seq: UInt,
     val fullTree: Boolean,
@@ -208,11 +208,11 @@ public data class ClosureRef(
  *
  * Unlike a patch-bound `ClosureRef` (which the shadow tree attaches to a node),
  * a `HandlerDef` is the frame-level transport for handler bodies: the executor
- * slices each one out of [Frame.bytecodeBlob] and registers it for dispatch
+ * slices each one out of [FluxFrame.bytecodeBlob] and registers it for dispatch
  * (Gap G1, §3.1 task 1).
  *
  * @property handlerId the closure-table index this definition populates.
- * @property closure the closure descriptor indexing [Frame.bytecodeBlob].
+ * @property closure the closure descriptor indexing [FluxFrame.bytecodeBlob].
  */
 public data class HandlerDef(
     val handlerId: UInt,

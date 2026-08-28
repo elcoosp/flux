@@ -5,7 +5,7 @@ package dev.flux.host.wire
  *
  * Decodes the shared `FLUX` header (§D.1), the node tree (§D.3), values (§D.5),
  * patches (§D.2), string entries (§D.9), and state delta (§D.10). The result is
- * an immutable [Frame] that the runtime applies to the [dev.flux.host.shadow.ShadowTree].
+ * an immutable [FluxFrame] that the runtime applies to the [dev.flux.host.shadow.ShadowTree].
  *
  * Decoding is total: a malformed buffer raises [WireError] rather than
  * producing a half-built tree, so the host can show a red error overlay instead
@@ -23,15 +23,15 @@ public object FrameDeserializer {
     /** Little-endian magic FLUX (Appendix D §D.1). */
     public const val MAGIC: UInt = 0x465C5558u
 
-    /** Frame kind constants mirroring crates/flux-ir-serde/src/frame.rs. */
+    /** FluxFrame kind constants mirroring crates/flux-ir-serde/src/frame.rs. */
     private const val FRAME_INIT: UByte = 0x02u
     private const val FRAME_DELTA: UByte = 0x04u
 
     /** Delta flag bit gating a trailing signal_meta section. */
     private const val FLAG_NODE_HAS_SIGNAL_DEPS: UByte = 0x40u
 
-    /** Decodes [bytes] into a [Frame], or raises [WireError] on a malformed frame. */
-    public fun deserialize(bytes: ByteArray): Frame {
+    /** Decodes [bytes] into a [FluxFrame], or raises [WireError] on a malformed frame. */
+    public fun deserialize(bytes: ByteArray): FluxFrame {
         val r = ByteReader(bytes)
         val magic = r.u32().toUInt()
         if (magic != MAGIC) {
@@ -50,7 +50,7 @@ public object FrameDeserializer {
     private fun decodeInit(
         r: ByteReader,
         version: UByte,
-    ): Frame {
+    ): FluxFrame {
         val seq = r.u32().toUInt()
         val root = decodeNode(r)
         // Appendix D §D.12.2: the full tree is root followed by a u32 count of
@@ -70,7 +70,7 @@ public object FrameDeserializer {
         repeat(smCount) {
             r.u32() // fileId
             val len = r.u16()
-            r.utf8(len) // path (consumed; not modeled on the Android Frame)
+            r.utf8(len) // path (consumed; not modeled on the Android FluxFrame)
         }
         // string_count is a u32 (Appendix D §D.12.2). These are LITERAL strings
         // only (text props, etc.); component-name interning lives in its own
@@ -101,7 +101,7 @@ public object FrameDeserializer {
             val marker = r.u8()
             if (marker != 0) signalMeta = decodeSignalMetaSection(r)
         }
-        return Frame(
+        return FluxFrame(
             version = version,
             seq = seq,
             fullTree = true,
@@ -121,7 +121,7 @@ public object FrameDeserializer {
     private fun decodeDelta(
         r: ByteReader,
         version: UByte,
-    ): Frame {
+    ): FluxFrame {
         val seq = r.u32().toUInt()
         val flags = r.u8()
         val patchCount = r.u16()
@@ -138,7 +138,7 @@ public object FrameDeserializer {
         if ((flags and FLAG_NODE_HAS_SIGNAL_DEPS.toInt()) != 0) {
             signalMeta = decodeSignalMetaSection(r)
         }
-        return Frame(
+        return FluxFrame(
             version = version,
             seq = seq,
             fullTree = false,

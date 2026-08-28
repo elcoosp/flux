@@ -152,7 +152,7 @@ class RuntimeFixesPart2Test {
         // gate expression is the single source of truth.
         val releaseGate = false
         if (releaseGate) tree.trace = { collected.add(it) }
-        tree.emitTrace(TraceEvent.Frame(seq = 0u, full = true, root = 1u, nodes = 1u, patches = 0u))
+        tree.emitTrace(TraceEvent.FluxFrame(seq = 0u, full = true, root = 1u, nodes = 1u, patches = 0u))
         assertTrue(collected.isEmpty(), "when the DEBUG gate is false the trace sink is never invoked")
     }
 
@@ -161,7 +161,7 @@ class RuntimeFixesPart2Test {
         val collected = mutableListOf<TraceEvent>()
         val tree = newTree()
         tree.trace = { collected.add(it) }
-        tree.emitTrace(TraceEvent.Frame(seq = 3u, full = true, root = 1u, nodes = 1u, patches = 0u))
+        tree.emitTrace(TraceEvent.FluxFrame(seq = 3u, full = true, root = 1u, nodes = 1u, patches = 0u))
         if (BuildFlags.DEBUG) {
             assertEquals(1, collected.size, "debug build must emit the frame trace")
             assertEquals(3u, collected[0].seq)

@@ -8,7 +8,7 @@ import dev.flux.host.vm.FluxValue
 import dev.flux.host.vm.StringResolver
 import dev.flux.host.vm.VmResult
 import dev.flux.host.wire.ClosureRef
-import dev.flux.host.wire.Frame
+import dev.flux.host.wire.FluxFrame
 import dev.flux.host.wire.NodeSignalMeta
 import dev.flux.host.wire.Patch
 import dev.flux.host.wire.PropDiff
@@ -186,7 +186,7 @@ public class ShadowTree(
      * replay their patches. Returns the resulting root (when present).
      */
     public fun applyFrame(
-        frame: Frame,
+        frame: FluxFrame,
         executor: FluxExecutor,
     ): ShadowNode? {
         executorRef = executor

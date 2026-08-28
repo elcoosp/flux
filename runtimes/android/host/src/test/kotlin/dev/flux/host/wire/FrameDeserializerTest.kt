@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test
 import java.io.File
 
 /**
- * Frame deserializer tests (FLUX-007 acceptance criterion 10): hand-built byte
+ * FluxFrame deserializer tests (FLUX-007 acceptance criterion 10): hand-built byte
  * arrays from Appendix D, plus the `FLUX_WIRE_FIXTURES` env-var loader (R10)
  * that skips cleanly when the directory is absent.
  *

@@ -14,7 +14,7 @@ import dev.flux.host.vm.StringResolver
 import dev.flux.host.vm.TableStringResolver
 import dev.flux.host.vm.VmErrorKind
 import dev.flux.host.vm.VmResult
-import dev.flux.host.wire.Frame
+import dev.flux.host.wire.FluxFrame
 import dev.flux.host.wire.FrameDeserializer
 import dev.flux.host.wire.STRING_ID_CANONICAL_CEILING
 import dev.flux.host.wire.StringInterning
@@ -122,7 +122,7 @@ public class CapabilityAsyncResolver(
  * graph, string resolver, closure table, and shadow-tree mutations — is confined
  * to a single injected [ReactiveDispatcher] (production: [ReactiveDispatcher.Main],
  * i.e. the Android main thread; tests: [ReactiveDispatcher.Test] over a
- * [kotlinx.coroutines.test.StandardTestDispatcher]). Frame bytes are deserialized
+ * [kotlinx.coroutines.test.StandardTestDispatcher]). FluxFrame bytes are deserialized
  * off that dispatcher ([vmScope]/`Default`); every stateful step afterwards runs
  * `withContext(reactiveDispatcher.dispatcher)`. [dispatch] and [receiveFrame] are
  * annotated [MainThread] so the Kotlin compiler rejects any off-main call,
@@ -511,7 +511,7 @@ public class FluxExecutor(
      * The frame's string table is also promoted into the VM's [stringResolver]
      * and the O(1) [stringIndex] for `STR_LEN`/`STR_CONCAT` and event dispatch.
      */
-    private fun registerFrameHandlers(frame: Frame) {
+    private fun registerFrameHandlers(frame: FluxFrame) {
         if (frame.strings.isNotEmpty()) {
             stringResolver = TableStringResolver(frame.strings.associate { it.id to it.text })
             stringIndex = StringInterning.fromEntries(frame.strings)
