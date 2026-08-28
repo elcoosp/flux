@@ -13,6 +13,13 @@ enum Patch: Equatable, Sendable {
     case remove(id: UInt32)
     case reorder(parentId: UInt32, keys: [UInt32])
     case handler(id: UInt32, closure: ClosureRef)
+    /// Re-bind the live instance behind `old` to `new`, preserving its signal
+    /// state, refs and scroll/focus (roadmap Phase 3). Emitted instead of
+    /// `.replace` when a structural edit changed a node's identity (e.g. `Column`
+    /// → `Row`) but the node still denotes the same component at the same
+    /// position. The host re-keys the instance and applies `node` to it — it
+    /// never destroys and re-materialises the subtree, which would reset state.
+    case reattach(old: UInt32, new: UInt32, node: ShadowNode)
 }
 
 /// A handler definition (Appendix D §D.8): a handler id plus its closure.

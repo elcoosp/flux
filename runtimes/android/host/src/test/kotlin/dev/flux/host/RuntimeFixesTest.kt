@@ -8,6 +8,7 @@ import dev.flux.host.transport.MockTransport
 import dev.flux.host.vm.CapabilityImpl
 import dev.flux.host.vm.CapabilityKey
 import dev.flux.host.vm.CapabilityRegistry
+import dev.flux.host.vm.FileStorageBackend
 import dev.flux.host.vm.FluxBytecodeVM
 import dev.flux.host.vm.FluxValue
 import dev.flux.host.vm.InMemorySignals
@@ -320,6 +321,46 @@ class RuntimeFixesTest {
         assertEquals(FluxValue.ListVal(listOf(FluxValue.IntVal(9))), signals.read(95u), "present before delete")
         registry.lookup(2u, 3u.toUShort())!!.call(key, signals)
         assertEquals(FluxValue.NullVal, signals.read(95u), "cleared after delete")
+    }
+
+    // ── LANE-C Task 1: `Storage` must persist across registry instances ──────
+
+    @Test
+    fun `Storage set persists across registry recreation using a file backend`() {
+        val dir = java.nio.file.Files.createTempDirectory("flux-lane-c-storage").toFile().also { it.deleteOnExit() }
+        val key = FluxValue.RecordVal(listOf(FluxValue.Field(0u.toUShort(), FluxValue.StrVal(7u))))
+        val value =
+            FluxValue.RecordVal(
+                listOf(
+                    FluxValue.Field(0u.toUShort(), FluxValue.StrVal(7u)),
+                    FluxValue.Field(1u.toUShort(), FluxValue.ListVal(listOf(FluxValue.IntVal(1), FluxValue.IntVal(2)))),
+                ),
+            )
+
+        // Write via the first registry (file-backed).
+        val first = CapabilityRegistry.makeDev(backend = FileStorageBackend(dir))
+        val firstSignals = InMemorySignals()
+        assertEquals(95u, first.lookup(2u, 1u.toUShort())!!.call(value, firstSignals))
+
+        // Drop the registry instance; only the on-disk dir survives. A second
+        // registry over the same dir must observe the persisted value (real
+        // persistence, not an in-memory cache).
+        val second = CapabilityRegistry.makeDev(backend = FileStorageBackend(dir))
+        val secondSignals = InMemorySignals()
+        val gotCell = second.lookup(2u, 2u.toUShort())!!.call(key, secondSignals)
+        assertEquals(95u, gotCell, "Storage.get returns its result-cell id after recreation")
+        assertEquals(
+            FluxValue.ListVal(listOf(FluxValue.IntVal(1), FluxValue.IntVal(2))),
+            secondSignals.read(95u),
+            "Storage value must survive registry recreation (real persistence)",
+        )
+
+        // Delete via the recreated registry; a fresh read must be null on disk.
+        second.lookup(2u, 3u.toUShort())!!.call(key, secondSignals)
+        val third = CapabilityRegistry.makeDev(backend = FileStorageBackend(dir))
+        val thirdSignals = InMemorySignals()
+        third.lookup(2u, 2u.toUShort())!!.call(key, thirdSignals)
+        assertEquals(FluxValue.NullVal, thirdSignals.read(95u), "Storage.delete must clear the persisted value")
     }
 
     // ── G5: lifecycle hooks ──────────────────────────────────────────────────

@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 flux-syntax.workspace = true
 flux-parser.workspace = true
+flux-vm-ref.workspace = true
 ahash.workspace = true
 thiserror.workspace = true
 

@@ -15,7 +15,7 @@ import dev.flux.host.vm.VmErrorKind.TYPE_MISMATCH
  * - a **synchronous** method writes `Ready(value)` into the cell and returns its id;
  * - an **asynchronous** method creates the cell (state `Pending`) and returns its id
  *   immediately; the host resolves it later via [SignalStore.resolveCell], which
- * resumes any awaiting handler.
+ *   resumes any awaiting handler.
  *
  * One signature serves both shapes; the VM never branches on sync-vs-async.
  */
@@ -31,23 +31,15 @@ public fun interface CapabilityImpl {
  * Backing state for stateful capabilities (e.g. `Storage`), shared by every
  * impl registered in a registry. Kept separate from the signal graph so
  * capabilities can hold data the reactive tree does not (a persisted blob is
- * not a UI signal). Dev builds register an in-memory store; release builds
- * register one backed by the platform (SharedPreferences / DataStore).
+ * not a UI signal).
+ *
+ * `CapabilityStore` is now a thin named alias over [InMemoryStorageBackend] —
+ * the injection seam the registry uses. Dev/test builds register an in-memory
+ * store; the app shell registers a [FileStorageBackend] so `Storage.set`/`get`/
+ * `delete` persist across process restarts (Task 1, LANE-C). Both conform to
+ * [StorageBackend], so the impls never know which they are talking to.
  */
-public class CapabilityStore {
-    private val storage = LinkedHashMap<UInt, FluxValue>()
-
-    /** Records a `Storage` value; `null` clears the key. */
-    public fun putStorage(
-        key: UInt,
-        value: FluxValue?,
-    ) {
-        if (value == null) storage.remove(key) else storage[key] = value
-    }
-
-    /** Reads a previously recorded `Storage` value, or `null`. */
-    public fun getStorage(key: UInt): FluxValue? = storage[key]
-}
+public typealias CapabilityStore = InMemoryStorageBackend
 
 /** A capability table key: `(capabilityId, methodId)`. */
 public data class CapabilityKey(
@@ -70,7 +62,7 @@ public data class CapabilityKey(
  */
 public class CapabilityRegistry(
     private val handlers: Map<CapabilityKey, CapabilityImpl>,
-    private val store: CapabilityStore = CapabilityStore(),
+    private val store: StorageBackend = InMemoryStorageBackend(),
 ) {
     /** Looks up the impl for [capId]/[methodId], or `null` when unregistered. */
     public fun lookup(
@@ -79,13 +71,7 @@ public class CapabilityRegistry(
     ): CapabilityImpl? = handlers[CapabilityKey(capId, methodId)]
 
     public companion object {
-        /**
-         * The oracle-faithful default table. Contains the `flux-vm-ref`
-         * built-in `(1,1)` capability — it writes `arg[0]` into signal 99 and
-         * returns `arg[0]` — so the golden `call_cap_basic` vector stays green
-         * without a live dev server. Tests and release code extend or replace
-         * this with the full capability set.
-         */
+        /** The oracle-faithful default table (no `Storage`/`Camera` state). */
         public fun default(): CapabilityRegistry =
             fromEntries(
                 listOf(
@@ -107,115 +93,127 @@ public class CapabilityRegistry(
                 ),
             )
 
-        /** A registry with the real MLP capability set registered (G4).
-         *
-         * IDs follow `stdlib/capabilities.flux` and the debug-bridge convention:
+        /**
+         * Builds the MLP capability set (G4):
          * - `Camera`  (cap 1): `take` (1,1), `startPreview` (1,2), `stopPreview` (1,3).
          * - `Storage` (cap 2): `set` (2,1), `get` (2,2), `delete` (2,3).
          * - `Router`  (cap 3): `navigate` (3,1).
          *
-         * Dev implementations are synchronous stand-ins for the real native
-         * backends: `Camera.take` synthesises a deterministic `Data` payload (a
-         * `List[Int]` of bytes) so a capture result is observable without a
-         * camera; `Storage` is backed by an in-memory [CapabilityStore]; `Router`
-         * records the target string id in signal 97 and returns `NullVal`.
+         * `Storage` is backed by the injected [StorageBackend] (dev/test:
+         * in-memory; app shell: [FileStorageBackend]) — see Task 1 (LANE-C).
+         * `Camera.take` (1,1) preserves the oracle-parity echo of its first
+         * argument into signal 99 so `flux-vm-ref`'s `call_cap_basic` vector
+         * stays green. `startPreview`/`stopPreview` manage a preview flag
+         * (signal 96) and are capture no-ops in headless builds. `Router.navigate`
+         * (3,1) records the target string id in signal 97 (reconciler-driven).
+         *
+         * @param backend the `Storage` persistence backend; defaults to an
+         *   in-memory store (dev/test). Pass [FileStorageBackend] for a
+         *   persist-to-disk registry.
          */
-        public val DEV: CapabilityRegistry =
-            run {
-                val store = CapabilityStore()
-                CapabilityRegistry(
-                    LinkedHashMap<CapabilityKey, CapabilityImpl>().apply {
-                        fun put(
-                            capId: UInt,
-                            methodId: UShort,
-                            impl: CapabilityImpl,
-                        ) {
-                            this[CapabilityKey(capId, methodId)] = impl
-                        }
-                        // Camera.take (1,1): oracle-parity echo into signal 99; return its id.
-                        put(1u, 1u.toUShort()) { args, signals ->
-                            val arg =
-                                when (val a = args) {
-                                    is RecordVal -> a.fields.firstOrNull()?.value
-                                    else -> null
-                                } ?: throw VmError(TYPE_MISMATCH, 0u)
-                            signals.write(99u, arg)
-                            99u
-                        }
-                        // Camera.startPreview (1,2): record preview flag in signal 96; return its id.
-                        put(1u, 2u.toUShort()) { _args, signals ->
-                            signals.write(96u, FluxValue.BoolVal(true))
-                            96u
-                        }
-                        // Camera.stopPreview (1,3): clear preview flag; return its id.
-                        put(1u, 3u.toUShort()) { _args, signals ->
-                            signals.write(96u, FluxValue.BoolVal(false))
-                            96u
-                        }
-                        // Storage.set(key, value) (2,1): persist into the store, expose via signal 95.
-                        put(2u, 1u.toUShort()) { args, signals ->
-                            val keyId =
-                                when (val rec = args) {
-                                    is RecordVal ->
-                                        rec.fields.firstOrNull()?.value?.let { first ->
-                                            if (first is StrVal) first.id else null
-                                        }
-                                    else -> null
-                                } ?: throw VmError(TYPE_MISMATCH, 0u)
-                            val value =
-                                when (val rec = args) {
-                                    is RecordVal -> rec.fields.getOrNull(1)?.value
-                                    else -> null
-                                } ?: throw VmError(TYPE_MISMATCH, 0u)
-                            store.putStorage(keyId, value)
-                            signals.write(95u, value)
-                            95u
-                        }
-                        // Storage.get(key) (2,2): read the persisted value, expose via signal 95.
-                        put(2u, 2u.toUShort()) { args, signals ->
-                            val keyId =
-                                when (val rec = args) {
-                                    is RecordVal ->
-                                        rec.fields.firstOrNull()?.value?.let { first ->
-                                            if (first is StrVal) first.id else null
-                                        }
-                                    else -> null
-                                } ?: throw VmError(TYPE_MISMATCH, 0u)
-                            val value = store.getStorage(keyId) ?: FluxValue.NullVal
-                            signals.write(95u, value)
-                            95u
-                        }
-                        // Storage.delete(key) (2,3): clear the persisted value, expose `null` via signal 95.
-                        put(2u, 3u.toUShort()) { args, signals ->
-                            val keyId =
-                                when (val rec = args) {
-                                    is RecordVal ->
-                                        rec.fields.firstOrNull()?.value?.let { first ->
-                                            if (first is StrVal) first.id else null
-                                        }
-                                    else -> null
-                                } ?: throw VmError(TYPE_MISMATCH, 0u)
-                            store.putStorage(keyId, null)
-                            signals.write(95u, FluxValue.NullVal)
-                            95u
-                        }
-                        // Router.navigate(target) (3,1): record target in signal 97; return its id.
-                        put(3u, 1u.toUShort()) { args, signals ->
-                            signals.write(97u, args)
-                            97u
-                        }
-                        // Reference async capability (2,99): allocate a fresh Pending cell, return its id
-                        // immediately (ADR-0045). The host resolves it later via SignalStore.resolveCell,
-                        // resuming the awaiting handler. Mirrors the oracle's `async_deferred`.
-                        put(2u, 99u.toUShort()) { _args, signals ->
-                            val id = signals.allocateCell()
-                            signals.markPending(id)
-                            id
-                        }
-                    },
-                    store,
-                )
-            }
+        public fun makeDev(backend: StorageBackend = InMemoryStorageBackend()): CapabilityRegistry {
+            val store = backend
+            return CapabilityRegistry(
+                LinkedHashMap<CapabilityKey, CapabilityImpl>().apply {
+                    fun put(
+                        capId: UInt,
+                        methodId: UShort,
+                        impl: CapabilityImpl,
+                    ) {
+                        this[CapabilityKey(capId, methodId)] = impl
+                    }
+                    // Camera.take (1,1): oracle-parity echo into signal 99; return its id.
+                    // The dev-safe camera bridge (real capture behind CameraX
+                    // ImageCapture) is intentionally NOT wired here so the oracle
+                    // vector stays deterministic (Task 2, LANE-C): headless/JVM tests
+                    // keep this echo; the app shell supplies real capture via a
+                    // separate `CameraCapability` that still writes field 0 → 99.
+                    put(1u, 1u.toUShort()) { args, signals ->
+                        val arg =
+                            when (val a = args) {
+                                is RecordVal -> a.fields.firstOrNull()?.value
+                                else -> null
+                            } ?: throw VmError(TYPE_MISMATCH, 0u)
+                        signals.write(99u, arg)
+                        99u
+                    }
+                    // Camera.startPreview (1,2): record preview flag in signal 96; return its id.
+                    put(1u, 2u.toUShort()) { _args, signals ->
+                        signals.write(96u, FluxValue.BoolVal(true))
+                        96u
+                    }
+                    // Camera.stopPreview (1,3): clear preview flag; return its id.
+                    put(1u, 3u.toUShort()) { _args, signals ->
+                        signals.write(96u, FluxValue.BoolVal(false))
+                        96u
+                    }
+                    // Storage.set(key, value) (2,1): persist into the backend, expose via signal 95.
+                    put(2u, 1u.toUShort()) { args, signals ->
+                        val keyId =
+                            when (val rec = args) {
+                                is RecordVal ->
+                                    rec.fields.firstOrNull()?.value?.let { first ->
+                                        if (first is StrVal) first.id else null
+                                    }
+                                else -> null
+                            } ?: throw VmError(TYPE_MISMATCH, 0u)
+                        val value =
+                            when (val rec = args) {
+                                is RecordVal -> rec.fields.getOrNull(1)?.value
+                                else -> null
+                            } ?: throw VmError(TYPE_MISMATCH, 0u)
+                        store.put(keyId, value)
+                        signals.write(95u, value)
+                        95u
+                    }
+                    // Storage.get(key) (2,2): read the persisted value, expose via signal 95.
+                    put(2u, 2u.toUShort()) { args, signals ->
+                        val keyId =
+                            when (val rec = args) {
+                                is RecordVal ->
+                                    rec.fields.firstOrNull()?.value?.let { first ->
+                                        if (first is StrVal) first.id else null
+                                    }
+                                else -> null
+                            } ?: throw VmError(TYPE_MISMATCH, 0u)
+                        val value = store.get(keyId) ?: FluxValue.NullVal
+                        signals.write(95u, value)
+                        95u
+                    }
+                    // Storage.delete(key) (2,3): clear the persisted value, expose `null` via signal 95.
+                    put(2u, 3u.toUShort()) { args, signals ->
+                        val keyId =
+                            when (val rec = args) {
+                                is RecordVal ->
+                                    rec.fields.firstOrNull()?.value?.let { first ->
+                                        if (first is StrVal) first.id else null
+                                    }
+                                else -> null
+                            } ?: throw VmError(TYPE_MISMATCH, 0u)
+                        store.put(keyId, null)
+                        signals.write(95u, FluxValue.NullVal)
+                        95u
+                    }
+                    // Router.navigate(target) (3,1): record target in signal 97; return its id.
+                    put(3u, 1u.toUShort()) { args, signals ->
+                        signals.write(97u, args)
+                        97u
+                    }
+                    // Reference async capability (2,99): allocate a fresh Pending cell, return its id
+                    // immediately (ADR-0045). The host resolves it later via SignalStore.resolveCell,
+                    // resuming the awaiting handler. Mirrors the oracle's `async_deferred`.
+                    put(2u, 99u.toUShort()) { _args, signals ->
+                        val id = signals.allocateCell()
+                        signals.markPending(id)
+                        id
+                    }
+                },
+                store,
+            )
+        }
+
+        /** The MLP dev registry: `Storage` backed by an in-memory store. */
+        public val DEV: CapabilityRegistry = makeDev()
 
         /** An empty registry: every `CALL_CAP` faults as `TYPE_MISMATCH`. */
         public val EMPTY: CapabilityRegistry = CapabilityRegistry(emptyMap())

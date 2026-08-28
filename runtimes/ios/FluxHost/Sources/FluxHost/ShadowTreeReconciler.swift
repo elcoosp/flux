@@ -26,12 +26,19 @@ final class BuiltNode {
     /// `@pure` subtree skip (G6) to detect unchanged props without re-walking
     /// the children.
     var lastPropHash: UInt64
+    /// Whether this node is a `Router` (resolved by the registered adapter name
+    /// "Router" — the server lowers a router as a *component* with
+    /// `componentId="Router"`, so matching the wire `NodeKind` misses it; Android
+    /// detects a router the same way, via the adapter's kind string). Drives the
+    /// navigation-signal (97) subscription and the active-child re-filter.
+    var isRouter: Bool
 
-    init(adapter: AnyFluxAdapter, view: AnyObject, runtimeProps: [Prop], lastPropHash: UInt64 = 0) {
+    init(adapter: AnyFluxAdapter, view: AnyObject, runtimeProps: [Prop], lastPropHash: UInt64 = 0, isRouter: Bool = false) {
         self.adapter = adapter
         self.view = view
         self.runtimeProps = runtimeProps
         self.lastPropHash = lastPropHash
+        self.isRouter = isRouter
     }
 }
 
@@ -174,7 +181,7 @@ struct ShadowTreeReconciler {
         var patchNodes = nodeTable
         for patch in frame.patches {
             switch patch {
-            case let .replace(_, node), let .insert(_, _, node):
+            case let .replace(_, node), let .insert(_, _, node), let .reattach(_, _, node):
                 patchNodes[node.id] = node
             default:
                 break
@@ -273,7 +280,12 @@ struct ShadowTreeReconciler {
         var deps = Set(metaDeps).union(effectiveProps.compactMap { $0.value.asInt }.compactMap { UInt32(exactly: $0) })
         // A `Router` node must re-reconcile whenever its navigation target
         // changes, so it subscribes to the `Router.navigate` signal (97, ADR-0045).
-        if node.kind == .router {
+        // The server lowers a router as a *component* with `componentId="Router"`
+        // (the same way Android does — `adapter?.kind == "router"`), so we detect
+        // it by the resolved adapter name, not the wire `NodeKind`, which would
+        // miss it and leave navigation dead.
+        let isRouter = node.kind == .router || componentNames[node.componentId] == "Router"
+        if isRouter {
             deps.insert(Self.navigationRouteSignalId)
         }
         signalDeps[nodeId] = deps
@@ -318,7 +330,7 @@ struct ShadowTreeReconciler {
             let view = adapter.create()
             adapter.update(view, from: Props(), to: kit)
             let hash = propHash(effectiveProps)
-            built[nodeId] = BuiltNode(adapter: adapter, view: view, runtimeProps: effectiveProps, lastPropHash: hash)
+            built[nodeId] = BuiltNode(adapter: adapter, view: view, runtimeProps: effectiveProps, lastPropHash: hash, isRouter: isRouter)
             report.built.append(nodeId)
             // Bind handlers once, at build time — re-binding on every frame
             // would stack UIControl actions (ButtonAdapter adds one per call).
@@ -344,14 +356,21 @@ struct ShadowTreeReconciler {
     /// per-dispatch whole-tree re-walk: on a tap only the signal-dependent
     /// subtrees are touched.
     ///
+    /// The walk uses the reconciler's own authoritative `nodeTable` (seeded from
+    /// every applied frame), NOT a caller-passed copy — mirroring the Android host,
+    /// which always reconciles against its own `nodes` map. Passing a separate
+    /// `currentNodes` copy from the executor desynced from the built views and
+    /// left the router node unreachable, so navigation never re-attached the
+    /// active screen.
+    ///
     /// A node whose own dependencies changed is always re-applied (even if its raw
     /// prop bytes are unchanged, because the signal(s) behind them may carry new
     /// values). A node that is merely an ancestor of a dirty descendant only
     /// re-attaches its children; a fully clean subtree is never visited.
     @discardableResult
-    mutating func reconcileDirty(rootId: UInt32, nodes: [UInt32: ShadowNode], signalIds: Set<UInt32>) -> ReconcileReport {
+    mutating func reconcileDirty(rootId: UInt32, signalIds: Set<UInt32>) -> ReconcileReport {
         var report = ReconcileReport()
-        _ = reconcileDirty(nodeId: rootId, signalIds: signalIds, nodes: nodes, report: &report)
+        _ = reconcileDirty(nodeId: rootId, signalIds: signalIds, nodes: nodeTable, report: &report)
         return report
     }
 
@@ -403,8 +422,28 @@ struct ShadowTreeReconciler {
                 owner.lastPropHash = propHash(effectiveProps)
                 report.updated.append(nodeId)
             }
-            // Re-parent children so a dirty descendant lands in this view.
-            owner.adapter.setChildren(childViews, on: owner.view)
+            // Re-parent children so a dirty descendant lands in this view. For a
+            // Router, navigation (signal 97) changes which single child is active,
+            // so `collectChildViews` must be re-run to re-apply `routerActiveChildId`
+            // (which filters to exactly the active Screen and builds it). Re-attaching
+            // the blanket `childViews` collected above would keep showing the
+            // originally-built child and navigation would "do nothing".
+            let views: [AnyObject]
+            // Detect a router by the resolved adapter name (the server lowers it
+            // as a `component` with `componentId="Router"`, so the wire `NodeKind`
+            // is `.component`, not `.router`). This mirrors Android's
+            // `adapter?.kind == ROUTER_KIND` check and must not rely on the
+            // build-time `owner.isRouter` flag, which can be stale if
+            // `componentNames` was populated after the node was first built.
+            if node.kind == .router || componentNames[node.componentId] == "Router" {
+                views = collectChildViews(of: node, nodes: nodes, report: &report)
+                #if DEBUG
+                NSLog("[FluxRT] reconcileDirty router: collected \(views.count) views for node \(nodeId)")
+                #endif
+            } else {
+                views = childViews
+            }
+            owner.adapter.setChildren(views, on: owner.view)
         } else if isDirty {
             // A dirty node that was never built (shouldn't happen on dispatch, but
             // be safe): fall back to a full reconcile of this subtree.
@@ -420,7 +459,7 @@ struct ShadowTreeReconciler {
         // A `Router` presents only the active-route `Screen` (ADR-0045): it must
         // not build/reconcile the hidden sibling screens, so we scope the walk to
         // the single active child id returned by `routerActiveChildId`.
-        let activeChildId = node.kind == .router ? routerActiveChildId(node, nodes: nodes) : nil
+        let activeChildId = (node.kind == .router || componentNames[node.componentId] == "Router") ? routerActiveChildId(node, nodes: nodes) : nil
         for child in node.children {
             let childIds: [UInt32]
             switch child {
@@ -464,23 +503,45 @@ struct ShadowTreeReconciler {
     /// When the signal is unset, malformed, or no screen matches, returns the
     /// first child so the stack always shows a screen (mirrors Android).
     private func routerActiveChildId(_ node: ShadowNode, nodes: [UInt32: ShadowNode]) -> UInt32? {
-        guard node.kind == .router else { return nil }
+        // The server lowers a router as a *component* (`componentId="Router"`),
+        // so its wire `NodeKind` is `.component`, not `.router`. Accept either,
+        // matching Android's `adapter?.kind == ROUTER_KIND` detection.
+        let isRouter = node.kind == .router || componentNames[node.componentId] == "Router"
+        guard isRouter else { return nil }
         var activeRoute: String?
         if let runtime = executorRef as? FluxRuntime,
-           let record = runtime.graph.read(Self.navigationRouteSignalId),
-           case let .record(fields) = record,
-           case let .str(routeId) = fields.first?.value,
-           let route = currentTable().lookup(routeId) {
-            activeRoute = route
+           let record = runtime.graph.read(Self.navigationRouteSignalId) {
+            // `Router.navigate(target)` writes the VM's CALL_CAP `args` register to
+            // signal 97. The iOS compiler lowers `Router.navigate("x")` to
+            // `LOAD_STR_CONST` + `CALL_CAP`, so `args` is a RAW `.str(targetId)`
+            // (not a wrapped record). Accept both a raw `.str` and a `.record`
+            // whose first field is a `.str`, so navigation swaps the visible screen
+            // on a real tap rather than always showing the first child.
+            let routeId: UInt32?
+            switch record {
+            case let .str(id):
+                routeId = id
+            case let .record(fields):
+                routeId = fields.first.flatMap { field -> UInt32? in
+                    if case let .str(id) = field.value { id } else { nil }
+                }
+            default:
+                routeId = nil
+            }
+            if let rid = routeId, let route = currentTable().lookup(rid) {
+                activeRoute = route
+            }
         }
+        #if DEBUG
+        NSLog("[FluxRT] routerActiveChildId: kind=\(node.kind) comp=\(node.componentId) isRouter=\(isRouter) active=\(activeRoute ?? "nil")")
+        #endif
         var firstChildId: UInt32?
+        var matchedChild: UInt32?
         for child in node.children {
             let childIds: [UInt32]
             switch child {
-            case let .node(id):
-                childIds = [id]
-            case let .splice(_, items):
-                childIds = items.map { $0.node }
+            case let .node(id): childIds = [id]
+            case let .splice(_, items): childIds = items.map { $0.node }
             }
             for cid in childIds {
                 if firstChildId == nil { firstChildId = cid }
@@ -488,12 +549,17 @@ struct ShadowTreeReconciler {
                 guard let prop = childNode.props.first(where: { $0.index == Self.routePropIndex }),
                       case let .str(id) = prop.value,
                       let route = currentTable().lookup(id) else { continue }
-                if let active = activeRoute, route == active {
-                    return cid
+                // When signal 97 is unset (initial render) fall back to the first
+                // screen; when set, prefer the route match. Either way pick a
+                // screen so the router never blanks (mirrors Android).
+                if activeRoute == nil {
+                    if matchedChild == nil { matchedChild = cid }
+                } else if route == activeRoute {
+                    if matchedChild == nil { matchedChild = cid }
                 }
             }
         }
-        return firstChildId
+        return matchedChild ?? firstChildId
     }
 
     /// Materialises the props of `node` by running its ADR-0027 prop thunk
@@ -603,6 +669,44 @@ struct ShadowTreeReconciler {
             guard let parent = built[parentId] else { return }
             let views = keys.compactMap { built[$0]?.view }
             parent.adapter.setChildren(views, on: parent.view)
+
+        case let .reattach(old, new, node):
+            // Phase 3 state preservation: re-key the live instance from `old` to
+            // `new` WITHOUT destroying and rebuilding it, so its signal state,
+            // refs, scroll position and text input survive a structural edit
+            // (e.g. `Column` → `Row`, or a re-spanned subtree) that changed the
+            // node's id but not its component identity.
+            guard let existing = built.removeValue(forKey: old) else {
+                // No live instance to preserve (first appearance as `new`):
+                // build it fresh rather than going blank.
+                reconcile(nodeId: new, nodes: nodes, report: &report)
+                return
+            }
+            // Preserve the built view + adapter (state lives in the native view
+            // and the adapter's per-node closure table). Only the key changes.
+            let preserved = existing
+            built[new] = preserved
+            nodeTable[new] = node
+            // Keep the retained signal-deps map coherent for dirty walks.
+            if let deps = signalDeps[old] { signalDeps[new] = deps }
+            // Re-materialise props against the new node shape and push the delta
+            // to the (preserved) native view.
+            let newProps = materializeProps(for: new, fallbackProps: node.props)
+            let oldKit = kitProps(preserved.runtimeProps, table: currentTable())
+            let newKit = kitProps(newProps, table: currentTable())
+            preserved.adapter.update(preserved.view, from: oldKit, to: newKit)
+            preserved.runtimeProps = newProps
+            preserved.lastPropHash = propHash(newProps)
+            preserved.isRouter = node.kind == .router || componentNames[node.componentId] == "Router"
+            built[new] = preserved
+            report.updated.append(new)
+            // Re-parent children from the preserved node so a nested dirty child
+            // lands correctly; handler bindings are retained (handler ids are
+            // stable across the reattach).
+            let childViews = collectChildViews(of: node, nodes: nodes, report: &report)
+            if let owner = built[new] {
+                owner.adapter.setChildren(childViews, on: owner.view)
+            }
 
         case let .handler(id, _):
             // A state-preserving handler swap. `apply` already re-registered the

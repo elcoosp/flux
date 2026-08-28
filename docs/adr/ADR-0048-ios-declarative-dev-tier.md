@@ -1,6 +1,7 @@
 # ADR-0048: Converge the iOS dev tier onto declarative SwiftUI
 
-**Status:** Proposed (no code landed; supersedes nothing until implemented)
+**Status:** Proposed — **gated on measurement** (Phase 0/1 must run before the port
+is approved; may be rejected outright if the spike regresses perf)
 **Date:** 2026-08-28
 **Resolves:** the "doc-reconciliation ADR is pending" note in AGENTS.md §0.2.
 **Decision Drivers:** AGENTS.md §0.2 declares that dev and release render through the
@@ -67,8 +68,47 @@ which was which.
 
 ## Decision
 
-Port the iOS dev tier to declarative SwiftUI, so that one component vocabulary is
-fed by two feeders (dev by the VM, release by codegen) on both platforms.
+**Not yet. This ADR is gated on measurement, not accepted on doctrine.**
+
+§0.2 is a strong architectural argument for converging, but "the doctrine says so"
+is not sufficient justification for rewriting nine adapters and the host mount
+path. The perf question is open and currently **unanswerable from this repo**:
+
+* There is **no render-perf test on either platform.** iOS has `VMDispatchPerfTests`,
+  `DeserializeAllocPerfTests` and `StringTablePerfTests` — all VM/wire, none
+  measuring view mutation. Android has no render benchmark at all.
+* §3.10's budget row already *presumes* this architecture ("under the unified tier
+  this is measured as *observable props write → next composed frame* for a ~50-node
+  subtree, < 3 ms"), but nothing verifies it. The budget is unverified on **both**
+  platforms today.
+* The theory is genuinely two-sided. Imperative UIKit mutation is cheap (`label.text = x`
+  and done — no diff, no body re-evaluation), and SwiftUI adds both. But the current
+  iOS reconciler runs a full pass over a parallel object tree it owns, whereas
+  `reconcileDirty` touches exactly `dependents[S]`. For a large tree with a small
+  dirty set the declarative path may well be *faster*; for a tiny tree with a large
+  dirty set, slower. Which dominates is an empirical question about tree size and
+  dirty-set ratio.
+
+Therefore, in order:
+
+**Phase 0 (do this first, cheap).** Land the missing render benchmark on *both*
+platforms against the §3.10 budget: observable-props write → next composed frame for
+a ~50-node subtree, plus a single-leaf-dirty case and an all-dirty case. This is
+independently worth having — it verifies a budget that is currently unenforced — and
+it is a small, low-collision change.
+
+**Phase 1 (spike, not a rewrite).** Port **one** leaf adapter (`Text` is the
+smallest) to SwiftUI behind the existing kit and measure it against the UIKit
+implementation on the same device using the Phase-0 benchmark.
+
+**Phase 2 (gate).** Proceed with the full port **only if** the spike holds the
+< 3 ms budget and does not regress the single-update path by more than 10%. If it
+regresses materially, this ADR is **rejected** and §0.2 must be amended to permit a
+platform-specific imperative tier on iOS — the doctrine yields to the measurement,
+not the reverse. Record the numbers either way; do not leave this as a half-done
+TODO.
+
+The port itself, if the gate passes, is:
 
 1. Replace the nine UIKit adapters with SwiftUI views reading the same props
    contract. Prop access stays name-derived (§3.2, FNV-1a-32 masked to `u16` via

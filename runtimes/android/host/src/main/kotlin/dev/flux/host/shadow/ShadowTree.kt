@@ -520,9 +520,64 @@ public class ShadowTree(
                 updatedCount++
                 emitTrace(TraceEvent.Update(seq = lastSeq, id = nodeId))
             }
+            0x07 -> { // Reattach (roadmap Phase 3): preserve the live instance's
+                // state across a structural edit that changed the node id but not
+                // its component identity (e.g. Column -> Row, or a re-spanned
+                // subtree). Re-key the built ShadowNode from oldId to newId instead
+                // of tearing it down and rebuilding (which would reset state).
+                val wire = patch.node ?: return
+                val existing = nodes.remove(patch.oldId) ?: run {
+                    // No live instance to preserve: build the replacement fresh
+                    // rather than going blank.
+                    val built = build(wire, patchIndex + (wire.id to wire), executor, depth = 0u)
+                    nodes[built.id] = built
+                    collect(built)
+                    return
+                }
+                // Re-key the SAME live instance from oldId to newId so its signal
+                // state, refs and scroll/focus survive (ShadowNode is a class with
+                // an immutable `id`, so we re-key the map entry, not the node).
+                nodes[patch.newId] = existing
+                // Keep the parent/child + signal-dep maps coherent for dirty walks.
+                parents[patch.oldId]?.let { parents[patch.newId] = it }
+                parents.remove(patch.oldId)
+                signalDeps[patch.oldId]?.let { signalDeps[patch.newId] = it }
+                signalDeps.remove(patch.oldId)
+                reconciled[patch.newId] = (reconciled[patch.newId] ?: 0) + 1
+                // Re-materialise props against the new node shape and push the
+                // delta to the (preserved) native view; handler bindings are
+                // retained (handler ids are stable across the reattach).
+                val newProps = materializeProps(wire.props, patch.newId)
+                withAdapter(existing.kind, existing.componentId, existing.view) { a, v ->
+                    a.update(v, newProps)
+                }
+                existing.wireProps = WireProps(wire.props, childIdList(wire))
+                existing.props = newProps
+                // Rebuild the child subtree under the preserved instance so a
+                // nested dirty child lands correctly (children reuse build()).
+                val childIndex = patchIndex + (wire.id to wire)
+                existing.children.clear()
+                for (child in wire.children) {
+                    val childId = childIdOf(child) ?: continue
+                    val childWire = childIndex[childId] ?: continue
+                    existing.children.add(build(childWire, childIndex, executor, depth = 1u))
+                }
+                withAdapter(existing.kind, existing.componentId, existing.view) { a, v ->
+                    a.setChildren(v, existing.children.map { it.id }, existing.children.map { it.view })
+                }
+                emitTrace(TraceEvent.Update(seq = lastSeq, id = patch.newId))
+                updatedCount++
+            }
             else -> { /* Reorder/unknown tags are no-ops for the MLP host */ }
         }
     }
+
+    /** Extracts the child node id from a [WireChild] (used by Reattach). */
+    private fun childIdOf(child: WireChild): UInt? =
+        when (child) {
+            is WireChild.Node -> child.id
+            is WireChild.Splice -> child.items.firstOrNull()?.second
+        }
 
     /** Applies [diff] on top of [base], returning a new wire-prop bag. */
     private fun mergeProps(

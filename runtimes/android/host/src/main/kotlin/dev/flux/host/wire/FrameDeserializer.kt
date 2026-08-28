@@ -249,6 +249,23 @@ public object FrameDeserializer {
                     closure = decodeClosureRef(r),
                 )
             }
+            0x07 -> { // Reattach: u32 old_id, u32 new_id, Node
+                val old = r.u32().toUInt()
+                val new = r.u32().toUInt()
+                Patch(
+                    tag,
+                    id = new,
+                    parentId = 0u,
+                    index = 0u,
+                    node = decodeNode(r),
+                    diff = null,
+                    keyCount = 0u,
+                    keys = emptyList(),
+                    closure = null,
+                    oldId = old,
+                    newId = new,
+                )
+            }
             else -> throw WireError("unknown patch tag ${tag.toInt()} at offset ${r.position}")
         }
     }

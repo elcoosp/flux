@@ -396,6 +396,13 @@ enum FrameDeserializer {
             let id = try r.u32()
             let closure = try decodeClosureRef(&r)
             return .handler(id: id, closure: closure)
+        case 0x07:
+            // `Reattach` (Appendix D §D.2, roadmap Phase 3): `old_id`, `new_id`,
+            // then the new node shape to apply to the preserved instance.
+            let oldId = try r.u32()
+            let newId = try r.u32()
+            let node = try decodeNode(&r)
+            return .reattach(old: oldId, new: newId, node: node)
         case let t:
             throw WireError.unknownTag(offset: r.offset - 1, tag: t)
         }

@@ -177,6 +177,14 @@ public data class Patch(
     val keyCount: UShort,
     val keys: List<UInt>,
     val closure: ClosureRef?,
+    /**
+     * `Reattach` (tag 0x07, roadmap Phase 3): the live instance is currently
+     * keyed under [oldId] and must be re-keyed to [newId], preserving its signal
+     * state, refs and scroll/focus. Falls back to [id] (the replaced node) for
+     * other tags.
+     */
+    val oldId: UInt = 0u,
+    val newId: UInt = 0u,
 )
 
 /** A `PropDiff` (Appendix D §D.6). */
