@@ -58,6 +58,19 @@ The host halves (iOS/Android `resume` call sites, and the codegen `Task {}` /
 `suspend` emission) are not in this change; they live in the runtime and codegen
 directories owned by other in-flight work.
 
+### Roadmap Phase 5 — host intern fallback: secondary id region
+
+`HostStrings` now allocates from two disjoint regions below the canonical
+ceiling — primary at `0x4000_0000`, secondary at `0x7000_0000` — mapped through
+a single `id_for_index`/`index_for_id` pair whose bijection is tested straight
+across the boundary (that off-by-one is the one place two distinct strings could
+silently alias onto one id). Crossing into the secondary region logs a `warn!`,
+so the alarm fires while allocation is still unique instead of only once the
+table is genuinely exhausted. `InstanceRegistry::try_reattach` (flux-ir) is the
+host-side transfer for `Patch::Reattach`: it keeps the `InstanceId`, signals,
+effects, closures and captured `state`, and refuses only an unknown source node
+or a target node that already holds a live instance.
+
 ### Roadmap Phase 5 — unknown host frames are diagnosed, not dropped
 
 An unrecognised `frame_type` now logs a `warn!` and ships an `Error` frame
