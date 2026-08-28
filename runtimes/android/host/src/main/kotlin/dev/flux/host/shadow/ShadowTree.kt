@@ -813,6 +813,19 @@ public class ShadowTree(
         return children.firstOrNull()
     }
 
+    /**
+     * The single `Screen` child a `Router` node should render, chosen by the
+     * active navigation signal (97, ADR-0045). Returns `null` for a non-router
+     * node or a router with no screens. The Android Compose renderer
+     * ([dev.flux.app.ShadowTreeRenderer]) uses this to show exactly one screen
+     * and to re-render when a `Router.navigate` swaps the visible route — the
+     * host side already drives the same query through the frozen adapter's
+     * `setChildren`, but the Compose projection must consult it too, otherwise
+     * every screen stacks in a column and tapping navigate does nothing.
+     */
+    public fun activeChildOf(node: ShadowNode): ShadowNode? =
+        if (node.kind == ROUTER_KIND) routerActiveChild(node) else null
+
     private companion object {
         /** FNV-1a prop-index for the `route` prop name (matches the wire encoder). */
         val ROUTE_PROP_INDEX: UShort = fnv1aPropIndexForName("route")

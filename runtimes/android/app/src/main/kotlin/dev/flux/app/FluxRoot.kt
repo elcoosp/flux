@@ -56,6 +56,13 @@ public fun FluxRoot(session: FluxSession) {
         onDispose { /* session is retained by the ViewModel; not disposed here */ }
     }
 
+    // The renderer asks the host tree for a router's visible child; this pointer
+    // keeps the renderer (app module) decoupled from the host module. Without it
+    // the router would stack every screen and navigation would do nothing.
+    androidx.compose.runtime.SideEffect {
+        activeChildrenProvider = { routerNode -> session.shadowTree.activeChildOf(routerNode) }
+    }
+
     // `frameVersion` is read here so Compose treats `rootNode` as state-
     // dependent: every applied frame bumps it, forcing this read to re-run and
     // the freshly mounted (possibly root-replaced) tree to be displayed.
@@ -64,9 +71,11 @@ public fun FluxRoot(session: FluxSession) {
         when {
             // Real Compose UI: walk the shadow tree and render native widgets.
             // Leaf recomposition is driven by each node's observable props.
-            rootNode != null -> FluxTreeView(node = rootNode) { handlerId ->
-                executor.dispatch(dev.flux.ui.HandlerEvent(handlerId))
-            }
+            rootNode != null -> FluxTreeView(
+                node = rootNode,
+                routerVersion = frameVersion,
+                onButtonClick = { handlerId -> executor.dispatch(dev.flux.ui.HandlerEvent(handlerId)) },
+            )
             else -> Text("Flux — connecting…", modifier = Modifier.align(Alignment.Center))
         }
         errorMessage?.let { msg ->

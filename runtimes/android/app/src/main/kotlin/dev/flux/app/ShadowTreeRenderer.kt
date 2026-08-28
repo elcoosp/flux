@@ -41,6 +41,10 @@ import dev.flux.ui.PropsIndex
 public fun FluxTreeView(
     node: ShadowNode?,
     onButtonClick: (handlerId: UInt) -> Unit,
+    /** Bumped on every applied frame / dispatch so routers re-read the active
+     * route (signal 97) and swap the visible screen even though a router node's
+     * own props do not change on navigation. */
+    routerVersion: Int = 0,
 ) {
     if (node == null) return
     when (node.kind) {
@@ -48,13 +52,47 @@ public fun FluxTreeView(
         "row" -> RenderRow(node, onButtonClick)
         "text" -> RenderText(node)
         "button" -> RenderButton(node, onButtonClick)
-        // Containers without bespoke layout: render their children inline.
-        "screen", "router" -> RenderContainer(node, onButtonClick)
+        // A router shows exactly one screen — the one whose `route` prop matches
+        // the active navigation signal (ADR-0045). Every other screen is hidden,
+        // so tapping "Go to Settings" actually swaps the visible view instead of
+        // stacking all screens in a column.
+        "router" -> RenderRouter(node, onButtonClick, routerVersion)
+        // A screen renders the content it wraps (its own children).
+        "screen" -> RenderContainer(node, onButtonClick)
         // TextField/Image have no live adapter subtree in the MLP host; surface
         // a contained placeholder so the tree stays visible.
         else -> RenderContainer(node, onButtonClick)
     }
 }
+
+/**
+ * Renders the active `Screen` of a `Router` node. Reads [routerVersion] (a value
+ * that changes on every applied frame / dispatch) so Compose re-runs this
+ * composable when `Router.navigate` changes signal 97 and the host picks a
+ * different active child — without it the router node's props stay equal and the
+ * screen would never swap (the reported "navigation does nothing" bug).
+ */
+@Composable
+private fun RenderRouter(
+    node: ShadowNode,
+    onButtonClick: (UInt) -> Unit,
+    routerVersion: Int,
+) {
+    // `routerVersion` is read by the caller's recomposition: when it changes
+    // (every applied frame / dispatch) FluxRoot re-runs and re-invokes this with
+    // a new value, so the active child is re-resolved. We forward it down so any
+    // nested router also swaps.
+    val child = activeChildrenProvider?.invoke(node)
+    if (child != null) FluxTreeView(child, onButtonClick, routerVersion)
+}
+
+/**
+ * Supplies the visible child of a router node from the host shadow tree. Injected
+ * by [dev.flux.app.FluxRoot] so the renderer can ask the tree (which owns the
+ * signal graph and the active-route query) without depending on the host module.
+ * When unset, the router falls back to showing all children.
+ */
+public var activeChildrenProvider: ((ShadowNode) -> ShadowNode?)? = null
 
 /** Reads [ShadowNode.props] through its observable [State][androidx.compose.runtime.State]. */
 @Composable

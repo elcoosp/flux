@@ -653,6 +653,63 @@ fun `router navigates to the screen matching signal 97`() =
         assertEquals(3u, routerView.children().first().nodeId, "visible screen should have swapped to settings")
     }
 
+/**
+ * Pins the exact query the Android Compose renderer ([dev.flux.app.ShadowTreeRenderer])
+ * now depends on: `ShadowTree.activeChildOf` must return the *settings* screen
+ * once signal 97 carries the settings route. Without this, the renderer would
+ * stack every screen in a column and `Router.navigate` would do nothing on
+ * device (the reported "navigation does nothing" bug). Mirrors the host-side G7
+ * assertion but at the renderer-consumed API.
+ */
+@Test
+fun `activeChildOf returns the settings screen once signal 97 is set`() =
+    runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val signals = SignalGraph()
+        val routeProp = fnv1aRoutePropIndex()
+        val homeId = 10u
+        val settingsId = 11u
+
+        val bytes =
+            FrameBuilder()
+                .apply {
+                    magic()
+                    version(1)
+                    seq(0)
+                    flags(fullTree = true, hasPure = false)
+                    patchCount(0)
+                    handlerCount(0)
+                    stringCount(stdlibEntries.size + 2)
+                    for ((id, kind) in stdlibEntries) stringEntry(id, kind)
+                    stringEntry(homeId, "home")
+                    stringEntry(settingsId, "settings")
+                    node(id = 1u, kind = 0x12u, component = 600u, props = emptyList(), childIds = listOf(2u, 3u))
+                    node(id = 2u, kind = 0x12u, component = 500u, props = listOf(routeProp to WireValue.StrVal(homeId)), childIds = emptyList())
+                    node(id = 3u, kind = 0x12u, component = 500u, props = listOf(routeProp to WireValue.StrVal(settingsId)), childIds = emptyList())
+                }.build()
+
+        val tree = ShadowTree(AdapterRegistry.fromStringTable(stdlibEntries.map { (id, k) -> StringTableEntry(id, k) }))
+        val transport = MockTransport()
+        val executor = FluxExecutor(tree, signals, transport, vmScope = scope, reactiveDispatcher = ReactiveDispatcher.test(dispatcher))
+        executor.onError = { throw AssertionError("executor error: $it") }
+        executor.receiveFrame(bytes)
+        dispatcher.scheduler.runCurrent()
+
+        val router = tree.rootNode ?: error("router root not built")
+        assertEquals("router", router.kind)
+        // Default (signal 97 unset) → first screen (home, id 2).
+        assertEquals(2u, tree.activeChildOf(router)?.id, "default visible screen should be home")
+
+        // Router.navigate("settings") writes the route record to signal 97.
+        signals.write(97u, FluxValue.RecordVal(listOf(FluxValue.Field(0u, FluxValue.StrVal(settingsId)))))
+        signals.flush()
+        tree.reconcileDirty(router.id, setOf(97u))
+
+        // Now the renderer's query must resolve to the settings screen (id 3).
+        assertEquals(3u, tree.activeChildOf(router)?.id, "activeChildOf must swap to settings after navigation")
+    }
+
 /** FNV-1a (32-bit) hash of "route", matching the wire's `prop_index_for_name`. */
 private fun fnv1aRoutePropIndex(): UShort {
     var h: UInt = 0x811c9dc5u
