@@ -96,4 +96,33 @@ final class CapabilityRoundTripTests: XCTestCase {
         _ = try third.lookup(2, 2)!(2, 2, key, &thirdSignals)
         XCTAssertEqual(thirdSignals.read(95), .null, "Storage.delete must clear the persisted value")
     }
+
+    // MARK: - LANE-C Task 3: new capabilities (Clipboard / Geolocation)
+
+    func testClipboardSetThenGetRoundTrips() throws {
+        var signals: any SignalStore = InMemorySignals()
+        // Clipboard.set(value=Str(7)) → cap 4, method 1 returns cell id 94.
+        let setCell = try CapabilityRegistry.dev.lookup(4, 1)!(4, 1, .str(7), &signals)
+        XCTAssertEqual(setCell, 94, "Clipboard.set returns its result-cell id")
+        // Clipboard.get() → cap 4, method 2 exposes the value via cell 93.
+        let getCell = try CapabilityRegistry.dev.lookup(4, 2)!(4, 2, .null, &signals)
+        XCTAssertEqual(getCell, 93, "Clipboard.get returns its result-cell id")
+        XCTAssertEqual(signals.read(93), .str(7), "Clipboard.get returns the value set earlier")
+    }
+
+    func testClipboardGetDefaultsToNull() throws {
+        var signals: any SignalStore = InMemorySignals()
+        let getCell = try CapabilityRegistry.dev.lookup(4, 2)!(4, 2, .null, &signals)
+        XCTAssertEqual(getCell, 93, "Clipboard.get returns its result-cell id")
+        XCTAssertEqual(signals.read(93), .null, "Clipboard.get defaults to null when nothing set")
+    }
+
+    func testGeolocationGetReturnsNullInDevHost() throws {
+        var signals: any SignalStore = InMemorySignals()
+        // Geolocation.get() → cap 5, method 1. The MLP dev host has no real
+        // location provider, so it surfaces a deterministic `null` (no fix).
+        let getCell = try CapabilityRegistry.dev.lookup(5, 1)!(5, 1, .null, &signals)
+        XCTAssertEqual(getCell, 92, "Geolocation.get returns its result-cell id")
+        XCTAssertEqual(signals.read(92), .null, "Geolocation.get is null on the dev host")
+    }
 }

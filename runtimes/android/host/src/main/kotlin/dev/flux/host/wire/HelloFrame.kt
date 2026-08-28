@@ -65,6 +65,13 @@ private val idlCapabilities: List<Triple<String, UInt, List<Pair<String, UInt>>>
     Triple("Router", 3u, listOf(
         "navigate" to 1u,
     )),
+    Triple("Clipboard", 4u, listOf(
+        "set" to 1u,
+        "get" to 2u,
+    )),
+    Triple("Geolocation", 5u, listOf(
+        "get" to 1u,
+    )),
 )
 // ===== GENERATED-END =====
 

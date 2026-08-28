@@ -363,6 +363,41 @@ class RuntimeFixesTest {
         assertEquals(FluxValue.NullVal, thirdSignals.read(95u), "Storage.delete must clear the persisted value")
     }
 
+    // ── LANE-C Task 3: new capabilities (Clipboard / Geolocation) ─────────────
+
+    @Test
+    fun `Clipboard set then get round-trips through DEV registry`() {
+        val registry = CapabilityRegistry.DEV
+        val signals = InMemorySignals()
+        // Clipboard.set(value=Str(7)) (4,1) → cell id 94.
+        val setCell = registry.lookup(4u, 1u.toUShort())!!.call(FluxValue.StrVal(7u), signals)
+        assertEquals(94u, setCell, "Clipboard.set returns its result-cell id")
+        // Clipboard.get() (4,2) exposes the value through cell 93.
+        val getCell = registry.lookup(4u, 2u.toUShort())!!.call(FluxValue.NullVal, signals)
+        assertEquals(93u, getCell, "Clipboard.get returns its result-cell id")
+        assertEquals(FluxValue.StrVal(7u), signals.read(93u), "Clipboard.get returns the value set earlier")
+    }
+
+    @Test
+    fun `Clipboard get defaults to null when nothing set`() {
+        val registry = CapabilityRegistry.DEV
+        val signals = InMemorySignals()
+        val getCell = registry.lookup(4u, 2u.toUShort())!!.call(FluxValue.NullVal, signals)
+        assertEquals(93u, getCell, "Clipboard.get returns its result-cell id")
+        assertEquals(FluxValue.NullVal, signals.read(93u), "Clipboard.get defaults to null when nothing set")
+    }
+
+    @Test
+    fun `Geolocation get returns null on the dev host`() {
+        val registry = CapabilityRegistry.DEV
+        val signals = InMemorySignals()
+        // Geolocation.get() (5,1): the MLP dev host has no real location provider,
+        // so it surfaces a deterministic `null` (no fix) through cell 92.
+        val getCell = registry.lookup(5u, 1u.toUShort())!!.call(FluxValue.NullVal, signals)
+        assertEquals(92u, getCell, "Geolocation.get returns its result-cell id")
+        assertEquals(FluxValue.NullVal, signals.read(92u), "Geolocation.get is null on the dev host")
+    }
+
     // ── G5: lifecycle hooks ──────────────────────────────────────────────────
 
     @Test

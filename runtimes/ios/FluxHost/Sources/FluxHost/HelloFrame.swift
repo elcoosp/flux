@@ -41,6 +41,13 @@ extension HelloFrame {
         ("Router", 3, [
             ("navigate", 1),
         ]),
+        ("Clipboard", 4, [
+            ("set", 1),
+            ("get", 2),
+        ]),
+        ("Geolocation", 5, [
+            ("get", 1),
+        ]),
     ]
     // ===== GENERATED-END =====
 
@@ -79,8 +86,16 @@ public enum HelloFrame {
         data.append(UInt8((caps.count >> 8) & 0xFF))
         for (name, version, features) in caps {
             data.fluxAppendString(name)
+            // Capability `version` is encoded as `u32` LE on the wire (matches
+            // `flux_ir_serde::HelloFrame::to_bytes`/`from_hello_bytes`, which read
+            // it with `read_u32`). Encoding it as `u16` here desyncs the whole
+            // capability tuple and makes the server reject the handshake as
+            // malformed ("expected a Hello frame") — which surfaces as a blank
+            // screen on the host.
             data.append(UInt8(version & 0xFF))
             data.append(UInt8((version >> 8) & 0xFF))
+            data.append(UInt8((version >> 16) & 0xFF))
+            data.append(UInt8((version >> 24) & 0xFF))
             data.append(UInt8(features.count & 0xFF))
             data.append(UInt8((features.count >> 8) & 0xFF))
             for feature in features { data.fluxAppendString(feature) }

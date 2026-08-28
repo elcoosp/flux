@@ -104,7 +104,7 @@ mod tests {
         assert_eq!(CapabilityIdl::names_for(2, 2), Some(("Storage", "get")));
         assert_eq!(CapabilityIdl::names_for(3, 1), Some(("Router", "navigate")));
         assert_eq!(CapabilityIdl::names_for(9, 9), None);
-        assert_eq!(CAPABILITY_IDL.len(), 3);
+        assert_eq!(CAPABILITY_IDL.len(), 5);
     }
 
     #[test]

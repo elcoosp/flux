@@ -83,6 +83,8 @@ final class CapabilityRegistry: @unchecked Sendable {
     /// - `Camera`  (cap 1): `take` (1,1), `startPreview` (1,2), `stopPreview` (1,3).
     /// - `Storage` (cap 2): `set` (2,1), `get` (2,2), `delete` (2,3).
     /// - `Router`  (cap 3): `navigate` (3,1).
+    /// - `Clipboard` (cap 4): `set` (4,1), `get` (4,2).
+    /// - `Geolocation` (cap 5): `get` (5,1).
     ///
     /// `Storage` is backed by the injected `StorageBackend` (dev/test:
     /// in-memory; app shell: `UserDefaults`) — see Task 1 (LANE-C). `Camera.take`
@@ -90,7 +92,10 @@ final class CapabilityRegistry: @unchecked Sendable {
     /// 99 so `flux-vm-ref`'s `call_cap_basic` vector stays green. `startPreview`/
     /// `stopPreview` manage a preview flag (signal 96) and are no-ops for capture
     /// in headless builds. `Router.navigate` (3,1) records the target string id
-    /// in signal 97 (reconciler-driven).
+    /// in signal 97 (reconciler-driven). `Clipboard`/`Geolocation` expose their
+    /// synchronous result through dedicated cells (94/93 and 92); the dev/test
+    /// bodies use deterministic in-memory echoes since the MLP dev host has no
+    /// real pasteboard/location (real OS access is a release-mode concern).
     ///
     /// - Parameter backend: the `Storage` persistence backend; defaults to an
     ///   in-memory store (dev/test). Pass `UserDefaultsStorageBackend` for a
@@ -162,6 +167,29 @@ final class CapabilityRegistry: @unchecked Sendable {
                 // the reconciler consumes it. Returns signal 97's id.
                 signals.write(97, arg)
                 return 97
+            }),
+            (4, 1, { _, _, arg, signals in
+                // Clipboard.set(value): echo the value into signal 94 (the
+                // Clipboard result cell). The MLP dev host has no real pasteboard,
+                // so the dev body is a deterministic echo; release mode would
+                // forward to UIPasteboard / ClipboardManager.
+                signals.write(94, arg)
+                return 94
+            }),
+            (4, 2, { _, _, _, signals in
+                // Clipboard.get(): surface the last set value (signal 94) through
+                // signal 93; default to `null` when nothing was set.
+                let value = signals.read(94) ?? .null
+                signals.write(93, value)
+                return 93
+            }),
+            (5, 1, { _, _, _, signals in
+                // Geolocation.get(): the MLP dev host has no real location
+                // provider, so surface a deterministic `null` (no fix available)
+                // through signal 92. Release mode would resolve CLLocationManager
+                // / FusedLocationProvider and write the coordinate here.
+                signals.write(92, .null)
+                return 92
             }),
             (2, 99, { _, _, _, signals in
                 // Reference async capability: allocates a fresh result cell, marks it

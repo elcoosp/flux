@@ -98,6 +98,8 @@ public class CapabilityRegistry(
          * - `Camera`  (cap 1): `take` (1,1), `startPreview` (1,2), `stopPreview` (1,3).
          * - `Storage` (cap 2): `set` (2,1), `get` (2,2), `delete` (2,3).
          * - `Router`  (cap 3): `navigate` (3,1).
+         * - `Clipboard` (cap 4): `set` (4,1), `get` (4,2).
+         * - `Geolocation` (cap 5): `get` (5,1).
          *
          * `Storage` is backed by the injected [StorageBackend] (dev/test:
          * in-memory; app shell: [FileStorageBackend]) — see Task 1 (LANE-C).
@@ -106,6 +108,10 @@ public class CapabilityRegistry(
          * stays green. `startPreview`/`stopPreview` manage a preview flag
          * (signal 96) and are capture no-ops in headless builds. `Router.navigate`
          * (3,1) records the target string id in signal 97 (reconciler-driven).
+         * `Clipboard`/`Geolocation` expose their synchronous result through
+         * dedicated cells (94/93 and 92); the dev/test bodies use deterministic
+         * in-memory echoes since the MLP dev host has no real pasteboard/location
+         * (real OS access is a release-mode concern).
          *
          * @param backend the `Storage` persistence backend; defaults to an
          *   in-memory store (dev/test). Pass [FileStorageBackend] for a
@@ -198,6 +204,29 @@ public class CapabilityRegistry(
                     put(3u, 1u.toUShort()) { args, signals ->
                         signals.write(97u, args)
                         97u
+                    }
+                    // Clipboard.set(value) (4,1): echo the value into signal 94 (the
+                    // Clipboard result cell). The MLP dev host has no real pasteboard,
+                    // so the dev body is a deterministic echo; release mode would
+                    // forward to UIPasteboard / ClipboardManager.
+                    put(4u, 1u.toUShort()) { args, signals ->
+                        signals.write(94u, args)
+                        94u
+                    }
+                    // Clipboard.get() (4,2): surface the last set value (signal 94) through
+                    // signal 93; default to `null` when nothing was set.
+                    put(4u, 2u.toUShort()) { _args, signals ->
+                        val value = signals.read(94u) ?: FluxValue.NullVal
+                        signals.write(93u, value)
+                        93u
+                    }
+                    // Geolocation.get() (5,1): the MLP dev host has no real location
+                    // provider, so surface a deterministic `null` (no fix available)
+                    // through signal 92. Release mode would resolve CLLocationManager /
+                    // FusedLocationProvider and write the coordinate here.
+                    put(5u, 1u.toUShort()) { _args, signals ->
+                        signals.write(92u, FluxValue.NullVal)
+                        92u
                     }
                     // Reference async capability (2,99): allocate a fresh Pending cell, return its id
                     // immediately (ADR-0045). The host resolves it later via SignalStore.resolveCell,
