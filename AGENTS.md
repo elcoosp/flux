@@ -44,21 +44,41 @@ Dev and release render through **the same declarative components**:
   unified model. One component, two feeders: dev is fed by the VM, release by
   codegen — the component is the same.
 
-**Convergence status (as of the current tree — verified, not aspirational):**
+**Convergence status (as of the current tree — verified, not aspirational).**
+Two *independent* axes; do not conflate them:
 
-| Platform | Dev-tier state |
+**Axis 1 — in-place prop observation: BOTH PLATFORMS SATISFY §0.2.**
+The VM re-materializes a node's props in place and the UI reacts. The
+*mechanism* differs by necessity, and that is fine:
+
+| Platform | How in-place mutation is observed |
 |---|---|
-| Android | Converged. `ShadowNode` holds props in a Compose `MutableState` via `propsStateFactory`; `DirtyReconciler` implements `reconcileDirty`. |
-| iOS | **Not yet converged.** `adapters/ui-swift/Sources/FluxUIKit` is still a UIKit adapter kit (`Text`→`UILabel`, `Image`→`UIImageView`, `Router`→`UINavigationController`), and `FluxHostController`/`FluxAppMain` mount a real `UIView` tree keyed by node id. |
+| Android | Needs an explicit observable: props live in a Compose `MutableState` injected via `propsStateFactory`. A plain `var` is invisible to Compose's snapshot tracking, so the UI froze after the first frame (fixed in `6b61fa4`). |
+| iOS | Observes in-place tree mutation natively; no explicit state wrapper is required. |
 
-The iOS doc comments therefore *accurately describe the code that exists today*
-and intentionally still say "UIView tree". Do **not** rewrite them to claim
-observable-props materialization while the UIKit implementation is what ships —
-that would make the docs lie about the code. The iOS migration to the unified
-tier is real architectural work pending its own ADR; when it lands, update those
-comments and this table in the same change. Both kits remain adapter **contract
-version 1**, and the props contract (§3.2 derived indices, degrade-to-default)
-already holds on both platforms.
+`propsStateFactory` lives in `:host` precisely so this stays a *platform-neutral*
+injection point (no Compose-UI/Android-framework dep, so the JVM suites still
+run). Android is **not** "ahead" here and iOS is **not** missing a feature.
+
+**Axis 2 — the rendering tier: iOS HAS NOT converged.** This is the real
+divergence:
+
+| Platform | Dev rendering tier |
+|---|---|
+| Android | Declarative. `ShadowTreeRenderer` composes; `DirtyReconciler.reconcileDirty` touches only `dependents[S]`. |
+| iOS | **Still imperative.** `adapters/ui-swift/Sources/FluxUIKit` is a UIKit kit (`Text`→`UILabel`, `Image`→`UIImageView`, `Router`→`UINavigationController`); `ShadowTreeReconciler` keeps a parallel tree of live view objects it owns and mutates via `adapter.create()`/`destroy()`; `FluxHostController`/`FluxAppMain` mount a real `UIView` tree. 20 files import UIKit; effectively none import SwiftUI. |
+
+This is exactly the "dev implementation: imperative, drives UIView/View
+directly" model called superseded above — still live on iOS.
+
+Consequently the iOS doc comments *accurately describe the code that exists
+today* and intentionally still say "UIView tree". Do **not** rewrite them to
+claim a SwiftUI/declarative implementation that does not exist — that would make
+the docs lie about the code. The UIKit→SwiftUI port is real architectural work
+tracked in **ADR-0048**; when it lands, update those comments and this section in
+the same change. Both kits remain adapter **contract version 1**, and the props
+contract (§3.2 derived indices, degrade-to-default) already holds on both
+platforms.
 
 ### 0.3 Repository map
 
