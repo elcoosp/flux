@@ -4,7 +4,7 @@ import java.lang.ref.WeakReference
 import kotlin.collections.List as KList
 
 /**
- * The contract every dev adapter implements (Appendix F).
+ * The contract every dev adapter implements (AGENTS.md §3.5).
  *
  * An adapter maps one IR node kind to a native view: it [create]s the backing
  * [FluxNativeView], applies decoded [Props] in [update], manages the

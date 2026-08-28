@@ -4,7 +4,7 @@ import java.lang.ref.WeakReference
 import kotlin.collections.List as KList
 
 /**
- * Dev adapter for `Screen` (Appendix F.7).
+ * Declarative adapter for `Screen` (unified tier; AGENTS.md §3.5).
  *
  * Maps a Flux `Screen` node to a native screen container holding exactly one
  * content subtree (the screen's child). The screen's [nodeId] is its stable

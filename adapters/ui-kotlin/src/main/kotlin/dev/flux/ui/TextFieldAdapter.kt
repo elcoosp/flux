@@ -4,7 +4,7 @@ import java.lang.ref.WeakReference
 import kotlin.collections.List as KList
 
 /**
- * Dev adapter for `TextField` (Appendix F.5).
+ * Declarative adapter for `TextField` (unified tier; AGENTS.md §3.5).
  *
  * Maps a Flux `TextField` node to a native editable text view. The controlled
  * [text][PropsIndex.TEXT_FIELD_TEXT] is pushed on every [update]; when the

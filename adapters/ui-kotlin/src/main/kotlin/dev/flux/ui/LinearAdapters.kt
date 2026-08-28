@@ -4,7 +4,7 @@ import java.lang.ref.WeakReference
 import kotlin.collections.List as KList
 
 /**
- * Dev adapter for `Column` (Appendix F.3).
+ * Declarative adapter for `Column` (unified tier; AGENTS.md §3.5).
  *
  * Maps a Flux `Column` node to a vertical linear container. The [gap] spacing
  * is declared as a view property the host applies between children; the child
@@ -24,7 +24,7 @@ public class ColumnAdapter private constructor() : FluxLinearAdapter(orientation
 }
 
 /**
- * Dev adapter for `Row` (Appendix F.4).
+ * Declarative adapter for `Row` (unified tier; AGENTS.md §3.5).
  *
  * Maps a Flux `Row` node to a horizontal linear container. Identical contract
  * to [ColumnAdapter] modulo orientation.

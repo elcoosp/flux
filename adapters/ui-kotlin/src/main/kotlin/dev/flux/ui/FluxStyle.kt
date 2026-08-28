@@ -2,7 +2,7 @@ package dev.flux.ui
 
 /**
  * An RGBA color with channels in `[0, 1]`, mirroring the `Color` record
- * (Appendix F.1 `color: Option[Color]`). The Android runtime converts this to
+ * (`color: Option[Color]`). The Android runtime converts this to
  * an `android.graphics.Color` when binding a `FluxNativeView`.
  */
 public data class FluxColor(
@@ -24,8 +24,8 @@ public data class FluxColor(
 }
 
 /**
- * A font description, mirroring the `Font` record (Appendix F.1
- * `font: Option[Font]`). [weight] and [family] are optional; [size] is the
+ * A font description, mirroring the `Font` record
+ * (`font: Option[Font]`). [weight] and [family] are optional; [size] is the
  * point size in density-independent pixels.
  */
 public data class FluxFont(

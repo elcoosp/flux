@@ -4,7 +4,7 @@ import java.lang.ref.WeakReference
 import kotlin.collections.List as KList
 
 /**
- * Dev adapter for `Router` (Appendix F.6).
+ * Declarative adapter for `Router` (unified tier; AGENTS.md §3.5).
  *
  * Maps a Flux `Router` node to a native navigation-frame container. Its
  * children are `Screen` nodes; the ordered child list is the back-stack.

@@ -4,7 +4,7 @@ import java.lang.ref.WeakReference
 import kotlin.collections.List as KList
 
 /**
- * Dev adapter for `Image` (Appendix F.8).
+ * Declarative adapter for `Image` (unified tier; AGENTS.md §3.5).
  *
  * Maps a Flux `Image` node to a native image view, loading the bitmap from the
  * dev server's asset route (`http://localhost:7332/assets/<src>`). The adapter
@@ -17,11 +17,13 @@ import kotlin.collections.List as KList
  * Each node gets its own adapter instance via [create], so the resolved source
  * and dimensions never bleed into a sibling image (FLUX-007).
  *
- * Prop fields and their `PropIdx` (Appendix F.8 contract):
- * - `0 src: String` (required) — asset path relative to the project root.
- * - `1 width: Option[Float]`
- * - `2 height: Option[Float]`
- * - `3 contentMode: Option[String]` — `\"fill\"` (default), `\"fit\"`, `\"stretch\"`.
+ * Props are read by name; the index is the FNV-1a-32 digest of the name masked
+ * to `u16` ([PropsIndex.propIndexForName]), derived identically on server and
+ * client (AGENTS.md §3.2) — never a hardcoded positional index. Fields:
+ * - `src: String` (required) — asset path relative to the project root.
+ * - `width: Option[Float]`
+ * - `height: Option[Float]`
+ * - `contentMode: Option[String]` — `"fill"` (default), `"fit"`, `"stretch"`.
  */
 public class ImageAdapter private constructor() : FluxAdapter<FluxNativeView> {
     override val kind: String = KIND

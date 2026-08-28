@@ -4,7 +4,7 @@ import java.lang.ref.WeakReference
 import kotlin.collections.List as KList
 
 /**
- * Dev adapter for `Text` (Appendix F.1).
+ * Declarative adapter for `Text` (unified tier; AGENTS.md §3.5).
  *
  * Maps a Flux `Text` node to a native text view. In the Android runtime the
  * backing [FluxNativeView] wraps an `android.widget.TextView`; this adapter

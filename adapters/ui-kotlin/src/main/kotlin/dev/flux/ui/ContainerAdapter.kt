@@ -9,8 +9,8 @@ import kotlin.collections.List as KList
  *
  * Components carry no native presentation of their own — they are a named
  * subtree whose children do the real rendering — so this adapter backs them
- * with a neutral [FluxNativeView] that simply hosts their children (Appendix
- * F: a component is a container). This mirrors the iOS `ContainerAdapter`
+ * with a neutral [FluxNativeView] that simply hosts their children
+ * (a component is a container; AGENTS.md §3.5). This mirrors the iOS `ContainerAdapter`
  * (FLUX-008) and the SwiftUI dev runtime, which treats every `Component` node
  * as a plain container view.
  *
