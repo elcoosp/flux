@@ -203,3 +203,102 @@ fn router_example_emits_route_prop_and_navigate_call() {
     }
     assert_eq!(navigate_calls, 2, "both buttons must call Router.navigate");
 }
+
+/// LANE-B (device-only blind spot): a POSITIONAL `Screen("home")` arg is the
+/// documented trap. The dev-path reducer reconstructs `route` syntactically
+/// (`flux_parity::reduce::screen_route_from_args`), so dev/release parity stays
+/// GREEN, but the *lowered* IR carries the route at `PropIdx(0)` — NOT at
+/// `FNV-1a("route")` — so the iOS / Android host reconcilers' `route` lookup
+/// finds nothing and navigation silently never swaps on device (ADR-0045).
+///
+/// This gate inspects the ACTUAL lowered prop index (the true on-device
+/// contract) and pins the trap so it can never regress silently: a positional
+/// `Screen` must NOT emit a `route` prop keyed by `prop_index_for_name("route")`.
+/// If this ever becomes non-zero, either the compiler started lowering
+/// positional args to the named prop (closing the blind spot — the intended
+/// fix) or a regression hid the trap. The correct fix for authors is the NAMED
+/// `Screen(route:)` form (see `router_example_emits_route_prop_and_navigate_call`).
+#[test]
+fn positional_screen_does_not_emit_route_prop_at_fnv_index() {
+    // Mirror the B.3.5 navigation fixture surface (brace syntax), but with a
+    // POSITIONAL `Screen("home")` arg instead of a named `route:` prop. This is
+    // exactly the device-only trap: the reducer reconstructs `route` from the
+    // positional arg syntactically, so dev/release parity stays GREEN, but the
+    // *lowered* IR carries the route at `PropIdx(0)` — NOT at `FNV-1a("route")`.
+    let source = r#"compo App
+  Router {
+    Screen("home") {
+      Column(gap: 16) {
+        Text("Home")
+        Button(text: "Go to Settings", onClick: {
+          Router.navigate("settings")
+        })
+      }
+    }
+    Screen("settings") {
+      Column(gap: 16) {
+        Text("Settings")
+        Button(text: "Go to Home", onClick: {
+          Router.navigate("home")
+        })
+      }
+    }
+  }
+"#;
+    let (_ast, _typed, lowered) =
+        flux_parity::compile(source, 901).expect("positional router example compiles");
+
+    // Mirrors the node-locating helper above; the lowered IR represents
+    // `Router`/`Screen` as ordinary `Component` nodes matched by name.
+    let name_of = |lowered: &flux_ir::LoweredIr, id: flux_syntax::NodeId| -> String {
+        let cid = lowered.arena.get(id).expect("node").component_id();
+        lowered
+            .component_names
+            .iter()
+            .find(|(c, _)| *c == cid)
+            .map(|(_, name)| name.clone())
+            .expect("component name interned")
+    };
+
+    let route_prop_index = flux_ir::lower::prop_index_for_name("route");
+
+    let router_id = lowered
+        .arena
+        .all_ids()
+        .find(|id| name_of(&lowered, *id) == "Router")
+        .expect("lowered IR must contain a Router node");
+
+    let mut positional_route_props = 0usize;
+    for child in lowered
+        .arena
+        .get(router_id)
+        .expect("router node")
+        .children()
+    {
+        if let flux_syntax::Child::Node(screen_id) = child {
+            let screen = lowered.arena.get(screen_id).expect("screen node");
+            assert_eq!(
+                name_of(&lowered, screen_id),
+                "Screen",
+                "child of Router must be a Screen"
+            );
+            // The host reconcilers read the `route` prop at `FNV-1a("route")`
+            // (Android `ROUTE_PROP_INDEX`, iOS `routePropIndex`). A positional
+            // `Screen("home")` must NOT emit a prop under that index — that is
+            // the device-only trap this gate makes visible in Rust.
+            if screen
+                .props()
+                .fields()
+                .iter()
+                .any(|(idx, _)| *idx == route_prop_index)
+            {
+                positional_route_props += 1;
+            }
+        }
+    }
+
+    assert_eq!(
+        positional_route_props, 0,
+        "POSITIONAL Screen must NOT carry a `route` prop at FNV-1a(\"route\") — the device-only blind spot"
+    );
+}
