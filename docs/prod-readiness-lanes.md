@@ -133,14 +133,26 @@ I **Compliance & docs** — error hierarchy, security sandboxing, prod deploymen
 
 ## 3. Dispatch waves (stagger 3–4, per parallel-agent-orchestration)
 
+> **WAVE SEQUENCING RULE (hard):** a wave is NOT "done" until every agent in it has
+> its tests GREEN and its commit landed (atomic `--only`). The next wave MUST NOT be
+> dispatched until the prior wave's green commits are in `main`. Reason: Wave 2/3 touch
+> `runtimes/*` and `flux-cli`, which Wave 1 does not — but Wave 1's capability/error
+> lanes establish the contracts (registry shape, error taxonomy) Wave 2's async/device
+> lanes consume. Starting Wave 2 before Wave 1 lands risks the async resolver keying off
+> a capability shape that is still moving. Verify prior-wave green with `cargo nextest`
+> (Rust) + `./gradlew :runtimes:android:host:test` + `xcodebuild -scheme FluxApp test`
+> (native) before launching the next wave. Re-check `git status --short` for in-flight
+> owners of `runtimes/*` at each dispatch (collision rule).
+
 - **Wave 1 (independent, dir-disjoint):** LANE-C (caps), LANE-D (fuzzing),
   LANE-H (perf), LANE-I (errors). No shared dirs; all can run now.
-- **Wave 2 (after Wave 1, depends on runtime dirs being free):** LANE-A (async
+- **Wave 2 (after Wave 1 green + runtimes dirs free):** LANE-A (async
   resolver), LANE-B (device blind spots), LANE-E (build gate). These touch
-  `runtimes/*` — ensure no other agent holds them at dispatch.
-- **Wave 3 (structural, coordinate with orchestrator re: R2):** LANE-F (packaging),
-  LANE-G (distribution/guides). Android native suite is runnable NOW via `./gradlew`
-  (root wrapper present) — Wave 2 Android lanes (A/B/E) can verify here, not only in CI.
+  `runtimes/*` + `crates/flux-cli` — ensure no other agent holds them at dispatch.
+- **Wave 3 (after Wave 2 green, coordinate with orchestrator re: R2):** LANE-F
+  (packaging), LANE-G (distribution/guides). Android native suite is runnable NOW via
+  `./gradlew` (root wrapper present) — Wave 2 Android lanes (A/B/E) verify here, not
+  only in CI.
 
 ## 4. Explicitly OUT OF SCOPE (already done or not blocking MVP→prod)
 - Lowering 10/10 B.3 (DONE), async wire bridge (DONE), capability handshake (DONE),
@@ -150,5 +162,5 @@ I **Compliance & docs** — error hierarchy, security sandboxing, prod deploymen
 ## 5. Verification gates per lane (do NOT claim green without these)
 - Rust lanes: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo nextest`, `cargo doc`.
 - iOS lane: `xcodebuild -scheme FluxApp test` on iPhone 17 Pro sim (SwiftLint/treat-warnings).
-- Android lane: `./gradlew :host:test` (requires wrapper from Lane F first).
+- Android lane: `./gradlew :host:test` (root wrapper present — runs here).
 - Capability lanes: round-trip test on BOTH hosts + `call_cap_basic` oracle vector intact.
