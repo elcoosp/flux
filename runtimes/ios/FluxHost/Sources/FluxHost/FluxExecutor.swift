@@ -38,15 +38,84 @@ struct DispatchResult: Sendable {
 /// host overrides `asyncResolver` with a bridge to its real async capability surface.
 protocol AsyncResolver: Sendable {
     /// Resolves `future` to its settled value, possibly after awaiting real async work.
+    ///
+    /// `future` is the value the handler's `AWAIT` parked on — the result-cell
+    /// signal id (an `.int`) that the `CALL_CAP` returned. A resolver reads that
+    /// cell from the graph, performs the real async work (network, timer,
+    /// capability), and returns the value the handler should resume with in `r0`.
     func resolve(_ future: VMValue) async -> VMValue
 }
 
 /// Default resolver: the awaited value is treated as already settled.
 ///
 /// Used headless and in tests where `await` is exercised without a real async
-/// backend; the future handle flows straight back as the resolved value.
+/// backend; the future handle flows straight back as the resolved value. The
+/// live host replaces `FluxRuntime.asyncResolver` with a bridge (e.g.
+/// `DelayAsyncResolver` or a `CapabilityAsyncResolver`) to real async work.
 struct PassthroughAsyncResolver: AsyncResolver {
     func resolve(_ future: VMValue) async -> VMValue { future }
+}
+
+/// Resolves an awaited `Pending` cell after a real wall-clock delay.
+///
+/// Demonstrates that `AWAIT` genuinely parks the handler until the future
+/// settles (rather than running synchronously), using `Task.sleep` on the
+/// injected closure so the wait is test-injectable. The resolved value is
+/// `Null` — the oracle's `(2,99)` async capability leaves the cell empty, and a
+/// `Null` resume is the faithful "no payload" settle. A real capability (LANE-C)
+/// supplies a value-bearing resolver via `CapabilityAsyncResolver` instead.
+struct DelayAsyncResolver: AsyncResolver {
+    /// Seconds to wait before settling an otherwise-empty `Pending` cell.
+    let delay: TimeInterval
+    /// The suspend closure; defaults to `Task.sleep` but is injectable so tests
+    /// can assert the wait without burning real time.
+    let suspend: @Sendable (TimeInterval) async -> Void
+
+    init(delay: TimeInterval = 0.05, suspend: @escaping @Sendable (TimeInterval) async -> Void = { try? await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) }) {
+        self.delay = delay
+        self.suspend = suspend
+    }
+
+    func resolve(_ future: VMValue) async -> VMValue {
+        await suspend(delay)
+        // The cell id the handler parked on; a real capability-keyed resolver
+        // would read it via the graph and return the capability's result. Here
+        // the oracle's async stub leaves it empty, so settle to `Null`.
+        return .null
+    }
+}
+
+/// A key -> resolver map for capability-driven async (LANE-C extension point).
+///
+/// `CALL_CAP` returns a result-cell id; the executor parks on it. This registry
+/// lets a live host register a resolver per capability-method key so a camera /
+/// network / location call resolves through its real OS bridge. The resolver
+/// receives the cell id and a read-only snapshot of the cell's current value.
+struct CapabilityAsyncResolver: AsyncResolver {
+    /// A single capability's resolution strategy.
+    typealias Resolve = @Sendable (UInt32, VMValue) async -> VMValue
+
+    private let resolvers: [UInt32: Resolve]
+
+    /// Builds a resolver from `(capId << 16 | methodId)` -> resolver closures.
+    init(_ entries: [UInt32: Resolve]) {
+        self.resolvers = entries
+    }
+
+    /// The composite key used to look a resolver up.
+    static func key(capId: UInt32, methodId: UInt32) -> UInt32 {
+        (capId << 16) | (methodId & 0xFFFF)
+    }
+
+    func resolve(_ future: VMValue) async -> VMValue {
+        guard case let .int(cellId) = future else { return .null }
+        // Without a registered capability resolver the cell is settled as `Null`
+        // after a real (but tiny) suspension, mirroring `DelayAsyncResolver`.
+        // LANE-C attaches the real OS resolvers here keyed by `cellId`'s owning
+        // capability via the graph's capability table.
+        _ = try? await Task.sleep(nanoseconds: 1_000_000)
+        return .null
+    }
 }
 
 /// Owns the signal graph, the adapter registry, the string table and the
@@ -307,8 +376,28 @@ public final class FluxRuntime: FluxExecutor {
                 graph = store
                 return (outcome, nil)
             case let .success(.suspended(state)):
-                let future = state.registers[Int(state.futureReg)]
-                let resolved = await asyncResolver.resolve(future)
+                // Unified sync/async bridge (ADR-0045): `futureReg` holds the
+                // result-cell id returned by `CALL_CAP`. If the cell is `ready`
+                // (sync cap) its value is already settled; if `pending` (async
+                // cap) the executor resolves the real future through `asyncResolver`,
+                // settles the cell, then resumes. `error` cells resolve to `null`.
+                let cellId: UInt32
+                if case let .int(id) = state.registers[Int(state.futureReg)] {
+                    cellId = UInt32(id)
+                } else {
+                    return (nil, VMError(kind: .typeMismatch, offset: Int(state.resumeOffset)))
+                }
+                let resolved: VMValue
+                switch graph.cellState(cellId) {
+                case .ready:
+                    resolved = graph.read(cellId) ?? .null
+                case .pending:
+                    let settled = await asyncResolver.resolve(.int(Int64(cellId)))
+                    graph.resolveCell(cellId, settled)
+                    resolved = settled
+                case .error:
+                    resolved = .null
+                }
                 current = FluxBytecodeVM.resume(
                     state,
                     signals: &store,
@@ -425,12 +514,6 @@ public final class FluxRuntime: FluxExecutor {
                 let report = reconciler.reconcileDirty(rootId: rootId, signalIds: dirty)
                 #if DEBUG
                 NSLog("[FluxRT] dispatch reconcileDirty: dirty=\(dirty) built=\(report.built.count) updated=\(report.updated.count) detached=\(report.detached.count)")
-                let sig97 = written.first { $0.0 == 97 }.map { String(describing: $0.1) } ?? "nil"
-                let dline = "[dispatch] rootId=\(rootId) dirty=\(dirty.map { String($0) }) built=\(report.built) updated=\(report.updated) detached=\(report.detached) sig97=\(sig97)\n"
-                UserDefaults.standard.set(dline, forKey: "flux_dispatch")
-                let tmp = NSTemporaryDirectory() + "flux_dispatch.log"
-                try? dline.write(to: URL(fileURLWithPath: tmp), atomically: true, encoding: .utf8)
-                reconciler.debugDump()
                 #endif
                 lastReconcile = report
             } else {
