@@ -203,7 +203,7 @@
       </g>
       <g class="node" data-id="iosexec" data-lane="ios">
         <rect x="50" y="686" width="560" height="52" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
-        <text x="64" y="706" fill="#f8fafc" font-size="11.5">FluxRuntime : FluxExecutor — apply / dispatch</text>
+        <text x="64" y="706" fill="#f8fafc" font-size="11.5">FluxExecutor — apply / dispatch</text>
         <text x="64" y="722" fill="#cbd5e1" font-size="9.5">FluxExecutor.swift:370 dispatch(_:) · caches [Instruction] (R3)</text>
         <text x="64" y="734" fill="#e2e8f0" font-size="9.5">reconcileDirty only signal-dependent subtrees (R1)</text>
       </g>
@@ -219,7 +219,7 @@
       </g>
       <g class="node" data-id="iosvalue" data-lane="ios">
         <rect x="339" y="814" width="255" height="44" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
-        <text x="353" y="833" fill="#f8fafc" font-size="11.5">VMValue (D.5)</text>
+        <text x="353" y="833" fill="#f8fafc" font-size="11.5">FluxValue (D.5)</text>
         <text x="353" y="848" fill="#a78bfa" font-size="9.5">int/float/bool/str/list/record</text>
       </g>
       <g class="node" data-id="iosrecon" data-lane="ios">
@@ -338,7 +338,7 @@
     </div>
     <div class="mini"><div class="mini-h"><div class="d" style="background:#a78bfa"></div><h3>Shared Model &amp; Parity</h3></div>
       <ul>
-        <li>VMValue tag set 0x00–0x07 is the wire contract (Swift/Kotlin/Rust)</li>
+        <li>FluxValue tag set 0x00–0x07 is the wire contract (Swift/Kotlin/Rust)</li>
         <li>flux-vm-ref is the oracle; both native VMs conform via ISA vectors</li>
         <li>flux build → idiomatic SwiftUI / Compose from same LoweredIr</li>
         <li>flux-parity reduces dev-VM trace + both codegen outputs to one ViewNode</li>
@@ -398,7 +398,7 @@ const NODES = {
     summary:"Turns raw bytes into a FluxFrame (root, extraNodes, state seed, strings, component_names, closures, signal_meta). Mirrors the Rust serializer exactly — the same D layout on both ends.",
     fns:[["fn","decode([UInt8])->FluxFrame","full decode"],["struct","WireModels","Node/Prop/Patch mirrors"]],
     notes:["Feeds string table + component-name table into the reconciler separately (D.9 id spaces never collide).","signal_meta sliced by content hash (mirrors Android)."]},
-  iosexec:{title:"iOS · FluxRuntime (FluxExecutor)", loc:"runtimes/ios/FluxHost/Sources/FluxHost/FluxExecutor.swift:370 dispatch(_:)", tags:["iOS","@MainActor","R1","R3"],
+  iosexec:{title:"iOS · FluxExecutor", loc:"runtimes/ios/FluxHost/Sources/FluxHost/FluxExecutor.swift:370 dispatch(_:)", tags:["iOS","@MainActor","R1","R3"],
     summary:"@MainActor hub. Applies decoded frames, caches decoded [Instruction] per handler (R3) so the hot path never re-decodes, folds VM-written signals into the graph, then reconcileDirty walks only signal-dependent subtrees.",
     fns:[["fn","dispatch(_ event)","evaluate → fold → reconcileDirty"],["fn","runHandlerAsync","resumable AWAIT loop (ADR-0044)"],["fn","registerHandler","decode once, cache (R3)"]],
     notes:["No VM error escapes: faults captured into lastError → error overlay.","On a tap, dirty set = written ∩ graph; only dependent nodes re-render.","AsyncResolver settles futures (sync pass-through in tests)."]},
@@ -410,10 +410,10 @@ const NODES = {
     summary:"The reactive core, confined to the main actor (mirror of Android's ReactiveDispatcher). SignalStore impl; observe() drives native view mutations. sendable-safe graph shared by reference into the VM (no existential boxing on the hot path).",
     fns:[["fn","write(id,value)","propagate to observers"],["fn","read(id)","resolve cell"],["fn","observe(id,cb)","R-graph subscription"]],
     notes:["Host-authoritative state (ADR-0002): taps evaluated locally, no server round trip per tap.","Result-cell signals allocated for async capabilities."]},
-  iosvalue:{title:"iOS · VMValue (D.5)", loc:"runtimes/ios/FluxHost/Sources/FluxHost/FluxValue.swift", tags:["iOS","wire","D.5"],
+  iosvalue:{title:"iOS · FluxValue (D.5)", loc:"runtimes/ios/FluxHost/Sources/FluxHost/FluxValue.swift", tags:["iOS","wire","D.5"],
     summary:"The value vocabulary on the wire and in the VM: int / float / bool / str / list / record. Tag set 0x00–0x07 is the contract shared by Swift, Kotlin and Rust so a value serialized on one host deserializes identically on the other.",
-    fns:[["enum","VMValue","Null/Int/Float/Bool/Str/List/Record"],["fn","toData()/fromBytes()","D.5 encoding"]],
-    notes:["Record fields are (PropIdx,VMValue) — same framing as Rust Value::Record.","Str carries canonical StringId (< ceiling) resolved via interner."]},
+    fns:[["enum","FluxValue","Null/Int/Float/Bool/Str/List/Record"],["fn","toData()/fromBytes()","D.5 encoding"]],
+    notes:["Record fields are (PropIdx,FluxValue) — same framing as Rust Value::Record.","Str carries canonical StringId (< ceiling) resolved via interner."]},
   iosrecon:{title:"iOS · ShadowTreeReconciler", loc:"runtimes/ios/FluxHost/Sources/FluxHost/ShadowTreeReconciler.swift:351 reconcileDirty", tags:["iOS","reconcile","G6"],
     summary:"Keyed reconciler over the deserialized shadow tree, driving real FluxUIKit adapters. Nodes matched by stable NodeId; Splice children by u64 key. New nodes → create(); changed → update() in place; removed → destroy(). Preserves view identity across pushes/pops.",
     fns:[["fn","apply(_ frame)","full build or patch replay"],["fn","reconcileDirty(rootId,nodes,signalIds)","only dependents[S] revisited"],["fn","materializeProps","run prop thunk against live graph"]],
@@ -439,7 +439,7 @@ const NODES = {
     fns:[["fun","write(id,value)","resolve cell → Ready"],["fun","read(id)","current value"],["fun","cellState(id)","Ready/Pending/Error"]],
     notes:["Also the VM's SignalStore (same object threaded into run).","Lifecycle hooks (onMount/onCleanup) run through the same VM."]},
   andvalue:{title:"Android · FluxValue (D.5)", loc:"runtimes/android/host/src/main/kotlin/dev/flux/host/vm/FluxValue.kt", tags:["Android","wire","D.5"],
-    summary:"The value vocabulary mirror of iOS VMValue: NullVal/IntVal/FloatVal/BoolVal/StrVal/ListVal/RecordVal. Tag set 0x00–0x07 is the shared wire contract so values cross hosts losslessly.",
+    summary:"The value vocabulary mirror of iOS FluxValue: NullVal/IntVal/FloatVal/BoolVal/StrVal/ListVal/RecordVal. Tag set 0x00–0x07 is the shared wire contract so values cross hosts losslessly.",
     fns:[["sealed","FluxValue","7 variants"],["fun","toVmValue/fromVmValue","kit↔vm"]],
     notes:["Record fields (PropIdx, FluxValue).","StrVal carries canonical StringId resolved via StringInterning (INV-1)."]},
   andrecon:{title:"Android · ShadowTree.reconcileDirty", loc:"runtimes/android/host/src/main/kotlin/dev/flux/host/shadow/DirtyReconciler.kt:48", tags:["Android","reconcile","R1","G6"],

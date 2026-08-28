@@ -9,7 +9,7 @@
 - `runtimes/android/host/src/main/kotlin/dev/flux/host/vm/wire/HelloFrame.kt`
 - `runtimes/android/host/src/test/kotlin/dev/flux/host/RuntimeFixesTest.kt` (add round-trip tests)
 - `stdlib/capabilities.flux`
-**Consumed (read-only):** `flux-syntax::Value`/`VMValue` shapes; `stdlib/capabilities.flux`
+**Consumed (read-only):** `flux-syntax::Value`/`FluxValue` shapes; `stdlib/capabilities.flux`
 cap/method id table. Do NOT edit any VM dispatch site (`FluxBytecodeVM.swift`,
 `StepResult.kt`, `Opcode.kt`, `flux-vm-ref/src/vm.rs`) — capability registry/Hello/stdlib
 are YOUR lane; VM lowering/dispatch is NOT (per flux-capabilities skill, R-unsafe list).

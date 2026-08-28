@@ -7,7 +7,7 @@ Do NOT delegate; Louis runs this.
   drives it; keep `FluxApp` as the demo host — `FluxAppMain.swift` stays `@main` demo)
 - `runtimes/android/**` (ensure `:runtimes:android:host` is a library module a consumer app
   can `implementation(project(":runtimes:android:host"))`; verify `:app` consumes it)
-**Consumed (read-only):** the engine public surface (`FluxRuntime`/`FluxExecutor`,
+**Consumed (read-only):** the engine public surface (`FluxExecutor`/`FluxExecutor`,
 `AdapterRegistry`, `SignalGraph`) already in `FluxHost` (SwiftPM lib, `Package.swift:23`).
 **R2 (frozen manifests):** `settings.gradle.kts` + `gradle/wrapper` ALREADY exist at repo
 root (incl. `:runtimes:android:host` + `:app`) — do NOT recreate them. The wrapper is present,
@@ -19,7 +19,7 @@ RUN HERE. Your task is the engine/library split, not the wrapper.
   and `FluxAppMain.swift` `@main` is a thin SwiftUI `App` that imports `FluxHost`. So the
   engine is already importable; the remaining gap (ADR-0036) is (a) a clear "consumer embeds
   FluxHost" sample and (b) ensuring NO app-shell singleton leaks into `FluxHost` (the engine
-  must be drivable headlessly, which `FluxRuntime(graph:registry:)` already allows).
+  must be drivable headlessly, which `FluxExecutor(graph:registry:)` already allows).
 - Android: `:host` (pure-JVM reactive core) and `:app` (Compose shell) are separate modules;
   `FluxSession.kt:55` builds `FluxExecutor` via the primary ctor. A consumer app can already
   `implementation(project(":runtimes:android:host"))`. Verify this compiles; close any leak

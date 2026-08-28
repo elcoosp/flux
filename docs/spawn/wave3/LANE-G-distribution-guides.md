@@ -31,7 +31,7 @@ packaging (LANE-F), `:host` AAR output (LANE-F). No manifest edits (R2).
    (`./gradlew :runtimes:android:host:bundleReleaseAar`), and upload them as release artifacts.
    Pin the artifact version to the runtime release tag.
 3. **Embed guide.** Write `docs/embed-flux.md`: a consumer app `import FluxHost` (iOS) /
-   `implementation(project(":runtimes:android:host"))` (Android), wires `FluxRuntime` to a
+   `implementation(project(":runtimes:android:host"))` (Android), wires `FluxExecutor` to a
    `FluxRootView` / `FluxTreeView`, and connects to a dev server or loads `Generated/`.
 4. **Versioning ADR** (create-only): ratify that `PROTOCOL_VERSION` is bumped on any wire/IR
    change and that hosts MUST fail-closed (item 1).
