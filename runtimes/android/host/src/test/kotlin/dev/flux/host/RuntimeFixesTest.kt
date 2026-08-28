@@ -923,6 +923,88 @@ fun `primary-ctor executor dispatches Router navigate and swaps the screen`() =
         assertEquals(3u, tree.activeChildOf(router)?.id, "real app tap must swap to the settings screen")
     }
 
+/**
+ * LANE-B device-only blind spot: a POSITIONAL `Screen("home")` lowers its route
+ * to prop index 0, NOT `FNV-1a("route")`. The host reconciler's `routeOf` reads
+ * the `route` prop at `ROUTE_PROP_INDEX` (FNV-1a), finds nothing, and navigation
+ * silently never swaps (ADR-0045). This test pins the trap on-device: with the
+ * route carried at positional index 0, a real `Router.navigate` tap must NOT
+ * swap the visible screen — it stays on the first child (home, id 2). If this
+ * ever starts swapping, the compiler began lowering positional args to the named
+ * prop (closing the blind spot — the intended fix). The correct author fix is the
+ * NAMED `Screen(route:)` form (see the G7 tests above).
+ */
+@Test
+fun `positional screen route at index 0 never swaps on navigate`() =
+    runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val signals = SignalGraph()
+        val homeId = 10u
+        val settingsId = 11u
+
+        val bytes =
+            FrameBuilder()
+                .apply {
+                    magic()
+                    version(1)
+                    seq(0)
+                    flags(fullTree = true, hasPure = false)
+                    patchCount(0)
+                    handlerCount(0)
+                    stringCount(stdlibEntries.size + 2)
+                    for ((id, kind) in stdlibEntries) stringEntry(id, kind)
+                    stringEntry(homeId, "home")
+                    stringEntry(settingsId, "settings")
+                    node(id = 1u, kind = 0x12u, component = 600u, props = emptyList(), childIds = listOf(2u, 3u))
+                    // POSITIONAL form: route at prop index 0, not FNV-1a("route").
+                    node(id = 2u, kind = 0x12u, component = 500u, props = listOf(0u.toUShort() to WireValue.StrVal(homeId)), childIds = emptyList())
+                    node(id = 3u, kind = 0x12u, component = 500u, props = listOf(0u.toUShort() to WireValue.StrVal(settingsId)), childIds = emptyList())
+                }.build()
+
+        val tree = ShadowTree(AdapterRegistry.fromStringTable(stdlibEntries.map { (id, k) -> StringTableEntry(id, k) }))
+        val transport = MockTransport()
+        val executor = FluxExecutor(tree, signals, transport, vmScope = scope, reactiveDispatcher = ReactiveDispatcher.test(dispatcher))
+        executor.onError = { error("executor error: $it") }
+        executor.receiveFrame(bytes)
+        dispatcher.scheduler.runCurrent()
+
+        val router = tree.rootNode ?: error("router root not built")
+        assertEquals(2u, tree.activeChildOf(router)?.id, "default visible screen should be home")
+
+        // A real tap of "Go to Settings": LOAD_STR_CONST r0, settingsId ; CALL_CAP r1, (3,1), args=r0 ; HALT.
+        val navigateBytecode =
+            byteArrayOf(
+                0xB3.toByte(), // LOAD_STR_CONST
+                0, // result reg r0
+                (settingsId and 0xFFu).toByte(),
+                0,
+                0,
+                0, // string id = settingsId (u32 LE)
+                0x90.toByte(), // CALL_CAP
+                1, // result reg r1
+                3,
+                0,
+                0,
+                0, // capId = 3
+                1,
+                0, // methodId = 1
+                0, // args reg r0
+                0x00, // HALT
+            )
+        executor.registerClosure(100u, navigateBytecode)
+        executor.dispatch(100u, dev.flux.host.vm.FluxValue.NullVal)
+        dispatcher.scheduler.runCurrent()
+
+        // The route prop is at the wrong index, so the reconciler cannot match it
+        // to signal 97 → navigation is a no-op and the first screen stays visible.
+        assertEquals(
+            2u,
+            tree.activeChildOf(router)?.id,
+            "POSITIONAL screen route must NOT swap — documents the device-only blind spot",
+        )
+    }
+
 /** FNV-1a (32-bit) hash of "route", matching the wire's `prop_index_for_name`. */
 private fun fnv1aRoutePropIndex(): UShort {
     var h: UInt = 0x811c9dc5u
