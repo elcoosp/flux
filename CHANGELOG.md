@@ -58,6 +58,14 @@ The host halves (iOS/Android `resume` call sites, and the codegen `Task {}` /
 `suspend` emission) are not in this change; they live in the runtime and codegen
 directories owned by other in-flight work.
 
+`flux-parity/tests/async_resume_wire.rs` closes the loop against the *real*
+reference VM rather than a hand-built state: a handler whose `CALL_CAP` hits the
+async capability parks on a `Pending` cell, its `SuspendState` crosses the
+`AwaitSuspend`/`Resume` frames, and `resume` reaches `Halt` with the awaited
+value in `r0`. It also pins the two properties a host could plausibly get wrong —
+a write made *before* the await is replayed rather than dropped, and a non-`Int`
+payload survives the codec.
+
 ### Roadmap Phase 5 — host intern fallback: secondary id region
 
 `HostStrings` now allocates from two disjoint regions below the canonical
