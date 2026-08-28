@@ -108,17 +108,6 @@ public final class FluxRuntime: FluxExecutor {
     /// attached (e.g. headless tests).
     public var onTreeChanged: (@MainActor () -> Void)?
 
-    #if DEBUG
-    /// DEBUG-only: dispatches a button handler by id, used by the host's
-    /// synthetic long-press so navigation can be exercised without relying on
-    /// `simctl io tap` (which doesn't deliver synthetic touches to this
-    /// SwiftUI-hosted app). Kept here because `FluxEvent` is a `FluxHost` type
-    /// not visible from the `Host` presentation module.
-    public func debugDispatch(handlerId: UInt32, nodeId: UInt32) {
-        dispatch(FluxEvent(handlerId: handlerId, nodeId: nodeId))
-    }
-    #endif
-
     /// Creates an executor backed by `graph` and an `AdapterRegistry` built from
     /// `table`.
     public init(graph: SignalGraph, registry: AdapterRegistry) {
@@ -250,11 +239,6 @@ public final class FluxRuntime: FluxExecutor {
         // rebuilds the tree, while a patch frame (root == nil) applies only its
         // patches. The reconciler no-ops the tree build when root is absent.
         let report = reconciler.apply(frame)
-        #if DEBUG
-        let dbg = FileManager.default.temporaryDirectory.appendingPathComponent("flux_apply.log")
-        try? "[apply] rootId=\(currentRootId.map { String($0) } ?? "nil") built=\(report.built.count)\n".write(to: dbg, atomically: true, encoding: .utf8)
-        UserDefaults.standard.set("[apply] rootId=\(currentRootId.map { String($0) } ?? "nil") built=\(report.built.count)\n", forKey: "flux_apply")
-        #endif
         #if DEBUG
         NSLog("[FluxRT] apply: rootId=\(currentRootId.map { String($0) } ?? "nil") rootViewBuilt=\(reconciler.rootView != nil) built=\(report.built.count) updated=\(report.updated.count)")
         #endif
@@ -441,10 +425,18 @@ public final class FluxRuntime: FluxExecutor {
                 let report = reconciler.reconcileDirty(rootId: rootId, signalIds: dirty)
                 #if DEBUG
                 NSLog("[FluxRT] dispatch reconcileDirty: dirty=\(dirty) built=\(report.built.count) updated=\(report.updated.count) detached=\(report.detached.count)")
-                UserDefaults.standard.set("[dispatch] rootId=\(rootId) dirty=\(dirty) built=\(report.built) updated=\(report.updated) detached=\(report.detached)\n", forKey: "flux_dispatch")
+                let sig97 = written.first { $0.0 == 97 }.map { String(describing: $0.1) } ?? "nil"
+                let dline = "[dispatch] rootId=\(rootId) dirty=\(dirty.map { String($0) }) built=\(report.built) updated=\(report.updated) detached=\(report.detached) sig97=\(sig97)\n"
+                UserDefaults.standard.set(dline, forKey: "flux_dispatch")
+                let tmp = NSTemporaryDirectory() + "flux_dispatch.log"
+                try? dline.write(to: URL(fileURLWithPath: tmp), atomically: true, encoding: .utf8)
+                reconciler.debugDump()
                 #endif
                 lastReconcile = report
             } else {
+                #if DEBUG
+                UserDefaults.standard.set("[dispatch] rootId=\(currentRootId.map { String($0) } ?? "nil") dirty=[] (no signals written) built=[] updated=[] detached=[]\n", forKey: "flux_dispatch")
+                #endif
                 lastReconcile = ReconcileReport()
             }
             // A signal-dependent reconcile may have re-parented native views; the

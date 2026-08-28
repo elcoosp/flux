@@ -59,6 +59,19 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.flux.FluxApp
         TARGETED_DEVICE_FAMILY: "1,2"
 
+  FluxAppUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: TestsUI
+        createIntermediateGroups: true
+    dependencies:
+      - target: FluxApp
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: FluxApp
+
   FluxAppTests:
     type: bundle.unit-test
     platform: iOS

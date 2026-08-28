@@ -53,11 +53,15 @@ struct FluxRootView: View {
         let registry = AdapterRegistry(table: table)
         let runtime = FluxRuntime(graph: SignalGraph(), registry: registry)
         let connection = HostConnectionState()
-        // Dev server endpoint, configurable via the `FLUX_WS_URL` Info.plist key
-        // (defaults to the local loopback). For a simulator or device that cannot
-        // reach the Mac's loopback, set this to `ws://<mac-lan-ip>:7331`.
-        let wsUrlString =
-            (Bundle.main.object(forInfoDictionaryKey: "FLUX_WS_URL") as? String)
+        // Dev server endpoint. Resolution order:
+        //   1. `FLUX_WS_URL` launch environment variable (lets a simulator or
+        //      physical device reach the Mac's LAN IP without rebuilding the app),
+        //   2. the `FLUX_WS_URL` Info.plist key (CI / pre-provisioned builds),
+        //   3. loopback default.
+        // A simulator or device that cannot reach the Mac's loopback should be
+        // launched with `FLUX_WS_URL=ws://<mac-lan-ip>:7331` (see AGENTS.md §3.9).
+        let wsUrlString = ProcessInfo.processInfo.environment["FLUX_WS_URL"]
+            ?? (Bundle.main.object(forInfoDictionaryKey: "FLUX_WS_URL") as? String)
             ?? "ws://127.0.0.1:7331"
         guard let wsUrl = URL(string: wsUrlString) else {
             fatalError("FLUX_WS_URL is not a valid WebSocket URL: \(wsUrlString)")

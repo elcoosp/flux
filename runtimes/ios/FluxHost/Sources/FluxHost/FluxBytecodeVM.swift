@@ -969,6 +969,7 @@ enum FluxBytecodeVM {
                 let budget = instr.u32(0)
                 if gas < budget { return .failure(.gasExhausted(offset: instr.offset)) }
             }
+            ip = nextIP
         }
         } catch let err as VMError {
             return .failure(err)
