@@ -83,11 +83,20 @@ impl Backend for Kotlin {
         "}".to_owned()
     }
 
-    fn button_open(handler: &str) -> String {
-        format!("Button(onClick = {{ {handler} }}) {{")
+    fn button_open(name: &str, handler: &str) -> String {
+        match name {
+            "CupertinoButton" => {
+                format!("Button(onClick = {{ {handler} }}, shape = RoundedCornerShape(12.dp)) {{")
+            }
+            _ => format!("Button(onClick = {{ {handler} }}) {{"),
+        }
     }
 
-    fn text_field(value: &str, on_change: &str) -> String {
+    fn button_style(_name: &str) -> &'static str {
+        ""
+    }
+
+    fn text_field(value: &str, on_change: &str, placeholder: &str) -> String {
         let value = if value.is_empty() {
             "\"\"".to_owned()
         } else {
@@ -98,7 +107,13 @@ impl Backend for Kotlin {
         } else {
             on_change.to_owned()
         };
-        format!("TextField(value = {value}, onValueChange = {{ {on_change} }})")
+        if placeholder.is_empty() {
+            format!("TextField(value = {value}, onValueChange = {{ {on_change} }})")
+        } else {
+            format!(
+                "TextField(value = {value}, onValueChange = {{ {on_change} }}, placeholder = {{ Text(\"{placeholder}\") }})"
+            )
+        }
     }
 
     fn key_extractor(key: &Expr) -> String {

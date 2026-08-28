@@ -100,10 +100,15 @@ declarative **primitive registry**, and reduce the two release backends to thin
 ### Negative / trade-offs
 
 - `flux-codegen-core` is a new workspace member and a new dependency edge for both backends.
-- The six `Other` primitives are still emitted as bare calls (no native shaping). This is a
-  deliberate, documented stop-gap that preserves the committed parity baseline; real
-  `CupertinoButton`/`MaterialButton`/`TextField`/`Provider`/`When`/`Switch` shaping is future work
-  blocked on their dev-model semantics (issue FLUX-047 follow-up).
+- The six previously-bare primitives now have real native shaping: `CupertinoButton` /
+  `MaterialButton` lower to styled native `Button`s (SwiftUI `.buttonStyle(.bordered)` /
+  `.buttonStyle(.borderedProminent)`; Compose `RoundedCornerShape(12.dp)`), `TextField`
+  lowers to a native editable field bound to `text`/`onChange` with an optional
+  `placeholder`, and `Provider` lowers to a child-bearing wrapper. `When` / `Switch`
+  are control-flow forms: they lower to `NodeKind::If` / `NodeKind::Match` and are
+  emitted structurally by `emit_if` / `emit_match`, so they never reach `emit_primitive`
+  as a primitive call. `CupertinoButton` / `MaterialButton` normalize to `Button` in the
+  parity contract so the release output compares equal to the dev surface AST.
 - One parity snapshot (`parity_b38_platform`) was regenerated: the unified `render_expr` spells an
   unsupported `platform() == "ios"` condition as `( 0 /* unsupported */ == "ios" )` rather than the
   old `( /* unsupported expr */ 0 == "ios" )`. The structural parity contract is unchanged; only the

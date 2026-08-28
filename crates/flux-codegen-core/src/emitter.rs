@@ -325,9 +325,28 @@ impl<'a, B: Backend> Emitter<'a, B> {
             PrimitiveKind::Button => {
                 let label = Self::render_button_label(args, trailing.as_deref());
                 let handler = Self::collect_handler(args);
-                self.line(indent, &B::button_open(&handler));
+                self.line(indent, &B::button_open(spec.flux_name, &handler));
                 self.line(indent + B::CHILD_STEP, &format!("Text({label})"));
-                self.line(indent, "}");
+                let style = B::button_style(spec.flux_name);
+                if style.is_empty() {
+                    self.line(indent, "}");
+                } else {
+                    self.line(indent, &format!("}}{style}"));
+                }
+            }
+            PrimitiveKind::TextField => {
+                let value = props
+                    .get("text")
+                    .or_else(|| props.get("value"))
+                    .map(String::as_str)
+                    .unwrap_or("");
+                let on_change = props
+                    .get("onValueChange")
+                    .or_else(|| props.get("onChange"))
+                    .map(String::as_str)
+                    .unwrap_or("");
+                let placeholder = props.get("placeholder").map(String::as_str).unwrap_or("");
+                self.line(indent, &B::text_field(value, on_change, placeholder));
             }
             PrimitiveKind::Other => {
                 // Primitives emitted as a bare call (no special shaping yet):

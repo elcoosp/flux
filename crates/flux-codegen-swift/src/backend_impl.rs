@@ -81,11 +81,20 @@ impl Backend for Swift {
         "}".to_owned()
     }
 
-    fn button_open(handler: &str) -> String {
+    fn button_open(name: &str, handler: &str) -> String {
+        let _ = name;
         format!("Button(action: {{ {handler} }}) {{")
     }
 
-    fn text_field(value: &str, on_change: &str) -> String {
+    fn button_style(name: &str) -> &'static str {
+        match name {
+            "CupertinoButton" => ".buttonStyle(.bordered)",
+            "MaterialButton" => ".buttonStyle(.borderedProminent)",
+            _ => "",
+        }
+    }
+
+    fn text_field(value: &str, on_change: &str, placeholder: &str) -> String {
         let value = if value.is_empty() {
             "\"\"".to_owned()
         } else {
@@ -96,7 +105,12 @@ impl Backend for Swift {
         } else {
             on_change.to_owned()
         };
-        format!("TextField(text: {value}, onEditingChanged: {{ {on_change} }})")
+        let title = if placeholder.is_empty() {
+            "\"\"".to_owned()
+        } else {
+            format!("\"{placeholder}\"")
+        };
+        format!("TextField({title}, text: .constant({value}), onEditingChanged: {{ {on_change} }})")
     }
 
     fn key_extractor(key: &Expr) -> String {

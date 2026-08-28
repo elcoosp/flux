@@ -12,14 +12,14 @@ verdict: equivalent
                 cond: "(/* unsupported expr */ 0 == \"ios\")",
                 then_branch: [
                     Primitive {
-                        name: "CupertinoButton",
+                        name: "Button",
                         props: [],
                         children: [],
                     },
                 ],
                 else_branch: [
                     Primitive {
-                        name: "MaterialButton",
+                        name: "Button",
                         props: [],
                         children: [],
                     },
@@ -36,14 +36,14 @@ swift  == [
                 cond: "( 0 /* unsupported */ == \"ios\" )",
                 then_branch: [
                     Primitive {
-                        name: "CupertinoButton",
+                        name: "Button",
                         props: [],
                         children: [],
                     },
                 ],
                 else_branch: [
                     Primitive {
-                        name: "MaterialButton",
+                        name: "Button",
                         props: [],
                         children: [],
                     },
@@ -60,14 +60,14 @@ kotlin == [
                 cond: "(/*unsupportedexpr*/0==\"ios\")",
                 then_branch: [
                     Primitive {
-                        name: "CupertinoButton",
+                        name: "Button",
                         props: [],
                         children: [],
                     },
                 ],
                 else_branch: [
                     Primitive {
-                        name: "MaterialButton",
+                        name: "Button",
                         props: [],
                         children: [],
                     },

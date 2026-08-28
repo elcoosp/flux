@@ -30,12 +30,16 @@ pub enum PrimitiveKind {
     Screen,
     /// An interactive leaf (`Button` and its style aliases).
     Button,
+    /// An editor leaf (`TextField`): a native editable text field bound to a
+    /// `text`/`onChange` (Kotlin) or `text:`/`onEditingChanged:` (Swift) pair,
+    /// with an optional `placeholder`.
+    TextField,
     /// A built-in primitive the release backends emit as a bare call (no special
-    /// shaping yet): `CupertinoButton`, `MaterialButton`, `TextField`,
-    /// `Provider`, `When`, `Switch`. This preserves the pre-refactor behaviour
-    /// (the old `other => "{other}()"` catch-all) while keeping the names in the
-    /// single registry so the parity test can guarantee coverage. Richer native
-    /// shaping for these is future work once their dev-model semantics land.
+    /// shaping yet): `When`, `Switch`. These are control-flow forms that lower to
+    /// `NodeKind::If`/`NodeKind::Match` and are emitted structurally by
+    /// `emit_if`/`emit_match`, so they never reach `emit_primitive` as a primitive
+    /// call; the registry entry exists only so `PRIMITIVES` covers every prelude
+    /// name and the parity guard stays honest.
     Other,
 }
 
@@ -139,9 +143,9 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
     PrimitiveSpec {
         flux_name: "CupertinoButton",
         node_kind: NodeKind::Primitive,
-        kind: PrimitiveKind::Other,
-        kotlin_view: "CupertinoButton",
-        swift_view: "CupertinoButton",
+        kind: PrimitiveKind::Button,
+        kotlin_view: "Button",
+        swift_view: "Button",
         primary_prop: None,
         handler_prop: Some("onClick"),
         label_prop: Some("text"),
@@ -149,9 +153,9 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
     PrimitiveSpec {
         flux_name: "MaterialButton",
         node_kind: NodeKind::Primitive,
-        kind: PrimitiveKind::Other,
-        kotlin_view: "MaterialButton",
-        swift_view: "MaterialButton",
+        kind: PrimitiveKind::Button,
+        kotlin_view: "Button",
+        swift_view: "Button",
         primary_prop: None,
         handler_prop: Some("onClick"),
         label_prop: Some("text"),
@@ -159,17 +163,17 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
     PrimitiveSpec {
         flux_name: "TextField",
         node_kind: NodeKind::Primitive,
-        kind: PrimitiveKind::Other,
+        kind: PrimitiveKind::TextField,
         kotlin_view: "TextField",
         swift_view: "TextField",
-        primary_prop: None,
-        handler_prop: None,
+        primary_prop: Some("text"),
+        handler_prop: Some("onChange"),
         label_prop: None,
     },
     PrimitiveSpec {
         flux_name: "Provider",
         node_kind: NodeKind::Primitive,
-        kind: PrimitiveKind::Other,
+        kind: PrimitiveKind::Container,
         kotlin_view: "Provider",
         swift_view: "Provider",
         primary_prop: None,

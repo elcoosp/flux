@@ -234,6 +234,7 @@ pub fn normalize_view_name(name: &str) -> String {
     match name {
         "VStack" => "Column",
         "HStack" => "Row",
+        "CupertinoButton" | "MaterialButton" => "Button",
         other => other,
     }
     .to_owned()
@@ -247,6 +248,6 @@ pub fn normalize_view_name(name: &str) -> String {
 pub(crate) fn is_container(name: &str) -> bool {
     matches!(
         name,
-        "Column" | "Row" | "VStack" | "HStack" | "ZStack" | "Stack"
+        "Column" | "Row" | "VStack" | "HStack" | "ZStack" | "Stack" | "Provider"
     )
 }

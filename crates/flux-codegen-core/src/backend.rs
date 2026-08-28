@@ -104,17 +104,26 @@ pub trait Backend {
     #[must_use]
     fn for_each_close() -> String;
 
-    /// Renders a `Button` open line given the rendered handler body. The label is
-    /// emitted separately as a `Text(...)` child; only the opening (and the
-    /// handler lambda) differ per backend (`onClick =` / `action:`).
+    /// Renders a `Button` open line given the primitive name and the rendered
+    /// handler body. The label is emitted separately as a `Text(...)` child; only
+    /// the opening (and the handler lambda, plus any platform style) differ per
+    /// backend and per button style (`Button` / `CupertinoButton` / `MaterialButton`).
     #[must_use]
-    fn button_open(handler: &str) -> String;
+    fn button_open(name: &str, handler: &str) -> String;
 
-    /// Renders a `TextField` leaf given its bound value and `onValueChange`
-    /// handler. When `value`/`on_change` are empty, sensible defaults are
+    /// A trailing style modifier appended after a `Button`'s label block
+    /// (e.g. Swift `.buttonStyle(.borderedProminent)`). Empty for backends whose
+    /// style is already part of [`button_open`]. Emitting it *after* the closing
+    /// `}` keeps the parity recognizer from mistaking the label block for a
+    /// sibling child.
+    #[must_use]
+    fn button_style(name: &str) -> &'static str;
+
+    /// Renders a `TextField` leaf given its bound value, `onValueChange` handler,
+    /// and placeholder. When `value`/`on_change` are empty, sensible defaults are
     /// emitted so the view still compiles.
     #[must_use]
-    fn text_field(value: &str, on_change: &str) -> String;
+    fn text_field(value: &str, on_change: &str, placeholder: &str) -> String;
 
     /// The `key`-extractor fragment for a `ForEach` collection (`{ it.id }` /
     /// `\.id`).
