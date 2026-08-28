@@ -293,4 +293,92 @@ final class RenderMountTests: XCTestCase {
             afterScreen === beforeScreen,
             "a real navigate dispatch must swap the visible screen (build+show settings)")
     }
+
+    /// LANE-B device-only blind spot: a POSITIONAL `Screen("home")` lowers its
+    /// route to prop index 0, NOT `FNV-1a("route")`. The reconciler's
+    /// `routerActiveChildId` reads the `route` prop at `routePropIndex` (FNV-1a),
+    /// finds nothing, and navigation silently never swaps (the documented
+    /// "go to settings does nothing" trap, ADR-0045). This test pins the trap
+    /// on-device: with the route carried at positional index 0, a real
+    /// `Router.navigate` tap must NOT swap the visible screen — it stays on the
+    /// first child (home). If this ever starts swapping, the compiler began
+    /// lowering positional args to the named prop (closing the blind spot — the
+    /// intended fix). The correct author fix is the NAMED `Screen(route:)` form.
+    @MainActor
+    func testPositionalScreenRouteAtIndex0NeverSwapsOnNavigate() async {
+        let home = mountNode(
+            10, componentId: 6, kind: .screen,
+            props: [Prop(index: 0, value: .str(7))]) // route at POSITIONAL index 0
+        let settings = mountNode(
+            11, componentId: 6, kind: .screen,
+            props: [Prop(index: 0, value: .str(8))]) // route at POSITIONAL index 0
+        let router = mountNode(20, componentId: 5, kind: .router, children: [.node(10), .node(11)])
+
+        var table = StringTable()
+        table.intern(5, "Router")
+        table.intern(6, "Screen")
+        table.intern(7, "home")
+        table.intern(8, "settings")
+
+        let graph = SignalGraph()
+        let frame = FluxFrame(
+            version: 1, seq: 0, flags: 0x01,
+            root: router,
+            nodes: [20: router, 10: home, 11: settings],
+            patches: [], handlers: [],
+            strings: [
+                StringEntry(stringId: 7, value: "home"),
+                StringEntry(stringId: 8, value: "settings"),
+            ],
+            state: [], files: [], componentNames: [
+                StringEntry(stringId: 5, value: "Router"),
+                StringEntry(stringId: 6, value: "Screen"),
+            ], signalMeta: [20: NodeSignalMeta(deps: [97], thunk: nil, layout: [])]
+        )
+
+        let executor = FluxRuntime(graph: graph, registry: AdapterRegistry(table: table))
+        executor.apply(frame)
+
+        guard let beforeHost = executor.view(for: 20) as? RouterHostView else {
+            XCTFail("router root view must be a RouterHostView")
+            return
+        }
+        XCTAssertEqual(beforeHost.nav.viewControllers.count, 1, "router must show one screen before navigation")
+        let beforeScreen = beforeHost.nav.viewControllers.first
+
+        // A real navigate closure targeting "settings": LOAD_STR_CONST r0, 8 ; CALL_CAP r1, (3,1), args=r0 ; HALT.
+        let navigateBytecode: [UInt8] = [
+            0xB3, // LOAD_STR_CONST
+            0, // result reg r0
+            8, 0, 0, 0, // string id = 8 ("settings"), u32 LE
+            0x90, // CALL_CAP
+            1, // result reg r1
+            3, 0, 0, 0, // capId = 3
+            1, 0, // methodId = 1
+            0, // args reg r0
+            0x00, // HALT
+        ]
+        let closure = ClosureRef(
+            hash: [], bytecodeOffset: 0,
+            bytecodeLen: UInt16(navigateBytecode.count), signalCount: 0,
+            signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0))
+        executor.registerHandler(100, closure: closure, bytecode: navigateBytecode)
+
+        executor.dispatch(FluxEvent(handlerId: 100, nodeId: 20))
+        try? await Task.sleep(nanoseconds: 300_000_000)
+
+        guard let afterHost = executor.view(for: 20) as? RouterHostView else {
+            XCTFail("router root view must still be a RouterHostView after navigation")
+            return
+        }
+        XCTAssertEqual(
+            afterHost.nav.viewControllers.count, 1,
+            "a real navigate dispatch must still leave exactly one screen")
+        let afterScreen = afterHost.nav.viewControllers.first
+        // The route prop is at the wrong index, so the reconciler cannot match it
+        // to signal 97 → navigation is a no-op and the first screen stays visible.
+        XCTAssertTrue(
+            afterScreen === beforeScreen,
+            "POSITIONAL screen route must NOT swap — documents the device-only blind spot")
+    }
 }
