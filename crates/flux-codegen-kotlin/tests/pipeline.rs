@@ -281,6 +281,8 @@ fn generated_kotlin_parses() {
     combined.push_str("import androidx.compose.foundation.layout.*\n");
     combined.push_str("import androidx.compose.material3.*\n");
     combined.push_str("import androidx.compose.material3.Icon\n");
+    combined.push_str("import androidx.compose.ui.geometry.*\n");
+    combined.push_str("import androidx.compose.ui.graphics.*\n");
     combined.push_str("import androidx.navigation.compose.*\n");
     for (name, src) in examples() {
         combined.push_str(&codegen_example(name, src));
@@ -338,6 +340,8 @@ fn generated_kotlin_parses() {
     }
     cmd.arg("-classpath")
         .arg(&compose_classpath)
+        .arg("-jvm-target")
+        .arg("11")
         .arg("-Xallow-no-source-files")
         .arg(&path);
     let output = cmd.output().expect("spawn kotlinc");

@@ -105,6 +105,14 @@ jobs:
           # classes that live in kotlin-compiler-embeddable; kotlinc's own classpath
           # does not expose them to a standalone -Xplugin, so add it to the classpath.
           curl -fsSL "$MAVEN/org/jetbrains/kotlin/kotlin-compiler-embeddable/$KOTLIN_VER/kotlin-compiler-embeddable-$KOTLIN_VER.jar" -o "$WORK/jars/kotlin-compiler-embeddable.jar"
+          # navigation-compose is not part of the Compose BOM's managed androidx.*
+          # entries we download above; fetch it explicitly (pins from libs.versions.toml).
+          NAV_COMPOSE_VER="2.9.8"
+          if curl -fsSL "$GOOGLE/androidx/navigation/navigation-compose/$NAV_COMPOSE_VER/navigation-compose-$NAV_COMPOSE_VER.aar" -o "$WORK/aars/navigation-compose-$NAV_COMPOSE_VER.aar" 2>/dev/null \
+             && unzip -o -q "$WORK/aars/navigation-compose-$NAV_COMPOSE_VER.aar" classes.jar -d "$WORK/aars" 2>/dev/null \
+             && [ -f "$WORK/aars/classes.jar" ]; then
+            mv "$WORK/aars/classes.jar" "$WORK/jars/navigation-compose-$NAV_COMPOSE_VER.jar"
+          fi
 
           classpath="$(ls "$WORK/jars"/*.jar 2>/dev/null | tr '\n' ':')"
           classpath="${classpath%:}"
