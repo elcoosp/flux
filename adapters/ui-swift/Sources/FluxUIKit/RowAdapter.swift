@@ -3,9 +3,12 @@
 
 import UIKit
 
-/// Dev adapter mapping a Flux `Row` node to a horizontal `UIStackView`.
+/// Declarative adapter mapping a Flux `Row` node to a horizontal `UIStackView`
+/// (unified tier; AGENTS.md §3.5).
 ///
-/// Prop fields (Appendix F.4): `0 gap: Float = 0`, `1 alignment: Option[Alignment]`.
+/// Props are read by name (`gap`, `alignment`); the index is the FNV-1a-32
+/// digest of the name masked to `u16` (`Props.propIndex`), derived identically
+/// on server and client (AGENTS.md §3.2) — never a hardcoded positional index.
 /// Child reconciliation reuses the shared `reconcileChildren` keyed-by-identity
 /// algorithm from `ColumnAdapter` so both containers preserve view state across
 /// reorderings.

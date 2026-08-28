@@ -3,14 +3,17 @@
 
 import UIKit
 
-/// Dev adapter mapping a Flux `Image` node to a `UIImageView`.
+/// Declarative adapter mapping a Flux `Image` node to a `UIImageView`
+/// (unified tier; AGENTS.md §3.5).
 ///
-/// Prop fields and their `PropIdx` (Appendix F.8 contract):
-/// - `0 src: String` (required) — asset path relative to the project root,
+/// Props are read by name; the index is the FNV-1a-32 digest of the name
+/// masked to `u16` (`Props.propIndex`), derived identically on server and
+/// client (AGENTS.md §3.2) — never a hardcoded positional index. Fields:
+/// - `src: String` (required) — asset path relative to the project root,
 ///   e.g. `"assets/logo.png"`.
-/// - `1 width: Option[Float]`
-/// - `2 height: Option[Float]`
-/// - `3 contentMode: Option[String]` — `"fill"` (default), `"fit"`, `"stretch"`.
+/// - `width: Option[Float]`
+/// - `height: Option[Float]`
+/// - `contentMode: Option[String]` — `"fill"` (default), `"fit"`, `"stretch"`.
 ///
 /// In dev the bitmap is fetched over HTTP from the dev server's asset route
 /// (`http://localhost:7332/assets/<src>`). Load failures (missing asset,

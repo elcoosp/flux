@@ -3,15 +3,18 @@
 
 import UIKit
 
-/// Dev adapter mapping a Flux `TextField` node to a `UITextField`.
+/// Declarative adapter mapping a Flux `TextField` node to a `UITextField`
+/// (unified tier; AGENTS.md §3.5).
 ///
-/// Prop fields and their `PropIdx` (Appendix F.5 contract):
-/// - `0 text: String = ""` (controlled value)
-/// - `1 onChange: Handler`
-/// - `2 placeholder: Option[String]`
-/// - `3 ref: Option[Ref]` (unused in dev; the view itself is the ref)
-/// - `4 enabled: Bool = true`
-/// - `5 secure: Bool = false`
+/// Props are read by name; the index is the FNV-1a-32 digest of the name
+/// masked to `u16` (`Props.propIndex`), derived identically on server and
+/// client (AGENTS.md §3.2) — never a hardcoded positional index. Fields:
+/// - `text: String = ""` (controlled value)
+/// - `onChange: Handler`
+/// - `placeholder: Option[String]`
+/// - `ref: Option[Ref]` (unused in dev; the view itself is the ref)
+/// - `enabled: Bool = true`
+/// - `secure: Bool = false`
 ///
 /// Editing changes dispatch `onChange` with the new text as the payload, so the
 /// runtime's handler can write the bound signal. A `UITextFieldDelegate` relays

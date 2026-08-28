@@ -7,7 +7,7 @@ import UIKit
 ///
 /// Canonical encoding: a float `size` (points) and an optional string
 /// `weight`. Field indices are `FontField`. When `size` is absent the system
-/// default of 14 points (per Appendix F.1) is used.
+/// default of 14 points is used.
 public struct FluxFount: Sendable, Hashable {
     /// Point size.
     public let size: Double

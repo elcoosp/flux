@@ -3,13 +3,16 @@
 
 import UIKit
 
-/// Dev adapter mapping a Flux `Button` node to a `UIButton`.
+/// Declarative adapter mapping a Flux `Button` node to a `UIButton`
+/// (unified tier; AGENTS.md §3.5).
 ///
-/// Prop fields and their `PropIdx` (Appendix F.2 contract):
-/// - `0 text: String` (required)
-/// - `1 onClick: Handler` (required)
-/// - `2 enabled: Bool = true`
-/// - `3 color: Option[Color]`
+/// Props are read by name; the index is the FNV-1a-32 digest of the name
+/// masked to `u16` (`Props.propIndex`), derived identically on server and
+/// client (AGENTS.md §3.2) — never a hardcoded positional index. Fields:
+/// - `text: String` (required)
+/// - `onClick: Handler` (required)
+/// - `enabled: Bool = true`
+/// - `color: Option[Color]`
 ///
 /// Tapping the button dispatches `onClick` via the weak executor. The target
 /// is held only by the button's action, which cannot resurrect a deallocated
@@ -35,6 +38,25 @@ public final class ButtonAdapter: FluxAdapter {
 
     public func bindHandler(_ handlerId: FluxHandlerId, to view: UIButton, nodeId: FluxNodeId) {
         let target = HandlerTarget(executor: executor, handlerId: handlerId, nodeId: nodeId) { nil }
+        #if DEBUG
+        NSLog("[FluxRT] ButtonAdapter.bindHandler handlerId=\(handlerId) nodeId=\(nodeId) executor=\(executor != nil ? "set" : "NIL")")
+        // Deep-dive probe: record the button's real window-space hit frame and
+        // what `hitTest` at its center actually returns, so we can tell whether
+        // a real tap reaches the button or is intercepted by an ancestor.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            let f = view.frame
+            let abs = view.convert(view.bounds, to: nil)
+            let center = CGPoint(x: abs.midX, y: abs.midY)
+            let hit = view.window?.hitTest(center, with: nil)
+            let hitDesc = String(describing: hit.map { type(of: $0) })
+            let selfIsHit = hit === view
+            let line = "[frame] handlerId=\(handlerId) nodeId=\(nodeId) frame=\(f) absWin=\(abs) enabled=\(view.isEnabled) userInt=\(view.isUserInteractionEnabled) superview=\(type(of: view.superview)) hitAtCenter=\(hitDesc) selfIsHit=\(selfIsHit) at \(Date())\n"
+            NSLog("[FluxRT] ButtonAdapter frame: \(line)")
+            UserDefaults.standard.set(line, forKey: "flux_frame")
+            let tmp = NSTemporaryDirectory() + "flux_frame.log"
+            try? line.write(to: URL(fileURLWithPath: tmp), atomically: true, encoding: .utf8)
+        }
+        #endif
         view.addAction(UIAction { _ in target.fire() }, for: .touchUpInside)
     }
 

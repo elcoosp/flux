@@ -61,6 +61,12 @@ final class HandlerTarget: NSObject {
     /// assert main isolation before touching the `@MainActor` executor.
     @objc func fire() {
         MainActor.assumeIsolated {
+            #if DEBUG
+            NSLog("[FluxRT] HandlerTarget.fire handlerId=\(handlerId) nodeId=\(nodeId) executor=\(executor != nil ? "set" : "nil")")
+            UserDefaults.standard.set("[fire] handlerId=\(handlerId) nodeId=\(nodeId) at \(Date())\n", forKey: "flux_fire")
+            let tmp = NSTemporaryDirectory() + "flux_fire.log"
+            try? "[fire] handlerId=\(handlerId) nodeId=\(nodeId) at \(Date())\n".write(to: URL(fileURLWithPath: tmp), atomically: true, encoding: .utf8)
+            #endif
             executor?.dispatch(FluxEvent(handlerId: handlerId, nodeId: nodeId, payload: payload()))
         }
     }

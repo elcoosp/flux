@@ -3,9 +3,12 @@
 
 import UIKit
 
-/// Dev adapter mapping a Flux `Column` node to a vertical `UIStackView`.
+/// Declarative adapter mapping a Flux `Column` node to a vertical `UIStackView`
+/// (unified tier; AGENTS.md §3.5).
 ///
-/// Prop fields (Appendix F.3): `0 gap: Float = 0`, `1 alignment: Option[Alignment]`.
+/// Props are read by name (`gap`, `alignment`); the index is the FNV-1a-32
+/// digest of the name masked to `u16` (`Props.propIndex`), derived identically
+/// on server and client (AGENTS.md §3.2) — never a hardcoded positional index.
 /// Children are reconciled by identity: the runtime guarantees each child's
 /// native view is stable per node id, so we match on object identity and only
 /// insert/remove to reach the target list — no view is recreated on reorder.

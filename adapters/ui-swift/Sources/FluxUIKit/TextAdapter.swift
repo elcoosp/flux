@@ -3,16 +3,19 @@
 
 import UIKit
 
-/// Dev adapter mapping a Flux `Text` node to a `UILabel`.
+/// Declarative adapter mapping a Flux `Text` node to a `UILabel`
+/// (unified tier; AGENTS.md §3.5).
 ///
-/// Prop fields and their `PropIdx` (Appendix F.1 contract):
-/// - `0 text: String` (required)
-/// - `1 font: Option[Font]`
-/// - `2 size: Option[Float]`
-/// - `3 color: Option[Color]`
-/// - `4 alignment: Option[Alignment]`
-/// - `5 max_lines: Option[Int]`
-/// - `6 overflow: Option[Overflow]`
+/// Props are read by name; the index is the FNV-1a-32 digest of the name
+/// masked to `u16` (`Props.propIndex`), derived identically on server and
+/// client (AGENTS.md §3.2) — never a hardcoded positional index. Fields:
+/// - `text: String` (required)
+/// - `font: Option[Font]`
+/// - `size: Option[Float]`
+/// - `color: Option[Color]`
+/// - `alignment: Option[Alignment]`
+/// - `max_lines: Option[Int]`
+/// - `overflow: Option[Overflow]`
 public final class TextAdapter: FluxAdapter {
     public typealias View = UILabel
     weak var executor: (any FluxExecutor)?
