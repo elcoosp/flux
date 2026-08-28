@@ -30,3 +30,11 @@ criterion.workspace = true
 [[bench]]
 name = "pipeline_large"
 harness = false
+
+[[bench]]
+name = "pipeline_delta"
+harness = false
+
+[[bench]]
+name = "signal_propagation"
+harness = false
