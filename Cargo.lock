@@ -1969,6 +1969,7 @@ dependencies = [
  "flux-syntax",
  "flux-types",
  "insta",
+ "serde",
  "thiserror 2.0.20",
 ]
 
@@ -2084,6 +2085,7 @@ name = "flux-parity"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "flux-codegen-core",
  "flux-codegen-kotlin",
  "flux-codegen-swift",
  "flux-differ",

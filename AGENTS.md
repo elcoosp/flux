@@ -44,6 +44,22 @@ Dev and release render through **the same declarative components**:
   unified model. One component, two feeders: dev is fed by the VM, release by
   codegen — the component is the same.
 
+**Convergence status (as of the current tree — verified, not aspirational):**
+
+| Platform | Dev-tier state |
+|---|---|
+| Android | Converged. `ShadowNode` holds props in a Compose `MutableState` via `propsStateFactory`; `DirtyReconciler` implements `reconcileDirty`. |
+| iOS | **Not yet converged.** `adapters/ui-swift/Sources/FluxUIKit` is still a UIKit adapter kit (`Text`→`UILabel`, `Image`→`UIImageView`, `Router`→`UINavigationController`), and `FluxHostController`/`FluxAppMain` mount a real `UIView` tree keyed by node id. |
+
+The iOS doc comments therefore *accurately describe the code that exists today*
+and intentionally still say "UIView tree". Do **not** rewrite them to claim
+observable-props materialization while the UIKit implementation is what ships —
+that would make the docs lie about the code. The iOS migration to the unified
+tier is real architectural work pending its own ADR; when it lands, update those
+comments and this table in the same change. Both kits remain adapter **contract
+version 1**, and the props contract (§3.2 derived indices, degrade-to-default)
+already holds on both platforms.
+
 ### 0.3 Repository map
 
 | Path | Contents |
@@ -53,8 +69,12 @@ Dev and release render through **the same declarative components**:
 | `crates/flux-types` | Type checker (`type_check`) |
 | `crates/flux-ir` | Arena IR, `lower`, `prop_index_for_name`, `LoweredIr` |
 | `crates/flux-ir-serde` | IR serialization for tests/fixtures |
+| `crates/flux-differ` | Tree diffing — `diff` over two lowered arenas |
+| `crates/flux-vm-ref` | Reference VM (`run`, `run_resumable`, `resume`) for ISA vectors |
+| `crates/flux-parity` | Dev/release parity harness + trace diffing |
 | `crates/flux-devserver` | `Pipeline`, `DevServer`, frame/diff/patch, asset server |
 | `crates/flux-codegen-swift` / `flux-codegen-kotlin` | Release codegen + ADR-0027 node-ID bridge |
+| `crates/flux-codegen-core` | Shared data-driven emitter, `Backend` trait, primitive registry (ADR-0047) |
 | `crates/flux-cli` | `flux init/dev/build/doc` |
 | `crates/flux-devtools-ui` | DevTools on gpui (**nightly toolchain required**) |
 | `adapters/ui-kotlin`, `adapters/ui-swift` | Dev adapter kits (contract version 1) |
@@ -78,7 +98,8 @@ Dev and release render through **the same declarative components**:
   lifecycle, node-ID bridge), 0029 (Appendix B grammar repairs), 0044 (async
   futures / result cells), 0045 (unified sync/async capability bridge). Before
   filing a new ADR, run `bash docs/scripts/check-adr-numbering.sh` and take the
-  next sequential number (currently ≥ 0046).
+  next sequential number (currently ≥ 0048; 0046 dream-syntax hand-written
+  parser and 0047 unified data-driven codegen have landed).
 * **Issue prefixes in use:** FLUX-001 … FLUX-023 (foundation, hosts, adapter
   kits, CI, registry, hot-reload, codegen, CLI, wire fixtures).
 
@@ -139,7 +160,6 @@ Approved dependencies (do not remove or replace without an ADR):
 
 | Language | Dependency | Purpose |
 |---|---|---|
-| Rust | `pest` / `pest_derive` | PEG parser |
 | Rust | `tokio`, `tokio-tungstenite` | Async runtime, WebSocket server |
 | Rust | `notify` | File watching |
 | Rust | `axum` | HTTP asset server |

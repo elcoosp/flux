@@ -67,8 +67,6 @@ criterion = "^0.8"
 insta = "^1"
 notify = "^8"
 parking_lot = "^0.12"
-pest = "^2"
-pest_derive = "^2"
 proptest = "^1"
 rmp-serde = "^1"
 serde = { version = "^1", features = ["derive"] }
