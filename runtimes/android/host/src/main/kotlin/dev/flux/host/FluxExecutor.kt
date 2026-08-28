@@ -92,6 +92,11 @@ public class FluxExecutor(
     private val transport: FluxTransport,
     private val vmScope: CoroutineScope = CoroutineScope(SupervisorJob() + kotlinx.coroutines.Dispatchers.Default),
     private val reactiveDispatcher: ReactiveDispatcher = ReactiveDispatcher.main(),
+    /** The `(capId, methodId) → impl` table for `CALL_CAP`. Defaults to the dev
+     * capability set (which includes `Router.navigate` (3,1)) so the live host can
+     * drive real navigation; the unit-test oracle uses [CapabilityRegistry.default]
+     * or a custom registry instead. */
+    private val capabilities: CapabilityRegistry = CapabilityRegistry.DEV,
 ) : KitExecutor {
     /** Invoked on the reactive dispatcher after a successful frame application. */
     public var onTreeChanged: (() -> Unit)? = null
@@ -124,9 +129,6 @@ public class FluxExecutor(
      * the source of a synthetic id.
      */
     private var stringIndex: StringInterning = StringInterning.empty()
-
-    /** The `(capId, methodId) → impl` capability table threaded into the VM. */
-    private val capabilities: CapabilityRegistry = CapabilityRegistry.default()
 
     /**
      * The async-future resolver for `await` (ADR-0044). Defaults to the synchronous
