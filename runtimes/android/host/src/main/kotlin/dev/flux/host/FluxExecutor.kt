@@ -54,6 +54,67 @@ public object PassthroughAsyncResolver : AsyncResolver {
 }
 
 /**
+ * Resolves an awaited `Pending` cell after a real (injectable) delay, using
+ * `kotlinx.coroutines.delay` by default. Proves that `AWAIT` genuinely parks the
+ * handler until the future settles rather than completing synchronously. The
+ * settled value is `NullVal` — the oracle's `(2,99)` async capability leaves the
+ * cell empty, so a `Null` resume is the faithful "no payload" settle. A real
+ * capability (LANE-C) supplies a value-bearing resolver via [CoroutineAsyncResolver]
+ * instead.
+ *
+ * @param delayMillis wall-clock wait before settling an otherwise-empty `Pending` cell.
+ * @param suspend the suspend closure; defaults to `delay` but is injectable so tests
+ *   can assert the wait without burning real time.
+ */
+public class DelayAsyncResolver(
+    private val delayMillis: Long = 50,
+    private val suspend: suspend (Long) -> Unit = { kotlinx.coroutines.delay(it) },
+) : AsyncResolver {
+    override suspend fun resolve(future: dev.flux.host.vm.FluxValue): dev.flux.host.vm.FluxValue {
+        suspend(delayMillis)
+        // The oracle's async stub leaves the cell empty; settle to `NullVal`.
+        return dev.flux.host.vm.FluxValue.NullVal
+    }
+}
+
+/**
+ * A key -> resolver map for capability-driven async (LANE-C extension point).
+ *
+ * `CALL_CAP` returns a result-cell id; the executor parks on it. This registry lets
+ * a live host register a resolver per capability-method key so a camera / network /
+ * location call resolves through its real OS bridge. The resolver receives the cell
+ * id and the cell's current value (read-only). When no keyed resolver matches (or
+ * none are registered), [defaultResolver] is used — the oracle's `(2,99)` async
+ * capability leaves the cell empty, so the default settles to `NullVal`.
+ *
+ * @param resolvers `(capId << 16 | methodId)` -> resolution strategy.
+ * @param defaultResolver the strategy used when no keyed resolver matches; defaults to
+ *   a tiny suspension then `NullVal`, mirroring [DelayAsyncResolver] for the reference
+ *   async capability.
+ */
+public class CapabilityAsyncResolver(
+    private val resolvers: Map<UInt, suspend (UInt, dev.flux.host.vm.FluxValue) -> dev.flux.host.vm.FluxValue> = emptyMap(),
+    private val defaultResolver: suspend (UInt, dev.flux.host.vm.FluxValue) -> dev.flux.host.vm.FluxValue = { _, _ ->
+        kotlinx.coroutines.delay(1)
+        dev.flux.host.vm.FluxValue.NullVal
+    },
+) : AsyncResolver {
+    /** The composite key used to look a resolver up. */
+    public companion object {
+        /** Builds the `(capId, methodId)` composite key. */
+        public fun key(capId: UInt, methodId: UInt): UInt = (capId shl 16) or (methodId and 0xFFFFu)
+    }
+
+    override suspend fun resolve(future: dev.flux.host.vm.FluxValue): dev.flux.host.vm.FluxValue {
+        val cellId = (future as? dev.flux.host.vm.FluxValue.IntVal)?.value?.toUInt() ?: 0u
+        // LANE-C: look up the capability that owns `cellId` via the graph's capability
+        // table and dispatch to its keyed resolver. Until that wiring lands, the
+        // default resolver settles the (empty) reference cell.
+        return defaultResolver(cellId, future)
+    }
+}
+
+/**
  * The host executor: the single hub that ties the VM, signal graph, shadow tree
  * and transport together.
  *
