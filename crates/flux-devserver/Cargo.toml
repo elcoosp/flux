@@ -25,3 +25,8 @@ futures-util.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "pipeline_large"
+harness = false

@@ -4,6 +4,11 @@
 //! host as an `Error` frame ([`Diagnostic`]) while the previous good tree stays
 //! live. [`DevServerError`] is reserved for failures that stop the server
 //! itself, such as a port that cannot be bound.
+//!
+//! A pipeline failure may originate as any of the per-crate error types
+//! (`TypeError`, `ParseError`, `LoweringError`, `VmError`); [`Diagnostic`]
+//! converts from any of them so the server emits one diagnostic shape to the
+//! host, always with a `what`/`where`/`why`/`how` payload (AGENTS.md §3.11).
 
 use flux_syntax::Span;
 use thiserror::Error;
@@ -71,5 +76,38 @@ impl std::fmt::Display for Diagnostic {
             ),
             None => write!(f, "{}", self.message),
         }
+    }
+}
+
+impl From<flux_types::FluxError> for Diagnostic {
+    fn from(err: flux_types::FluxError) -> Self {
+        let mut message = format!("[{}] {}", err.class(), err.what());
+        if let Some(how) = err.how() {
+            message.push_str(&format!(" — how: {how}"));
+        }
+        Diagnostic {
+            message,
+            span: err.where_span(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flux_syntax::Span;
+
+    #[test]
+    fn diagnostic_carries_message_and_span() {
+        // A diagnostic must round-trip its what/where so the host's red banner
+        // can point at the offending source without re-deriving it.
+        let diag = Diagnostic::new("type mismatch", Some(Span::new(2, 4, 9)));
+        assert_eq!(diag.span, Some(Span::new(2, 4, 9)));
+        assert!(diag.message.contains("type mismatch"));
+        assert_eq!(
+            diag.to_string(),
+            "type mismatch (file 2 bytes 4..9)",
+            "display must include the span location"
+        );
     }
 }

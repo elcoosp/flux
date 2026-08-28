@@ -46,22 +46,35 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
         }
         // Task 1 (FLUX-014 P3): node-level prop skip. `props_equal` short-circuits
         // on the arena-stored `u64` hash, so identical-hash nodes emit no
-        // `Update` and we avoid deserialising either cold blob. Computed once per
-        // node and reused below (cheap, behaviour-preserving).
+        // `Update` and we avoid deserialising either cold blob.
         let props_equal = props_equal(&o, &n);
+
+        // LANE-H T2: structural fast-path. The arena precomputes `children_hash`
+        // as an order-sensitive blake3 fold of the *full* child layout (slot,
+        // key, id — see `IRArena::children_hash`). For a large tree where almost
+        // every node is unchanged, reaching for `child_ids`/`child_order` would
+        // allocate an `AHashSet` *and* a `Vec` for each of the 10k nodes on every
+        // pass. When the props hash and the children hash both match the node is
+        // provably structurally and prop-wise identical, so we skip straight to
+        // the (cheap, rare) handler check and allocate nothing. This is
+        // behaviour-preserving: equal layout ⇒ equal child set and order.
+        if props_equal && o.children_hash() == n.children_hash() {
+            if handlers_equal(old, new, &o.handlers(), &n.handlers()) {
+                continue; // truly identical — no patch, no allocation
+            }
+            // Only handler bodies changed → state-preserving fast path.
+            emit_handler(&mut patches, new, n.handlers(), o.handlers());
+            continue;
+        }
+
+        // Fall-back path for nodes whose props and/or children changed: compare
+        // the actual child sets/orders (the hot-path allocations above are
+        // avoided for the dominant unchanged case).
         let o_children = child_ids(&o);
         let n_children = child_ids(&n);
         if o_children == n_children {
             // Same child set: only order may differ.
             if child_order(&o) == child_order(&n) {
-                if props_equal {
-                    if handlers_equal(old, new, &o.handlers(), &n.handlers()) {
-                        continue; // truly identical
-                    }
-                    // Only handler bodies changed → state-preserving fast path.
-                    emit_handler(&mut patches, new, n.handlers(), o.handlers());
-                    continue;
-                }
                 // Props changed; structure (children) unchanged.
                 patches.push(Patch::Update {
                     id: *id,
