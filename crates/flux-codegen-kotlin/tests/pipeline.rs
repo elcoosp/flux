@@ -4,8 +4,9 @@
 //! → `codegen` — over one of the Appendix B.3 grammar examples (completed
 //! where the spec elides bodies with `{ … }` or omits sibling declarations),
 //! then asserts the generated Compose via an [`insta`] snapshot. A determinism
-//! check and a `kotlinc` compile-check (when `ANDROID_COMPOSE_CLASSPATH` is set
-//! to a Compose-aware classpath) round out the suite.
+//! check and a `kotlinc` compile-check (when `ANDROID_COMPOSE_CLASSPATH` and
+//! `ANDROID_COMPOSE_COMPILER` are set from a provisioned Compose toolchain) round
+//! out the suite.
 
 use flux_codegen_kotlin::codegen;
 use flux_ir::lower;
@@ -263,13 +264,16 @@ fn generated_kotlin_contains_key_substrings() {
 
 /// `kotlinc` must accept the generated Compose when a Compose-aware classpath is
 /// supplied. Bare `kotlinc` performs full semantic resolution and cannot resolve
-/// `androidx.compose.*` unless the Compose compiler + Android runtime jars are on
-/// its classpath — which only a configured Android toolchain provides. The
-/// classpath is opt-in via `ANDROID_COMPOSE_CLASSPATH` so the check runs only
-/// where it can actually succeed (e.g. an Android CI that exports the Compose
-/// compiler + `android.jar`), and skips cleanly in the plain Rust `rust-check`
-/// runner. Per the issue's acceptance bar, this is a compile/parse check of the
-/// generated code.
+/// `androidx.compose.*` unless (a) the Compose runtime + Android runtime jars are
+/// on its `-classpath` and (b) the Compose compiler plugin is enabled via
+/// `-Xplugin`. Both are provided by a configured Android toolchain: the Android
+/// SDK (`android.jar`) plus the Compose library AARs supply the runtime classes,
+/// and the Kotlin Compose compiler plugin jar supplies `@Composable` handling.
+/// They are opt-in via `ANDROID_COMPOSE_CLASSPATH` (runtime + android) and
+/// `ANDROID_COMPOSE_COMPILER` (plugin path) so the check runs only where it can
+/// actually succeed (e.g. an Android CI that resolves the Compose BOM into
+/// `~/.gradle`), and skips cleanly in the plain Rust `rust-check` runner. Per the
+/// issue's acceptance bar, this is a compile check of the generated code.
 #[test]
 fn generated_kotlin_parses() {
     let mut combined = String::new();
@@ -296,7 +300,17 @@ fn generated_kotlin_parses() {
             eprintln!(
                 "ANDROID_COMPOSE_CLASSPATH unset; skipping kotlinc compile check \
                  (bare kotlinc cannot resolve androidx.compose.* without the Compose \
-                 compiler + Android runtime on its classpath)"
+                 runtime + Android runtime on its classpath)"
+            );
+            return;
+        }
+    };
+    let compose_compiler = match std::env::var("ANDROID_COMPOSE_COMPILER") {
+        Ok(p) if !p.is_empty() => p,
+        _ => {
+            eprintln!(
+                "ANDROID_COMPOSE_COMPILER unset; skipping kotlinc compile check \
+                 (the Compose compiler plugin is required to recognise @Composable)"
             );
             return;
         }
@@ -305,6 +319,8 @@ fn generated_kotlin_parses() {
     let path = dir.join("flux_codegen_kotlin_generated.kt");
     std::fs::write(&path, &combined).expect("write temp kotlin file");
     let status = std::process::Command::new("kotlinc")
+        .arg("-Xplugin")
+        .arg(&compose_compiler)
         .arg("-classpath")
         .arg(&compose_classpath)
         .arg("-Xallow-no-source-files")
