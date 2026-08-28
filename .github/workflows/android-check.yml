@@ -66,38 +66,43 @@ jobs:
         # extract classes.jar from the AARs, and locate the Kotlin Compose
         # compiler plugin jar. No Android platform and no Gradle project needed.
         run: |
-          set -euo pipefail
+          set -uo pipefail
           BOM_VER="2026.08.00"
           KOTLIN_VER="2.4.10"
           GOOGLE="https://dl.google.com/dl/android/maven2"
+          MAVEN="https://repo1.maven.org/maven2"
           WORK="$HOME/compose_prov"
           mkdir -p "$WORK/aars" "$WORK/jars"
 
           curl -fsSL "$GOOGLE/androidx/compose/compose-bom/$BOM_VER/compose-bom-$BOM_VER.pom" -o "$WORK/bom.pom"
 
           # Each managed <dependency> in the BOM POM: groupId / artifactId / version.
+          # Skip Kotlin Multiplatform stub artifacts ("*-linuxx64stubs" etc.) — they
+          # are not on Google Maven and are irrelevant to the JVM/Android classpath.
           perl -0777 -ne 'while(/<dependency>(.*?)<\/dependency>/sg){print "$1\x00"}' "$WORK/bom.pom" \
             | while IFS= read -r -d '' dep; do
                 g=$(printf '%s' "$dep" | grep -oE '<groupId>[^<]+' | sed 's/<groupId>//')
                 a=$(printf '%s' "$dep" | grep -oE '<artifactId>[^<]+' | sed 's/<artifactId>//')
-                v=$(printf '%s' "$dep" | grep -oE '<version>[^<]+' | sed 's/<version>//' | sed 's/\${[^}]*}//g')
+                v=$(printf '%s' "$dep" | grep -oE '<version>[^<]+' | sed 's/<version>//' | sed 's/${[^}]*}//g')
                 case "$g" in androidx.*) ;; *) continue ;; esac
+                case "$a" in *-linuxx64stubs|*-linuxarm64stubs|*-macos*stubs|*-mingwx64stubs|*-jsstubs|*-jvmstubs) continue ;; esac
                 [ -z "$v" ] && continue
                 path="${g//.//}/$a/$v"
-                if curl -fsSL "$GOOGLE/$path/$a-$v.aar" -o "$WORK/aars/$a-$v.aar" \
+                if curl -fsSL "$GOOGLE/$path/$a-$v.aar" -o "$WORK/aars/$a-$v.aar" 2>/dev/null \
                    && unzip -o -q "$WORK/aars/$a-$v.aar" classes.jar -d "$WORK/aars" 2>/dev/null \
                    && [ -f "$WORK/aars/classes.jar" ]; then
                   mv "$WORK/aars/classes.jar" "$WORK/jars/$a-$v.jar"
-                elif curl -fsSL "$GOOGLE/$path/$a-$v.jar" -o "$WORK/jars/$a-$v.jar"; then
+                elif curl -fsSL "$GOOGLE/$path/$a-$v.jar" -o "$WORK/jars/$a-$v.jar" 2>/dev/null; then
                   :
                 else
                   echo "skip $g:$a:$v (no AAR/JAR on Google Maven)"
                 fi
               done
 
-          curl -fsSL "$GOOGLE/org/jetbrains/kotlin/kotlin-compose-compiler-plugin-embeddable/$KOTLIN_VER/kotlin-compose-compiler-plugin-embeddable-$KOTLIN_VER.jar" -o "$WORK/jars/compose-compiler.jar"
+          # The Kotlin Compose compiler plugin is a Kotlin/JVM artifact on Maven Central.
+          curl -fsSL "$MAVEN/org/jetbrains/kotlin/kotlin-compose-compiler-plugin-embeddable/$KOTLIN_VER/kotlin-compose-compiler-plugin-embeddable-$KOTLIN_VER.jar" -o "$WORK/jars/compose-compiler.jar"
 
-          classpath="$(ls "$WORK/jars"/*.jar | tr '\n' ':')"
+          classpath="$(ls "$WORK/jars"/*.jar 2>/dev/null | tr '\n' ':')"
           classpath="${classpath%:}"
           echo "ANDROID_COMPOSE_CLASSPATH=$classpath" >> "$GITHUB_ENV"
           echo "ANDROID_COMPOSE_COMPILER=$WORK/jars/compose-compiler.jar" >> "$GITHUB_ENV"

@@ -343,6 +343,11 @@ fn generated_kotlin_parses() {
         "kotlinc rejected generated Kotlin:\n{combined}\n--- kotlinc stderr ---\n{}",
         String::from_utf8_lossy(&output.stderr)
     );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("e: "),
+        "kotlinc reported compiler errors despite a zero exit code:\n{stderr}"
+    );
 }
 
 /// Regression test for the Button codegen defect: the `onClick` handler body and
