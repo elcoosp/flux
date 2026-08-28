@@ -7,9 +7,8 @@
 // `ADR-0036-runtime-packaging-gap` ADR as the recommended integration path.
 
 compo Counter
-    state count: Int = 0
+    $count: Int = 0
 
-    Column(gap: 8.0) {
-        Text(text: "tapped {count} times")
-        Button(text: "Increment", onClick: fn() { count = count + 1 })
-    }
+    Column gap: 8.0
+        Text text: "tapped {count} times"
+        Button text: "Increment", onClick: || { count = count + 1 }
