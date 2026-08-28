@@ -779,9 +779,22 @@ public class ShadowTree(
     private fun activeRouteFromSignal(): String? {
         val host = executorRef as? HostExecutor ?: return null
         val raw = host.materializationSignals.read(NAVIGATION_ROUTE_SIGNAL_ID) ?: return null
-        val record = raw as? dev.flux.host.vm.FluxValue.RecordVal ?: return null
-        val field = record.fields.firstOrNull()?.value ?: return null
-        val strId = (field as? dev.flux.host.vm.FluxValue.StrVal)?.id ?: return null
+        // `Router.navigate(target)` writes the argument to signal 97. The compiler
+        // lowers `Router.navigate("x")` to `LOAD_STR_CONST` + `CALL_CAP`, so the VM
+        // passes the target as a RAW `StrVal(id)` — not a wrapped record. (The ADR-0045
+        // "record" description is the capability-contract shape; the wire value the
+        // reader must accept is the raw string id the VM actually stores.) Accept
+        // both a raw `StrVal` and a `RecordVal` whose first field is a `StrVal` so the
+        // renderer swaps screens on a real tap, not only when the signal is seeded as a
+        // record by hand.
+        val strId = when (raw) {
+            is dev.flux.host.vm.FluxValue.StrVal -> raw.id
+            is dev.flux.host.vm.FluxValue.RecordVal -> {
+                val field = raw.fields.firstOrNull()?.value ?: return null
+                (field as? dev.flux.host.vm.FluxValue.StrVal)?.id ?: return null
+            }
+            else -> return null
+        }
         return stringLookup(strId)
     }
 

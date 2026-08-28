@@ -710,6 +710,64 @@ fun `activeChildOf returns the settings screen once signal 97 is set`() =
         assertEquals(3u, tree.activeChildOf(router)?.id, "activeChildOf must swap to settings after navigation")
     }
 
+/**
+ * Reproduces the REAL tap path: the `Router.navigate` capability is invoked with
+ * the VM's `args` register, which for `Router.navigate("settings")` holds a RAW
+ * `StrVal(settingsId)` (the compiler emits `LOAD_STR_CONST` + `CALL_CAP`, not a
+ * wrapped record). The reader in [ShadowTree.activeChildOf] must accept that
+ * shape — if it only unwraps a `RecordVal` it returns null and the router keeps
+ * showing Home even after the tap (the reported "go to settings does nothing"
+ * bug). This test calls the real capability with a raw string arg so the
+ * regression can never hide behind a hand-built `RecordVal` seed.
+ */
+@Test
+fun `router swaps to settings when navigate is called with a raw string arg`() =
+    runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val scope = TestScope(dispatcher)
+        val signals = SignalGraph()
+        val routeProp = fnv1aRoutePropIndex()
+        val homeId = 10u
+        val settingsId = 11u
+
+        val bytes =
+            FrameBuilder()
+                .apply {
+                    magic()
+                    version(1)
+                    seq(0)
+                    flags(fullTree = true, hasPure = false)
+                    patchCount(0)
+                    handlerCount(0)
+                    stringCount(stdlibEntries.size + 2)
+                    for ((id, kind) in stdlibEntries) stringEntry(id, kind)
+                    stringEntry(homeId, "home")
+                    stringEntry(settingsId, "settings")
+                    node(id = 1u, kind = 0x12u, component = 600u, props = emptyList(), childIds = listOf(2u, 3u))
+                    node(id = 2u, kind = 0x12u, component = 500u, props = listOf(routeProp to WireValue.StrVal(homeId)), childIds = emptyList())
+                    node(id = 3u, kind = 0x12u, component = 500u, props = listOf(routeProp to WireValue.StrVal(settingsId)), childIds = emptyList())
+                }.build()
+
+        val tree = ShadowTree(AdapterRegistry.fromStringTable(stdlibEntries.map { (id, k) -> StringTableEntry(id, k) }))
+        val transport = MockTransport()
+        val executor = FluxExecutor(tree, signals, transport, vmScope = scope, reactiveDispatcher = ReactiveDispatcher.test(dispatcher))
+        executor.onError = { throw AssertionError("executor error: $it") }
+        executor.receiveFrame(bytes)
+        dispatcher.scheduler.runCurrent()
+
+        val router = tree.rootNode ?: error("router root not built")
+        assertEquals(2u, tree.activeChildOf(router)?.id, "default visible screen should be home")
+
+        // Exactly what the VM does on a real tap of "Go to Settings".
+        val registry = CapabilityRegistry.DEV
+        val cellId = registry.lookup(3u, 1u.toUShort())!!.call(FluxValue.StrVal(settingsId), signals)
+        assertEquals(97u, cellId, "Router.navigate returns the signal-97 result-cell id")
+        signals.flush()
+        tree.reconcileDirty(router.id, setOf(97u))
+
+        assertEquals(3u, tree.activeChildOf(router)?.id, "tap of 'Go to Settings' must swap to the settings screen")
+    }
+
 /** FNV-1a (32-bit) hash of "route", matching the wire's `prop_index_for_name`. */
 private fun fnv1aRoutePropIndex(): UShort {
     var h: UInt = 0x811c9dc5u
