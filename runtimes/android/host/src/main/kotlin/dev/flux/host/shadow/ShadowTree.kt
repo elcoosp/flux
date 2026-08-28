@@ -778,16 +778,14 @@ public class ShadowTree(
      */
     private fun activeRouteFromSignal(): String? {
         val host = executorRef as? HostExecutor ?: return null
-        val raw = host.materializationSignals.read(NAVIGATION_ROUTE_SIGNAL_ID) ?: return null
-        // `Router.navigate(target)` writes the argument to signal 97. The compiler
-        // lowers `Router.navigate("x")` to `LOAD_STR_CONST` + `CALL_CAP`, so the VM
-        // passes the target as a RAW `StrVal(id)` — not a wrapped record. (The ADR-0045
-        // "record" description is the capability-contract shape; the wire value the
-        // reader must accept is the raw string id the VM actually stores.) Accept
-        // both a raw `StrVal` and a `RecordVal` whose first field is a `StrVal` so the
-        // renderer swaps screens on a real tap, not only when the signal is seeded as a
-        // record by hand.
-        val strId = when (raw) {
+        val raw = host.materializationSignals.read(97u) ?: return null
+        // `Router.navigate(target)` writes the target to signal 97 (ADR-0045). The
+        // compiler emits `LOAD_STR_CONST` + `CALL_CAP`, so a real tap stores a raw
+        // `StrVal` holding the interned route-string id; some seeds wrap it in a
+        // `RecordVal` (first field = the id). Accept BOTH shapes, mirroring the iOS
+        // `RouterAdapter.routerActiveChildId`, so navigation never silently no-ops
+        // (the reported "go to settings does nothing" bug).
+        val routeId = when (raw) {
             is dev.flux.host.vm.FluxValue.StrVal -> raw.id
             is dev.flux.host.vm.FluxValue.RecordVal -> {
                 val field = raw.fields.firstOrNull()?.value ?: return null
@@ -795,7 +793,7 @@ public class ShadowTree(
             }
             else -> return null
         }
-        return stringLookup(strId)
+        return stringLookup(routeId)
     }
 
     /**
