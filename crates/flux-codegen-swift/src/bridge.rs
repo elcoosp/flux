@@ -12,7 +12,7 @@
 //! cheap, `Clone` types) so it carries no lifetime parameter and can be passed
 //! freely through the emitter.
 
-use flux_parser::{Ast, ComponentDecl, Decl, Expr};
+use flux_parser::{Ast, ComponentDecl, Decl, Expr, TypeDecl};
 use flux_syntax::{DeclTag, ExprTag, NodeId, Span};
 
 /// Structural tag the type checker/lowering assigns to every expression node.
@@ -50,6 +50,9 @@ pub(crate) struct Bridge {
     exprs: std::collections::HashMap<NodeId, Expr>,
     /// Component declarations.
     components: std::collections::HashMap<NodeId, ComponentDecl>,
+    /// Algebraic data type declarations, in source order (emitted as Swift
+    /// `enum`s with associated-value cases).
+    types: Vec<TypeDecl>,
 }
 
 impl Bridge {
@@ -59,10 +62,14 @@ impl Bridge {
     pub(crate) fn build(ast: &Ast) -> Bridge {
         let mut bridge = Bridge::default();
         for decl in &ast.decls {
-            if let Decl::Component(comp) = decl {
-                let id = component_id(comp.span);
-                bridge.components.insert(id, comp.clone());
-                walk_block(&comp.body, &mut bridge);
+            match decl {
+                Decl::Component(comp) => {
+                    let id = component_id(comp.span);
+                    bridge.components.insert(id, comp.clone());
+                    walk_block(&comp.body, &mut bridge);
+                }
+                Decl::Type(sum) => bridge.types.push(sum.clone()),
+                _ => {}
             }
         }
         bridge
@@ -79,6 +86,12 @@ impl Bridge {
     #[must_use]
     pub(crate) fn component(&self, id: NodeId) -> Option<&ComponentDecl> {
         self.components.get(&id)
+    }
+
+    /// Returns the algebraic data type declarations in source order.
+    #[must_use]
+    pub(crate) fn types(&self) -> &[TypeDecl] {
+        &self.types
     }
 }
 

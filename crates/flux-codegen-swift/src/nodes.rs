@@ -10,7 +10,7 @@ use flux_syntax::NodeId;
 
 use crate::expressions::render_expr;
 use crate::model::view_name;
-use crate::printers::{key_path_of, render_inline, render_pattern};
+use crate::printers::{key_path_of, render_inline};
 use crate::program::Emitter;
 
 /// Emits a primitive view (Text, Button, Image, Column, …) with a deterministic
@@ -158,24 +158,6 @@ pub(crate) fn emit_for_each(em: &mut Emitter<'_>, id: NodeId, indent: usize) {
         &format!("ForEach({collection}, id: {key_path}) {{ item in"),
     );
     em.emit_block_body(body, indent + 4);
-    em.line(indent, "}");
-}
-
-/// Emits a `switch` over an algebraic data type (per spec FR-011).
-pub(crate) fn emit_match(em: &mut Emitter<'_>, id: NodeId, indent: usize) {
-    let Some(expr) = em.bridge.expr(id) else {
-        return;
-    };
-    let ExprKind::Match { scrutinee, arms } = &expr.kind else {
-        return;
-    };
-    let subject = render_expr(scrutinee);
-    em.line(indent, &format!("switch {subject} {{"));
-    for arm in arms {
-        let pattern = render_pattern(&arm.pattern);
-        em.line(indent + 4, &format!("case {pattern}:"));
-        em.emit_expr_body(&arm.body, indent + 8);
-    }
     em.line(indent, "}");
 }
 

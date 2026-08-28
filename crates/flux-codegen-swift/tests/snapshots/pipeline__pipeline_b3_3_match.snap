@@ -1,16 +1,20 @@
 ---
 source: crates/flux-codegen-swift/tests/pipeline.rs
-assertion_line: 91
 expression: "codegen_example(name, src)"
 ---
+enum Shape {
+ case Circle(field0: Int)
+ case Rect(field0: Int, field1: Int)
+}
+
 struct AreaView: View {
     let shape: Shape
     var body: some View {
   VStack {
       switch shape {
-          case Circle(r):
+          case let .Circle(r):
               Text("circle")
-          case Rect(w, h):
+          case let .Rect(w, h):
               Text("rect")
       }
   }
