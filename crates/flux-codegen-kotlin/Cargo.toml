@@ -16,3 +16,8 @@ thiserror.workspace = true
 
 [dev-dependencies]
 insta.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "codegen"
+harness = false
