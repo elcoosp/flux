@@ -3,428 +3,602 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Flux Architecture — grounded in source</title>
+<title>Flux Architecture — interactive, grounded in source</title>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family:'JetBrains Mono',monospace; background:#020617; min-height:100vh; padding:2rem; color:white; }
-  .container { max-width:1320px; margin:0 auto; }
-  .header { margin-bottom:1.5rem; }
-  .header-row { display:flex; align-items:center; gap:1rem; margin-bottom:.5rem; }
-  .pulse-dot { width:12px; height:12px; background:#34d399; border-radius:50%; animation:pulse 2s infinite; }
-  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.5;} }
+  :root{
+    --bg:#020617; --panel:#0f172a; --border:#1e293b; --grid:#1e293b;
+    --txt:#e2e8f0; --dim:#94a3b8; --faint:#64748b; --ghost:#475569;
+    --cyan:#22d3ee; --emerald:#34d399; --violet:#a78bfa; --amber:#fbbf24;
+    --rose:#fb7185; --orange:#fb923c; --slate:#cbd5e1;
+  }
+  body { font-family:'JetBrains Mono',monospace; background:var(--bg); color:var(--txt); min-height:100vh; padding:2rem; line-height:1.5; }
+  .wrap { max-width:1340px; margin:0 auto; }
+  .header { margin-bottom:1.25rem; }
+  .hrow { display:flex; align-items:center; gap:1rem; }
+  .pulse { width:12px; height:12px; border-radius:50%; background:var(--emerald); animation:pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.4;} }
   h1 { font-size:1.5rem; font-weight:700; letter-spacing:-.025em; }
-  .subtitle { color:#94a3b8; font-size:.85rem; margin-left:1.75rem; }
-  .diagram-container { background:rgba(15,23,42,.5); border-radius:1rem; border:1px solid #1e293b; padding:1.5rem; margin-top:1.25rem; overflow-x:auto; }
-  svg { width:100%; min-width:900px; display:block; }
-  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:1rem; margin-top:1.5rem; }
-  .card { background:rgba(15,23,42,.5); border-radius:.75rem; border:1px solid #1e293b; padding:1.25rem; }
-  .card-header { display:flex; align-items:center; gap:.5rem; margin-bottom:.75rem; }
-  .card-dot { width:8px; height:8px; border-radius:50%; }
-  .card-dot.cyan{background:#22d3ee;} .card-dot.emerald{background:#34d399;}
-  .card-dot.violet{background:#a78bfa;} .card-dot.amber{background:#fbbf24;}
-  .card-dot.rose{background:#fb7185;} .card-dot.orange{background:#fb923c;}
-  .card h3 { font-size:.875rem; font-weight:600; }
-  .card ul { list-style:none; color:#94a3b8; font-size:.72rem; line-height:1.5; }
-  .card li { margin-bottom:.3rem; }
-  .footer { text-align:center; margin-top:1.5rem; color:#475569; font-size:.72rem; }
-  h2.sec { color:#e2e8f0; font-size:1.05rem; font-weight:600; margin-top:2.5rem; margin-bottom:.25rem; }
-  .sec-note { color:#64748b; font-size:.78rem; margin-bottom:.5rem; }
+  .sub { color:var(--dim); font-size:.82rem; margin-left:1.75rem; max-width:1000px; }
+  .toolbar { display:flex; flex-wrap:wrap; gap:.6rem; margin:1.25rem 0 .5rem; align-items:center; }
+  .btn { background:var(--panel); border:1px solid var(--border); color:var(--slate); padding:.5rem .8rem; border-radius:.5rem; font:inherit; font-size:.72rem; cursor:pointer; transition:.15s; }
+  .btn:hover { border-color:var(--cyan); color:var(--cyan); }
+  .btn.on { border-color:var(--emerald); color:var(--emerald); }
+  .legend-inline { display:flex; flex-wrap:wrap; gap:1rem; margin-left:auto; font-size:.68rem; color:var(--faint); }
+  .legend-inline span { display:inline-flex; align-items:center; gap:.35rem; }
+  .dot { width:9px; height:9px; border-radius:2px; display:inline-block; }
+  .stage { display:grid; grid-template-columns:1.45fr 1fr; gap:1.25rem; margin-top:1rem; align-items:start; }
+  @media (max-width:980px){ .stage{ grid-template-columns:1fr; } }
+  .diagram { background:var(--panel); border:1px solid var(--border); border-radius:1rem; padding:.5rem; position:relative; overflow:hidden; }
+  .diagram svg { width:100%; height:auto; display:block; }
+  .node { cursor:pointer; transition:.15s; }
+  .node rect, .node path { transition:.15s; }
+  .node:hover rect, .node:hover path { filter:brightness(1.35); }
+  .node.sel rect, .node.sel path { stroke-width:2.6px; }
+  .node.dim { opacity:.28; }
+  .edge { transition:.15s; }
+  .edge.dim { opacity:.12; }
+  .card { background:var(--panel); border:1px solid var(--border); border-radius:1rem; padding:1.25rem; min-height:420px; position:sticky; top:1rem; }
+  .card h2 { font-size:1rem; font-weight:600; margin-bottom:.25rem; }
+  .card .loc { color:var(--amber); font-size:.7rem; margin-bottom:.9rem; word-break:break-all; }
+  .card .loc a { color:var(--amber); text-decoration:none; } .card .loc a:hover{ text-decoration:underline; }
+  .tag { display:inline-block; font-size:.62rem; padding:.12rem .45rem; border-radius:.3rem; border:1px solid var(--border); color:var(--dim); margin-right:.3rem; margin-bottom:.4rem; }
+  .card p { color:var(--slate); font-size:.74rem; margin-bottom:.7rem; }
+  .kv { font-size:.7rem; color:var(--dim); margin-bottom:.4rem; }
+  .kv b { color:var(--cyan); font-weight:600; }
+  .fn { background:#0b1220; border:1px solid var(--border); border-radius:.45rem; padding:.5rem .6rem; font-size:.68rem; color:var(--slate); margin-bottom:.4rem; }
+  .fn .ret { color:var(--violet); }
+  .fn .nm { color:var(--cyan); }
+  .empty-hint { color:var(--ghost); font-size:.8rem; margin-top:4rem; text-align:center; }
+  .sec { color:var(--txt); font-size:1.05rem; font-weight:600; margin-top:2.5rem; margin-bottom:.3rem; }
+  .sec-note { color:var(--faint); font-size:.74rem; margin-bottom:.6rem; max-width:1040px; }
+  .cards-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:1rem; margin-top:1.25rem; }
+  .mini { background:var(--panel); border:1px solid var(--border); border-radius:.75rem; padding:1.1rem; }
+  .mini-h { display:flex; align-items:center; gap:.5rem; margin-bottom:.6rem; }
+  .mini-h .d { width:8px; height:8px; border-radius:50%; }
+  .mini h3 { font-size:.82rem; font-weight:600; }
+  .mini ul { list-style:none; color:var(--dim); font-size:.7rem; line-height:1.55; }
+  .mini li::before { content:"• "; color:var(--ghost); }
+  .footer { text-align:center; margin-top:2rem; color:var(--ghost); font-size:.7rem; }
+  /* dispatch simulator */
+  .sim { background:var(--panel); border:1px solid var(--border); border-radius:1rem; padding:1.25rem; margin-top:1.25rem; }
+  .sim h3 { font-size:.9rem; font-weight:600; margin-bottom:.4rem; }
+  .sim .desc { color:var(--dim); font-size:.72rem; margin-bottom:1rem; }
+  .simstage { display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; min-height:54px; }
+  .chip { font-size:.66rem; padding:.35rem .55rem; border-radius:.4rem; border:1px solid var(--border); color:var(--dim); transition:.2s; background:#0b1220; }
+  .chip.fire { border-color:var(--emerald); color:var(--emerald); box-shadow:0 0 12px rgba(52,211,153,.4); }
+  .chip.guard { border-color:var(--amber); color:var(--amber); }
+  .chip.fault { border-color:var(--rose); color:var(--rose); }
+  .chip.write { border-color:var(--violet); color:var(--violet); }
+  .arrow { color:var(--ghost); font-size:.8rem; }
+  .progress { height:6px; background:#0b1220; border-radius:3px; margin-top:1rem; overflow:hidden; }
+  .progress > div { height:100%; width:0; background:linear-gradient(90deg,var(--cyan),var(--emerald)); transition:.25s; }
+  .log { font-size:.66rem; color:var(--faint); margin-top:.7rem; white-space:pre-wrap; min-height:2.5rem; }
+  kbd { background:#0b1220; border:1px solid var(--border); border-radius:.3rem; padding:.05rem .3rem; font-size:.65rem; color:var(--slate); }
 </style>
 </head>
 <body>
-<div class="container">
+<div class="wrap">
   <div class="header">
-    <div class="header-row"><div class="pulse-dot"></div><h1>Flux — End-to-End Architecture (grounded in source)</h1></div>
-    <p class="subtitle">Write-once native UI for iOS &amp; Android. Every box cites the real file I read in /Users/adm/Documents/Repos/flux. Dev mode interprets lowered IR in a bytecode VM; release mode runs generated Swift/Kotlin; both proven equivalent.</p>
+    <div class="hrow"><div class="pulse"></div><h1>Flux — End-to-End Architecture (interactive)</h1></div>
+    <p class="sub">Write-once native UI for iOS &amp; Android. Click any box to inspect its real implementation — every panel cites the source file I read in <code>/Users/adm/Documents/Repos/flux</code>. Dev mode interprets lowered IR in a bytecode VM; release mode runs generated Swift/Kotlin; <code>flux-parity</code> proves the three paths converge on one structural tree.</p>
   </div>
 
-  <!-- ===================== SVG 1: FULL ARCHITECTURE ===================== -->
-  <h2 class="sec">1 · Full pipeline: authoring → Rust dev server → wire → dual native runtime → parity</h2>
-  <p class="sec-note">Left: Rust toolchain. Center band: Appendix-D wire. Right: iOS (Swift) and Android (Kotlin) runtimes drawn as structural mirrors. The rose curves are the host→server DispatchReport feeding the ADR-0027 dependency index.</p>
-  <div class="diagram-container">
-  <svg viewBox="0 0 1280 1280" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <marker id="ah" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#64748b"/></marker>
-      <marker id="ahc" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#22d3ee"/></marker>
-      <marker id="ahr" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#fb7185"/></marker>
-      <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width=".5"/></pattern>
-    </defs>
-    <rect width="1280" height="1280" fill="url(#grid)"/>
-
-    <!-- Rust dev server boundary -->
-    <rect x="30" y="40" width="470" height="470" rx="12" fill="rgba(8,51,68,.12)" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="8,4"/>
-    <text x="44" y="58" fill="#22d3ee" font-size="11" font-weight="600">Rust Dev Server (crates/)</text>
-
-    <!-- .flux source -->
-    <rect x="50" y="72" width="150" height="42" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
-    <text x="62" y="92" fill="#e2e8f0" font-size="11">.flux source</text>
-    <text x="62" y="108" fill="#64748b" font-size="8">editor + file watch</text>
-
-    <!-- flux-cli -->
-    <rect x="50" y="132" width="200" height="42" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
-    <text x="62" y="152" fill="#e2e8f0" font-size="11">flux-cli · dev subcmd</text>
-    <text x="62" y="168" fill="#64748b" font-size="8">cli/src/lib.rs · ws_host flag</text>
-
-    <!-- Pipeline -->
-    <rect x="50" y="192" width="300" height="256" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
-    <text x="62" y="212" fill="#e2e8f0" font-size="11" font-weight="600">flux-devserver · Pipeline</text>
-    <text x="62" y="226" fill="#64748b" font-size="8">pipeline.rs:97 compile()</text>
-    <rect x="64" y="232" width="272" height="30" rx="4" fill="rgba(8,51,68,.5)" stroke="#0e7490"/><text x="74" y="251">flux_parser::parse → Ast</text>
-    <rect x="64" y="268" width="272" height="30" rx="4" fill="rgba(8,51,68,.5)" stroke="#0e7490"/><text x="74" y="287">flux_types::type_check</text>
-    <rect x="64" y="304" width="272" height="30" rx="4" fill="rgba(8,51,68,.5)" stroke="#0e7490"/><text x="74" y="323">flux_ir::lower → LoweredIr</text>
-    <rect x="64" y="340" width="272" height="30" rx="4" fill="rgba(8,51,68,.5)" stroke="#0e7490"/><text x="74" y="359">flux_differ::diff → Patch</text>
-    <text x="62" y="392" fill="#64748b" font-size="8">retains last_good tree + monotonic seq</text>
-    <text x="62" y="406" fill="#64748b" font-size="8">emits Init / Delta / Error frame</text>
-    <text x="62" y="420" fill="#64748b" font-size="8">set_signal_deps → rebuild_index()</text>
-    <text x="62" y="436" fill="#64748b" font-size="8">handle_dispatch_report → minimal Δ</text>
-
-    <!-- wire codec -->
-    <rect x="372" y="212" width="118" height="52" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
-    <text x="384" y="232" fill="#e2e8f0" font-size="10">flux-ir-serde</text>
-    <text x="384" y="248" fill="#64748b" font-size="8">wire.rs · frame.rs</text>
-
-    <!-- dispatch.rs index -->
-    <rect x="372" y="300" width="118" height="74" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
-    <text x="384" y="320" fill="#e2e8f0" font-size="10">dispatch.rs</text>
-    <text x="384" y="336" fill="#64748b" font-size="8">DependencyIndex</text>
-    <text x="384" y="350" fill="#64748b" font-size="8">emit_minimal_updates</text>
-    <text x="384" y="364" fill="#64748b" font-size="8">ADR-0027</text>
-
-    <!-- frame types mini -->
-    <rect x="372" y="400" width="118" height="96" rx="6" fill="#0f172a" stroke="#fbbf24" stroke-width="1.5"/>
-    <text x="384" y="420" fill="#fbbf24" font-size="9" font-weight="600">Frame types</text>
-    <text x="384" y="436" fill="#64748b" font-size="8">0x01 Hello</text>
-    <text x="384" y="450" fill="#64748b" font-size="8">0x02 Init</text>
-    <text x="384" y="464" fill="#64748b" font-size="8">0x03 Error</text>
-    <text x="384" y="478" fill="#64748b" font-size="8">0x04 Delta</text>
-    <text x="384" y="492" fill="#64748b" font-size="8">0x06 Report</text>
-
-    <!-- arrows section 1 -->
-    <line x1="125" y1="114" x2="150" y2="130" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
-    <line x1="200" y1="174" x2="200" y2="190" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
-    <line x1="350" y1="320" x2="370" y2="238" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
-    <line x1="431" y1="264" x2="431" y2="298" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
-    <line x1="431" y1="374" x2="431" y2="398" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
-    <line x1="431" y1="264" x2="431" y2="538" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#ah)"/>
-
-    <!-- Wire protocol band -->
-    <rect x="30" y="540" width="1220" height="56" rx="6" fill="#0f172a" stroke="#fbbf24" stroke-width="1.5"/>
-    <text x="46" y="562" fill="#e2e8f0" font-size="11" font-weight="600">WIRE PROTOCOL — Appendix D · magic 0x465C5558 · LE</text>
-    <text x="46" y="580" fill="#a16207" font-size="8.5">Frame = version·seq·flags·[root Node]·patches·handler-section(bytecode blob + ClosureRefs)·strings·stateΔ·files — Value tags 0x00–0x07 · Child = Node id | Splice keyed u64 (D.4) · Patch D.2 · ClosureRef D.7 · DispatchReport D.12.6</text>
-
-    <!-- ============ iOS runtime ============ -->
-    <rect x="30" y="624" width="600" height="612" rx="12" fill="rgba(6,78,59,.10)" stroke="#34d399" stroke-width="1.5" stroke-dasharray="8,4"/>
-    <text x="44" y="644" fill="#34d399" font-size="11" font-weight="600">iOS · SwiftPM `FluxHost` · @MainActor</text>
-
-    <rect x="50" y="656" width="560" height="46" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
-    <text x="62" y="676" fill="#e2e8f0" font-size="10.5">FluxWebSocketTransport — Hello handshake, 1s reconnect</text>
-    <text x="62" y="692" fill="#64748b" font-size="8">FluxWebSocketTransport.swift</text>
-
-    <rect x="50" y="716" width="560" height="46" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
-    <text x="62" y="736" fill="#e2e8f0" font-size="10.5">FrameDeserializer — bytes → FluxFrame (mirrors Rust)</text>
-    <text x="62" y="752" fill="#64748b" font-size="8">FrameDeserializer.swift · WireModels.swift</text>
-
-    <rect x="50" y="776" width="560" height="46" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
-    <text x="62" y="796" fill="#e2e8f0" font-size="10.5">FluxRuntime : FluxExecutor — apply / dispatch</text>
-    <text x="62" y="812" fill="#64748b" font-size="8">FluxExecutor.swift · caches [Instruction] per handler (R3)</text>
-
-    <rect x="66" y="836" width="528" height="46" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
-    <text x="78" y="856" fill="#e2e8f0" font-size="10.5">FluxBytecodeVM.run — gas r15, 16 MiB alloc budget</text>
-    <text x="78" y="872" fill="#64748b" font-size="8">FluxBytecodeVM.swift · mirrors flux-vm-ref oracle</text>
-
-    <rect x="66" y="896" width="255" height="46" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
-    <text x="78" y="916" fill="#e2e8f0" font-size="10.5">SignalGraph</text>
-    <text x="78" y="932" fill="#a78bfa" font-size="8">SignalStore · observe() (R-graph)</text>
-
-    <rect x="339" y="896" width="255" height="46" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
-    <text x="351" y="916" fill="#e2e8f0" font-size="10.5">VMValue (D.5)</text>
-    <text x="351" y="932" fill="#a78bfa" font-size="8">int/float/bool/str/list/record</text>
-
-    <rect x="66" y="956" width="528" height="80" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
-    <text x="78" y="976" fill="#e2e8f0" font-size="10.5">ShadowTreeReconciler — keyed by NodeId</text>
-    <text x="78" y="992" fill="#64748b" font-size="8">reconcileDirty: dirty-set walk (R1), @pure skip (G6)</text>
-    <text x="78" y="1008" fill="#64748b" font-size="8">AdapterKit.swift → FluxUIKit adapters (Text/Button/…)</text>
-    <text x="78" y="1024" fill="#64748b" font-size="8">mutate UIView in place by stable NodeId</text>
-
-    <!-- iOS internal arrows -->
-    <line x1="330" y1="702" x2="330" y2="714" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
-    <line x1="330" y1="762" x2="330" y2="774" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
-    <line x1="330" y1="822" x2="330" y2="834" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
-    <line x1="193" y1="882" x2="193" y2="894" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#ah)"/>
-    <line x1="466" y1="882" x2="466" y2="894" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#ah)"/>
-    <line x1="330" y1="1042" x2="330" y2="1058" fill="none"/>
-    <!-- executor -> reconciler elbow -->
-    <path d="M 610 799 L 640 799 L 640 996 L 594 996" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
-
-    <!-- ============ Android runtime ============ -->
-    <rect x="650" y="624" width="600" height="612" rx="12" fill="rgba(6,78,59,.10)" stroke="#34d399" stroke-width="1.5" stroke-dasharray="8,4"/>
-    <text x="664" y="644" fill="#34d399" font-size="11" font-weight="600">Android · Kotlin `host` · Dispatchers.Main</text>
-
-    <rect x="670" y="656" width="560" height="46" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
-    <text x="682" y="676" fill="#e2e8f0" font-size="10.5">FluxTransport — WS, off-main deserialize (Default)</text>
-    <text x="682" y="692" fill="#64748b" font-size="8">host/.../transport · receiveFrame hops to dispatcher</text>
-
-    <rect x="670" y="716" width="560" height="46" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
-    <text x="682" y="736" fill="#e2e8f0" font-size="10.5">FrameDeserializer — bytes → Frame (same D layout)</text>
-    <text x="682" y="752" fill="#64748b" font-size="8">host/.../wire</text>
-
-    <rect x="670" y="776" width="560" height="46" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
-    <text x="682" y="796" fill="#e2e8f0" font-size="10.5">FluxExecutor — apply / dispatch</text>
-    <text x="682" y="812" fill="#64748b" font-size="8">FluxExecutor.kt · last-wins hot-swap (T7)</text>
-
-    <rect x="686" y="836" width="528" height="46" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
-    <text x="698" y="856" fill="#e2e8f0" font-size="10.5">FluxBytecodeVM.run — VmResult, 16 MiB cap</text>
-    <text x="698" y="872" fill="#64748b" font-size="8">host/.../vm · mirrors flux-vm-ref oracle</text>
-
-    <rect x="686" y="896" width="255" height="46" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
-    <text x="698" y="916" fill="#e2e8f0" font-size="10.5">SignalGraph</text>
-    <text x="698" y="932" fill="#a78bfa" font-size="8">SignalStore impl</text>
-
-    <rect x="959" y="896" width="255" height="46" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
-    <text x="971" y="916" fill="#e2e8f0" font-size="10.5">FluxValue (D.5)</text>
-    <text x="971" y="932" fill="#a78bfa" font-size="8">IntVal/FloatVal/… mirror</text>
-
-    <rect x="686" y="956" width="528" height="80" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
-    <text x="698" y="976" fill="#e2e8f0" font-size="10.5">ShadowTree.reconcileDirty — keyed by NodeId</text>
-    <text x="698" y="992" fill="#64748b" font-size="8">dirty-set walk (R1), @pure skip (G6)</text>
-    <text x="698" y="1008" fill="#64748b" font-size="8">host/.../shadow → adapters/ui-kotlin (Compose)</text>
-    <text x="698" y="1024" fill="#64748b" font-size="8">mutate FluxNativeView in place</text>
-
-    <line x1="950" y1="702" x2="950" y2="714" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
-    <line x1="950" y1="762" x2="950" y2="774" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
-    <line x1="950" y1="822" x2="950" y2="834" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
-    <line x1="813" y1="882" x2="813" y2="894" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#ah)"/>
-    <line x1="1086" y1="882" x2="1086" y2="894" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#ah)"/>
-    <path d="M 1230 799 L 1260 799 L 1260 996 L 1214 996" fill="none" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
-
-    <!-- entry arrows from band -->
-    <line x1="330" y1="596" x2="330" y2="654" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#ah)"/>
-    <line x1="950" y1="596" x2="950" y2="654" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#ah)"/>
-
-    <!-- DispatchReport reverse arrows (rose) -->
-    <path d="M 200 799 C 20 799, 20 300, 372 320" fill="none" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#ahr)"/>
-    <text x="40" y="560" fill="#fb7185" font-size="8">DispatchReport ↑</text>
-    <path d="M 950 799 C 1160 799, 1160 300, 490 320" fill="none" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#ahr)"/>
-    <text x="1000" y="560" fill="#fb7185" font-size="8">DispatchReport ↑ (written sig)</text>
-
-    <!-- Legend -->
-    <rect x="900" y="1070" width="360" height="190" rx="8" fill="rgba(15,23,42,.7)" stroke="#1e293b"/>
-    <text x="914" y="1090" fill="#e2e8f0" font-size="10" font-weight="600">Legend</text>
-    <rect x="914" y="1100" width="14" height="10" rx="2" fill="rgba(8,51,68,.5)" stroke="#22d3ee"/><text x="934" y="1108" fill="#94a3b8" font-size="8">Rust toolchain</text>
-    <rect x="914" y="1116" width="14" height="10" rx="2" fill="rgba(6,78,59,.5)" stroke="#34d399"/><text x="934" y="1124" fill="#94a3b8" font-size="8">Native runtime (iOS≈Android)</text>
-    <rect x="914" y="1132" width="14" height="10" rx="2" fill="rgba(120,53,15,.4)" stroke="#fbbf24"/><text x="934" y="1140" fill="#94a3b8" font-size="8">Wire protocol (Appendix D)</text>
-    <rect x="914" y="1148" width="14" height="10" rx="2" fill="rgba(76,29,149,.5)" stroke="#a78bfa"/><text x="934" y="1156" fill="#94a3b8" font-size="8">Value / signal model</text>
-    <line x1="914" y1="1168" x2="928" y2="1168" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="4,3"/><text x="934" y="1171" fill="#94a3b8" font-size="8">DispatchReport (host→server)</text>
-    <rect x="914" y="1180" width="14" height="10" rx="2" fill="rgba(136,19,55,.5)" stroke="#fb7185"/><text x="934" y="1188" fill="#94a3b8" font-size="8">Fault / lifecycle boundary</text>
-    <text x="914" y="1208" fill="#64748b" font-size="8">All paths converge on parity (SVG 3 region)</text>
-    <text x="914" y="1222" fill="#64748b" font-size="8">vm-ref oracle → ISA conformance.</text>
-    <text x="914" y="1236" fill="#64748b" font-size="8">Codegen → SwiftUI / Compose.</text>
-  </svg>
+  <div class="toolbar">
+    <button class="btn" id="btnLane">Group by lane</button>
+    <button class="btn" id="btnWalk">Animate a tap</button>
+    <button class="btn" id="btnReset">Reset</button>
+    <div class="legend-inline">
+      <span><i class="dot" style="background:rgba(8,51,68,.6);border:1px solid var(--cyan)"></i>Rust server</span>
+      <span><i class="dot" style="background:rgba(6,78,59,.6);border:1px solid var(--emerald)"></i>Native runtime</span>
+      <span><i class="dot" style="background:rgba(120,53,15,.5);border:1px solid var(--amber)"></i>Wire (App. D)</span>
+      <span><i class="dot" style="background:rgba(76,29,149,.6);border:1px solid var(--violet)"></i>Value / signal</span>
+      <span><i class="dot" style="background:rgba(136,19,55,.6);border:1px solid var(--rose)"></i>Fault / report</span>
+    </div>
   </div>
 
-  <!-- ===================== SVG 2: DISPATCH HOT PATH ===================== -->
-  <h2 class="sec">2 · The per-tap dispatch hot path (deep dive) — with budgets &amp; decisions</h2>
-  <p class="sec-note">What actually runs when a native control fires a handler. Cited from FluxExecutor.swift:199 dispatch(_:) and FluxBytecodeVM.swift:84 run(...). Diamonds are the guard rails that keep a runaway closure from crashing the device.</p>
-  <div class="diagram-container">
-  <svg viewBox="0 0 1280 760" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <marker id="ah2" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#64748b"/></marker>
-      <marker id="ahf" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#fb7185"/></marker>
-      <marker id="ahg" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#34d399"/></marker>
-    </defs>
-    <rect width="1280" height="760" fill="url(#grid)"/>
+  <div class="stage">
+    <div class="diagram">
+      <svg id="map" viewBox="0 0 1280 1180" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="ah" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#64748b"/></marker>
+          <marker id="ahc" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#22d3ee"/></marker>
+          <marker id="ahr" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#fb7185"/></marker>
+          <marker id="aha" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#a78bfa"/></marker>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width=".5"/></pattern>
+        </defs>
+        <rect width="1280" height="1180" fill="url(#grid)"/>
 
-    <!-- Tap -->
-    <rect x="540" y="20" width="200" height="40" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
-    <text x="552" y="44" fill="#e2e8f0" font-size="11">Native tap / event</text>
+        <!-- lane boundaries -->
+        <rect id="ln-rust" x="30" y="40" width="470" height="470" rx="12" fill="rgba(8,51,68,.10)" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="8,4"/>
+        <text x="44" y="58" fill="#22d3ee" font-size="11" font-weight="600">Rust Dev Server (crates/)</text>
+        <rect id="ln-ios" x="30" y="600" width="600" height="560" rx="12" fill="rgba(6,78,59,.08)" stroke="#34d399" stroke-width="1.5" stroke-dasharray="8,4"/>
+        <text x="44" y="620" fill="#34d399" font-size="11" font-weight="600">iOS · SwiftPM FluxHost · @MainActor</text>
+        <rect id="ln-and" x="650" y="600" width="600" height="560" rx="12" fill="rgba(6,78,59,.08)" stroke="#34d399" stroke-width="1.5" stroke-dasharray="8,4"/>
+        <text x="664" y="620" fill="#34d399" font-size="11" font-weight="600">Android · Kotlin host · Dispatchers.Main</text>
 
-    <!-- dispatch(event) -->
-    <rect x="500" y="80" width="280" height="40" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
-    <text x="512" y="104" fill="#e2e8f0" font-size="11">dispatch(FluxEvent) · Executor:199</text>
+        <!-- ============ RUST SERVER NODES ============ -->
+        <g class="node" data-id="cli" data-lane="rust">
+          <rect x="50" y="70" width="200" height="42" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+          <text x="62" y="90" fill="#e2e8f0" font-size="10.5">flux-cli · dev subcmd</text>
+          <text x="62" y="105" fill="#64748b" font-size="8">cli/src/lib.rs · ws flags</text>
+        </g>
+        <g class="node" data-id="pipeline" data-lane="rust">
+          <rect x="50" y="128" width="300" height="150" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+          <text x="62" y="148" fill="#e2e8f0" font-size="11" font-weight="600">flux-devserver · Pipeline</text>
+          <text x="62" y="163" fill="#64748b" font-size="8">pipeline.rs:429 compile()</text>
+          <rect x="64" y="170" width="272" height="22" rx="4" fill="rgba(8,51,68,.5)"/><text x="74" y="185" font-size="8.5">parse → type_check → lower</text>
+          <rect x="64" y="196" width="272" height="22" rx="4" fill="rgba(8,51,68,.5)"/><text x="74" y="211" font-size="8.5">diff → frame (last_good + seq)</text>
+          <rect x="64" y="222" width="272" height="22" rx="4" fill="rgba(8,51,68,.5)"/><text x="74" y="237" font-size="8.5">Init / Delta / Unchanged</text>
+          <rect x="64" y="248" width="272" height="20" rx="4" fill="rgba(8,51,68,.5)"/><text x="74" y="262" font-size="8.5">set_source · timings()</text>
+        </g>
+        <g class="node" data-id="dispatch" data-lane="rust">
+          <rect x="50" y="290" width="300" height="120" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+          <text x="62" y="310" fill="#e2e8f0" font-size="11" font-weight="600">dispatch.rs · ADR-0027</text>
+          <text x="62" y="325" fill="#64748b" font-size="8">handle_dispatch_report:345</text>
+          <text x="62" y="343" fill="#94a3b8" font-size="8">DependencyIndex (Signal→NodeId)</text>
+          <text x="62" y="358" fill="#94a3b8" font-size="8">emit_minimal_updates:226</text>
+          <text x="62" y="373" fill="#94a3b8" font-size="8">patch scope = |dependents[S]|</text>
+          <text x="62" y="388" fill="#64748b" font-size="7.5">noop when written has no readers</text>
+        </g>
+        <g class="node" data-id="differ" data-lane="rust">
+          <rect x="372" y="128" width="118" height="84" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+          <text x="384" y="148" fill="#e2e8f0" font-size="10">flux-differ</text>
+          <text x="384" y="162" fill="#64748b" font-size="8">diff.rs:20</text>
+          <text x="384" y="178" fill="#94a3b8" font-size="8">Update/Reorder/</text>
+          <text x="384" y="190" fill="#94a3b8" font-size="8">Replace/Remove</text>
+          <text x="384" y="204" fill="#94a3b8" font-size="8">props_hash skip</text>
+        </g>
+        <g class="node" data-id="irserde" data-lane="rust">
+          <rect x="372" y="224" width="118" height="62" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+          <text x="384" y="244" fill="#e2e8f0" font-size="10">flux-ir-serde</text>
+          <text x="384" y="258" fill="#64748b" font-size="8">frame.rs</text>
+          <text x="384" y="272" fill="#94a3b8" font-size="8">Init/Delta/Hello</text>
+        </g>
+        <g class="node" data-id="wire" data-lane="wire">
+          <rect x="50" y="430" width="1178" height="56" rx="6" fill="#0f172a" stroke="#fbbf24" stroke-width="1.5"/>
+          <text x="66" y="452" fill="#e2e8f0" font-size="11" font-weight="600">WIRE PROTOCOL — Appendix D · magic 0x465C5558 · LE</text>
+          <text x="66" y="470" fill="#a16207" font-size="8">Frame = version·seq·flags·[root Node]·patches·handler-section(bytecode blob + ClosureRefs)·strings·stateΔ·files — Value tags 0x00–0x07 · Child = Node id | Splice keyed u64 (D.4) · Patch D.2 · ClosureRef D.7 · DispatchReport 0x06 (D.12.6)</text>
+        </g>
+        <g class="node" data-id="codegen" data-lane="rust">
+          <rect x="372" y="290" width="118" height="120" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+          <text x="384" y="310" fill="#e2e8f0" font-size="10" font-weight="600">codegen-*</text>
+          <text x="384" y="324" fill="#64748b" font-size="8">bridge.rs (ADR-0027)</text>
+          <text x="384" y="340" fill="#94a3b8" font-size="8">EXPR_TAG=10</text>
+          <text x="384" y="354" fill="#94a3b8" font-size="8">COMPONENT_TAG=3</text>
+          <text x="384" y="368" fill="#94a3b8" font-size="8">codegen.rs → SwiftUI</text>
+          <text x="384" y="382" fill="#94a3b8" font-size="8">/ Compose</text>
+          <text x="384" y="398" fill="#64748b" font-size="8">bytecode.rs:83</text>
+        </g>
+        <g class="node" data-id="vmref" data-lane="rust">
+          <rect x="50" y="560" width="200" height="42" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
+          <text x="62" y="580" fill="#e2e8f0" font-size="10.5">flux-vm-ref · oracle</text>
+          <text x="62" y="594" fill="#a78bfa" font-size="8">vm.rs:285 run_resumable</text>
+        </g>
+        <g class="node" data-id="parity" data-lane="rust">
+          <rect x="50" y="612" width="200" height="42" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
+          <text x="62" y="632" fill="#e2e8f0" font-size="10.5">flux-parity (FLUX-023)</text>
+          <text x="62" y="646" fill="#a78bfa" font-size="8">reduce.rs:23 from_ast</text>
+        </g>
 
-    <!-- lookup diamond -->
-    <polygon points="640,150 700,180 640,210 580,180" fill="#0f172a" stroke="#fbbf24" stroke-width="1.5"/>
-    <text x="612" y="184" fill="#e2e8f0" font-size="9">handler</text>
+        <!-- ============ iOS RUNTIME NODES ============ -->
+        <g class="node" data-id="iostransport" data-lane="ios">
+          <rect x="50" y="650" width="560" height="40" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+          <text x="62" y="668" fill="#e2e8f0" font-size="10">FluxWebSocketTransport — Hello + 1s reconnect</text>
+          <text x="62" y="683" fill="#64748b" font-size="7.5">Sources/Host/FluxWebSocketTransport.swift</text>
+        </g>
+        <g class="node" data-id="iosdeser" data-lane="ios">
+          <rect x="50" y="702" width="560" height="40" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+          <text x="62" y="720" fill="#e2e8f0" font-size="10">FrameDeserializer — bytes → FluxFrame (mirrors Rust)</text>
+          <text x="62" y="735" fill="#64748b" font-size="7.5">FrameDeserializer.swift · WireModels.swift</text>
+        </g>
+        <g class="node" data-id="iosexec" data-lane="ios">
+          <rect x="50" y="754" width="560" height="48" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+          <text x="62" y="773" fill="#e2e8f0" font-size="10">FluxRuntime : FluxExecutor — apply / dispatch</text>
+          <text x="62" y="789" fill="#64748b" font-size="7.5">FluxExecutor.swift:370 dispatch(_:) · caches [Instruction] (R3)</text>
+          <text x="62" y="797" fill="#94a3b8" font-size="7.5">reconcileDirty only signal-dependent subtrees (R1)</text>
+        </g>
+        <g class="node" data-id="iosvm" data-lane="ios">
+          <rect x="66" y="814" width="528" height="40" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+          <text x="78" y="832" fill="#e2e8f0" font-size="10">FluxBytecodeVM.run — gas r15, 16 MiB alloc budget</text>
+          <text x="78" y="847" fill="#64748b" font-size="7.5">FluxBytecodeVM.swift · mirrors flux-vm-ref oracle</text>
+        </g>
+        <g class="node" data-id="iossignal" data-lane="ios">
+          <rect x="66" y="866" width="255" height="40" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
+          <text x="78" y="884" fill="#e2e8f0" font-size="10">SignalGraph</text>
+          <text x="78" y="899" fill="#a78bfa" font-size="7.5">SignalStore · observe() (R-graph)</text>
+        </g>
+        <g class="node" data-id="iosvalue" data-lane="ios">
+          <rect x="339" y="866" width="255" height="40" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
+          <text x="351" y="884" fill="#e2e8f0" font-size="10">VMValue (D.5)</text>
+          <text x="351" y="899" fill="#a78bfa" font-size="7.5">int/float/bool/str/list/record</text>
+        </g>
+        <g class="node" data-id="iosrecon" data-lane="ios">
+          <rect x="66" y="918" width="528" height="58" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+          <text x="78" y="938" fill="#e2e8f0" font-size="10">ShadowTreeReconciler — keyed by NodeId</text>
+          <text x="78" y="954" fill="#64748b" font-size="7.5">reconcileDirty:351 · @pure skip (G6) · materializeProps</text>
+          <text x="78" y="968" fill="#64748b" font-size="7.5">AdapterKit.swift → FluxUIKit (Text/Button/…)</text>
+        </g>
 
-    <!-- lastError box (no) -->
-    <rect x="760" y="160" width="190" height="40" rx="6" fill="#0f172a" stroke="#fb7185" stroke-width="1.5"/>
-    <text x="772" y="184" fill="#fb7185" font-size="10">lastError=invalidDispatch</text>
+        <!-- ============ ANDROID RUNTIME NODES ============ -->
+        <g class="node" data-id="andtransport" data-lane="and">
+          <rect x="670" y="650" width="560" height="40" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+          <text x="682" y="668" fill="#e2e8f0" font-size="10">FluxTransport — WS, off-main deserialize (Default)</text>
+          <text x="682" y="683" fill="#64748b" font-size="7.5">host/.../transport · receiveFrame hops to dispatcher</text>
+        </g>
+        <g class="node" data-id="anddeser" data-lane="and">
+          <rect x="670" y="702" width="560" height="40" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+          <text x="682" y="720" fill="#e2e8f0" font-size="10">FrameDeserializer — bytes → Frame (same D layout)</text>
+          <text x="682" y="735" fill="#64748b" font-size="7.5">host/.../wire</text>
+        </g>
+        <g class="node" data-id="andexec" data-lane="and">
+          <rect x="670" y="754" width="560" height="48" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+          <text x="682" y="773" fill="#e2e8f0" font-size="10">FluxExecutor — apply / dispatch</text>
+          <text x="682" y="789" fill="#64748b" font-size="7.5">FluxExecutor.kt:201/229 · last-wins hot-swap (T7)</text>
+          <text x="682" y="797" fill="#94a3b8" font-size="7.5">@MainThread · ReactiveDispatcher (R-graph)</text>
+        </g>
+        <g class="node" data-id="andvm" data-lane="and">
+          <rect x="686" y="814" width="528" height="40" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+          <text x="698" y="832" fill="#e2e8f0" font-size="10">FluxBytecodeVM.run — VmResult, 16 MiB cap</text>
+          <text x="698" y="847" fill="#64748b" font-size="7.5">host/.../vm/FluxBytecodeVM.kt · mirrors oracle</text>
+        </g>
+        <g class="node" data-id="andsignal" data-lane="and">
+          <rect x="686" y="866" width="255" height="40" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
+          <text x="698" y="884" fill="#e2e8f0" font-size="10">SignalGraph</text>
+          <text x="698" y="899" fill="#a78bfa" font-size="7.5">SignalStore impl</text>
+        </g>
+        <g class="node" data-id="andvalue" data-lane="and">
+          <rect x="959" y="866" width="255" height="40" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
+          <text x="971" y="884" fill="#e2e8f0" font-size="10">FluxValue (D.5)</text>
+          <text x="971" y="899" fill="#a78bfa" font-size="7.5">IntVal/FloatVal/… mirror</text>
+        </g>
+        <g class="node" data-id="andrecon" data-lane="and">
+          <rect x="686" y="918" width="528" height="58" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
+          <text x="698" y="938" fill="#e2e8f0" font-size="10">ShadowTree.reconcileDirty — keyed by NodeId</text>
+          <text x="698" y="954" fill="#64748b" font-size="7.5">DirtyReconciler.kt:48 · @pure skip (G6) · materializeProps</text>
+          <text x="698" y="968" fill="#64748b" font-size="7.5">host/.../shadow → adapters/ui-kotlin (Compose)</text>
+        </g>
 
-    <!-- cached decode -->
-    <rect x="500" y="240" width="280" height="40" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
-    <text x="512" y="264" fill="#e2e8f0" font-size="11">cached [Instruction] (R3) + payload→VMValue</text>
+        <!-- edges -->
+        <path id="e1" class="edge" d="M250 112 L200 126" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
+        <path id="e2" class="edge" d="M350 200 L440 168" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
+        <path id="e3" class="edge" d="M350 320 L440 252" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
+        <path id="e4" class="edge" d="M430 286 L430 224" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
+        <path id="e5" class="edge" d="M430 352 L430 290" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
+        <path id="e6" class="edge" d="M430 410 L430 486" stroke="#fbbf24" stroke-width="1.5" marker-end="url(#ah)"/>
+        <path id="e7" class="edge" d="M200 486 L200 558" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#aha)"/>
+        <path id="e8" class="edge" d="M200 602 L200 610" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#aha)"/>
 
-    <!-- VM.run -->
-    <rect x="500" y="300" width="280" height="40" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
-    <text x="512" y="324" fill="#e2e8f0" font-size="11">FluxBytecodeVM.run · VM:84</text>
+        <!-- server -> ios/and over wire -->
+        <path id="e9" class="edge" d="M330 486 L330 648" stroke="#fbbf24" stroke-width="1.8" marker-end="url(#ahc)"/>
+        <path id="e10" class="edge" d="M950 486 L950 648" stroke="#fbbf24" stroke-width="1.8" marker-end="url(#ahc)"/>
 
-    <!-- gas diamond -->
-    <polygon points="640,380 700,410 640,440 580,410" fill="#0f172a" stroke="#fbbf24" stroke-width="1.5"/>
-    <text x="618" y="408" fill="#e2e8f0" font-size="9">gas==0?</text>
+        <!-- internal ios -->
+        <path id="e11" class="edge" d="M330 690 L330 700" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
+        <path id="e12" class="edge" d="M330 742 L330 752" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
+        <path id="e13" class="edge" d="M330 802 L330 812" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
+        <path id="e14" class="edge" d="M193 854 L193 864" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#aha)"/>
+        <path id="e15" class="edge" d="M466 854 L466 864" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#aha)"/>
+        <path id="e16" class="edge" d="M330 976 L330 916" stroke="#34d399" stroke-width="1.5" marker-end="url(#ah)"/>
+        <!-- internal and -->
+        <path id="e17" class="edge" d="M950 690 L950 700" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
+        <path id="e18" class="edge" d="M950 742 L950 752" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
+        <path id="e19" class="edge" d="M950 802 L950 812" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah)"/>
+        <path id="e20" class="edge" d="M813 854 L813 864" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#aha)"/>
+        <path id="e21" class="edge" d="M1086 854 L1086 864" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#aha)"/>
+        <path id="e22" class="edge" d="M950 976 L950 916" stroke="#34d399" stroke-width="1.5" marker-end="url(#ah)"/>
 
-    <!-- gas exhausted -->
-    <rect x="760" y="390" width="190" height="40" rx="6" fill="#0f172a" stroke="#fb7185" stroke-width="1.5"/>
-    <text x="772" y="414" fill="#fb7185" font-size="10">GasExhausted fault</text>
+        <!-- DispatchReport reverse (rose) -->
+        <path id="e23" class="edge" d="M200 778 C 20 778, 20 320, 372 340" fill="none" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#ahr)"/>
+        <path id="e24" class="edge" d="M950 778 C 1160 778, 1160 320, 490 340" fill="none" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="5,4" marker-end="url(#ahr)"/>
+        <text x="40" y="540" fill="#fb7185" font-size="8">DispatchReport ↑ (written sig)</text>
+        <text x="1000" y="540" fill="#fb7185" font-size="8">DispatchReport ↑ (written sig)</text>
 
-    <!-- per-op -->
-    <rect x="500" y="470" width="280" height="40" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
-    <text x="512" y="494" fill="#e2e8f0" font-size="11">decode op · requireInt/Float/Bool</text>
+        <!-- Legend -->
+        <g class="node" data-id="legend" data-lane="legend">
+          <rect x="900" y="980" width="360" height="170" rx="8" fill="rgba(15,23,42,.7)" stroke="#1e293b"/>
+          <text x="914" y="1000" fill="#e2e8f0" font-size="10" font-weight="600">Legend</text>
+          <rect x="914" y="1010" width="14" height="10" rx="2" fill="rgba(8,51,68,.5)" stroke="#22d3ee"/><text x="934" y="1018" fill="#94a3b8" font-size="8">Rust toolchain</text>
+          <rect x="914" y="1026" width="14" height="10" rx="2" fill="rgba(6,78,59,.5)" stroke="#34d399"/><text x="934" y="1034" fill="#94a3b8" font-size="8">Native runtime (iOS≈Android)</text>
+          <rect x="914" y="1042" width="14" height="10" rx="2" fill="rgba(120,53,15,.4)" stroke="#fbbf24"/><text x="934" y="1050" fill="#94a3b8" font-size="8">Wire protocol (Appendix D)</text>
+          <rect x="914" y="1058" width="14" height="10" rx="2" fill="rgba(76,29,149,.5)" stroke="#a78bfa"/><text x="934" y="1066" fill="#94a3b8" font-size="8">Value / signal model</text>
+          <line x1="914" y1="1080" x2="928" y2="1080" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="4,3"/><text x="934" y="1083" fill="#94a3b8" font-size="8">DispatchReport (host→server)</text>
+          <rect x="914" y="1092" width="14" height="10" rx="2" fill="rgba(136,19,55,.5)" stroke="#fb7185"/><text x="934" y="1100" fill="#94a3b8" font-size="8">Fault / lifecycle boundary</text>
+          <text x="914" y="1124" fill="#64748b" font-size="8">vm-ref oracle → ISA conformance.</text>
+          <text x="914" y="1138" fill="#64748b" font-size="8">Codegen → SwiftUI / Compose.</text>
+          <text x="914" y="1152" fill="#64748b" font-size="8">parity → one ViewNode (BR-004).</text>
+        </g>
+      </svg>
+    </div>
 
-    <!-- alloc diamond -->
-    <polygon points="640,550 700,580 640,610 580,580" fill="#0f172a" stroke="#fbbf24" stroke-width="1.5"/>
-    <text x="606" y="578" fill="#e2e8f0" font-size="9">alloc&gt;16MiB?</text>
-
-    <!-- mem exhausted -->
-    <rect x="760" y="560" width="190" height="40" rx="6" fill="#0f172a" stroke="#fb7185" stroke-width="1.5"/>
-    <text x="772" y="584" fill="#fb7185" font-size="10">MemoryExhausted</text>
-
-    <!-- VmOutcome -->
-    <rect x="500" y="640" width="280" height="40" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
-    <text x="512" y="664" fill="#e2e8f0" font-size="11">VmOutcome.signals (sorted)</text>
-
-    <!-- graph.write -->
-    <rect x="180" y="700" width="260" height="40" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
-    <text x="192" y="724" fill="#e2e8f0" font-size="10.5">graph.write(id, value)</text>
-
-    <!-- reconcileDirty -->
-    <rect x="500" y="700" width="280" height="40" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
-    <text x="512" y="724" fill="#e2e8f0" font-size="10.5">reconcileDirty(rootId, signalIds)</text>
-
-    <!-- dirty diamond -->
-    <polygon points="860,700 920,730 860,760 800,730" fill="#0f172a" stroke="#fbbf24" stroke-width="1.5"/>
-    <text x="836" y="734" fill="#e2e8f0" font-size="9">dirty?</text>
-
-    <!-- @pure / setChildren -->
-    <rect x="960" y="700" width="240" height="40" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5"/>
-    <text x="972" y="724" fill="#e2e8f0" font-size="10">@pure? skip · else setChildren</text>
-
-    <!-- arrows -->
-    <line x1="640" y1="60" x2="640" y2="78" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah2)"/>
-    <line x1="640" y1="120" x2="640" y2="148" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah2)"/>
-    <line x1="700" y1="180" x2="758" y2="180" stroke="#fb7185" stroke-width="1.5" marker-end="url(#ahf)"/>
-    <line x1="640" y1="210" x2="640" y2="238" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah2)"/>
-    <line x1="640" y1="280" x2="640" y2="298" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah2)"/>
-    <line x1="640" y1="340" x2="640" y2="378" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah2)"/>
-    <line x1="700" y1="410" x2="758" y2="410" stroke="#fb7185" stroke-width="1.5" marker-end="url(#ahf)"/>
-    <line x1="640" y1="440" x2="640" y2="468" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah2)"/>
-    <line x1="640" y1="510" x2="640" y2="548" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah2)"/>
-    <line x1="700" y1="580" x2="758" y2="580" stroke="#fb7185" stroke-width="1.5" marker-end="url(#ahf)"/>
-    <line x1="640" y1="610" x2="640" y2="638" stroke="#34d399" stroke-width="1.5" marker-end="url(#ahg)"/>
-    <line x1="560" y1="660" x2="438" y2="700" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#ahg)"/>
-    <line x1="640" y1="680" x2="640" y2="698" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah2)"/>
-    <line x1="780" y1="720" x2="798" y2="728" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah2)"/>
-    <line x1="920" y1="730" x2="958" y2="730" stroke="#64748b" stroke-width="1.5" marker-end="url(#ah2)"/>
-    <text x="300" y="694" fill="#a78bfa" font-size="8">folds VM writes</text>
-    <text x="690" y="694" fill="#64748b" font-size="8">dirty set = signalDeps∩written</text>
-  </svg>
+    <div class="card" id="detail">
+      <div class="empty-hint">Select a component on the left to read its real implementation.<br><br>Each panel cites the file:line I read during the codebase deep-dive, plus the load-bearing functions and the cross-host parity guarantees.</div>
+    </div>
   </div>
 
-  <!-- ===================== SVG 3: RUST WORKSPACE ===================== -->
-  <h2 class="sec">3 · Rust workspace crate graph (crates/Cargo.toml)</h2>
-  <p class="sec-note">Dependency edges among the crates. flux-vm-ref is the oracle (test-only). flux-parity consumes the codegen output + vm-ref, not the app.</p>
-  <div class="diagram-container">
-  <svg viewBox="0 0 1280 560" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <marker id="ah3" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0,10 3.5,0 7" fill="#22d3ee"/></marker>
-    </defs>
-    <rect width="1280" height="560" fill="url(#grid)"/>
-
-    <!-- flux-cli -->
-    <rect x="40" y="40" width="220" height="50" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
-    <text x="52" y="60" fill="#e2e8f0" font-size="11">flux-cli</text>
-    <text x="52" y="78" fill="#64748b" font-size="8">dev · build · init · doc</text>
-
-    <!-- devserver -->
-    <rect x="40" y="140" width="220" height="50" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
-    <text x="52" y="160" fill="#e2e8f0" font-size="11">flux-devserver</text>
-    <text x="52" y="178" fill="#64748b" font-size="8">pipeline · dispatch · watch</text>
-
-    <!-- leaf crates -->
-    <rect x="320" y="40" width="180" height="44" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
-    <text x="332" y="60" fill="#e2e8f0" font-size="10">flux-parser</text>
-    <rect x="320" y="100" width="180" height="44" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
-    <text x="332" y="120" fill="#e2e8f0" font-size="10">flux-types</text>
-    <rect x="320" y="160" width="180" height="44" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
-    <text x="332" y="180" fill="#e2e8f0" font-size="10">flux-ir</text>
-    <rect x="320" y="220" width="180" height="44" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
-    <text x="332" y="240" fill="#e2e8f0" font-size="10">flux-differ</text>
-    <rect x="320" y="280" width="180" height="44" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
-    <text x="332" y="300" fill="#e2e8f0" font-size="10">flux-ir-serde</text>
-
-    <!-- codegen -->
-    <rect x="560" y="40" width="220" height="50" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
-    <text x="572" y="60" fill="#e2e8f0" font-size="11">flux-codegen-swift</text>
-    <text x="572" y="78" fill="#64748b" font-size="8">bridge.rs → SwiftUI</text>
-    <rect x="560" y="110" width="220" height="50" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
-    <text x="572" y="130" fill="#e2e8f0" font-size="11">flux-codegen-kotlin</text>
-    <text x="572" y="148" fill="#64748b" font-size="8">bridge.rs → Compose</text>
-
-    <!-- vm-ref oracle -->
-    <rect x="560" y="220" width="220" height="50" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
-    <text x="572" y="240" fill="#e2e8f0" font-size="11">flux-vm-ref</text>
-    <text x="572" y="258" fill="#a78bfa" font-size="8">test oracle only</text>
-
-    <!-- parity -->
-    <rect x="860" y="140" width="240" height="56" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
-    <text x="872" y="162" fill="#e2e8f0" font-size="11">flux-parity (FLUX-023)</text>
-    <text x="872" y="180" fill="#64748b" font-size="8">reduces 3 paths → ViewNode</text>
-
-    <!-- arrows -->
-    <line x1="260" y1="65" x2="318" y2="62" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#ah3)"/>
-    <line x1="260" y1="90" x2="58" y2="138" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#ah3)"/>
-    <line x1="260" y1="165" x2="318" y2="62" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#ah3)"/>
-    <line x1="260" y1="165" x2="318" y2="122" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#ah3)"/>
-    <line x1="260" y1="165" x2="318" y2="182" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#ah3)"/>
-    <line x1="260" y1="165" x2="318" y2="242" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#ah3)"/>
-    <line x1="260" y1="165" x2="318" y2="302" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#ah3)"/>
-    <line x1="500" y1="65" x2="558" y2="62" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#ah3)"/>
-    <line x1="500" y1="135" x2="558" y2="132" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#ah3)"/>
-    <line x1="780" y1="65" x2="858" y2="150" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#ah3)"/>
-    <line x1="780" y1="135" x2="858" y2="168" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#ah3)"/>
-    <line x1="780" y1="245" x2="858" y2="185" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#ah3)"/>
-    <text x="630" y="100" fill="#64748b" font-size="8">build → codegen</text>
-    <text x="800" y="200" fill="#a78bfa" font-size="8">equivalence</text>
-  </svg>
+  <!-- DISPATCH SIMULATOR -->
+  <div class="sim">
+    <h3>Per-tap dispatch hot path — animated</h3>
+    <div class="desc">What actually runs when a native control fires a handler. Click <kbd>Animate a tap</kbd> in the toolbar (or here) to walk the guard rails. Grounded in <code>FluxExecutor.swift:370</code> / <code>FluxExecutor.kt:201</code> and <code>FluxBytecodeVM</code> on both hosts.</div>
+    <div class="simstage" id="simstage"></div>
+    <div class="progress"><div id="simprog"></div></div>
+    <div class="log" id="simlog">idle — press play.</div>
+    <div style="margin-top:.8rem"><button class="btn" id="btnPlay">▶ Play tap</button> <button class="btn" id="btnPlayFault">▶ Play faulty tap</button></div>
   </div>
 
-  <div class="cards">
-    <div class="card">
-      <div class="card-header"><div class="card-dot cyan"></div><h3>Dev Server (Rust)</h3></div>
+  <h2 class="sec">Component lanes — what each tier actually does</h2>
+  <p class="sec-note">Dev and release render through the <b>same declarative components</b> (AGENTS.md §0.2): the shadow tree is not a tree of native views; each <code>ShadowNode</code> holds materialized props in a platform observable and the same component vocabulary is fed by the VM (dev) or by codegen (release).</p>
+  <div class="cards-grid">
+    <div class="mini"><div class="mini-h"><div class="d" style="background:#22d3ee"></div><h3>Dev Server (Rust)</h3></div>
       <ul>
-        <li>• flux-cli dev → flux-devserver Pipeline</li>
-        <li>• parse → type_check → lower → diff → frame</li>
-        <li>• Retains <b>last_good</b> tree; ships Init/Delta/Error</li>
-        <li>• dispatch.rs DependencyIndex (ADR-0027): on write to S, re-sends only <b>dependents[S]</b> as Update patches</li>
-        <li>• wrote signal nobody reads → ships <b>nothing</b> (noop budget)</li>
-        <li>• handler section = shared bytecode blob + ClosureRefs (Gap G1)</li>
+        <li>flux-cli dev → flux-devserver Pipeline</li>
+        <li>parse → type_check → lower → diff → frame</li>
+        <li>Retains <b>last_good</b> tree; ships Init/Delta/Unchanged</li>
+        <li>dispatch.rs DependencyIndex (ADR-0027): on write to S, re-sends only <b>dependents[S]</b></li>
+        <li>wrote signal nobody reads → ships <b>nothing</b> (noop budget)</li>
+        <li>handler section = shared bytecode blob + ClosureRefs (Gap G1)</li>
       </ul>
     </div>
-    <div class="card">
-      <div class="card-header"><div class="card-dot emerald"></div><h3>Native Runtime (iOS≈Android)</h3></div>
+    <div class="mini"><div class="mini-h"><div class="d" style="background:#34d399"></div><h3>Native Runtime (iOS≈Android)</h3></div>
       <ul>
-        <li>• Transport → FrameDeserializer (mirrors Rust serializer)</li>
-        <li>• Executor.apply seeds signals + string table, registers handlers</li>
-        <li>• Handler bytecode decoded once &amp; cached → reused per tap (R3)</li>
-        <li>• dispatch: VM runs closure, folds written signals into graph</li>
-        <li>• reconcileDirty walks only subtrees reading written signals (R1)</li>
-        <li>• @pure nodes with unchanged prop hash skipped (G6)</li>
-        <li>• Adapters mutate native views <b>in place</b> by stable NodeId</li>
+        <li>Transport → FrameDeserializer (mirrors Rust serializer)</li>
+        <li>Executor.apply seeds signals + string table, registers handlers</li>
+        <li>Handler bytecode decoded once &amp; cached → reused per tap (R3)</li>
+        <li>dispatch: VM runs closure, folds written signals into graph</li>
+        <li>reconcileDirty walks only subtrees reading written signals (R1)</li>
+        <li>@pure nodes with unchanged prop hash skipped (G6)</li>
+        <li>Adapters mutate native views <b>in place</b> by stable NodeId</li>
       </ul>
     </div>
-    <div class="card">
-      <div class="card-header"><div class="card-dot violet"></div><h3>Shared Model &amp; Parity</h3></div>
+    <div class="mini"><div class="mini-h"><div class="d" style="background:#a78bfa"></div><h3>Shared Model &amp; Parity</h3></div>
       <ul>
-        <li>• VMValue tag set 0x00–0x07 is the wire contract (Swift/Kotlin/Rust)</li>
-        <li>• flux-vm-ref is the oracle; both native VMs conform via ISA vectors</li>
-        <li>• flux build → idiomatic SwiftUI / Compose from same LoweredIr</li>
-        <li>• flux-parity reduces dev-VM trace + both codegen outputs to one ViewNode, asserts equivalence (BR-004)</li>
-        <li>• Empty ForEach splice faithful on all 3 paths (FLUX-014)</li>
+        <li>VMValue tag set 0x00–0x07 is the wire contract (Swift/Kotlin/Rust)</li>
+        <li>flux-vm-ref is the oracle; both native VMs conform via ISA vectors</li>
+        <li>flux build → idiomatic SwiftUI / Compose from same LoweredIr</li>
+        <li>flux-parity reduces dev-VM trace + both codegen outputs to one ViewNode</li>
+        <li>Empty ForEach splice faithful on all 3 paths (FLUX-014)</li>
+        <li>Node IDs via compute_node_id with correct tag family (§3.2)</li>
       </ul>
     </div>
   </div>
 
-  <p class="footer">Generated from source: crates/{cli,devserver,ir-serde,vm-ref,codegen-swift,codegen-kotlin,parity} · runtimes/ios/FluxHost/Sources · runtimes/android/host/src. Appendices B–G of mlp-appendices.md are normative.</p>
+  <p class="footer">Generated from source: crates/{cli,devserver,differ,ir-serde,ir/lower,vm-ref,codegen-swift,codegen-kotlin,parity} · runtimes/ios/FluxHost/Sources · runtimes/android/host/src. Appendices B–G of mlp-appendices.md are normative.</p>
 </div>
+
+<script>
+/* ---- source-grounded component data ---- */
+const NODES = {
+  cli:{title:"flux-cli · dev subcommand", loc:"crates/flux-cli/src/lib.rs", tags:["Rust","CLI","dev"],
+    summary:"The entry point that starts the dev server. Parses `flux dev` flags (--root, --ws-host, --ws-port, --http-port) and hands the project root to `flux-devserver::Pipeline`.",
+    fns:[["fn","run(args)->Result","top-level dispatch of subcommands dev/build/init/doc"]],
+    notes:["Defaults ws 7331 / http 7332; `--ws-host 0.0.0.0` exposes to LAN devices.","`dev` spawns the file watcher and the WebSocket + asset servers."]},
+  pipeline:{title:"flux-devserver · Pipeline", loc:"crates/flux-devserver/src/pipeline.rs:429 compile()", tags:["Rust","core","ADR-0027"],
+    summary:"The incremental compile pipeline. Owns the last-good LoweredIr plus the server-side DependencyIndex derived from each tree's signal_deps. Compiling either advances state and yields a frame, or returns a Diagnostic (previous good tree retained, no Delta).",
+    fns:[["fn","compile()->Result<Compiled,Diagnostic>","parse→type_check→lower→diff→frame"],["fn","handle_dispatch_report(report)","emits minimal Delta or None (noop)"],["fn","set_signal_deps(deps)","rebuilds reverse index"]],
+    notes:["Compiled::Init on first success, Delta on changed tree, Unchanged when identical.","Merge arenas across files; prop thunks shipped as closures (ADR-0027 T14).","required_capabilities() scans CALL_CAP bytecode for Hello handshake gating."]},
+  dispatch:{title:"dispatch.rs · ADR-0027 minimal patches", loc:"crates/flux-devserver/src/dispatch.rs:345 handle_dispatch_report", tags:["Rust","ADR-0027","server-half"],
+    summary:"The server-side payoff of Phase 2. A host→server DispatchReport carries (handler_id, written signal). The DependencyIndex inverts each node's signal_deps into SignalId→{NodeId}. On a write to S, emit Update patches addressed ONLY to dependents[S].",
+    fns:[["fn","emit_minimal_updates(written,arena,index)","1 Patch::Update per node in dirty"],["fn","DependencyIndex::rebuild","Signal→Node + Node→Signal maps"],["fn","DispatchReport::to_bytes","fixed 14-byte 0x06 frame"]],
+    notes:["Degrades to coarse frame when index inactive (no signal_deps).","wrote signal nobody reads → empties dirty set → ships nothing (noop budget).","Patch::Update is state-preserving so instances survive."]},
+  differ:{title:"flux-differ · keyed diff", loc:"crates/flux-differ/src/diff.rs:20 diff()", tags:["Rust","FLUX-014"],
+    summary:"Computes the minimal Patch stream transforming old into new. Keyed on stable NodeIds (blake3 of span+tag+parent). Identical-hash nodes emit no Update; handler-only changes emit a state-preserving Handler patch (hot reload).",
+    fns:[["fn","diff(old,new)->Vec<Patch>","Update/Reorder/Replace/Remove/Insert/Handler"],["fn","props_equal","O(1) u64 hash compare + belt-and-braces field check"],["fn","handlers_equal","byte-identical closure compare (FLUX-019)"]],
+    notes:["Reorder emitted instead of remove+insert when child set unchanged.","Node kind/component_id mismatch → Replace.","Prop hash short-circuits deserialization of cold blobs."]},
+  irserde:{title:"flux-ir-serde · wire frames", loc:"crates/flux-ir-serde/src/frame.rs:413 init()", tags:["Rust","Appendix D"],
+    summary:"Constructs and decodes the frame family. Init/Deltas follow the D.1 header (magic 0x465C5558, version 1); Hello/Error/Heartbeat follow D.12. Handler transport (Gap G1): shared bytecode blob + HandlerDef stream whose ClosureRefs index the blob.",
+    fns:[["fn","Frame::init(root,extra,seed,src,table,comp,closures,meta)","full-tree frame"],["fn","Frame::delta(seq,flags,patches,strings,closures,...)","patch frame"],["fn","write_closures","concatenate bytecode, record offsets"]],
+    notes:["STRING_ID_CANONICAL_CEILING = 0x8000_0000; host synthetic fallback forbidden in prod.","Frame types: 0x01 Hello, 0x02 Init, 0x03 Error, 0x04 Delta, 0x05 Heartbeat, 0x06 DispatchReport, 0x07/0x08 InternString.","All integers little-endian."]},
+  codegen:{title:"codegen-swift / codegen-kotlin", loc:"crates/flux-codegen-swift/src/bridge.rs:41 component_id", tags:["Rust","release","ADR-0027"],
+    summary:"Release path. bridge.rs rebuilds each node's originating AST construct from its NodeId using the SAME compute_node_id call the type checker used. EXPR_TAG=10, COMPONENT_TAG=3 — using the wrong family silently produces an ID that matches nothing.",
+    fns:[["fn","Bridge::build(ast)","walk decls+exprs, record by derived NodeId"],["fn","codegen(lowered,ast)->String","SwiftUI / Compose emitter"],["fn","compile_handler(body,...)","handler → register bytecode (FLUX-018)"]],
+    notes:["Component names recovered from AST (arena drops them for compactness).","Bytecode compiler: state=state+1 → READ_SIGNAL/ADD_I64/WRITE_SIGNAL.","Same LoweredIr vocabulary as the dev VM path."]},
+  vmref:{title:"flux-vm-ref · behavioral oracle", loc:"crates/flux-vm-ref/src/vm.rs:285 run_resumable", tags:["Rust","oracle","ADR-0021/23/24"],
+    summary:"The reference interpreter. Swift (FLUX-006) and Kotlin (FLUX-007) runtimes MUST match its observable output on every ISA golden vector. Flat 16-register machine, r15 = gas, r0 = payload.",
+    fns:[["fn","run_resumable(bytecode,signals,payload)","Halt | Suspended continuation"],["fn","resume(state,signals,value)","re-enter at resume_ip with value in r0"],["type","CapabilityImpl","(capId,methodId,args,signals)->SignalId"]],
+    notes:["ENTRY_GAS=100_000; ADR-0023 int DIV/MOD by 0 → DivByZero; float DIV by 0 → ±inf.","ADR-0024 GET_FIELD on Null → NullDereference.","ADR-0044 AWAIT parks on Pending cell; result-cell model (ADR-0045)."]},
+  parity:{title:"flux-parity · dev vs release (BR-004)", loc:"crates/flux-parity/src/reduce.rs:23 from_ast", tags:["Rust","FLUX-023","parity"],
+    summary:"Proves what you see in dev is what ships. Reduces the dev-path reactive tree AND the release-path emitted SwiftUI/Compose to one shared language-neutral ViewNode model and asserts the three trees are identical.",
+    fns:[["fn","from_ast(ast)->Vec<ViewNode>","dev-path structural source of truth"],["fn","recognize_swift(src)->ViewNode","parse generated SwiftUI back"],["fn","check_parity(report)","assert 3 paths equal"]],
+    notes:["normalize_view_name: VStack→Column, HStack→Row so Swift/Kotlin compare equal.","Empty ForEach splice is the INTENDED faithful shape (FLUX-014), not a divergence.","Router/Screen/If/ForEach/Match all reduced to structural nodes."]},
+  wire:{title:"Wire Protocol — Appendix D", loc:"crates/flux-ir-serde/src/frame.rs:32 MAGIC", tags:["contract","Appendix D"],
+    summary:"The normative byte contract between the server and both hosts. Magic 0x465C5558, version 1, little-endian. Frame = header + root Node + patches + handler-section + strings + stateΔ + files.",
+    fns:[["const","MAGIC = 0x465C5558","'FLUX'"],["const","STRING_ID_CANONICAL_CEILING = 0x8000_0000","host synthetic ids forbidden in prod"],["enum","FrameKind","Hello/Init/Error/Delta/Heartbeat/Intern"]],
+    notes:["Value tags 0x00–0x07 (D.5): null/int/float/bool/str/list/record + more.","Child = Node id | Splice keyed u64 (D.4). Patch D.2. ClosureRef D.7.","DispatchReport 0x06 (D.12.6): magic 'XFDR' 0x52444658."]},
+  iostransport:{title:"iOS · FluxWebSocketTransport", loc:"runtimes/ios/Sources/Host/FluxWebSocketTransport.swift", tags:["iOS","transport"],
+    summary:"Swift WebSocket transport. Performs the Hello handshake advertising platform/device/capabilities, then streams frames into the executor. 1s reconnect backoff keeps the dev loop alive across server restarts.",
+    fns:[["class","FluxWebSocketTransport","Hello + reconnect"],["fn","send(_:)","outbound frame bytes"]],
+    notes:["Hello carries (capability, version, features) triples gated against required_capabilities().","Matches Rust serializer byte-for-byte (Appendix D)."]},
+  iosdeser:{title:"iOS · FrameDeserializer", loc:"runtimes/ios/FluxHost/Sources/FluxHost/FrameDeserializer.swift", tags:["iOS","wire"],
+    summary:"Turns raw bytes into a FluxFrame (root, extraNodes, state seed, strings, component_names, closures, signal_meta). Mirrors the Rust serializer exactly — the same D layout on both ends.",
+    fns:[["fn","decode([UInt8])->FluxFrame","full decode"],["struct","WireModels","Node/Prop/Patch mirrors"]],
+    notes:["Feeds string table + component-name table into the reconciler separately (D.9 id spaces never collide).","signal_meta sliced by content hash (mirrors Android)."]},
+  iosexec:{title:"iOS · FluxRuntime (FluxExecutor)", loc:"runtimes/ios/FluxHost/Sources/FluxHost/FluxExecutor.swift:370 dispatch(_:)", tags:["iOS","@MainActor","R1","R3"],
+    summary:"@MainActor hub. Applies decoded frames, caches decoded [Instruction] per handler (R3) so the hot path never re-decodes, folds VM-written signals into the graph, then reconcileDirty walks only signal-dependent subtrees.",
+    fns:[["fn","dispatch(_ event)","evaluate → fold → reconcileDirty"],["fn","runHandlerAsync","resumable AWAIT loop (ADR-0044)"],["fn","registerHandler","decode once, cache (R3)"]],
+    notes:["No VM error escapes: faults captured into lastError → error overlay.","On a tap, dirty set = written ∩ graph; only dependent nodes re-render.","AsyncResolver settles futures (sync pass-through in tests)."]},
+  iosvm:{title:"iOS · FluxBytecodeVM", loc:"runtimes/ios/FluxHost/Sources/FluxHost/FluxBytecodeVM.swift", tags:["iOS","VM","oracle"],
+    summary:"Faithful Swift port of flux-vm-ref. Gas in r15, 16 MiB allocation budget; per-op guard rails (GasExhausted / MemoryExhausted) keep a runaway closure from crashing the device. Mirrors the ISA golden vectors.",
+    fns:[["fn","run(instructions,signals,payload)","VmOutcome"],["fn","runResumable","Suspended on AWAIT"],["fn","resume(state,value)"]],
+    notes:["16 registers, r0 = payload, r15 = remaining gas.","Result cells Ready/Pending/Error (ADR-0045).","Conforms via ISAConformanceTests."]},
+  iossignal:{title:"iOS · SignalGraph", loc:"runtimes/ios/FluxHost/Sources/FluxHost/SignalGraph.swift", tags:["iOS","R-graph"],
+    summary:"The reactive core, confined to the main actor (mirror of Android's ReactiveDispatcher). SignalStore impl; observe() drives native view mutations. sendable-safe graph shared by reference into the VM (no existential boxing on the hot path).",
+    fns:[["fn","write(id,value)","propagate to observers"],["fn","read(id)","resolve cell"],["fn","observe(id,cb)","R-graph subscription"]],
+    notes:["Host-authoritative state (ADR-0002): taps evaluated locally, no server round trip per tap.","Result-cell signals allocated for async capabilities."]},
+  iosvalue:{title:"iOS · VMValue (D.5)", loc:"runtimes/ios/FluxHost/Sources/FluxHost/FluxValue.swift", tags:["iOS","wire","D.5"],
+    summary:"The value vocabulary on the wire and in the VM: int / float / bool / str / list / record. Tag set 0x00–0x07 is the contract shared by Swift, Kotlin and Rust so a value serialized on one host deserializes identically on the other.",
+    fns:[["enum","VMValue","Null/Int/Float/Bool/Str/List/Record"],["fn","toData()/fromBytes()","D.5 encoding"]],
+    notes:["Record fields are (PropIdx,VMValue) — same framing as Rust Value::Record.","Str carries canonical StringId (< ceiling) resolved via interner."]},
+  iosrecon:{title:"iOS · ShadowTreeReconciler", loc:"runtimes/ios/FluxHost/Sources/FluxHost/ShadowTreeReconciler.swift:351 reconcileDirty", tags:["iOS","reconcile","G6"],
+    summary:"Keyed reconciler over the deserialized shadow tree, driving real FluxUIKit adapters. Nodes matched by stable NodeId; Splice children by u64 key. New nodes → create(); changed → update() in place; removed → destroy(). Preserves view identity across pushes/pops.",
+    fns:[["fn","apply(_ frame)","full build or patch replay"],["fn","reconcileDirty(rootId,nodes,signalIds)","only dependents[S] revisited"],["fn","materializeProps","run prop thunk against live graph"]],
+    notes:["@pure node with unchanged prop hash → whole subtree skipped (G6).","Router re-collects only the active-route Screen child (signal 97, ADR-0045).","Delta replaces root when ids unstable across edits (FLUX-019 fix)."]},
+  andtransport:{title:"Android · FluxTransport", loc:"runtimes/android/host/src/main/kotlin/dev/flux/host/transport/FluxTransport.kt", tags:["Android","transport"],
+    summary:"Kotlin WebSocket transport. Frame bytes deserialized OFF the reactive dispatcher (Default), then every stateful step runs withContext(reactiveDispatcher). 1s reconnect keeps the dev loop alive.",
+    fns:[["interface","FluxTransport","connect { bytes->receiveFrame }"],["fn","send(ByteArray)","outbound"]],
+    notes:["Matches Rust serializer byte-for-byte.","Frame listeners used to await InternString replies (INV-1)."]},
+  anddeser:{title:"Android · FrameDeserializer", loc:"runtimes/android/host/src/main/kotlin/dev/flux/host/wire/FrameDeserializer.kt", tags:["Android","wire"],
+    summary:"Turns raw bytes into a Frame with the same D layout as the Rust encoder. Separates string literals (StringId space) from component_names (ComponentId space) so a literal at id 2 cannot clobber the 'Column' component binding (Appendix D §D.9).",
+    fns:[["fun","deserialize(bytes)->Frame","full decode"],["data","WireNode/WireChild","mirrors Rust"]],
+    notes:["Slices prop-thunk bytecode from shared blob by content hash.","signal_meta merged, never wiped by Delta (hot-reload)."]},
+  andexec:{title:"Android · FluxExecutor", loc:"runtimes/android/host/src/main/kotlin/dev/flux/host/FluxExecutor.kt:201 dispatch", tags:["Android","@MainThread","R-graph","T7"],
+    summary:"The single hub tying VM, signal graph, shadow tree and transport. @MainThread mirrors Swift's @MainActor. Last-wins hot-swap (T7): re-registering a handler overwrites the prior binding so a logic edit takes effect on the next tap. dispatch → VM run → reconcileDirty.",
+    fns:[["fun","dispatch(event)","intern payload → dispatchAsync"],["fun","dispatch(handlerId,payload)","VM run → reconcile"],["fun","dispatchAsync","resumable AWAIT loop (ADR-0044)"],["suspend fun","internString(text)","canonical id via RPC (INV-1)"]],
+    notes:["Everything stateful confined to ReactiveDispatcher (R-graph, ADR-0027).","Trace emission guarded by BuildFlags.DEBUG so R8 strips it from release.","On no readers, dirty reconcile is a no-op."]},
+  andvm:{title:"Android · FluxBytecodeVM", loc:"runtimes/android/host/src/main/kotlin/dev/flux/host/vm/FluxBytecodeVM.kt:74 run", tags:["Android","VM","oracle"],
+    summary:"Faithful Kotlin port of flux-vm-ref. ENTRY_GAS=100_000 in r15; MEMORY_CAP_BYTES=16 MiB. execTail shared by run/runResumable/resume. Faults are terminal failures (mirrors oracle's Err), never swallowed into a success.",
+    fns:[["fun","run(bytecode,signals,payload)","VmResult.Success/Failure"],["fun","runResumable","RunResult.Halt/Suspended/Fault"],["fun","resume(state,value)"]],
+    notes:["AllocationCounter clamps at 16 MiB and faults on exceed.","Conforms via IsaConformanceTest against golden vectors.","Result cells Ready/Pending/Error (ADR-0045)."]},
+  andsignal:{title:"Android · SignalGraph", loc:"runtimes/android/host/src/main/kotlin/dev/flux/host/signal/SignalGraph.kt", tags:["Android","R-graph"],
+    summary:"Host-authoritative reactive core (ADR-0002), confined to the ReactiveDispatcher. SignalStore impl with cellState/allocate_cell/resolve_cell for the async capability bridge. Taps evaluated locally — no server round trip per tap.",
+    fns:[["fun","write(id,value)","resolve cell → Ready"],["fun","read(id)","current value"],["fun","cellState(id)","Ready/Pending/Error"]],
+    notes:["Also the VM's SignalStore (same object threaded into run).","Lifecycle hooks (onMount/onCleanup) run through the same VM."]},
+  andvalue:{title:"Android · FluxValue (D.5)", loc:"runtimes/android/host/src/main/kotlin/dev/flux/host/vm/FluxValue.kt", tags:["Android","wire","D.5"],
+    summary:"The value vocabulary mirror of iOS VMValue: NullVal/IntVal/FloatVal/BoolVal/StrVal/ListVal/RecordVal. Tag set 0x00–0x07 is the shared wire contract so values cross hosts losslessly.",
+    fns:[["sealed","FluxValue","7 variants"],["fun","toVmValue/fromVmValue","kit↔vm"]],
+    notes:["Record fields (PropIdx, FluxValue).","StrVal carries canonical StringId resolved via StringInterning (INV-1)."]},
+  andrecon:{title:"Android · ShadowTree.reconcileDirty", loc:"runtimes/android/host/src/main/kotlin/dev/flux/host/shadow/DirtyReconciler.kt:48", tags:["Android","reconcile","R1","G6"],
+    summary:"Keyed by NodeId. After a handler writes signals, visits JUST the subtrees containing a dirty node — a clean sibling is never visited (independent of tree size). Re-materializes old/new prop kits only for nodes that actually change (T5/R2).",
+    fns:[["fun","reconcileDirty(rootId,writtenSignals)","only dependents[S]"],["fun","hasOwnDirtyDescendant","recursive dirty descent"],["fun","materializeProps","re-run prop thunk vs live graph"]],
+    notes:["@pure node with equal raw props → skipped (G6).","Router re-attaches only active-route child when signal 97 changes.","Merge not replace for thunk/component tables (FLUX-019 fix)."]},
+  legend:{title:"Legend & convergence", loc:"docs/flux-architecture.html", tags:["map"],
+    summary:"All three paths (dev VM, iOS codegen, Android codegen) converge on behavioral parity. The vm-ref oracle fixes ISA semantics; codegen emits SwiftUI/Compose from the same LoweredIr; flux-parity reduces all to one ViewNode (BR-004).",
+    fns:[],
+    notes:["Server→host over Appendix-D wire.","Host→server DispatchReport (0x06) feeds the ADR-0027 dependency index.","Empty ForEach splice faithful on all 3 paths (FLUX-014)."]}
+};
+
+/* ---- edge adjacency for dimming ---- */
+const EDGES = {
+  e1:["cli","pipeline"], e2:["pipeline","differ"], e3:["pipeline","dispatch"],
+  e4:["dispatch","irserde"], e5:["codegen","irserde"], e6:["irserde","wire"],
+  e7:["vmref","parity"], e8:["parity","parity"],
+  e9:["wire","iostransport"], e10:["wire","andtransport"],
+  e11:["iostransport","iosdeser"], e12:["iosdeser","iosexec"], e13:["iosexec","iosvm"],
+  e14:["iosvm","iossignal"], e15:["iosvm","iosvalue"], e16:["iosexec","iosrecon"],
+  e17:["andtransport","anddeser"], e18:["anddeser","andexec"], e19:["andexec","andvm"],
+  e20:["andvm","andsignal"], e21:["andvm","andvalue"], e22:["andexec","andrecon"],
+  e23:["iosexec","dispatch"], e24:["andexec","dispatch"]
+};
+
+const svg = document.getElementById('map');
+const detail = document.getElementById('detail');
+let selected = null, laneMode = false;
+
+function showDetail(id){
+  const n = NODES[id]; if(!n) return;
+  selected = id;
+  let tags = n.tags.map(t=>`<span class="tag">${t}</span>`).join('');
+  let fns = (n.fns||[]).map(f=>{
+    if(f[0]==='fun'||f[0]==='fn') return `<div class="fn"><span class="nm">${f[1]}</span> <span class="ret">${f[2]||''}</span></div>`;
+    if(f[0]==='class'||f[0]==='struct'||f[0]==='enum'||f[0]==='interface'||f[0]==='sealed'||f[0]==='type'||f[0]==='data'||f[0]==='const') return `<div class="fn"><span class="ret">${f[0]}</span> <span class="nm">${f[1]}</span> ${f[2]?`<span class="ret">${f[2]}</span>`:''}</div>`;
+    return `<div class="fn">${f[0]} ${f[1]}</div>`;
+  }).join('');
+  let notes = (n.notes||[]).map(x=>`<div class="kv">• <b></b>${x}</div>`).join('');
+  detail.innerHTML = `<h2>${n.title}</h2><div class="loc">${n.loc}</div>${tags}<p>${n.summary}</p><div style="margin:.6rem 0">${fns}</div>${notes}`;
+  // highlight selection
+  document.querySelectorAll('.node').forEach(g=>{
+    if(g.dataset.id===id) g.classList.add('sel'); else g.classList.remove('sel');
+  });
+  dimForSelection(id);
+}
+
+function dimForSelection(id){
+  if(laneMode){ laneHighlight(NODES[id].lane); return; }
+  const keep = new Set([id]);
+  for(const k in EDGES){ if(EDGES[k][0]===id) keep.add(EDGES[k][1]); if(EDGES[k][1]===id) keep.add(EDGES[k][0]); }
+  document.querySelectorAll('.node').forEach(g=>{
+    g.classList.toggle('dim', !keep.has(g.dataset.id));
+  });
+  for(const k in EDGES){
+    document.getElementById(k).classList.toggle('dim', !(EDGES[k][0]===id||EDGES[k][1]===id));
+  }
+}
+
+function laneHighlight(lane){
+  document.querySelectorAll('.node').forEach(g=> g.classList.toggle('dim', g.dataset.lane!==lane));
+  for(const k in EDGES){
+    const e=EDGES[k]; const on = NODES[e[0]].lane===lane && NODES[e[1]].lane===lane;
+    document.getElementById(k).classList.toggle('dim', !on);
+  }
+}
+
+document.querySelectorAll('.node').forEach(g=>{
+  g.addEventListener('click', ()=> showDetail(g.dataset.id));
+});
+
+/* ---- toolbar ---- */
+document.getElementById('btnLane').addEventListener('click', e=>{
+  laneMode = !laneMode; e.target.classList.toggle('on', laneMode);
+  if(!laneMode){ document.querySelectorAll('.node').forEach(g=>g.classList.remove('dim'));
+    for(const k in EDGES) document.getElementById(k).classList.remove('dim');
+    if(selected) dimForSelection(selected);
+  } else if(selected){ laneHighlight(NODES[selected].lane); }
+});
+document.getElementById('btnReset').addEventListener('click', ()=>{
+  selected=null; laneMode=false; document.getElementById('btnLane').classList.remove('on');
+  document.querySelectorAll('.node').forEach(g=>g.classList.remove('dim','sel'));
+  for(const k in EDGES) document.getElementById(k).classList.remove('dim');
+  detail.innerHTML = '<div class="empty-hint">Select a component on the left to read its real implementation.<br><br>Each panel cites the file:line I read during the codebase deep-dive, plus the load-bearing functions and the cross-host parity guarantees.</div>';
+});
+document.getElementById('btnWalk').addEventListener('click', ()=> runSim(false));
+
+/* ---- dispatch simulator ---- */
+const STEPS_OK = [
+  {t:"Native tap / event", c:"fire", d:""},
+  {t:"dispatch(FluxEvent)", c:"fire", d:"FluxExecutor:370 / :201"},
+  {t:"handler registered?", c:"guard", d:"lookup handlerClosures"},
+  {t:"cached [Instruction] (R3)", c:"guard", d:"no re-decode"},
+  {t:"FluxBytecodeVM.run", c:"fire", d:"VM:84 / FluxBytecodeVM.kt:74"},
+  {t:"gas==0?", c:"guard", d:"r15 budget 100_000"},
+  {t:"decode op · requireInt", c:"fire", d:"per-op guards"},
+  {t:"alloc>16MiB?", c:"guard", d:"AllocationCounter"},
+  {t:"VmOutcome.signals (sorted)", c:"write", d:"written signal set"},
+  {t:"graph.write(id,value)", c:"write", d:"fold into SignalGraph"},
+  {t:"reconcileDirty(root, written)", c:"fire", d:"only dependents[S]"},
+  {t:"@pure? skip · else setChildren", c:"guard", d:"G6 / R1"}
+];
+const STEPS_FAULT = [
+  {t:"Native tap / event", c:"fire", d:""},
+  {t:"dispatch(FluxEvent)", c:"fire", d:"FluxExecutor:370"},
+  {t:"VM runs closure", c:"fire", d:""},
+  {t:"gas exhausted (runaway loop)", c:"fault", d:"GasExhausted fault"},
+  {t:"lastError captured", c:"fault", d:"no VM error escapes"},
+  {t:"red banner, last good tree stays", c:"fault", d:"Appendix E §E.6"}
+];
+
+const stage = document.getElementById('simstage');
+const prog = document.getElementById('simprog');
+const log = document.getElementById('simlog');
+let simTimer=null;
+
+function renderSim(steps, i){
+  stage.innerHTML='';
+  steps.slice(0,i+1).forEach((s,idx)=>{
+    if(idx>0){ const a=document.createElement('span'); a.className='arrow'; a.textContent='→'; stage.appendChild(a); }
+    const c=document.createElement('span'); c.className='chip '+(idx===i?('fire '+s.c):s.c);
+    c.textContent=s.t; stage.appendChild(c);
+  });
+  prog.style.width = ((i+1)/steps.length*100)+'%';
+  log.textContent = 'step '+(i+1)+'/'+steps.length+': '+steps[i].t+(steps[i].d?'  —  '+steps[i].d:'');
+}
+
+function runSim(fault){
+  if(simTimer) clearInterval(simTimer);
+  const steps = fault?STEPS_FAULT:STEPS_OK;
+  let i=0; renderSim(steps,0);
+  simTimer=setInterval(()=>{
+    i++;
+    if(i>=steps.length){ clearInterval(simTimer); simTimer=null;
+      log.textContent += fault?'\n→ aborted with fault overlay (tree preserved).':'\n→ done: only signal-dependent subtrees re-rendered.';
+      return; }
+    renderSim(steps,i);
+  }, 620);
+}
+document.getElementById('btnPlay').addEventListener('click', ()=>runSim(false));
+document.getElementById('btnPlayFault').addEventListener('click', ()=>runSim(true));
+
+// open the pipeline by default so the panel isn't empty
+showDetail('pipeline');
+</script>
 </body>
 </html>
