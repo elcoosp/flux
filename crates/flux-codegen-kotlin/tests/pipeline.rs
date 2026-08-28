@@ -280,7 +280,7 @@ fn generated_kotlin_parses() {
     combined.push_str("import androidx.compose.runtime.*\n");
     combined.push_str("import androidx.compose.foundation.layout.*\n");
     combined.push_str("import androidx.compose.material3.*\n");
-    combined.push_str("import androidx.compose.material.icons.Icons\n");
+    combined.push_str("import androidx.compose.material3.Icon\n");
     combined.push_str("import androidx.navigation.compose.*\n");
     for (name, src) in examples() {
         combined.push_str(&codegen_example(name, src));
