@@ -8,7 +8,7 @@
 //  Router, Screen).
 
 /// The adapter contract version this kit implements (Appendix F).
-public enum FluxUIKit {
+public enum FluxUIKitModule {
     /// The adapter contract version this kit implements (Appendix F).
     public static let adapterContractVersion = 1
 }

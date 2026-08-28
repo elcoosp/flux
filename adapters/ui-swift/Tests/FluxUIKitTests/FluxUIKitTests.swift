@@ -6,6 +6,6 @@ import XCTest
 
 final class FluxUIKitTests: XCTestCase {
     func testAdapterContractVersionMatchesAppendixF() {
-        XCTAssertEqual(FluxUIKit.adapterContractVersion, 1)
+        XCTAssertEqual(FluxUIKitModule.adapterContractVersion, 1)
     }
 }
