@@ -1,0 +1,24 @@
+[package]
+name = "flux-fuzz"
+version = "0.1.0"
+edition = "2024"
+publish = false
+license = "Apache-2.0"
+
+# Keep this standalone `cargo fuzz` crate OUT of the parent `flux` workspace so
+# `cargo fuzz` can manage its own toolchain and `libfuzzer-sys` sanitizer deps
+# independently of the main build (AGENTS.md: `cargo fuzz` is a separate target).
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+flux-ir-serde = { path = "../crates/flux-ir-serde" }
+
+[[bin]]
+name = "decode_frame"
+path = "fuzz_targets/decode_frame.rs"
+test = false
+doc = false

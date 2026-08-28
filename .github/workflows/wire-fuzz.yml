@@ -1,0 +1,64 @@
+name: wire-fuzz
+
+# LANE-D (FLUX-01X) — wire robustness & fuzzing CI gate.
+#
+# Builds and runs the `cargo fuzz` target that hammers the untrusted-frame
+# decoder (`Frame::from_init_bytes` / `from_delta_bytes` / `from_hello_bytes`)
+# with arbitrary bytes. libFuzzer aborts the process on ANY panic, so a green
+# run means the decoder is total on attacker input: every buffer returns
+# `Ok` or a typed `WireError`/`None`, never `unwrap()`/`panic!` on attacker
+# bytes. The target lives in `fuzz/` (a standalone workspace, excluded from the
+# parent `flux` workspace so it can carry its own sanitizer toolchain).
+#
+# Runs on `ubuntu-latest` (native `cargo fuzz` / libFuzzer needs Linux; the
+# mac/windows runners keep the native Swift/Kotlin suites). Triggered on every
+# push/PR that touches the wire decoder or fuzz target.
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "crates/flux-ir-serde/**"
+      - "fuzz/**"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "crates/flux-ir-serde/**"
+      - "fuzz/**"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  fuzz:
+    name: cargo fuzz decode_frame
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly toolchain (cargo-fuzz needs nightly)
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt, clippy
+
+      - name: Install cargo-fuzz
+        # `cargo fuzz` is a separate binary; install it from crates.io on the
+        # nightly toolchain. Cached by cargo's own registry cache below.
+        run: cargo +nightly install cargo-fuzz --locked
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build the fuzz target (sanitized, release)
+        run: cargo +nightly fuzz build -O decode_frame
+
+      - name: Run the fuzz target for 60s — must not panic
+        # libFuzzer exits non-zero on the first panic (including the
+        # `panic!` inside an `unwrap`/`expect` on attacker bytes); a clean
+        # timeout-driven exit (status 0) is the pass condition.
+        run: cargo +nightly fuzz run -O decode_frame -- -max_total_time=60
