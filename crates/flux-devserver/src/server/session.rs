@@ -97,10 +97,57 @@ async fn handle_host_frame(bytes: &[u8], shared: &Arc<Shared>) -> Vec<Vec<u8>> {
             handle_intern_string(bytes, shared).into_iter().collect()
         }
         Some(flux_ir_serde::FRAME_HELLO) => handle_hello(bytes, shared).await.into_iter().collect(),
-        // Heartbeats and unknown host frames are ignored; the host drives the
-        // channel with `Hello` only (spec §D.12).
-        _ => Vec::new(),
+        // Roadmap Phase 2: the host parked a handler on a pending result cell.
+        // The server owns the resumption, so it replies with `Resume` as soon as
+        // the cell settles (immediately, when it settled first).
+        Some(flux_ir_serde::FRAME_AWAIT_SUSPEND) => {
+            handle_await_suspend(bytes, shared).into_iter().collect()
+        }
+        Some(flux_ir_serde::FRAME_HEARTBEAT) => Vec::new(),
+        // An unknown frame type is a protocol/version mismatch, not noise:
+        // silently dropping it is what makes a host built against a different
+        // protocol version look like an inexplicably dead channel. Log it and
+        // tell the host (roadmap Phase 5).
+        other => {
+            let tag = other.unwrap_or_default();
+            tracing::warn!(
+                frame_type = format!("{tag:#04x}"),
+                len = bytes.len(),
+                "unknown host frame type; host/server protocol versions may disagree"
+            );
+            let shared = Arc::clone(shared);
+            let diagnostic = unknown_frame(tag);
+            blocking(move || shared.pipeline.lock().error_frame(&diagnostic))
+                .await
+                .into_iter()
+                .collect()
+        }
     }
+}
+
+/// Handles a host `AwaitSuspend`, returning a `Resume` frame when the awaited
+/// cell has already settled.
+fn handle_await_suspend(bytes: &[u8], shared: &Arc<Shared>) -> Option<Vec<u8>> {
+    match shared.async_bridge.lock().on_await_suspend(bytes) {
+        Ok(resume) => resume,
+        Err(error) => {
+            tracing::warn!(?error, "malformed AwaitSuspend frame from host");
+            None
+        }
+    }
+}
+
+/// Diagnostic for a frame type this server does not implement.
+fn unknown_frame(tag: u8) -> Diagnostic {
+    Diagnostic::new(
+        format!(
+            "unknown wire frame type {tag:#04x}: this dev server implements protocol version {}. \
+             Rebuild the host app against the current Flux version so both sides agree on the \
+             frame set (Appendix D §D.12).",
+            flux_ir_serde::PROTOCOL_VERSION
+        ),
+        None,
+    )
 }
 
 /// Handles the `Hello` handshake, returning the `Init` (or `Error`) reply.
@@ -109,6 +156,7 @@ async fn handle_host_frame(bytes: &[u8], shared: &Arc<Shared>) -> Vec<Vec<u8>> {
 /// CPU-bound step in the WebSocket path and must not stall the reactor.
 async fn handle_hello(bytes: &[u8], shared: &Arc<Shared>) -> Option<Vec<u8>> {
     use flux_ir_serde::Frame;
+    eprintln!("[FLUXRT-srv] handle_hello: {} bytes", bytes.len());
     let Some(hello) = Frame::from_hello_bytes(bytes) else {
         let shared = Arc::clone(shared);
         return blocking(move || shared.pipeline.lock().error_frame(&malformed_hello())).await;

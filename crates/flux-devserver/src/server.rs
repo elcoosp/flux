@@ -32,6 +32,9 @@ mod session;
 #[derive(Debug)]
 pub(crate) struct Shared {
     pub(crate) pipeline: Mutex<Pipeline>,
+    /// Pairs host `AwaitSuspend` reports with capability completions and emits
+    /// `Resume` frames (roadmap Phase 2).
+    pub(crate) async_bridge: Mutex<crate::AsyncBridge>,
     clients: Mutex<Vec<UnboundedSender<Vec<u8>>>>,
     shutdown: AtomicBool,
 }
@@ -40,6 +43,7 @@ impl Shared {
     fn new(pipeline: Pipeline) -> Self {
         Self {
             pipeline: Mutex::new(pipeline),
+            async_bridge: Mutex::new(crate::AsyncBridge::new()),
             clients: Mutex::new(Vec::new()),
             shutdown: AtomicBool::new(false),
         }

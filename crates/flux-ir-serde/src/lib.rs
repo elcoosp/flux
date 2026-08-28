@@ -26,6 +26,7 @@
 
 mod encode;
 mod frame;
+mod resume;
 mod telemetry;
 mod wire;
 
@@ -39,6 +40,7 @@ pub use frame::{
     FLAG_HEARTBEAT, FLAG_NODE_HAS_SIGNAL_DEPS, FRAME_DELTA, FRAME_ERROR, FRAME_HEARTBEAT,
     FRAME_HELLO, FRAME_INIT, FRAME_INTERN_STRING, FRAME_STRING_INTERNED,
 };
+pub use resume::{AwaitSuspendFrame, FRAME_AWAIT_SUSPEND, FRAME_RESUME, ResumeFrame};
 pub use telemetry::{
     DebugCommand, DebugCommandFrame, EnrichedTelemetryEvent, EnrichedTelemetryFrame,
     FRAME_DEBUG_COMMAND, FRAME_TELEMETRY, Rect, Registers, TelemetryEvent, TelemetryFrame,

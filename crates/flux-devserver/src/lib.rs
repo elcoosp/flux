@@ -44,6 +44,7 @@
 )]
 
 mod assets;
+mod async_bridge;
 pub(crate) mod capability_idl;
 mod capability_manifest;
 mod config;
@@ -59,6 +60,7 @@ pub use dispatch::{
     emit_minimal_updates,
 };
 
+pub use async_bridge::AsyncBridge;
 pub use config::{
     DEFAULT_COALESCE, DEFAULT_DEBOUNCE, DEFAULT_HTTP_PORT, DEFAULT_WS_PORT, ServerConfig,
 };
