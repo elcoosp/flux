@@ -315,6 +315,17 @@ fn generated_kotlin_parses() {
             return;
         }
     };
+    // Sanity guard: if the provisioned classpath/compiler are empty or the plugin
+    // jar is missing, kotlinc would fail with an opaque "unresolved reference"
+    // rather than telling us the toolchain did not provision. Fail loudly here.
+    assert!(
+        !compose_classpath.is_empty(),
+        "ANDROID_COMPOSE_CLASSPATH was empty: the Compose toolchain did not provision into the Android CI job"
+    );
+    assert!(
+        std::path::Path::new(&compose_compiler).exists(),
+        "ANDROID_COMPOSE_COMPILER jar missing at {compose_compiler}: the Compose compiler plugin did not provision"
+    );
     let dir = std::env::temp_dir();
     let path = dir.join("flux_codegen_kotlin_generated.kt");
     std::fs::write(&path, &combined).expect("write temp kotlin file");
