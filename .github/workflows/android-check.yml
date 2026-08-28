@@ -6,6 +6,13 @@ name: android-check
 # frozen settings.gradle.kts, so their tests are covered with no manifest edits.
 # The Android SDK platform must be present for the android application plugin to
 # configure, so it is installed from the command-line tools on every run.
+#
+# This job also hosts the real `flux-codegen-kotlin` kotlinc compile-check: the
+# Gradle test step below resolves the Compose BOM into ~/.gradle, and the export
+# step assembles ANDROID_COMPOSE_CLASSPATH / ANDROID_COMPOSE_COMPILER from those
+# artifacts so `cargo test -p flux-codegen-kotlin generated_kotlin_parses` can
+# compile-check the generated Compose for real (it skips in rust-check, which has
+# no Android toolchain).
 
 on:
   push:
@@ -15,6 +22,7 @@ on:
       - "adapters/ui-kotlin/**"
       - "gradle/**"
       - "settings.gradle.kts"
+      - "crates/flux-codegen-kotlin/**"
   pull_request:
     branches: ["main"]
     paths:
@@ -22,13 +30,14 @@ on:
       - "adapters/ui-kotlin/**"
       - "gradle/**"
       - "settings.gradle.kts"
+      - "crates/flux-codegen-kotlin/**"
 
 permissions:
   contents: read
 
 jobs:
   android:
-    name: gradlew :adapters:ui-kotlin:test :runtimes:android:app:test
+    name: gradlew tests + kotlinc codegen check
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -49,26 +58,55 @@ jobs:
           yes | sdkmanager --licenses >/dev/null
           sdkmanager "platforms;android-37"
 
-      - name: Export ANDROID_COMPOSE_CLASSPATH for the kotlinc codegen check
-        # Mirrors the guarded export in rust-check.yml. `flux-codegen-kotlin`'s
-        # `generated_kotlin_parses` test shells out to `kotlinc` to compile-check
-        # the generated Compose; bare kotlinc cannot resolve androidx.compose.*
-        # without the Compose compiler + Android runtime on its classpath, supplied
-        # via the opt-in ANDROID_COMPOSE_CLASSPATH env var. After setup-android +
-        # the platform install above, $ANDROID_HOME/platforms/android-37/android.jar
-        # exists; the Compose compiler jar (in ~/.gradle) is provided by the
-        # separate toolchain-provisioning task. This step exports the classpath
-        # only when both artifacts are on disk, so it is a safe no-op until that
-        # lands and activates the real check automatically.
+      - name: Run adapter & runtime unit tests
+        # Resolves the full Compose BOM (runtime/foundation/material3/ui +
+        # navigation-compose + activity-compose) into ~/.gradle/caches, which the
+        # export step below turns into a classpath for the kotlinc codegen check.
+        run: ./gradlew :adapters:ui-kotlin:test :runtimes:android:app:test --no-daemon
+
+      - name: Export ANDROID_COMPOSE_CLASSPATH / ANDROID_COMPOSE_COMPILER for the kotlinc codegen check
+        # `flux-codegen-kotlin`'s `generated_kotlin_parses` test shells out to
+        # `kotlinc` to compile-check the generated Compose. Bare `kotlinc` needs
+        # the Compose runtime + Android runtime classes on `-classpath`
+        # (ANDROID_COMPOSE_CLASSPATH) and the Kotlin Compose compiler plugin on
+        # `-Xplugin` (ANDROID_COMPOSE_COMPILER). After the Gradle test step above,
+        # the Compose AARs (each containing classes.jar) and the
+        # kotlin-compose-compiler-plugin-embeddable jar are in ~/.gradle. This
+        # step extracts the runtime classes and exports both vars; it is a safe
+        # no-op if either is missing.
         run: |
           platform_jar="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/platforms/android-37/android.jar"
-          compose_jar="$(find "$HOME/.gradle" -name 'compose-compiler-*.jar' 2>/dev/null | head -n1)"
-          if [ -f "$platform_jar" ] && [ -n "$compose_jar" ]; then
-            echo "ANDROID_COMPOSE_CLASSPATH=${platform_jar}:${compose_jar}" >> "$GITHUB_ENV"
-            echo "exported ANDROID_COMPOSE_CLASSPATH for the kotlinc codegen check"
+          gradle_cache="$HOME/.gradle/caches/modules-2/files-2.1"
+          compose_cp=""
+          if [ -f "$platform_jar" ]; then
+            compose_cp="$platform_jar"
+          fi
+          if [ -d "$gradle_cache" ]; then
+            tmp_dir="$(mktemp -d)"
+            while IFS= read -r aar; do
+              extracted="$tmp_dir/$(basename "$aar" .aar).jar"
+              if unzip -o -q "$aar" classes.jar -d "$tmp_dir" >/dev/null 2>&1; then
+                mv "$tmp_dir/classes.jar" "$extracted"
+                compose_cp="${compose_cp:+$compose_cp:}$extracted"
+              fi
+            done < <(find "$gradle_cache" \
+              \( -path '*/androidx/compose/*' -o -path '*/androidx/navigation/navigation-compose/*' \
+                 -o -path '*/androidx/activity/activity-compose/*' \) -name '*.aar' 2>/dev/null)
+          fi
+          compose_compiler="$(find "$HOME/.gradle" -name 'kotlin-compose-compiler-plugin-embeddable-*.jar' 2>/dev/null | head -n1)"
+          if [ -n "$compose_cp" ] && [ -f "$compose_compiler" ]; then
+            echo "ANDROID_COMPOSE_CLASSPATH=$compose_cp" >> "$GITHUB_ENV"
+            echo "ANDROID_COMPOSE_COMPILER=$compose_compiler" >> "$GITHUB_ENV"
+            echo "exported ANDROID_COMPOSE_CLASSPATH and ANDROID_COMPOSE_COMPILER for the kotlinc codegen check"
           else
-            echo "Android/Compose toolchain not fully provisioned (missing ${platform_jar}${compose_jar:+ or compose-compiler jar}); ANDROID_COMPOSE_CLASSPATH left unset"
+            echo "Compose toolchain not fully provisioned (classpath='${compose_cp:-none}', compiler='${compose_compiler:-none}'); vars left unset (kotlinc check will skip)"
           fi
 
-      - name: Run adapter & runtime unit tests
-        run: ./gradlew :adapters:ui-kotlin:test :runtimes:android:app:test --no-daemon
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: kotlinc compile-check of generated Compose
+        # Runs the real kotlinc compile-check now that the Compose classpath +
+        # compiler plugin are exported above. Uses stable (flux-codegen-kotlin
+        # and its deps compile without the nightly-only gpui-ui feature).
+        run: cargo test -p flux-codegen-kotlin generated_kotlin_parses -- --nocapture

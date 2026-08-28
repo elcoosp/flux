@@ -58,25 +58,48 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-      - name: Export ANDROID_COMPOSE_CLASSPATH for the kotlinc codegen check
+      - name: Export ANDROID_COMPOSE_CLASSPATH / ANDROID_COMPOSE_COMPILER for the kotlinc codegen check
         # `flux-codegen-kotlin`'s `generated_kotlin_parses` test shells out to
-        # `kotlinc` to compile-check the generated Compose. Bare `kotlinc`
-        # cannot resolve `androidx.compose.*` unless the Compose compiler and
-        # the Android runtime are on its classpath, supplied via the opt-in
-        # ANDROID_COMPOSE_CLASSPATH env var (see that test). This step derives
-        # that classpath from a provisioned Android toolchain and exports it for
-        # the `cargo test` step below — but only when the artifacts actually
-        # exist on disk, so it is a safe no-op until the toolchain is fully
-        # provisioned (a separate infrastructure task) and the test skips
-        # cleanly otherwise.
+        # `kotlinc` to compile-check the generated Compose. Bare `kotlinc` needs
+        # two things from a provisioned Compose toolchain:
+        #   * the Compose runtime + Android runtime classes on `-classpath`
+        #     (ANDROID_COMPOSE_CLASSPATH), and
+        #   * the Kotlin Compose compiler plugin on `-Xplugin`
+        #     (ANDROID_COMPOSE_COMPILER).
+        # When Gradle has resolved the Compose BOM into ~/.gradle, the runtime
+        # classes live inside the Compose AARs (each AAR is a zip containing
+        # classes.jar) and the compiler plugin jar is the
+        # kotlin-compose-compiler-plugin-embeddable artifact. This step extracts
+        # the runtime classes and exports both vars, but only when the artifacts
+        # actually exist on disk — so it is a safe no-op until the toolchain is
+        # fully provisioned and the test skips cleanly otherwise.
         run: |
           platform_jar="${ANDROID_HOME:-$ANDROID_SDK_ROOT}/platforms/android-37/android.jar"
-          compose_jar="$(find "$HOME/.gradle" -name 'compose-compiler-*.jar' 2>/dev/null | head -n1)"
-          if [ -f "$platform_jar" ] && [ -n "$compose_jar" ]; then
-            echo "ANDROID_COMPOSE_CLASSPATH=${platform_jar}:${compose_jar}" >> "$GITHUB_ENV"
-            echo "exported ANDROID_COMPOSE_CLASSPATH for the kotlinc codegen check"
+          gradle_cache="$HOME/.gradle/caches/modules-2/files-2.1"
+          compose_cp=""
+          if [ -f "$platform_jar" ]; then
+            compose_cp="$platform_jar"
+          fi
+          if [ -d "$gradle_cache" ]; then
+            tmp_dir="$(mktemp -d)"
+            # Compose runtime/foundation/material/ui + navigation + activity compose AARs.
+            while IFS= read -r aar; do
+              extracted="$tmp_dir/$(basename "$aar" .aar).jar"
+              if unzip -o -q "$aar" classes.jar -d "$tmp_dir" >/dev/null 2>&1; then
+                mv "$tmp_dir/classes.jar" "$extracted"
+                compose_cp="${compose_cp:+$compose_cp:}$extracted"
+              fi
+            done < <(find "$gradle_cache" \
+              \( -path '*/androidx/compose/*' -o -path '*/androidx/navigation/navigation-compose/*' \
+                 -o -path '*/androidx/activity/activity-compose/*' \) -name '*.aar' 2>/dev/null)
+          fi
+          compose_compiler="$(find "$HOME/.gradle" -name 'kotlin-compose-compiler-plugin-embeddable-*.jar' 2>/dev/null | head -n1)"
+          if [ -n "$compose_cp" ] && [ -f "$compose_compiler" ]; then
+            echo "ANDROID_COMPOSE_CLASSPATH=$compose_cp" >> "$GITHUB_ENV"
+            echo "ANDROID_COMPOSE_COMPILER=$compose_compiler" >> "$GITHUB_ENV"
+            echo "exported ANDROID_COMPOSE_CLASSPATH and ANDROID_COMPOSE_COMPILER for the kotlinc codegen check"
           else
-            echo "Android/Compose toolchain not fully provisioned (missing ${platform_jar}${compose_jar:+ or compose-compiler jar}); ANDROID_COMPOSE_CLASSPATH left unset (kotlinc check will skip)"
+            echo "Compose toolchain not fully provisioned (classpath='${compose_cp:-none}', compiler='${compose_compiler:-none}'); vars left unset (kotlinc check will skip)"
           fi
 
       - name: cargo test
