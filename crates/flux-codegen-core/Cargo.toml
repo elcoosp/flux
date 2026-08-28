@@ -11,6 +11,7 @@ flux-syntax.workspace = true
 flux-ir.workspace = true
 flux-parser.workspace = true
 flux-types.workspace = true
+serde.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

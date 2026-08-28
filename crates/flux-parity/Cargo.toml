@@ -9,6 +9,7 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+flux-codegen-core.workspace = true
 flux-codegen-kotlin.workspace = true
 flux-codegen-swift.workspace = true
 flux-differ.workspace = true
@@ -18,6 +19,7 @@ flux-parser.workspace = true
 flux-syntax.workspace = true
 flux-types.workspace = true
 flux-vm-ref.workspace = true
+serde.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
