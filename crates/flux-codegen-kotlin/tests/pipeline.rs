@@ -330,8 +330,7 @@ fn generated_kotlin_parses() {
     let path = dir.join("flux_codegen_kotlin_generated.kt");
     std::fs::write(&path, &combined).expect("write temp kotlin file");
     let output = std::process::Command::new("kotlinc")
-        .arg("-Xplugin")
-        .arg(&compose_compiler)
+        .arg(format!("-Xplugin={compose_compiler}"))
         .arg("-classpath")
         .arg(&compose_classpath)
         .arg("-Xallow-no-source-files")

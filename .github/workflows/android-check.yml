@@ -101,6 +101,10 @@ jobs:
 
           # The Kotlin Compose compiler plugin is a Kotlin/JVM artifact on Maven Central.
           curl -fsSL "$MAVEN/org/jetbrains/kotlin/kotlin-compose-compiler-plugin-embeddable/$KOTLIN_VER/kotlin-compose-compiler-plugin-embeddable-$KOTLIN_VER.jar" -o "$WORK/jars/compose-compiler.jar"
+          # The Compose plugin (K2 FIR) references org.jetbrains.kotlin.com.intellij.psi.*
+          # classes that live in kotlin-compiler-embeddable; kotlinc's own classpath
+          # does not expose them to a standalone -Xplugin, so add it to the classpath.
+          curl -fsSL "$MAVEN/org/jetbrains/kotlin/kotlin-compiler-embeddable/$KOTLIN_VER/kotlin-compiler-embeddable-$KOTLIN_VER.jar" -o "$WORK/jars/kotlin-compiler-embeddable.jar"
 
           classpath="$(ls "$WORK/jars"/*.jar 2>/dev/null | tr '\n' ':')"
           classpath="${classpath%:}"
