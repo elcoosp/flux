@@ -1,0 +1,62 @@
+name: benchmarks
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  bench:
+    name: Criterion suite + baseline compare
+    runs-on: macos-14
+    # Benchmarks are expensive; only run on demand / main to keep PR minutes sane.
+    # Remove the `if` to gate on every PR.
+    if: github.event_name != 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install nightly toolchain
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustup default nightly
+
+      - name: Restore bench baseline from main
+        id: baseline
+        continue-on-error: true
+        run: |
+          git fetch origin main:main-ref || true
+          mkdir -p benches-baseline
+          git show main-ref:target/criterion-baseline.tar.zst > benches-baseline/baseline.tar.zst 2>/dev/null || true
+          if [ -s benches-baseline/baseline.tar.zst ]; then
+            tar -xf benches-baseline/baseline.tar.zst -C benches-baseline || true
+          fi
+
+      - name: Build benchmarks (do not run yet)
+        run: cargo bench --no-run --all-targets
+
+      - name: Run benchmarks and save baseline
+        run: |
+          cargo bench -- --save-baseline current
+          # Compact to a portable archive for artifact upload.
+          tar -cf criterion-current.tar.zst -I zstd --exclude='*.csv' --exclude='*.json' target/criterion
+
+      - name: Install critcmp
+        run: cargo install critcmp --locked || true
+
+      - name: Compare against baseline
+        if: steps.baseline.outcome == 'success'
+        run: |
+          critcmp benches-baseline/criterion current || true
+
+      - name: Upload current baseline artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: criterion-baseline
+          path: target/criterion
+          retention-days: 30
