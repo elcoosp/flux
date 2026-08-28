@@ -50,7 +50,7 @@ proptest! {
     ) {
         let source = names
             .iter()
-            .map(|name| format!("component {name} {{ Text(\"{name}\") }}"))
+            .map(|name| format!("compo {name}\n  Text(\"{name}\")"))
             .collect::<Vec<_>>()
             .join("\n");
         let ast = parse(&source, FILE_ID, "prop.flux").map_err(|error| {
@@ -67,7 +67,7 @@ proptest! {
         leading_blank_lines in 0usize..5,
     ) {
         let source = format!(
-            "{}component {name} {{ Text(\"x\") }}",
+            "{}compo {name}\n  Text(\"x\")",
             "\n".repeat(leading_blank_lines)
         );
         let ast = parse(&source, FILE_ID, "prop.flux").map_err(|error| {
@@ -75,14 +75,14 @@ proptest! {
         })?;
         let span = ast.decls[0].span();
         let text = &source[span.start as usize..span.end as usize];
-        prop_assert!(text.starts_with("component"), "span text was {text:?}");
+        prop_assert!(text.starts_with("compo"), "span text was {text:?}");
         prop_assert!(text.contains(&name), "span text was {text:?}");
     }
 
     /// Integer literals inside i64 always round-trip; ones outside always fail.
     #[test]
     fn integer_literals_round_trip_exactly_when_they_fit_in_i64(value in any::<i64>()) {
-        let source = format!("component A {{ state x: Int = {value} }}");
+        let source = format!("compo A\n  state x: Int = {value}");
         let ast = parse(&source, FILE_ID, "prop.flux").map_err(|error| {
             TestCaseError::fail(error.render())
         })?;

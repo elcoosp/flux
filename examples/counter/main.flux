@@ -6,11 +6,10 @@
 // `crates/flux-devserver/tests/full_pipeline.rs`) and by the
 // `ADR-0036-runtime-packaging-gap` ADR as the recommended integration path.
 
-component Counter {
+compo Counter
     state count: Int = 0
 
     Column(gap: 8.0) {
         Text(text: "tapped {count} times")
         Button(text: "Increment", onClick: fn() { count = count + 1 })
     }
-}

@@ -1,4 +1,4 @@
-// button.flux — `Button` adapter component (Appendix F.2).
+// button.flux — `Button` adapter compo (Appendix F.2).
 //
 // Props follow the Appendix F.2 contract exactly:
 //   text      String   required
@@ -14,11 +14,10 @@
 // Native rendering is defined by Appendix F.2 (UIButton / android.widget.Button
 // in dev mode; SwiftUI `Button` / Compose `Button` in release).
 
-component Button(
+compo Button(
   text: String,
   onClick: Handler,
   enabled: Bool = true,
   color: Option[Color] = None,
-) {
+)
   // Adapter leaf — native rendering defined by Appendix F.2.
-}

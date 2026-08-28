@@ -17,7 +17,7 @@ use flux_types::type_check;
 /// and every `Value::Str` id must resolve against it.
 #[test]
 fn lowered_string_props_resolve_from_arena_table() {
-    let src = "component Hello { state count: Int = 0 Text(\"hi\") Button(text: \"inc\") }";
+    let src = "compo Hello\n  state count: Int = 0\n  Text(\"hi\")\n  Button(text: \"inc\")\n";
     let ast = parse(src, 0, "hello.flux").expect("parse");
     let typed = type_check(&ast).expect("well-typed");
     let lowered = lower(&ast, &typed).expect("lowers");
@@ -49,7 +49,7 @@ fn lowered_string_props_resolve_from_arena_table() {
 /// table (no panic, no dangling interner).
 #[test]
 fn empty_arena_table_when_no_strings() {
-    let src = "component Box { Column() Row() }";
+    let src = "compo Box\n  Column()\n  Row()\n";
     let ast = parse(src, 0, "box.flux").expect("parse");
     let typed = type_check(&ast).expect("well-typed");
     let lowered = lower(&ast, &typed).expect("lowers");

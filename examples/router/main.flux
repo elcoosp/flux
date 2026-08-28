@@ -12,7 +12,7 @@
 // lowers it for release. It is the canonical Router example exercised by the
 // `examples/router` full-pipeline and parity tests.
 
-component App {
+compo App
     Column {
         // Root navigation container; the visible screen is driven by signal 97.
         Router {
@@ -34,4 +34,3 @@ component App {
             }
         }
     }
-}

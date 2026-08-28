@@ -137,7 +137,7 @@ mod tests {
 
     #[test]
     fn generic_component_emits_clause() {
-        let comp = component_named("component List[T] { prop items: List[T] Text(\"\") }");
+        let comp = component_named("compo List[T]\n  prop items: List[T]\n  Text(\"\")\n");
         let meta = ComponentMeta::new(&comp);
         assert!(!meta.decl.generics.is_empty());
         assert_eq!(meta.generic_clause(), "<T>");
@@ -145,7 +145,7 @@ mod tests {
 
     #[test]
     fn pure_component_has_no_state() {
-        let comp = component_named("component Stateless { Text(\"\") }");
+        let comp = component_named("compo Stateless\n  Text(\"\")\n");
         let meta = ComponentMeta::new(&comp);
         assert!(meta.states().is_empty());
     }

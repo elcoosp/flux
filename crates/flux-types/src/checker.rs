@@ -466,7 +466,7 @@ impl Checker {
         // A trailing block (component body) is type-checked for internal
         // errors even though its result does not change the call's type.
         if let Some(block) = trailing {
-            self.infer_block(block)?;
+            let _bt = self.infer_block(block)?;
         }
         // `Numeric.zero()` / `Numeric.one()` — trait method resolution.
         if let ExprKind::Ident(ident) = &callee.kind {

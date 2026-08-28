@@ -1,4 +1,4 @@
-// text.flux — `Text` adapter component (Appendix F.1).
+// text.flux — `Text` adapter compo (Appendix F.1).
 //
 // Renders a string. Props follow the Appendix F.1 contract exactly:
 //   text        String          required
@@ -18,7 +18,7 @@
 // mode; SwiftUI `Text` / Compose `Text` in release). This declaration is
 // the API contract; the body is supplied natively.
 
-component Text(
+compo Text(
   text: String,
   font: Option[Font] = None,
   size: Option[Float] = None,
@@ -26,6 +26,5 @@ component Text(
   alignment: Option[Alignment] = None,
   max_lines: Option[Int] = None,
   overflow: Option[Overflow] = None,
-) {
+)
   // Adapter leaf — native rendering defined by Appendix F.1.
-}

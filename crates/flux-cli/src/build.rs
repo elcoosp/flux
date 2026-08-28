@@ -27,10 +27,12 @@ pub(crate) fn run(platform: Platform, root: &Path) -> anyhow::Result<()> {
     for (path, source) in sources_list {
         pipeline.set_source(&path, source);
     }
-    if pipeline.compile().is_err() {
+    if let Err(diag) = pipeline.compile() {
+        tracing::error!(message = %diag.message, "compile failed");
         bail!(
-            "project at {} does not compile — fix the errors reported above, then rebuild",
-            root.display()
+            "project at {} does not compile — {}",
+            root.display(),
+            diag.message
         );
     }
 

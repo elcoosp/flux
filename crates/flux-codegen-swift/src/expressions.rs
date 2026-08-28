@@ -135,7 +135,7 @@ mod tests {
     use flux_parser::BinOp;
 
     fn expr_of(src: &str) -> flux_parser::Expr {
-        let full = format!("component Main {{ state x: Int = 0 {src} }}");
+        let full = format!("compo Main\n  {src}\n");
         let ast = flux_parser::parse(&full, 0, "t.flux").expect("parse");
         for decl in &ast.decls {
             if let flux_parser::Decl::Component(c) = decl {

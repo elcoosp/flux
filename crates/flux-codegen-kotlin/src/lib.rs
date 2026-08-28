@@ -20,7 +20,7 @@
 //! use flux_types::type_check;
 //! use flux_ir::lower;
 //!
-//! let src = "component Hello { state count: Int = 0 Text(\"hi\") }";
+//! let src = "compo Hello\n  state count: Int = 0\n  Text(\"hi\")\n";
 //! let ast = parse(src, 0, "hello.flux").unwrap();
 //! let typed = type_check(&ast).expect("well-typed");
 //! let lowered = lower(&ast, &typed).expect("lowers");

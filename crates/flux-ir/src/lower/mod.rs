@@ -119,7 +119,7 @@ impl LoweredIr {
 /// use flux_parser::parse;
 /// use flux_types::type_check;
 ///
-/// let src = "component Hello { state count: Int = 0 Button(text: \"tap\") }";
+/// let src = "compo Hello\n  state count: Int = 0\n  Button(text: \"tap\")\n";
 /// let ast = parse(src, 0, "hello.flux").unwrap();
 /// let typed = type_check(&ast).expect("well-typed");
 /// let lowered = lower(&ast, &typed).expect("lowers");

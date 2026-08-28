@@ -8,8 +8,6 @@ repository.workspace = true
 
 [dependencies]
 flux-syntax.workspace = true
-pest.workspace = true
-pest_derive.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

@@ -5,14 +5,14 @@ use flux_syntax::Patch;
 
 const ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/counter");
 
-const BASE: &str = "component Counter {
+const BASE: &str = "compo Counter
     state count: Int = 0
 
     Column(gap: 8.0) {
         Text(text: \"tapped {count} times\")
         Button(text: \"Increment\", onClick: fn() { count = count + 1 })
     }
-}
+
 ";
 
 fn label_of(pt: &Patch) -> String {

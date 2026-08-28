@@ -31,44 +31,43 @@ fn examples() -> Vec<(&'static str, &'static str)> {
     vec![
         (
             "b3_1_counter",
-            "component Counter {\n  state count: Int = 0\n  Column {\n    Text(\"Count: {count}\")\n    Button(onClick: { count = count + 1 }) { Text(\"Increment\") }\n  }\n}\n",
+            "compo Counter\n  state count: Int = 0\n  Column {\n    Text(\"Count: {count}\")\n    Button(onClick: { count = count + 1 }) { Text(\"Increment\") }\n  }\n\n",
         ),
         (
             "b3_2_button",
-            "component Tapped {\n  state taps: Int = 0\n  Button(onClick: { taps = taps + 1 }) { Text(\"Tapped {taps} times\") }\n}\n",
+            "compo Tapped\n  state taps: Int = 0\n  Button(onClick: { taps = taps + 1 }) { Text(\"Tapped {taps} times\") }\n\n",
         ),
         (
             "b3_3_match",
-            "type Shape = Circle(Int) | Rect(Int, Int)\n\
-             component AreaView(shape: Shape) {\n  Column {\n    match shape {\n      Circle(r) => Text(\"circle\")\n      Rect(w, h) => Text(\"rect\")\n    }\n  }\n}\n",
+            "type Shape = Circle(Int) | Rect(Int, Int)\ncompo AreaView(shape: Shape)\n  Column {\n    match shape {\n      Circle(r) => Text(\"circle\")\n      Rect(w, h) => Text(\"rect\")\n    }\n  }\n\n",
         ),
         (
             "b3_4_router",
-            "component App {\n  state route: String = \"home\"\n  Router {\n    Screen(\"home\") { Text(\"Home\") }\n    Screen(\"settings\") { Text(\"Settings\") }\n  }\n}\n",
+            "compo App\n  state route: String = \"home\"\n  Router {\n    Screen(\"home\") { Text(\"Home\") }\n    Screen(\"settings\") { Text(\"Settings\") }\n  }\n\n",
         ),
         (
             "b3_5_conditional",
-            "component App {\n  state show: Bool = false\n  Column {\n    when show {\n      Text(\"visible\")\n    } otherwise {\n      Text(\"hidden\")\n    }\n  }\n}\n",
+            "compo App\n  state show: Bool = false\n  Column {\n    when show {\n      Text(\"visible\")\n    } otherwise {\n      Text(\"hidden\")\n    }\n  }\n\n",
         ),
         (
             "b3_6_fetch",
-            "component Feed {\n  state items: List[String] = [\"a\", \"b\"]\n  Column {\n    ForEach(items, key: fn(s) { s.id }) { item =>\n      Text(item)\n    }\n  }\n}\n",
+            "compo Feed\n  state items: List[String] = [\"a\", \"b\"]\n  Column {\n    ForEach(items, key: fn(s) { s.id }) { item =>\n      Text(item)\n    }\n  }\n\n",
         ),
         (
             "b3_7_optional",
-            "component Detail(model: Model) {\n  Column {\n    Text(model.title)\n  }\n}\n",
+            "compo Detail(model: Model)\n  Column {\n    Text(model.title)\n  }\n\n",
         ),
         (
             "b3_8_form",
-            "component Login {\n  state value: String = \"\"\n  Column {\n    Text(\"Login\")\n    Button(onClick: { value = \"\" }) { Text(\"Reset\") }\n  }\n}\n",
+            "compo Login\n  state value: String = \"\"\n  Column {\n    Text(\"Login\")\n    Button(onClick: { value = \"\" }) { Text(\"Reset\") }\n  }\n\n",
         ),
         (
             "b3_9_state",
-            "component Toggle {\n  state on: Bool = false\n  Button(onClick: { on = true }) { Text(\"on = {on}\") }\n}\n",
+            "compo Toggle\n  state on: Bool = false\n  Button(onClick: { on = true }) { Text(\"on = {on}\") }\n\n",
         ),
         (
             "b3_10_generics",
-            "component List[T](items: List[T]) {\n  Column {\n    ForEach(items, key: fn(t) { t.id }) { item =>\n      Text(item)\n    }\n  }\n}\n",
+            "compo List[T](items: List[T])\n  Column {\n    ForEach(items, key: fn(t) { t.id }) { item =>\n      Text(item)\n    }\n  }\n\n",
         ),
     ]
 }
@@ -205,7 +204,7 @@ fn generated_swift_parses() {
 /// form (`Button(...) { Text(...) }`).
 #[test]
 fn button_emits_handler_and_label() {
-    let src = "component Tapped {\n  state taps: Int = 0\n  Button(text: \"Tap me\", onClick: fn() { taps = taps + 1 })\n}\n";
+    let src = "compo Tapped\n  state taps: Int = 0\n  Button(text: \"Tap me\", onClick: fn() { taps = taps + 1 })\n\n";
     let out = codegen_example("button_regression", src);
     assert!(
         out.contains("Button(action: { taps = (taps + 1) })"),
@@ -217,7 +216,7 @@ fn button_emits_handler_and_label() {
     );
 
     // Trailing-block label form must also work.
-    let src2 = "component Tapped2 {\n  state taps: Int = 0\n  Button(onClick: fn() { taps = taps + 1 }) { Text(\"Block\") }\n}\n";
+    let src2 = "compo Tapped2\n  state taps: Int = 0\n  Button(onClick: fn() { taps = taps + 1 }) { Text(\"Block\") }\n\n";
     let out2 = codegen_example("button_regression_2", src2);
     assert!(
         out2.contains("Button(action: { taps = (taps + 1) })"),

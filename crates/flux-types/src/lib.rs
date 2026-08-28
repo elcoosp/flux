@@ -18,7 +18,7 @@
 //! use flux_types::type_check;
 //! use flux_parser::parse;
 //!
-//! let source = "component Hello { state count: Int = 0 }";
+//! let source = "compo Hello\n  state count: Int = 0\n";
 //! let ast = parse(source, 0, "hello.flux").unwrap();
 //! let typed = type_check(&ast).expect("well-typed source");
 //! assert!(typed.instantiations.is_empty());

@@ -21,7 +21,7 @@ use tokio_tungstenite::tungstenite::stream::MaybeTlsStream;
 use tokio_tungstenite::tungstenite::{Message, WebSocket, connect};
 
 const GOOD_SOURCE: &str =
-    "component Hello { state count: Int = 0 Button(text: \"tap\") Text(text: \"${count}\") }";
+    "compo Hello\n  state count: Int = 0\n  Button(text: \"tap\")\n  Text(text: \"{count}\")\n";
 
 /// A unique scratch directory (the crate has no `tempfile` dev-dependency).
 fn scratch_dir(tag: &str) -> PathBuf {

@@ -1,4 +1,4 @@
-// text_field.flux — `TextField` adapter component (Appendix F.5).
+// text_field.flux — `TextField` adapter compo (Appendix F.5).
 //
 // Props follow the Appendix F.5 contract exactly:
 //   text        String          controlled value, defaults to ""
@@ -17,7 +17,7 @@
 // Native rendering is defined by Appendix F.5 (UITextField / EditText in
 // dev mode; SwiftUI `TextField` / Compose `TextField` in release).
 
-component TextField(
+compo TextField(
   text: String = "",
   onChange: Handler,
   placeholder: Option[String] = None,
@@ -25,6 +25,5 @@ component TextField(
   enabled: Bool = true,
   secure: Bool = false,
   keyboard: Option[KeyboardType] = None,
-) {
+)
   // Adapter leaf — native rendering defined by Appendix F.5.
-}

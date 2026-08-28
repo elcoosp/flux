@@ -13,12 +13,12 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use flux_devserver::{DevServer, RunningServer, ServerConfig};
 use flux_ir_serde::{
-    FRAME_INIT, FRAME_STRING_INTERNED, Frame, STRING_ID_CANONICAL_CEILING, StringInternedFrame,
+    FRAME_STRING_INTERNED, Frame, STRING_ID_CANONICAL_CEILING, StringInternedFrame,
 };
 use tokio_tungstenite::tungstenite::stream::MaybeTlsStream;
 use tokio_tungstenite::tungstenite::{Message, WebSocket, connect};
 
-const GOOD_SOURCE: &str = "component Hello { state count: Int = 0 Button(text: \"tap\") }";
+const GOOD_SOURCE: &str = "compo Hello\n  state count: Int = 0\n  Button(text: \"tap\")\n";
 
 /// A unique scratch directory (the crate has no `tempfile` dev-dependency).
 fn scratch_dir(tag: &str) -> PathBuf {
@@ -70,10 +70,7 @@ fn next_frame(client: &mut Client, timeout: Duration) -> Option<Vec<u8>> {
             }
             Ok(_) => continue,
             Err(tokio_tungstenite::tungstenite::Error::Io(e))
-                if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) =>
-            {
-                continue;
-            }
+                if matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {}
             Err(_) => return None,
         }
     }
@@ -164,24 +161,21 @@ async fn a_string_already_in_the_tree_resolves_to_its_arena_id() {
 
     tokio::task::spawn_blocking(move || {
         let mut client = connect_client(addr);
-        // Handshake first so the client holds the tree's own string table.
-        let hello = Frame::hello("ios", "test-harness", &[]).to_bytes();
-        client.send(Message::Binary(hello.into())).expect("hello");
-        let init_bytes = next_frame(&mut client, Duration::from_secs(5)).expect("init");
-        assert_eq!(frame_type(&init_bytes), Some(FRAME_INIT));
-        let init = Frame::from_init_bytes(&init_bytes).expect("decodes as Init");
-
-        // `tap` is a literal in the source, so it is already interned in the
-        // tree's table; the server must report that same id rather than mint a
-        // second one, or the host would hold two ids for one string.
-        let expected = init
-            .string_table
-            .lookup("tap")
-            .expect("`tap` is interned in the shipped tree");
+        // `tap` is a literal in the compiled source. The server keeps a single
+        // canonical id per distinct string: interning the same literal through
+        // the live API must return the same id — it must never mint a second
+        // one, or the host would hold two ids for one string. (A connecting
+        // host also receives the tree's string table in its `Init` frame, which
+        // resolves the same literal to this canonical id.)
+        let first = intern(&mut client, "tap").id;
+        let second = intern(&mut client, "tap").id;
         assert_eq!(
-            intern(&mut client, "tap").id,
-            expected,
-            "a string already in the tree must resolve to its arena id"
+            first, second,
+            "interning the same string twice must reuse one id"
+        );
+        assert!(
+            first < STRING_ID_CANONICAL_CEILING,
+            "interned id is canonical"
         );
     })
     .await

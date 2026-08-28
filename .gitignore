@@ -39,3 +39,4 @@ dump.txt
 # SwiftPM build output (regenerable)
 .build
 .kotlin
+docs/ideas

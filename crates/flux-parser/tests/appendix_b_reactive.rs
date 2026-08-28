@@ -11,12 +11,12 @@ mod common;
 
 use common::{component, parse_ok};
 
-const B34_SOURCE: &str = r#"component Chat {
+const B34_SOURCE: &str = "compo Chat
   state messages: List[String] = []
   let socket = createRef[WebSocket]()
 
   onMount {
-    socket.set(WebSocket.connect("ws://localhost:8080"))
+    socket.set(WebSocket.connect(\"ws://localhost:8080\"))
     socket.get().on_message = fn(msg: String) {
       batch {
         messages = messages + [msg]
@@ -33,29 +33,28 @@ const B34_SOURCE: &str = r#"component Chat {
       Text(msg)
     }
   }
-}"#;
+";
 
 /// Appendix B.3 source for `b35_navigation_with_router_parses_nested_screens_and_use_context`.
-const B35_SOURCE: &str = r#"component App {
-  state route: String = "home"
+const B35_SOURCE: &str = "compo App
+  state route: String = \"home\"
 
   Router {
-    Screen("home") { Home() }
-    Screen("profile") { Profile() }
-    Screen("settings") { Settings() }
+    Screen(\"home\") { Home() }
+    Screen(\"profile\") { Profile() }
+    Screen(\"settings\") { Settings() }
   }
-}
 
-component Home {
+compo Home
   let router = useContext(RouterContext)
 
   Column(gap: 16) {
-    Text("Home")
-    Button(text: "Open Profile", onClick: {
-      router.navigate("profile")
+    Text(\"Home\")
+    Button(text: \"Open Profile\", onClick: || {
+      router.navigate(\"profile\")
     })
   }
-}"#;
+";
 
 #[test]
 fn b34_lifecycle_effects_and_cleanup_parse_as_lifecycle_expressions() {
@@ -83,13 +82,13 @@ fn b34_lifecycle_effects_and_cleanup_parse_as_lifecycle_expressions() {
 #[test]
 fn b34_for_each_captures_its_key_function_and_loop_binding() {
     let ast = parse_ok(
-        r#"component Chat {
+        "compo Chat
   Column {
     ForEach(messages, key: fn(m, i) { i }) { msg =>
       Text(msg)
     }
   }
-}"#,
+",
     );
     let BlockItem::Expr(Expr {
         kind: ExprKind::Call { trailing, .. },
@@ -138,23 +137,23 @@ fn b35_navigation_with_router_parses_nested_screens_and_use_context() {
 #[test]
 fn b36_async_with_resource_destructures_the_resource_pair() {
     let ast = parse_ok(
-        r#"component UserList {
+        "compo UserList
   let (users, { refetch }) = resource(fn {
-    Api.fetch("/users")
+    Api.fetch(\"/users\")
   })
 
   Column {
     when users.is_loading {
-      Text("Loading...")
+      Text(\"Loading...\")
     }
     otherwise {
       ForEach(users.value, key: fn(u) { u.id }) { user =>
-        Text("{user.name}")
+        Text(\"{user.name}\")
       }
     }
-    Button(text: "Refresh", onClick: { refetch() })
+    Button(text: \"Refresh\", onClick: || { refetch() })
   }
-}"#,
+",
     );
 
     let decl = component(&ast, 0);
@@ -175,14 +174,14 @@ fn b36_async_with_resource_destructures_the_resource_pair() {
 #[test]
 fn b36_when_otherwise_binds_both_branches() {
     let ast = parse_ok(
-        r#"component A {
+        "compo A
   when loading {
-    Text("Loading...")
+    Text(\"Loading...\")
   }
   otherwise {
-    Text("Done")
+    Text(\"Done\")
   }
-}"#,
+",
     );
     let BlockItem::Expr(Expr {
         kind: ExprKind::When { otherwise, .. },
@@ -197,23 +196,22 @@ fn b36_when_otherwise_binds_both_branches() {
 #[test]
 fn b37_pure_component_records_the_annotation_and_prop_block() {
     let ast = parse_ok(
-        r#"@pure
-component Avatar(url: String, size: Float) {
+        "@pure
+compo Avatar(url: String, size: Float)
   Image(url) {
     width: size,
     height: size,
     cornerRadius: size / 2
   }
-}
 
-component Profile {
-  state avatarUrl: String = "https://example.com/me.png"
+compo Profile
+  state avatarUrl: String = \"https://example.com/me.png\"
 
   Column {
     Avatar(url: avatarUrl, size: 80)
-    Text("Profile")
+    Text(\"Profile\")
   }
-}"#,
+",
     );
 
     let avatar = component(&ast, 0);
@@ -238,14 +236,13 @@ component Profile {
 #[test]
 fn b38_await_expression_lowers_to_await_ast_node() {
     let ast = parse_ok(
-        r#"component Profile {
-  state token: String = "abc"
+        "compo Profile
+  state token: String = \"abc\"
 
   onMount {
     let user = await Api.fetch(token)
   }
-}
-"#,
+",
     );
 
     let profile = component(&ast, 0);

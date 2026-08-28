@@ -268,12 +268,12 @@ async fn release_build_emits_generated_swift_for_example() {
 /// that alters a node prop and therefore must produce a `Delta`.
 const EXAMPLE_EDITED: &str = "\
 // main.flux — edited copy of examples/counter for the delta e2e test.
-component Counter {
+compo Counter
     state count: Int = 0
 
     Column(gap: 8.0) {
         Text(text: \"tapped ${count} times\")
         Button(text: \"Increment\", onClick: fn() { count = count + 5 })
     }
-}
+
 ";

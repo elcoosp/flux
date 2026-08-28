@@ -24,14 +24,13 @@ const SAMPLE_ENTRY: &str = "\
 // `Hello` is the root component; `flux dev` serves it over WebSocket and
 // `flux build` lowers it for iOS / Android.
 
-component Hello {
+compo Hello
     state count: Int = 0
 
     Column(gap: 8.0) {
         Text(text: \"tapped ${count} times\")
         Button(text: \"Increment\", onClick: fn() { count = count + 1 })
     }
-}
 ";
 
 /// Default `.fluxignore` — build output, VCS noise, and editor cruft.

@@ -8,7 +8,7 @@
 
 /// B.3.1 — simple component declaring `state` and a `Column` tree, with a string
 /// interpolation and an `onClick` handler.
-pub(crate) const B31_SIMPLE: &str = r#"component HelloWorld {
+pub(crate) const B31_SIMPLE: &str = r#"compo HelloWorld
   state count: Int = 0
 
   Column(gap: 12) {
@@ -16,7 +16,6 @@ pub(crate) const B31_SIMPLE: &str = r#"component HelloWorld {
     Button(text: "Increment", onClick: {
       count = count + 1
     })
-  }
 }"#;
 
 /// B.3.2 — generic component with a trait bound, emitting `Column`/`Text`/`Button`.
@@ -27,14 +26,13 @@ pub(crate) const B32_GENERIC: &str = r#"trait Numeric[T] {
   fn -(a: T, b: T) -> T
 }
 
-component Counter[T: Numeric] {
+compo Counter[T: Numeric]
   state count: T = Numeric.zero()
 
   Column(gap: 8) {
     Text("Count: {count}")
     Button(text: "+", onClick: { count = count + Numeric.one() })
     Button(text: "-", onClick: { count = count - Numeric.one() })
-  }
 }"#;
 
 /// B.3.3 — ADT and pattern matching over every arm.
@@ -51,7 +49,7 @@ fn area(shape: Shape) -> Float {
   }
 }
 
-component ShapeDisplay {
+compo ShapeDisplay
   state shape: Shape = Circle(5.0)
 
   Column {
@@ -59,11 +57,10 @@ component ShapeDisplay {
     Button(text: "Make Square", onClick: {
       shape = Rectangle(4.0, 4.0)
     })
-  }
 }"#;
 
 /// B.3.4 — lifecycle (`onMount`/`onCleanup`), `createRef`, and a `ForEach`.
-pub(crate) const B34_LIFECYCLE: &str = r#"component Chat {
+pub(crate) const B34_LIFECYCLE: &str = r#"compo Chat
   state messages: List[String] = []
   let socket = createRef[WebSocket]()
 
@@ -72,8 +69,8 @@ pub(crate) const B34_LIFECYCLE: &str = r#"component Chat {
     socket.get().on_message = fn(msg: String) {
       batch {
         messages = messages + [msg]
-      }
     }
+  }
   }
 
   onCleanup {
@@ -85,23 +82,22 @@ pub(crate) const B34_LIFECYCLE: &str = r#"component Chat {
       Text(msg)
     }
   }
-}"#;
+"#;
 
 /// B.3.5 — navigation with a `Router`, `Screen`s, and `useContext`. The spec
 /// example calls `Home()`/`Profile()`/`Settings()` inside the screens; those are
 /// declared as minimal components here so the source is self-contained and
 /// type-checks (the parity harness needs a compiling source, not just a parse).
-pub(crate) const B35_NAVIGATION: &str = r#"component App {
+pub(crate) const B35_NAVIGATION: &str = r#"compo App
   state route: String = "home"
 
   Router {
     Screen("home") { Home() }
     Screen("profile") { Profile() }
     Screen("settings") { Settings() }
-  }
 }
 
-component Home {
+compo Home
   let router = useContext(RouterContext)
 
   Column(gap: 16) {
@@ -109,19 +105,16 @@ component Home {
     Button(text: "Open Profile", onClick: {
       router.navigate("profile")
     })
-  }
 }
 
-component Profile {
+compo Profile
   Column { Text("Profile") }
-}
 
-component Settings {
-  Column { Text("Settings") }
-}"#;
+compo Settings
+  Column { Text("Settings") }"#;
 
 /// B.3.6 — async with `resource`, `when … otherwise`, and a `ForEach`.
-pub(crate) const B36_ASYNC: &str = r#"component UserList {
+pub(crate) const B36_ASYNC: &str = r#"compo UserList
   let (users, { refetch }) = resource(fn {
     Api.fetch("/users")
   })
@@ -137,34 +130,31 @@ pub(crate) const B36_ASYNC: &str = r#"component UserList {
     }
     Button(text: "Refresh", onClick: { refetch() })
   }
-}"#;
+"#;
 
 /// B.3.7 — `@pure` component with a prop block (`Image(url) { width: size }`).
 pub(crate) const B37_PURE: &str = r#"@pure
-component Avatar(url: String, size: Float) {
+compo Avatar(url: String, size: Float)
   Image(url) {
     width: size,
     height: size,
     cornerRadius: size / 2
-  }
 }
 
-component Profile {
+compo Profile
   state avatarUrl: String = "https://example.com/me.png"
 
   Column {
     Avatar(url: avatarUrl, size: 80)
     Text("Profile")
-  }
 }"#;
 
 /// B.3.8 — platform conditional routing between two native components.
-pub(crate) const B38_PLATFORM: &str = r#"component PlatformButton {
+pub(crate) const B38_PLATFORM: &str = r#"compo PlatformButton
   if platform() == "ios" {
     CupertinoButton(text: "Tap", onClick: { ... })
   } else {
     MaterialButton(text: "Tap", onClick: { ... })
-  }
 }"#;
 
 /// B.3.9 — capability declarations listing every method.
@@ -181,7 +171,7 @@ capability Storage {
 }"#;
 
 /// B.3.10 — refs via `createRef[TextField]()` and binding them in `onMount`.
-pub(crate) const B310_REFS: &str = r#"component LoginForm {
+pub(crate) const B310_REFS: &str = r#"compo LoginForm
   let emailRef = createRef[TextField]()
   let passwordRef = createRef[TextField]()
 
@@ -198,7 +188,7 @@ pub(crate) const B310_REFS: &str = r#"component LoginForm {
       Auth.login(email, password)
     })
   }
-}"#;
+"#;
 
 /// All ten examples, in B.3.1 → B.3.10 order, as `(name, source)` pairs.
 #[must_use]

@@ -20,13 +20,13 @@ fn typed(src: &str) -> (flux_parser::Ast, flux_types::TypedAST) {
 
 #[test]
 fn text_node_prop_thunk_interpolates_count_not_increments() {
-    let src = "component Counter {
+    let src = "compo Counter
         state count: Int = 0
         Column {
             Text(text: \"tapped {count} times\")
             Button(text: \"Increment\") { onTap: { count = count + 1 } }
         }
-    }";
+    ";
     let (ast, typed) = typed(src);
     let lowered = lower(&ast, &typed).expect("lower");
 

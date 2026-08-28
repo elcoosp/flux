@@ -13,24 +13,24 @@ use flux_syntax::Patch;
 
 const ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/counter");
 
-const SRC1: &str = "component Counter {
+const SRC1: &str = "compo Counter
     state count: Int = 0
 
     Column(gap: 8.0) {
         Text(text: \"tapped {count} times\")
         Button(text: \"Increment\", onClick: fn() { count = count + 1 })
     }
-}
+
 ";
 
-const SRC2: &str = "component Counter {
+const SRC2: &str = "compo Counter
     state count: Int = 0
 
     Column(gap: 8.0) {
         Text(text: \"tapped {count} times\")
         Button(text: \"Increment\", onClick: fn() { count = count + 2 })
     }
-}
+
 ";
 
 #[test]

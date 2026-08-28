@@ -210,6 +210,20 @@ impl TcType {
                     .iter()
                     .map(|a| Self::from_surface(a, primitives))
                     .collect();
+                // A bare primitive name (`Int`, `Float`, …) may reach here when the
+                // surface type was lexed as an identifier rather than a primitive
+                // keyword; normalise it to the primitive variant so it unifies with
+                // inferred literals.
+                if converted.is_empty() && primitives.contains(&name.name) {
+                    return match name.name.as_str() {
+                        "Int" => Self::Int,
+                        "Float" => Self::Float,
+                        "Bool" => Self::Bool,
+                        "String" => Self::String,
+                        "Unit" => Self::Unit,
+                        other => Self::Named(other.to_owned(), Vec::new()),
+                    };
+                }
                 Self::app_named(&name.name, converted)
             }
             TypeKindAst::Record(fields) => Self::Record(

@@ -8,6 +8,34 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### FLUX-003 — parser: hand-written dream-syntax parser replaces pest — DONE
+
+Replaced the `pest`-generated parser with a hand-written lexer
+(`crates/flux-parser/src/lexer.rs`) + recursive-descent parser
+(`crates/flux-parser/src/parser.rs`) that implement the indentation-delimited
+"dream" surface syntax from `docs/counter-syntax-dream.md` as the single
+normative syntax. `flux.pest` is deleted and `pest`/`pest_derive` are removed
+from `flux-parser/Cargo.toml`.
+
+- Indentation delimits structure (`compo` bodies, `Column { … }` blocks, `fn`
+  bodies, `match` arms); braces remain only for inline blocks (`onMount { … }`,
+  `onClick: { … }`, `fn(x) { … }`, `match { … }`, `when { … } otherwise { … }`,
+  `if { … } else { … }`, and destructuring patterns like
+  `let (users, { refetch }) = …`).
+- Single public entry point `flux_parser::parse(source, file_id, path)`. No
+  `unwrap`/`expect` in production code; parse failures return a `Span`-carrying
+  `ParseError` (what/where/why/how).
+- Byte-accurate spans, allocation-free on the hot path; meets the AGENTS.md §3.6
+  parse budget. `MAX_NESTING_DEPTH = 16` retained (carried from ADR-0035).
+- Node-ID stability preserved via `flux_ir::compute_node_id()`.
+- **Migration:** every `.flux` source and inline test fixture in the workspace was
+  migrated from the old brace-delimited syntax to dream syntax — stdlib, examples,
+  `flux-cli`, `flux-parity`, `flux-devserver`, `flux-ir`, `flux-types`, and both
+  `flux-codegen-*` crates. The 10 Appendix B.3 parity examples, the flux-parity
+  snapshot suite, and the flux-types bidirectional type checker all pass under
+  dream syntax.
+- Recorded in `docs/adr/ADR-0046-dream-syntax-handwritten-parser.md`.
+
 ### FLUX-011 — codegen backends: Component bridge fix — PARTIAL
 
 - Fixed the codegen bridge key mismatch: both `flux-codegen-swift` and

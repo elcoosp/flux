@@ -711,7 +711,7 @@ mod tests {
         let mut pipeline = Pipeline::new("/tmp/project", false);
         pipeline.set_source(
             Path::new("/tmp/project/main.flux"),
-            "component Hello { state count: Int = 0 Button(text: \"tap\") }".to_owned(),
+            "compo Hello\n  state count: Int = 0\n  Button(text: \"tap\")\n".to_owned(),
         );
 
         let outcome = pipeline.compile().expect("well-formed source compiles");
@@ -742,7 +742,7 @@ mod tests {
         let mut pipeline = Pipeline::new("/tmp/project", false);
         pipeline.set_source(
             Path::new("/tmp/project/main.flux"),
-            "component Hello { Text(\"hi\") }".to_owned(),
+            "compo Hello\n  Text(\"hi\")\n".to_owned(),
         );
         pipeline.compile().expect("first compile succeeds");
         assert_eq!(pipeline.compiled_sources().len(), 1);
@@ -751,7 +751,7 @@ mod tests {
         // must reflect that no new good sources were produced this round.
         pipeline.set_source(
             Path::new("/tmp/project/main.flux"),
-            "component Broken {".to_owned(),
+            "compo Broken\n  state x: Int = false\n".to_owned(),
         );
         let result = pipeline.compile();
         assert!(result.is_err(), "malformed source fails to compile");

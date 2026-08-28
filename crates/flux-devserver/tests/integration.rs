@@ -15,9 +15,9 @@ use flux_ir_serde::{FRAME_DELTA, FRAME_ERROR, FRAME_INIT, Frame};
 use tokio_tungstenite::tungstenite::stream::MaybeTlsStream;
 use tokio_tungstenite::tungstenite::{Message, WebSocket, connect};
 
-const GOOD_SOURCE: &str = "component Hello { state count: Int = 0 Button(text: \"tap\") }";
-const GOOD_SOURCE_EDITED: &str = "component Hello { state count: Int = 0 Button(text: \"tap!\") }";
-const MALFORMED_SOURCE: &str = "component Hello { Button(text: ";
+const GOOD_SOURCE: &str = "compo Hello\n  state count: Int = 0\n  Button(text: \"tap\")\n";
+const GOOD_SOURCE_EDITED: &str = "compo Hello\n  state count: Int = 0\n  Button(text: \"tap!\")\n";
+const MALFORMED_SOURCE: &str = "compo Hello Button(text: ";
 
 /// A unique scratch directory (the crate has no `tempfile` dev-dependency).
 fn scratch_dir(tag: &str) -> PathBuf {

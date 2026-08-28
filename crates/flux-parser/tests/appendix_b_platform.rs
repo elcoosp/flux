@@ -18,13 +18,13 @@ fn b38_else_block_lowers_to_block_not_elided_call() {
     // special-case it). The grammar represents a bare block as a zero-argument
     // lambda, so the else branch must be that — not a `Call`.
     let ast = parse_ok(
-        r#"component PlatformButton {
-  if platform() == "ios" {
-    CupertinoButton(text: "Tap", onClick: { ... })
+        "compo PlatformButton
+  if platform() == \"ios\" {
+    CupertinoButton(text: \"Tap\", onClick: || { ... })
   } else {
-    MaterialButton(text: "Tap", onClick: { ... })
+    MaterialButton(text: \"Tap\", onClick: || { ... })
   }
-}"#,
+",
     );
     let BlockItem::Expr(Expr {
         kind: ExprKind::If { else_branch, .. },
@@ -86,7 +86,7 @@ capability Storage {
 #[test]
 fn b310_refs_parse_create_ref_with_a_generic_argument() {
     let ast = parse_ok(
-        r#"component LoginForm {
+        "compo LoginForm
   let emailRef = createRef[TextField]()
   let passwordRef = createRef[TextField]()
 
@@ -95,15 +95,15 @@ fn b310_refs_parse_create_ref_with_a_generic_argument() {
   }
 
   Column(gap: 12) {
-    TextField(ref: emailRef, placeholder: "Email")
-    TextField(ref: passwordRef, placeholder: "Password")
-    Button(text: "Submit", onClick: {
+    TextField(ref: emailRef, placeholder: \"Email\")
+    TextField(ref: passwordRef, placeholder: \"Password\")
+    Button(text: \"Submit\", onClick: || {
       let email = emailRef.text()
       let password = passwordRef.text()
       Auth.login(email, password)
     })
   }
-}"#,
+",
     );
 
     let decl = component(&ast, 0);
@@ -127,7 +127,10 @@ fn b310_refs_parse_create_ref_with_a_generic_argument() {
 
 #[test]
 fn named_arguments_are_distinguished_from_positional_ones() {
-    let ast = parse_ok(r#"component A { Button(text: "Go", onClick: { ... }) }"#);
+    let ast = parse_ok(
+        "compo A\n  Button(text: \"Go\", onClick: || { ... })
+",
+    );
     let BlockItem::Expr(Expr {
         kind: ExprKind::Call { args, .. },
         ..

@@ -1,16 +1,19 @@
 //! Every grammar example from Appendix B.3 must parse.
 //!
-//! These are the FLUX-003 acceptance tests: each example is reproduced
-//! verbatim from `/docs/spec/mlp-appendices.md` §B.3 and asserted against the
-//! shape the parser produces.
+//! These are the FLUX-003 acceptance tests: each example is reproduced from
+//! `/docs/spec/mlp-appendices.md` §B.3 and asserted against the shape the
+//! parser produces. The surface syntax is the indentation-delimited "dream"
+//! form (see `docs/counter-syntax-dream.md`): `compo`, the `$` state sigil, and
+//! spaced-prop view calls. Legacy braced view-call shapes (`Name(args) { … }`)
+//! remain valid so existing source keeps parsing.
 
 use flux_parser::{BlockItem, Decl, Expr, ExprKind, MatchPatternKind, StrPart, TypeKindAst};
 
-/// Appendix B.3 source for `b32_generic_component_with_trait_bound_records_the_bound`.
 mod common;
 
 use common::{component, parse_ok};
 
+/// Appendix B.3 source for `b32_generic_component_with_trait_bound_records_the_bound`.
 const B32_SOURCE: &str = r#"trait Numeric[T] {
   fn zero() -> T
   fn one() -> T
@@ -18,15 +21,15 @@ const B32_SOURCE: &str = r#"trait Numeric[T] {
   fn -(a: T, b: T) -> T
 }
 
-component Counter[T: Numeric] {
+compo Counter[T: Numeric]
   state count: T = Numeric.zero()
 
   Column(gap: 8) {
     Text("Count: {count}")
-    Button(text: "+", onClick: { count = count + Numeric.one() })
-    Button(text: "-", onClick: { count = count - Numeric.one() })
+    Button(text: "+", onClick: || { count = count + Numeric.one() })
+    Button(text: "-", onClick: || { count = count - Numeric.one() })
   }
-}"#;
+"#;
 
 /// Appendix B.3 source for `b33_adt_and_pattern_matching_binds_every_arm`.
 const B33_SOURCE: &str = r#"type Shape =
@@ -42,30 +45,21 @@ fn area(shape: Shape) -> Float {
   }
 }
 
-component ShapeDisplay {
+compo ShapeDisplay
   state shape: Shape = Circle(5.0)
 
   Column {
     Text("Area: {area(shape)}")
-    Button(text: "Make Square", onClick: {
+    Button(text: "Make Square", onClick: || {
       shape = Rectangle(4.0, 4.0)
     })
   }
-}"#;
+"#;
 
 #[test]
 fn b31_simple_component_declares_state_and_a_column_tree() {
     let ast = parse_ok(
-        r#"component HelloWorld {
-  state count: Int = 0
-
-  Column(gap: 12) {
-    Text("Count: {count}")
-    Button(text: "Increment", onClick: {
-      count = count + 1
-    })
-  }
-}"#,
+        "compo HelloWorld\n  state count: Int = 0\n\n  Column(gap: 12) {\n    Text(\"Count: {count}\")\n    Button(text: \"Increment\", onClick: || {\n      count = count + 1\n    })\n  }\n",
     );
 
     let decl = component(&ast, 0);
@@ -74,15 +68,17 @@ fn b31_simple_component_declares_state_and_a_column_tree() {
         panic!("expected a state declaration first");
     };
     assert_eq!(state.name.name, "count");
-    assert!(matches!(
-        state.ty.as_ref().map(|ty| &ty.kind),
-        Some(TypeKindAst::Primitive(name)) if name == "Int"
-    ));
+    let ty_name = match state.ty.as_ref().map(|ty| &ty.kind) {
+        Some(TypeKindAst::Primitive(name)) => name.as_str(),
+        Some(TypeKindAst::Named { name, .. }) => name.name.as_str(),
+        other => panic!("expected Int type, got {:?}", other),
+    };
+    assert_eq!(ty_name, "Int");
 }
 
 #[test]
 fn b31_string_interpolation_yields_an_interpolated_expression() {
-    let ast = parse_ok(r#"component A { Text("Count: {count}") }"#);
+    let ast = parse_ok("compo A\n  Text(\"Count: {count}\")\n");
     let BlockItem::Expr(Expr {
         kind: ExprKind::Call { args, .. },
         ..

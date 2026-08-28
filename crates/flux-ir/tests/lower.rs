@@ -21,10 +21,7 @@ fn typed(src: &str) -> (flux_parser::Ast, flux_types::TypedAST) {
 
 #[test]
 fn bridge_node_ids_match_types() {
-    let src = "component Counter {\
-        state count: Int = 0\
-        Button(text: \"tap\") { onClick: { count = count + 1 } }\
-    }";
+    let src = "compo Counter\n        state count: Int = 0\n        Button(text: \"tap\", onClick: { count = count + 1 })\n    ";
     let (ast, typed) = typed(src);
     let lowered = lower(&ast, &typed).expect("lower");
     let arena = &lowered.arena;
@@ -61,7 +58,7 @@ fn bridge_node_ids_match_types() {
 
 #[test]
 fn diff_of_identical_lowers_is_empty() {
-    let src = "component Hello { Text(\"hi\") }";
+    let src = "compo Hello\n  Text(\"hi\")\n";
     let (ast, typed) = typed(src);
     let a = lower(&ast, &typed).expect("lower a").arena;
     let b = lower(&ast, &typed).expect("lower b").arena;
@@ -71,7 +68,7 @@ fn diff_of_identical_lowers_is_empty() {
 
 #[test]
 fn diff_from_empty_arena_is_nonempty() {
-    let src = "component Hello { Text(\"hi\") }";
+    let src = "compo Hello\n  Text(\"hi\")\n";
     let (ast, typed) = typed(src);
     let lowered = lower(&ast, &typed).expect("lower").arena;
     let patches = flux_differ::diff(&flux_ir::IRArena::new(), &lowered);
@@ -83,10 +80,7 @@ fn diff_from_empty_arena_is_nonempty() {
 
 #[test]
 fn foreach_emits_empty_splice() {
-    let src = "component List {\
-        state items: List[Int] = []\
-        ForEach(items, key: fn(i) { i }) { item => Text(\"x\") }\
-    }";
+    let src = "compo List\n        state items: List[Int] = []\n        ForEach(items, key: fn(i) { i }) { item => Text(\"x\") }\n    ";
     let (ast, typed) = typed(src);
     let lowered = lower(&ast, &typed).expect("lower");
     let arena = &lowered.arena;
@@ -109,10 +103,7 @@ fn foreach_emits_empty_splice() {
 
 #[test]
 fn handler_bytecode_increments_signal_under_vm() {
-    let src = "component Counter {\
-        state count: Int = 0\
-        Button(text: \"tap\") { onClick: { count = count + 1 } }\
-    }";
+    let src = "compo Counter\n        state count: Int = 0\n        Button(text: \"tap\", onClick: { count = count + 1 })\n    ";
     let (ast, typed) = typed(src);
     let lowered = lower(&ast, &typed).expect("lower");
     let arena = &lowered.arena;
@@ -147,8 +138,8 @@ fn handler_bytecode_increments_signal_under_vm() {
 
 #[test]
 fn multiple_components_lower_all() {
-    let src = "component A { state x: Int = 0 Text(\"a\") }\
-               component B { state y: Int = 0 Text(\"b\") }";
+    let src =
+        "compo A\n  state x: Int = 0\n  Text(\"a\")\ncompo B\n  state y: Int = 0\n  Text(\"b\")\n";
     let (ast, typed) = typed(src);
     let lowered = lower(&ast, &typed).expect("lower both components");
     assert_eq!(lowered.arena.len(), 4, "two components + two text leaves");
@@ -161,10 +152,10 @@ fn string_assignment_handler_lowers_to_valid_write() {
     // `Value::Str` loaded by `LOAD_STR_CONST`). The MLP envelope supports it,
     // so lowering must SUCCEED loudly (never silently no-op) and produce a
     // closure carrying the write.
-    let src = "component C {
+    let src = "compo C
         state name: String = \"hi\"
-        Button(text: \"go\") { onClick: { name = \"bye\" } }
-    }";
+        Button(text: \"go\", onClick: { name = \"bye\" })
+    ";
     let (ast, typed) = typed(src);
     let lowered = lower(&ast, &typed).expect("string-assignment handler is a valid write");
     let mut found_handler = false;
@@ -185,10 +176,7 @@ fn string_assignment_handler_lowers_to_valid_write() {
 fn signal_deps_reads_signal_from_prop() {
     // `count` is state signal 1; passing it as a prop makes the Button node's
     // `signal_deps` include that signal (ADR-0027 T13).
-    let src = "component Counter {\
-        state count: Int = 0\
-        Button(text: count)\
-    }";
+    let src = "compo Counter\n        state count: Int = 0\n        Button(text: count)\n    ";
     let (ast, typed) = typed(src);
     let lowered = lower(&ast, &typed).expect("lower");
     let arena = &lowered.arena;
@@ -222,9 +210,7 @@ fn signal_deps_reads_signal_from_prop() {
 fn prop_thunk_runs_to_alloc_record_of_literals() {
     // A Button with literal props gets a prop_thunk (T14) whose bytecode, when
     // run, leaves an ALLOC_RECORD of the prop values in r1.
-    let src = "component Hello {\
-        Button(text: \"tap\", width: 5)\
-    }";
+    let src = "compo Hello\n        Button(text: \"tap\", width: 5)\n    ";
     let (ast, typed) = typed(src);
     let lowered = lower(&ast, &typed).expect("lower");
 

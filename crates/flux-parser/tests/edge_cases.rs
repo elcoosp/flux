@@ -23,14 +23,14 @@ fn whitespace_and_comment_only_source_parses_to_zero_declarations() {
 
 #[test]
 fn comments_between_declarations_are_skipped() {
-    let ast = ok("// one\ncomponent A { Text(\"a\") }\n// two\ncomponent B { Text(\"b\") }\n");
+    let ast = ok("// one\ncompo A\n  Text(\"a\")\n// two\ncompo B\n  Text(\"b\")\n");
     assert_eq!(ast.decls.len(), 2);
 }
 
 #[test]
 fn i64_min_and_max_literals_are_accepted() {
     let source = format!(
-        "component A {{ state lo: Int = {} state hi: Int = {} }}",
+        "compo A\n  state lo: Int = {}\n  state hi: Int = {}\n",
         i64::MIN + 1,
         i64::MAX
     );
@@ -55,7 +55,7 @@ fn i64_min_and_max_literals_are_accepted() {
 
 #[test]
 fn unicode_string_contents_round_trip_their_text() {
-    let ast = ok("component Cafe { Text(\"héllo → 世界 🎉\") }");
+    let ast = ok("compo Cafe\n  Text(\"héllo → 世界 🎉\")");
     let Decl::Component(decl) = &ast.decls[0] else {
         panic!("expected a component");
     };
@@ -75,24 +75,25 @@ fn unicode_string_contents_round_trip_their_text() {
 
 #[test]
 fn a_span_after_multibyte_text_still_indexes_the_original_bytes() {
-    let source = "component A { Text(\"→→→\") }\ncomponent Bee { Text(\"b\") }";
+    let source = "compo A\n  Text(\"→→→\")\ncompo Bee\n  Text(\"b\")";
     let ast = ok(source);
     let span = ast.decls[1].span();
-    assert_eq!(
-        &source[span.start as usize..span.end as usize][..13],
-        "component Bee"
+    assert!(
+        source[span.start as usize..span.end as usize].starts_with("compo Bee"),
+        "span text was {:?}",
+        &source[span.start as usize..span.end as usize]
     );
 }
 
 #[test]
 fn every_declaration_span_carries_the_requested_file_id() {
-    let ast = ok("component A { Text(\"a\") }\nfn f() -> Int { 1 }");
+    let ast = ok("compo A\n  Text(\"a\")\nfn f() -> Int { 1 }");
     assert!(ast.decls.iter().all(|decl| decl.span().file_id == FILE_ID));
 }
 
 #[test]
 fn escaped_braces_and_quotes_do_not_start_an_interpolation() {
-    let ast = ok("component A { Text(\"a \\{ b \\\" c\") }");
+    let ast = ok("compo A\n  Text(\"a \\{ b \\\" c\")");
     let Decl::Component(decl) = &ast.decls[0] else {
         panic!("expected a component");
     };
@@ -112,7 +113,7 @@ fn escaped_braces_and_quotes_do_not_start_an_interpolation() {
 
 #[test]
 fn an_empty_string_literal_has_no_parts() {
-    let ast = ok("component A { Text(\"\") }");
+    let ast = ok("compo A\n  Text(\"\")");
     let Decl::Component(decl) = &ast.decls[0] else {
         panic!("expected a component");
     };
@@ -128,7 +129,7 @@ fn an_empty_string_literal_has_no_parts() {
 
 #[test]
 fn an_empty_list_literal_parses() {
-    let ast = ok("component A { state xs: List[Int] = [] }");
+    let ast = ok("compo A\n  state xs: List[Int] = []");
     let Decl::Component(decl) = &ast.decls[0] else {
         panic!("expected a component");
     };
@@ -140,30 +141,30 @@ fn an_empty_list_literal_parses() {
 
 #[test]
 fn an_empty_component_body_parses() {
-    let ast = ok("component A { }");
+    let ast = ok("compo A\n");
     let Decl::Component(decl) = &ast.decls[0] else {
         panic!("expected a component");
     };
     assert!(decl.body.items.is_empty());
 }
 
+/// Generates a deeply brace-nested `Column` tree inside a `compo` body. The
+/// nesting limiter counts `{` braces, so this exercises the documented cap.
 fn nested(depth: usize) -> String {
-    let mut source = String::from("component A { ");
-    for _ in 0..depth {
-        source.push_str("Column { ");
+    let mut source = String::from("compo A\n  Column {\n");
+    for _ in 0..depth.saturating_sub(1) {
+        source.push_str("    Column {\n");
     }
-    source.push_str("Text(\"deep\") ");
+    source.push_str("      Text(\"deep\")\n");
     for _ in 0..depth {
-        source.push_str("} ");
+        source.push_str("  }\n");
     }
-    source.push('}');
     source
 }
 
 #[test]
 fn nesting_up_to_the_documented_maximum_parses() {
-    // 15 `Column` blocks plus the component brace is exactly the documented
-    // limit of 16.
+    // 15 `Column` blocks is within the documented limit of 16.
     assert_eq!(ok(&nested(15)).decls.len(), 1);
 }
 
@@ -184,7 +185,7 @@ fn the_nesting_limit_error_suggests_extracting_a_component() {
         error
             .hint
             .as_deref()
-            .is_some_and(|hint| hint.contains("component")),
+            .is_some_and(|hint| hint.contains("compo")),
         "hint was {:?}",
         error.hint
     );
@@ -230,7 +231,7 @@ fn multiplication_binds_tighter_than_addition() {
 
 #[test]
 fn a_windows_line_ending_source_reports_locations_on_the_right_line() {
-    let error = parse("component A {\r\n  state 9 = 1\r\n}", FILE_ID, "edge.flux")
-        .expect_err("must not parse");
+    let error =
+        parse("compo A\r\n  state 9 = 1\r\n", FILE_ID, "edge.flux").expect_err("must not parse");
     assert_eq!(error.location.line, 2);
 }

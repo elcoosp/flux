@@ -36,200 +36,56 @@ mod appendix_b3 {
     #[test]
     fn b3_1_simple_component() {
         check_ok(
-            "component HelloWorld {
-  state count: Int = 0
-
-  Column(gap: 12) {
-    Text(\"Count: {count}\")
-    Button(text: \"Increment\", onClick: {
-      count = count + 1
-    })
-  }
-}
-",
+            "compo HelloWorld\n  state count: Int = 0\n\n  Column(gap: 12) {\n    Text(\"Count: {count}\")\n    Button(text: \"Increment\", onClick: {\n      count = count + 1\n    })\n  }\n\n",
         );
     }
 
     #[test]
     fn b3_2_generic_component_trait_bound() {
         check_ok(
-            "trait Numeric[T] {
-  fn zero() -> T
-  fn one() -> T
-  fn +(a: T, b: T) -> T
-  fn -(a: T, b: T) -> T
-}
-
-component Counter[T: Numeric] {
-  state count: T = Numeric.zero()
-
-  Column(gap: 8) {
-    Text(\"Count: {count}\")
-    Button(text: \"+\", onClick: { count = count + Numeric.one() })
-    Button(text: \"−\", onClick: { count = count - Numeric.one() })
-  }
-}
-",
+            "trait Numeric[T] {\n  fn zero() -> T\n  fn one() -> T\n  fn +(a: T, b: T) -> T\n  fn -(a: T, b: T) -> T\n}\n\ncompo Counter[T: Numeric]\n  state count: T = Numeric.zero()\n\n  Column(gap: 8) {\n    Text(\"Count: {count}\")\n    Button(text: \"+\", onClick: { count = count + Numeric.one() })\n    Button(text: \"−\", onClick: { count = count - Numeric.one() })\n  }\n\n",
         );
     }
 
     #[test]
     fn b3_3_algebraic_data_type_and_match() {
         check_ok(
-            "type Shape =
-  | Circle(Float)
-  | Rectangle(Float, Float)
-  | Triangle(Float, Float, Float)
-
-fn area(shape: Shape) -> Float {
-  match shape {
-    Circle(r) => 3.14159 * r * r
-    Rectangle(w, h) => w * h
-    Triangle(b, h, _) => 0.5 * b * h
-  }
-}
-
-component ShapeDisplay {
-  state shape: Shape = Circle(5.0)
-
-  Column {
-    Text(\"Area: {area(shape)}\")
-    Button(text: \"Make Square\", onClick: {
-      shape = Rectangle(4.0, 4.0)
-    })
-  }
-}
-",
+            "type Shape =\n  | Circle(Float)\n  | Rectangle(Float, Float)\n  | Triangle(Float, Float, Float)\n\nfn area(shape: Shape) -> Float {\n  match shape {\n    Circle(r) => 3.14159 * r * r\n    Rectangle(w, h) => w * h\n    Triangle(b, h, _) => 0.5 * b * h\n  }\n}\n\ncompo ShapeDisplay\n  state shape: Shape = Circle(5.0)\n\n  Column {\n    Text(\"Area: {area(shape)}\")\n    Button(text: \"Make Square\", onClick: {\n      shape = Rectangle(4.0, 4.0)\n    })\n  }\n\n",
         );
     }
 
     #[test]
     fn b3_4_lifecycle_effects_cleanup() {
         check_ok(
-            "component Chat {
-  state messages: List[String] = []
-  let socket = createRef[WebSocket]()
-
-  onMount {
-    socket.set(WebSocket.connect(\"ws://localhost:8080\"))
-    socket.get().on_message = fn(msg: String) {
-      batch {
-        messages = messages + [msg]
-      }
-    }
-  }
-
-  onCleanup {
-    socket.get().close()
-  }
-
-  Column {
-    ForEach(messages, key: fn(m, i) { i }) { msg =>
-      Text(msg)
-    }
-  }
-}
-",
+            "compo Chat\n  state messages: List[String] = []\n  let socket = createRef[WebSocket]()\n\n  onMount {\n    socket.set(WebSocket.connect(\"ws://localhost:8080\"))\n    socket.get().on_message = fn(msg: String) {\n      batch {\n        messages = messages + [msg]\n      }\n    }\n  }\n\n  onCleanup {\n    socket.get().close()\n  }\n\n  Column {\n    ForEach(messages, key: fn(m, i) { i }) { msg =>\n      Text(msg)\n    }\n  }\n\n",
         );
     }
 
     #[test]
     fn b3_5_navigation_with_router() {
         check_ok(
-            "component App {
-  state route: String = \"home\"
-
-  Router {
-    Screen(\"home\") { Home() }
-    Screen(\"profile\") { Profile() }
-    Screen(\"settings\") { Settings() }
-  }
-}
-
-component Home {
-  let router = useContext(RouterContext)
-
-  Column(gap: 16) {
-    Text(\"Home\")
-    Button(text: \"Open Profile\", onClick: {
-      router.navigate(\"profile\")
-    })
-    Button(text: \"Settings\", onClick: {
-      router.navigate(\"settings\")
-    })
-  }
-}
-
-component Profile {
-  Column { Text(\"Profile\") }
-}
-
-component Settings {
-  Column { Text(\"Settings\") }
-}
-",
+            "compo App\n  state route: String = \"home\"\n\n  Router {\n    Screen(\"home\") { Home() }\n    Screen(\"profile\") { Profile() }\n    Screen(\"settings\") { Settings() }\n  }\n\n\ncompo Home\n  let router = useContext(RouterContext)\n\n  Column(gap: 16) {\n    Text(\"Home\")\n    Button(text: \"Open Profile\", onClick: {\n      router.navigate(\"profile\")\n    })\n    Button(text: \"Settings\", onClick: {\n      router.navigate(\"settings\")\n    })\n  }\n\n\ncompo Profile\n  Column { Text(\"Profile\") }\n\n\ncompo Settings\n  Column { Text(\"Settings\") }\n\n",
         );
     }
 
     #[test]
     fn b3_6_async_with_resource() {
         check_ok(
-            "component UserList {
-  let (users, { refetch }) = resource(fn {
-    Api.fetch(\"/users\")
-  })
-
-  Column {
-    when users.is_loading {
-      Text(\"Loading...\")
-    }
-    otherwise {
-      ForEach(users.value, key: fn(u) { u.id }) { user =>
-        Text(\"{user.name}\")
-      }
-    }
-    Button(text: \"Refresh\", onClick: { refetch() })
-  }
-}
-",
+            "compo UserList\n  let (users, { refetch }) = resource(fn {\n    Api.fetch(\"/users\")\n  })\n\n  Column {\n    when users.is_loading {\n      Text(\"Loading...\")\n    }\n    otherwise {\n      ForEach(users.value, key: fn(u) { u.id }) { user =>\n        Text(\"{user.name}\")\n      }\n    }\n    Button(text: \"Refresh\", onClick: { refetch() })\n  }\n\n",
         );
     }
 
     #[test]
     fn b3_7_pure_component() {
         check_ok(
-            "@pure
-component Avatar(url: String, size: Float) {
-  Image(url) {
-    width: size,
-    height: size,
-    cornerRadius: size / 2
-  }
-}
-
-component Profile {
-  state avatarUrl: String = \"https://example.com/me.png\"
-
-  Column {
-    Avatar(url: avatarUrl, size: 80)
-    Text(\"Profile\")
-  }
-}
-",
+            "@pure\ncompo Avatar(url: String, size: Float)\n  Image(url) {\n    width: size,\n    height: size,\n    cornerRadius: size / 2\n  }\n\n\ncompo Profile\n  state avatarUrl: String = \"https://example.com/me.png\"\n\n  Column {\n    Avatar(url: avatarUrl, size: 80)\n    Text(\"Profile\")\n  }\n\n",
         );
     }
 
     #[test]
     fn b3_8_platform_conditional() {
         check_ok(
-            "component PlatformButton {
-  if platform() == \"ios\" {
-    CupertinoButton(text: \"Tap\", onClick: { 1 })
-  } else {
-    MaterialButton(text: \"Tap\", onClick: { 1 })
-  }
-}
-",
+            "compo PlatformButton\n  if platform() == \"ios\" {\n    CupertinoButton(text: \"Tap\", onClick: { 1 })\n  } else {\n    MaterialButton(text: \"Tap\", onClick: { 1 })\n  }\n\n",
         );
     }
 
@@ -254,25 +110,7 @@ capability Storage {
     #[test]
     fn b3_10_refs() {
         check_ok(
-            "component LoginForm {
-  let emailRef = createRef[TextField]()
-  let passwordRef = createRef[TextField]()
-
-  onMount {
-    emailRef.focus()
-  }
-
-  Column(gap: 12) {
-    TextField(ref: emailRef, placeholder: \"Email\")
-    TextField(ref: passwordRef, placeholder: \"Password\")
-    Button(text: \"Submit\", onClick: {
-      let email = emailRef.text()
-      let password = passwordRef.text()
-      Auth.login(email, password)
-    })
-  }
-}
-",
+            "compo LoginForm\n  let emailRef = createRef[TextField]()\n  let passwordRef = createRef[TextField]()\n\n  onMount {\n    emailRef.focus()\n  }\n\n  Column(gap: 12) {\n    TextField(ref: emailRef, placeholder: \"Email\")\n    TextField(ref: passwordRef, placeholder: \"Password\")\n    Button(text: \"Submit\", onClick: {\n      let email = emailRef.text()\n      let password = passwordRef.text()\n      Auth.login(email, password)\n    })\n  }\n\n",
         );
     }
 }
@@ -282,12 +120,7 @@ mod diagnostics {
 
     #[test]
     fn mismatch_reports_type_error_with_span() {
-        let err = check_err(
-            "component Bad {
-  let s = 1 + \"not a number\"
-}
-",
-        );
+        let err = check_err("compo Bad\n  let s = 1 + \"not a number\"\n\n");
         // The error must carry a span pointing somewhere in the source.
         assert!(err.span.start > 0 || err.span.end > 0, "span must be set");
         assert!(
@@ -319,12 +152,7 @@ fn area(shape: Shape) -> Float {
 
     #[test]
     fn unbound_name_is_rejected() {
-        let err = check_err(
-            "component Orphan {
-  let x = missingThing() + 1
-}
-",
-        );
+        let err = check_err("compo Orphan\n  let x = missingThing() + 1\n\n");
         assert!(
             err.message.contains("unbound"),
             "expected unbound-name error, got: {}",
@@ -338,23 +166,7 @@ mod instantiations {
 
     #[test]
     fn counter_int_and_float_both_recorded() {
-        let source = "trait Numeric[T] {
-  fn zero() -> T
-  fn one() -> T
-}
-
-component Counter[T: Numeric](initial: T) {
-  state count: T = initial
-}
-
-component IntCase {
-  Counter(initial: 0)
-}
-
-component FloatCase {
-  Counter(initial: 0.0)
-}
-";
+        let source = "trait Numeric[T] {\n  fn zero() -> T\n  fn one() -> T\n}\n\ncompo Counter[T: Numeric](initial: T)\n  state count: T = initial\n\n\ncompo IntCase\n  Counter(initial: 0)\n\n\ncompo FloatCase\n  Counter(initial: 0.0)\n\n";
         let ast = ast_of(source);
         let result = type_check(&ast).expect("fixtures must type-check");
         let names: Vec<&String> = result.instantiations.iter().map(|i| &i.name).collect();
@@ -394,15 +206,7 @@ component FloatCase {
     #[test]
     fn const_color_module_constant() {
         check_ok(
-            "type Color = RGB(Float, Float, Float)
-Color.red = RGB(1.0, 0.0, 0.0)
-Color.green = RGB(0.0, 1.0, 0.0)
-
-component Swatch {
-  let c = Color.red
-  Text(\"red\")
-}
-",
+            "type Color = RGB(Float, Float, Float)\nColor.red = RGB(1.0, 0.0, 0.0)\nColor.green = RGB(0.0, 1.0, 0.0)\n\ncompo Swatch\n  let c = Color.red\n  Text(\"red\")\n\n",
         );
     }
 
@@ -413,14 +217,7 @@ component Swatch {
         // prop keeps `T` constrained (no unifying assignment), so the bound is
         // enforced at the arithmetic site.
         let err = check_err(
-            "trait Show[T] {
-  fn show(value: T) -> String
-}
-
-component Bad[T: Show](value: T) {
-  let y = value + 1
-}
-",
+            "trait Show[T] {\n  fn show(value: T) -> String\n}\n\ncompo Bad[T: Show](value: T)\n  let y = value + 1\n\n",
         );
         assert!(
             err.message.contains("Numeric") || err.message.contains("arithmetic"),

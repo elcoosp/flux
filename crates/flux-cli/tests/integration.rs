@@ -51,7 +51,7 @@ async fn init_refuses_non_empty_dir() {
 
     let previous = std::env::current_dir().expect("cwd");
     std::env::set_current_dir(dir.path()).expect("chdir to temp");
-    std::fs::write("main.flux", "component X { Text(\"x\") }").expect("seed file");
+    std::fs::write("main.flux", "compo X\n  Text(\"x\")").expect("seed file");
 
     let result = run(Command::Init {
         name: "main.flux".to_owned(),
@@ -69,7 +69,7 @@ async fn dev_serves_init_to_client() {
     let root = dir.path();
     std::fs::write(
         root.join("main.flux"),
-        "component Hello { state count: Int = 0 Button(text: \"tap\", onClick: fn() { count = count + 1 }) }",
+        "compo Hello\n  state count: Int = 0\n  Button(text: \"tap\", onClick: fn() { count = count + 1 })\n",
     )
     .expect("write sample");
 
@@ -180,7 +180,7 @@ async fn doc_emits_valid_json() {
 fn write_sample_project(root: &Path) {
     std::fs::write(
         root.join("main.flux"),
-        "component Hello { state count: Int = 0 Button(text: \"tap\", onClick: fn() { count = count + 1 }) }",
+        "compo Hello\n  state count: Int = 0\n  Button(text: \"tap\", onClick: fn() { count = count + 1 })\n",
     )
     .expect("write entry component");
 }
