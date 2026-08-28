@@ -1881,7 +1881,18 @@ Tag  Patch Type     Payload
 0x04 Remove          u32 id
 0x05 Reorder         u32 parent_id, u16 key_count, [u32; key_count]
 0x06 Handler         u32 id, ClosureRef closure
+0x07 Reattach        u32 old_id, u32 new_id, Node node
 ```
+
+`Reattach` (0x07) re-binds a live component instance from `old_id` to `new_id`
+instead of destroying and re-materialising it. The host looks the instance up by
+`old_id`, re-keys it to `new_id`, and applies `node` to it, preserving the
+instance's signal state, refs, input focus and scroll position. The server emits
+it in place of `Replace` when a node's `component_id` changed at a stable id
+(`Column` → `Row`), and in place of remove+insert when a re-spanned node keeps
+its component and its parent/index. A change of `NodeKind` is *not* reattachable
+and still emits `Replace`. `Reattach` is state-preserving, like `Update` and
+`Handler`.
 
 ### D.3 Node Encoding
 
@@ -2057,6 +2068,56 @@ Offset  Size  Field              Description
 ...     4     span_start         Byte offset
 ...     4     span_end           Byte offset
 ```
+
+#### D.12.8 AwaitSuspend Frame (Host → Server)
+
+Sent when a handler hits `AWAIT` on a result cell that is still `Pending`
+(ADR-0044). The host keeps the suspended continuation locally — register file,
+gas, and written-signal snapshot — so only its identity travels, keeping the
+frame fixed-width at 18 bytes.
+
+```
+Offset  Size  Field              Description
+------  ----  -----------------  -----------
+0       4     magic              0x465C5558
+4       1     version            Protocol version
+5       1     frame_type         0x12 = AwaitSuspend
+6       4     handler_id         HandlerId that parked
+10      4     cell               SignalId of the awaited result cell
+14      4     resume_ip          Bytecode offset the continuation re-enters at
+```
+
+#### D.12.9 Resume Frame (Server → Host)
+
+Sent when the awaited cell settles. The host looks its parked continuation up by
+`(handler_id, cell)` and re-enters it with `value` in `r0`. `is_error` marks a
+cell that settled as `Error` rather than `Ready`, so a faulting capability
+resumes the handler down its error path instead of delivering the payload as a
+normal result.
+
+```
+Offset  Size  Field              Description
+------  ----  -----------------  -----------
+0       4     magic              0x465C5558
+4       1     version            Protocol version
+5       1     frame_type         0x13 = Resume
+6       4     handler_id         HandlerId to resume
+10      4     cell               SignalId that settled
+14      1     is_error           0 = Ready, 1 = Error
+15      ...   value              Value (D.5)
+```
+
+A cell resumes at most once. A completion that arrives before its
+`AwaitSuspend` is retained by the server and delivered as soon as the suspension
+is reported, so a capability that resolves faster than the host reports cannot
+deadlock the handler.
+
+#### D.12.10 Unknown Frame Types
+
+A frame type the receiver does not implement is a version mismatch, not noise.
+The server logs it and replies with an `Error` frame (D.12.3) naming its
+protocol version, so a host built against a different Flux version surfaces
+immediately rather than appearing as a silently dead channel.
 
 ### D.13 Reconnect Protocol
 

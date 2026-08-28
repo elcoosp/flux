@@ -8,6 +8,63 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Roadmap Phase 1 — IR monomorphisation of generic components — DONE
+
+`LoweredIr` now carries `monomorphizations`: the generic instantiations lowering
+actually specialised, read from `TypedAST::instantiations` through a per-name
+source-order cursor in the new `flux-ir/src/lower/mono.rs`. Each generic call
+site interns a mangled component name (`Counter[Int]` → `Counter_Int`), so every
+instantiation gets its own `ComponentId` and the release backends can emit one
+native type per instantiation instead of erasing the type argument.
+`LoweredIr::requires_monomorph()` / `specialised_names()` expose the set to
+codegen; non-generic programs are byte-identical to before. `flux-devserver`
+merges each file's instantiations into the compiled tree.
+
+### Roadmap Phase 3 — `Patch::Reattach`, state-preserving structural edits — DONE
+
+New patch `Reattach { old_id, new_id, node }`, wire tag `0x07` (Appendix D §D.2:
+`u32 old_id | u32 new_id | Node`), reported by `Patch::is_state_preserving()`.
+The differ emits it in two cases that previously destroyed live state:
+
+- a node's `component_id` changed at a stable node id (`Column` → `Row`) — was
+  `Replace`;
+- a re-spanned node kept its component and its parent/index — was
+  remove + insert.
+
+A genuine `NodeKind` change still emits `Replace`, and two different components
+at the same slot still remove+insert, so state is never transferred to an
+unrelated node. Signal state, refs, input focus and scroll position now survive
+trivial refactors.
+
+### Roadmap Phase 2 — async suspension wire (`AwaitSuspend` / `Resume`) — server half DONE
+
+Two frames close the async loop (Appendix D §D.12.8–§D.12.9), in a new
+`flux-ir-serde/src/resume.rs` kept clear of the in-flight `frame.rs`:
+
+- `AwaitSuspend` (`0x12`, Host → Server), fixed 18 bytes:
+  `handler_id | cell | resume_ip`. The host retains the register file, gas and
+  written-signal snapshot locally, so only the suspension's identity travels.
+- `Resume` (`0x13`, Server → Host): `handler_id | cell | is_error | value(D.5)`.
+  `is_error` distinguishes a settled `Ready` cell from an `Error` one (ADR-0044)
+  so a faulting capability resumes the handler down its error path.
+
+`flux-devserver::AsyncBridge` pairs host suspensions with capability completions
+and emits the `Resume` bytes. It settles out of order: a completion that arrives
+before its suspension is retained and delivered on arrival, otherwise a
+capability that resolves faster than the host reports would deadlock the handler
+forever. A cell resumes at most once, and independent cells never cross-resume.
+
+The host halves (iOS/Android `resume` call sites, and the codegen `Task {}` /
+`suspend` emission) are not in this change; they live in the runtime and codegen
+directories owned by other in-flight work.
+
+### Roadmap Phase 5 — unknown host frames are diagnosed, not dropped
+
+An unrecognised `frame_type` now logs a `warn!` and ships an `Error` frame
+naming the server's protocol version (Appendix D §D.12.10). Previously the
+session loop silently ignored it, so a host built against a different protocol
+version looked like an inexplicably dead channel.
+
 ### FLUX-003 — parser: hand-written dream-syntax parser replaces pest — DONE
 
 Replaced the `pest`-generated parser with a hand-written lexer
