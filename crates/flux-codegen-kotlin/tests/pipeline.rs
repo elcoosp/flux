@@ -318,18 +318,19 @@ fn generated_kotlin_parses() {
     let dir = std::env::temp_dir();
     let path = dir.join("flux_codegen_kotlin_generated.kt");
     std::fs::write(&path, &combined).expect("write temp kotlin file");
-    let status = std::process::Command::new("kotlinc")
+    let output = std::process::Command::new("kotlinc")
         .arg("-Xplugin")
         .arg(&compose_compiler)
         .arg("-classpath")
         .arg(&compose_classpath)
         .arg("-Xallow-no-source-files")
         .arg(&path)
-        .status()
+        .output()
         .expect("spawn kotlinc");
     assert!(
-        status.success(),
-        "kotlinc rejected generated Kotlin:\n{combined}"
+        output.status.success(),
+        "kotlinc rejected generated Kotlin:\n{combined}\n--- kotlinc stderr ---\n{}",
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 
