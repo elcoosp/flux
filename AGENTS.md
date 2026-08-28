@@ -74,11 +74,14 @@ directly" model called superseded above — still live on iOS.
 Consequently the iOS doc comments *accurately describe the code that exists
 today* and intentionally still say "UIView tree". Do **not** rewrite them to
 claim a SwiftUI/declarative implementation that does not exist — that would make
-the docs lie about the code. The UIKit→SwiftUI port is real architectural work
-tracked in **ADR-0048**; when it lands, update those comments and this section in
-the same change. Both kits remain adapter **contract version 1**, and the props
-contract (§3.2 derived indices, degrade-to-default) already holds on both
-platforms.
+the docs lie about the code. Whether iOS *should* be ported at all is an open
+question gated on measurement, not a settled decision — see **ADR-0048**. There is
+currently no render-perf test on either platform, so the §3.10 "native view
+mutation < 3 ms" budget is unverified everywhere and the UIKit-vs-SwiftUI tradeoff
+is unmeasured. Do not start that port on doctrine alone; run ADR-0048's Phase 0/1
+first. If the port lands, update those comments and this section in the same
+change. Both kits remain adapter **contract version 1**, and the props contract
+(§3.2 derived indices, degrade-to-default) already holds on both platforms.
 
 ### 0.3 Repository map
 
@@ -112,16 +115,23 @@ platforms.
   fixtures still use brace syntax. See §3.6 before writing any `.flux` test
   source.
 * **CLI v0.1 shipped:** `init`, `dev`, `build`, `doc`. `flux build` emits
-  generated sources under `platforms/<platform>/Generated/` and **does not yet
-  invoke** `xcodebuild`/`gradle` — it only detects them.
-* **ADRs referenced by code:** 0003/0004 (codegen), 0027 (R-graph threading,
-  lifecycle, node-ID bridge), 0029 (Appendix B grammar repairs), 0044 (async
-  futures / result cells), 0045 (unified sync/async capability bridge). Before
-  filing a new ADR, run `bash docs/scripts/check-adr-numbering.sh` and take the
-  next sequential number (currently ≥ 0048; 0046 dream-syntax hand-written
-  parser and 0047 unified data-driven codegen have landed).
-* **Issue prefixes in use:** FLUX-001 … FLUX-023 (foundation, hosts, adapter
-  kits, CI, registry, hot-reload, codegen, CLI, wire fixtures).
+  generated sources under `platforms/<platform>/Generated/` and **detects**
+  `xcodebuild`/`gradle` but does not invoke them — it logs a manual build
+  command and a warning when the toolchain is absent (`build.rs`); it is not an
+  error. The new renderer (ADR-0041) emits SwiftUI/Kotlin-Jetpack sources, not
+  imperative UIKit/Android-View text.
+* **ADRs referenced by code:** 0027 (R-graph threading, lifecycle, node-ID
+  bridge), 0029 (Appendix B grammar repairs), 0041 (gpui DevTools UI),
+  0044 (async futures / result cells), 0045 (unified sync/async capability
+  bridge), 0047 (unified data-driven codegen), 0048 (iOS dev-tier convergence,
+  gated on measurement). Before filing a new ADR, run
+  `bash docs/scripts/check-adr-numbering.sh` and take the next sequential number
+  (currently ≥ 0049; 0046 dream-syntax hand-written parser, 0047 unified
+  data-driven codegen and 0048 iOS convergence have landed).
+* **Issue prefixes in use:** FLUX-001 … FLUX-047 (foundation, hosts, adapter
+  kits, CI, registry, hot-reload, codegen, CLI, wire fixtures). Actual ranges
+  go past 023 into the 04x series now (e.g. FLUX-047 = unified data-driven
+  codegen), so treat the ceiling as the highest seen, not 023.
 
 ---
 
@@ -215,7 +225,9 @@ New dependencies require an ADR (§1.3 vetting first).
   pre-allocated `String`).
 - **Async:** `tokio` runtime; `tokio::select!` over spawn+channel when one will
   do; `tokio::sync::mpsc` for channels. **Edition 2024, `resolver = "3"`,
-  `rust-version` 1.85, local toolchain 1.94.1** — write edition-2024 Rust.
+  `rust-version` 1.86, actual toolchain `nightly`** (set in `rust-toolchain.toml`;
+  `flux-devtools-ui` needs a newer-than-stable channel for `std::hint::cold_path`)
+  — write edition-2024 Rust.
 - **Testing:** unit tests in-file; integration tests in `tests/`; `proptest`
   for invariants; `insta` for codegen snapshots; `criterion` in `benches/`.
   **Always `cargo nextest run`, never `cargo test`** — except doctests
@@ -285,12 +297,14 @@ New dependencies require an ADR (§1.3 vetting first).
 
 **Node IDs** are `u32` blake3 hashes from
 `flux_syntax::compute_node_id(parent_id, tag, span, key)` — **never
-sequential**. Tags matter: expressions lower under `ExprTag` (`EXPR_TAG = 10`),
-declarations under `DeclTag` (`COMPONENT_TAG = 3`); the families occupy
-disjoint byte ranges and using the wrong family silently produces an ID that
-matches nothing (the codegen bridge in `flux-codegen-*/bridge.rs` depends on
-getting this exactly right). IDs are stable across edits where structure
-doesn't change; this drives state preservation and hot-swap.
+sequential**. Tags matter: expressions lower under `ExprTag`, declarations
+under `DeclTag`. Both wrap a `NodeKind` wire discriminant (`Component` = 0 …
+`Screen` = 6); `DeclTag` sets the high family bit (`0x80`) so the two families
+occupy disjoint byte ranges (`ExprTag` ∈ 0..=127, `DeclTag` ∈ 128..=255). Using
+the wrong family silently produces an ID that matches nothing (the codegen
+bridge in `flux-codegen-*/bridge.rs` depends on getting this exactly right). IDs
+are stable across edits where structure doesn't change; this drives state
+preservation and hot-swap.
 
 **Prop indices** are FNV-1a-32 of the prop *name*, masked to `u16`
 (`flux_ir::lower::prop_index_for_name`). Host kits **derive** them the same
