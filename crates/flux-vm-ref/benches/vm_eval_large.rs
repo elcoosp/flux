@@ -11,6 +11,31 @@ use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use flux_syntax::Value;
 use flux_vm_ref::{InMemorySignals, run};
 use std::hint::black_box;
+use std::time::Instant;
+
+/// Asserts `work` completes in under `budget_us` on average over a warm-up plus
+/// fixed measurement window, so a regression against the §3.10 budget fails CI
+/// loudly instead of silently drifting.
+const WARMUP: u32 = 10;
+const MEASURE: u32 = 200;
+
+fn assert_within_budget_us<F, T>(name: &str, budget_us: u128, work: F)
+where
+    F: Fn() -> T,
+{
+    for _ in 0..WARMUP {
+        black_box(work());
+    }
+    let started = Instant::now();
+    for _ in 0..MEASURE {
+        black_box(work());
+    }
+    let avg_us = started.elapsed().as_micros() / u128::from(MEASURE);
+    assert!(
+        avg_us < budget_us,
+        "{name} averaged {avg_us} µs, over the §3.10 budget of {budget_us} µs"
+    );
+}
 
 /// Number of signals in the graph under test (production-scale).
 const SIGNAL_GRAPH_SIZE: u32 = 10_000;
@@ -49,6 +74,12 @@ fn bench_vm_eval_large(c: &mut Criterion) {
     let signals = InMemorySignals::from_signals(
         (0..SIGNAL_GRAPH_SIZE).map(|id| (id, Value::Int(i64::from(id)))),
     );
+    // §3.10 budget: a 50-instruction handler must evaluate in under 2 ms even
+    // against a 10k-signal graph.
+    assert_within_budget_us("vm_eval_50instr", 2_000, || {
+        let mut s = signals.clone();
+        run(black_box(&program), &mut s, Value::Int(0)).expect("handler runs")
+    });
     group.bench_with_input(
         BenchmarkId::new("50instr", SIGNAL_GRAPH_SIZE),
         &SIGNAL_GRAPH_SIZE,
