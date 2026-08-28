@@ -110,6 +110,7 @@ jobs:
           classpath="${classpath%:}"
           echo "ANDROID_COMPOSE_CLASSPATH=$classpath" >> "$GITHUB_ENV"
           echo "ANDROID_COMPOSE_COMPILER=$WORK/jars/compose-compiler.jar" >> "$GITHUB_ENV"
+          echo "ANDROID_COMPOSE_COMPILER_EMBEDDABLE=$WORK/jars/kotlin-compiler-embeddable.jar" >> "$GITHUB_ENV"
           echo "exported ANDROID_COMPOSE_CLASSPATH ($classpath) and ANDROID_COMPOSE_COMPILER"
 
       - name: Set up Rust toolchain
