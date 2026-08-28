@@ -84,6 +84,19 @@ fn sample_patches() -> Vec<Patch> {
                 span,
             },
         },
+        Patch::Reattach {
+            old_id: 50,
+            new_id: 51,
+            node: flux_syntax::NodeRef {
+                id: 51,
+                kind: NodeKind::Primitive,
+                component_id: 9,
+                props: Props::from_fields(vec![(0u16, Value::Int(3))]),
+                children: vec![],
+                handlers: vec![],
+                span,
+            },
+        },
     ]
 }
 

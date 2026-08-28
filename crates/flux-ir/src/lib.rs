@@ -55,5 +55,5 @@ pub use closure::ClosureIR;
 pub use instance::{ComponentInstance, InstanceRegistry};
 pub use lower::bytecode::{HandlerCompileError, compile_handler};
 pub use lower::prop_index_for_name;
-pub use lower::{LoweredIr, LoweringError, lower};
+pub use lower::{LoweredIr, LoweringError, Monomorphization, lower, mangle_specialised};
 pub use node_id::compute_node_id;

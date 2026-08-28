@@ -29,9 +29,11 @@
 pub(crate) mod bytecode;
 pub(crate) mod error;
 pub(crate) mod ids;
+pub(crate) mod mono;
 
 pub use bytecode::{HandlerCompileError, compile_handler};
 pub use error::LoweringError;
+pub use mono::{Monomorphization, mangle_specialised};
 
 use flux_parser::{Ast, Decl, Expr, ExprKind};
 use flux_syntax::{Child, ComponentId, NodeId, NodeKind, Props, Span, Value};
@@ -85,6 +87,11 @@ pub struct LoweredIr {
     /// can ship them in the Init frame's string table (Appendix D §D.9), letting
     /// a host resolve each node's adapter from its `ComponentId`.
     pub component_names: Vec<(flux_syntax::ComponentId, String)>,
+    /// Generic instantiations this program specialised, in resolution order
+    /// (roadmap Phase 1). Each entry names one monomorphised component the
+    /// release backends must emit as its own native type. Empty when the
+    /// program uses no generic components.
+    pub monomorphizations: Vec<Monomorphization>,
     /// Live component-instance registry.
     pub instances: InstanceRegistry,
 }
@@ -94,6 +101,23 @@ impl LoweredIr {
     #[must_use]
     pub fn closure(&self, handler: flux_syntax::HandlerId) -> Option<&ClosureIR> {
         self.closures.get(&handler)
+    }
+
+    /// Returns `true` when the program contains at least one generic
+    /// instantiation the backends must monomorphise.
+    #[must_use]
+    pub fn requires_monomorph(&self) -> bool {
+        !self.monomorphizations.is_empty()
+    }
+
+    /// Returns the specialised (mangled) names of every instantiation, in
+    /// resolution order.
+    #[must_use]
+    pub fn specialised_names(&self) -> Vec<&str> {
+        self.monomorphizations
+            .iter()
+            .map(|m| m.mangled.as_str())
+            .collect()
     }
 }
 
@@ -154,6 +178,8 @@ struct Lowerer<'a> {
     signal_counter: flux_syntax::SignalId,
     /// Handler allocator (monotonic across the whole program).
     handler_counter: flux_syntax::HandlerId,
+    /// Generic-instantiation cursor (roadmap Phase 1).
+    mono: mono::MonoTable,
 }
 
 impl<'a> Lowerer<'a> {
@@ -169,21 +195,24 @@ impl<'a> Lowerer<'a> {
             state_seed: Vec::new(),
             signal_counter: flux_syntax::SignalId::from(0u32),
             handler_counter: flux_syntax::HandlerId::from(0u32),
+            mono: mono::MonoTable::new(typed),
         }
     }
 
     fn finish(self) -> LoweredIr {
         let arena = self.builder.finish();
+        let component_names = self
+            .name_to_component
+            .iter()
+            .map(|(name, id)| (*id, name.clone()))
+            .collect();
         LoweredIr {
             arena,
             closures: self.closures,
             prop_thunks: self.prop_thunks,
             state_seed: self.state_seed,
-            component_names: self
-                .name_to_component
-                .iter()
-                .map(|(name, id)| (*id, name.clone()))
-                .collect(),
+            component_names,
+            monomorphizations: self.mono.into_resolved(),
             instances: InstanceRegistry::new(),
         }
     }
@@ -519,7 +548,12 @@ impl<'a> Lowerer<'a> {
         };
 
         let id = expr_node_id(expr, ExprNodeKind::Primitive);
-        let component_id = self.intern_component(&name);
+        // A call to a generic component resolves to its *specialised* name
+        // (`Counter[Int]` → `Counter_Int`) so each instantiation gets its own
+        // `ComponentId` and the release backends emit one native type per
+        // instantiation (roadmap Phase 1). Non-generic calls keep their name.
+        let interned = self.mono.next_specialised(&name).unwrap_or(name);
+        let component_id = self.intern_component(&interned);
 
         // Build props from positional + named args, plus any trailing block
         // prop entries. Positional args take the next sequential PropIdx;

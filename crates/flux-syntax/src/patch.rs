@@ -53,6 +53,23 @@ pub enum Patch {
         /// Its new body.
         closure: ClosureRef,
     },
+    /// Re-bind the live instance behind `old_id` to `new_id`, preserving its
+    /// signal state, refs and scroll/focus position (roadmap Phase 3).
+    ///
+    /// Emitted instead of [`Patch::Replace`] when a structural edit changed a
+    /// node's identity (e.g. `Column` → `Row`, or a re-spanned subtree) but the
+    /// node still denotes the *same* component at the same position. The host
+    /// looks the instance up by `old_id`, re-keys it to `new_id`, and applies
+    /// `node` to it — it never destroys and re-materialises the subtree, which
+    /// is what would reset state.
+    Reattach {
+        /// The node id the live instance is currently keyed under.
+        old_id: NodeId,
+        /// The node id it must be re-keyed to.
+        new_id: NodeId,
+        /// The new node shape to apply to the preserved instance.
+        node: NodeRef,
+    },
 }
 
 impl Patch {
@@ -66,6 +83,7 @@ impl Patch {
             Self::Remove { .. } => 0x04,
             Self::Reorder { .. } => 0x05,
             Self::Handler { .. } => 0x06,
+            Self::Reattach { .. } => 0x07,
         }
     }
 
@@ -73,7 +91,10 @@ impl Patch {
     /// preserves all component state (`NFR-RELI-001`).
     #[must_use]
     pub const fn is_state_preserving(&self) -> bool {
-        matches!(self, Self::Handler { .. } | Self::Update { .. })
+        matches!(
+            self,
+            Self::Handler { .. } | Self::Update { .. } | Self::Reattach { .. }
+        )
     }
 }
 

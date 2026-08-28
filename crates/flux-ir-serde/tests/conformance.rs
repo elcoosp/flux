@@ -199,11 +199,42 @@ fn patch_tags_match_d2() {
             },
             0x06,
         ),
+        (
+            Patch::Reattach {
+                old_id: 1,
+                new_id: 2,
+                node: sample_node(),
+            },
+            0x07,
+        ),
     ];
     for (patch, tag) in samples {
         let bytes = Frame::delta(0, 0, &[patch], &[], &[], &[]).to_bytes();
         assert_eq!(bytes[17], tag, "patch tag for {tag:#x}");
     }
+}
+
+#[test]
+fn reattach_patch_layout_matches_d2() {
+    // §D.2 tag 0x07: u32 old_id, u32 new_id, then the node record.
+    let bytes = Frame::delta(
+        0,
+        0,
+        &[Patch::Reattach {
+            old_id: 0x1122_3344,
+            new_id: 0x5566_7788,
+            node: sample_node(),
+        }],
+        &[],
+        &[],
+        &[],
+    )
+    .to_bytes();
+    assert_eq!(bytes[17], 0x07, "reattach tag");
+    let old_id = u32::from_le_bytes([bytes[18], bytes[19], bytes[20], bytes[21]]);
+    let new_id = u32::from_le_bytes([bytes[22], bytes[23], bytes[24], bytes[25]]);
+    assert_eq!(old_id, 0x1122_3344);
+    assert_eq!(new_id, 0x5566_7788);
 }
 
 /// A minimal standalone node used to exercise Replace/Insert patches.

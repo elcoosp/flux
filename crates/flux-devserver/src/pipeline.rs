@@ -31,6 +31,9 @@ struct TreeCompilation {
     /// Component-id → name pairs, merged across files, shipped in the `Init`
     /// frame so a host resolves each node's adapter from its `ComponentId`.
     component_names: Vec<(flux_syntax::ComponentId, String)>,
+    /// Generic instantiations merged across files (roadmap Phase 1), so the
+    /// release backends emit one specialised native type per instantiation.
+    monomorphizations: Vec<flux_ir::Monomorphization>,
 }
 
 use std::collections::BTreeMap;
@@ -434,6 +437,7 @@ impl Pipeline {
             sources,
             prop_thunks,
             component_names,
+            monomorphizations,
         } = self.compile_tree()?;
         let started = Instant::now();
         let outcome = match self.last_good.as_ref() {
@@ -460,6 +464,7 @@ impl Pipeline {
             closures: closures.iter().map(|c| (c.id, c.clone())).collect(),
             prop_thunks: prop_thunks.clone(),
             component_names: component_names.clone(),
+            monomorphizations: monomorphizations.clone(),
             state_seed: state_seed.clone(),
             instances: flux_ir::InstanceRegistry::new(),
         });
@@ -499,6 +504,7 @@ impl Pipeline {
         let mut prop_thunks: std::collections::HashMap<flux_syntax::NodeId, flux_ir::ClosureIR> =
             std::collections::HashMap::new();
         let mut component_names: Vec<(flux_syntax::ComponentId, String)> = Vec::new();
+        let mut monomorphizations: Vec<flux_ir::Monomorphization> = Vec::new();
         for (file_id, path, source) in snapshots {
             let display = display_path(&self.root, &path);
             let (lowered, ast) = self.compile_one(&source, file_id, &display)?;
@@ -511,6 +517,11 @@ impl Pipeline {
                     .map(|(id, thunk)| (*id, thunk.clone())),
             );
             component_names.extend(lowered.component_names.iter().cloned());
+            for mono in &lowered.monomorphizations {
+                if !monomorphizations.contains(mono) {
+                    monomorphizations.push(mono.clone());
+                }
+            }
             state_seed.extend(lowered.state_seed.iter().cloned());
             sources.push((path.clone(), lowered.clone(), ast));
             merged = Some(match merged {
@@ -540,6 +551,7 @@ impl Pipeline {
             sources,
             prop_thunks,
             component_names,
+            monomorphizations,
         })
     }
 
@@ -806,6 +818,7 @@ mod tests {
             )]),
             state_seed: Vec::new(),
             component_names: Vec::new(),
+            monomorphizations: Vec::new(),
             instances: InstanceRegistry::new(),
         };
 

@@ -26,8 +26,22 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
     for id in old_ids.intersection(&new_ids) {
         let o = old.get(*id).expect("present in old");
         let n = new.get(*id).expect("present in new");
-        if o.kind() != n.kind() || o.component_id() != n.component_id() {
+        if o.kind() != n.kind() {
             emit_replace(&mut patches, &n);
+            continue;
+        }
+        if o.component_id() != n.component_id() {
+            // Same node identity and same node kind, different component: the
+            // author swapped the primitive at this position (`Column` → `Row`)
+            // or re-specialised a generic. The live instance still belongs at
+            // this slot, so re-key it in place instead of destroying it — a
+            // `Replace` here is what used to reset input focus and scroll
+            // position on a trivial refactor (roadmap Phase 3).
+            patches.push(Patch::Reattach {
+                old_id: *id,
+                new_id: *id,
+                node: to_ref(&n),
+            });
             continue;
         }
         // Task 1 (FLUX-014 P3): node-level prop skip. `props_equal` short-circuits
@@ -78,12 +92,25 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
     }
 
     // Nodes removed from the new tree.
-    for id in old_ids.difference(&new_ids) {
+    // Structural edits (a re-spanned or retagged subtree) surface as a
+    // removed id plus an inserted id that still denote the SAME component at
+    // the SAME parent/index. Pair those up into a state-preserving
+    // `Patch::Reattach` before falling back to remove+insert (roadmap Phase 3).
+    let removed: Vec<NodeId> = old_ids.difference(&new_ids).copied().collect();
+    let inserted: Vec<NodeId> = new_ids.difference(&old_ids).copied().collect();
+    let pairs = reattach_pairs(old, new, &removed, &inserted);
+
+    for id in &removed {
+        if pairs.iter().any(|(old_id, _)| old_id == id) {
+            continue;
+        }
         patches.push(Patch::Remove { id: *id });
     }
 
-    // Nodes inserted into the new tree.
-    for id in new_ids.difference(&old_ids) {
+    for id in &inserted {
+        if pairs.iter().any(|(_, new_id)| new_id == id) {
+            continue;
+        }
         if let Some((parent, index)) = find_parent_and_index(new, *id) {
             let n = new.get(*id).expect("present in new");
             patches.push(Patch::Insert {
@@ -94,7 +121,54 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
         }
     }
 
+    for (old_id, new_id) in pairs {
+        let n = new.get(new_id).expect("present in new");
+        patches.push(Patch::Reattach {
+            old_id,
+            new_id,
+            node: to_ref(&n),
+        });
+    }
+
     patches
+}
+
+/// Pairs each removed node with an inserted node that denotes the same live
+/// instance, so the host can re-key rather than re-materialise it.
+///
+/// Two nodes pair up only when they agree on **component identity** (same
+/// `component_id`, same `kind`) and on **position** (same parent slot and index
+/// in their respective trees). Both conditions are required: matching on
+/// component alone would re-key an unrelated sibling and silently move state to
+/// the wrong node. Each id pairs at most once.
+fn reattach_pairs(
+    old: &IRArena,
+    new: &IRArena,
+    removed: &[NodeId],
+    inserted: &[NodeId],
+) -> Vec<(NodeId, NodeId)> {
+    let mut pairs: Vec<(NodeId, NodeId)> = Vec::new();
+    let mut taken: AHashSet<NodeId> = AHashSet::new();
+    for old_id in removed {
+        let Some(o) = old.get(*old_id) else { continue };
+        let old_slot = find_parent_and_index(old, *old_id);
+        for new_id in inserted {
+            if taken.contains(new_id) {
+                continue;
+            }
+            let Some(n) = new.get(*new_id) else { continue };
+            if o.component_id() != n.component_id() || o.kind() != n.kind() {
+                continue;
+            }
+            if old_slot != find_parent_and_index(new, *new_id) {
+                continue;
+            }
+            taken.insert(*new_id);
+            pairs.push((*old_id, *new_id));
+            break;
+        }
+    }
+    pairs
 }
 
 /// Emits a `Replace` patch carrying the full new node.
@@ -320,6 +394,159 @@ mod tests {
             }
             other => panic!("expected Update, got {other:?}"),
         }
+    }
+
+    /// Builds a single-node arena whose node is `component_id`/`kind`.
+    fn single_node(component: u32, kind: NodeKind) -> IRArena {
+        let node = Node {
+            id: NodeId::from(1u32),
+            kind,
+            component_id: ComponentId::from(component),
+            props: Props::from_fields(vec![]),
+            children: vec![],
+            handlers: vec![],
+            span: Span::new(0, 0, 4),
+        };
+        let mut b = ArenaBuilder::new();
+        b.pack(node);
+        b.finish()
+    }
+
+    #[test]
+    fn component_swap_at_same_node_reattaches_instead_of_replacing() {
+        // `Column` → `Row` at the same node id: state must survive, so the
+        // differ emits a state-preserving Reattach, never a Replace.
+        let a = single_node(1, NodeKind::Primitive);
+        let b = single_node(2, NodeKind::Primitive);
+        let patches = diff(&a, &b);
+        assert_eq!(patches.len(), 1);
+        match &patches[0] {
+            Patch::Reattach {
+                old_id,
+                new_id,
+                node,
+            } => {
+                assert_eq!(*old_id, NodeId::from(1u32));
+                assert_eq!(*new_id, NodeId::from(1u32));
+                assert_eq!(node.component_id, ComponentId::from(2u32));
+            }
+            other => panic!("expected Reattach, got {other:?}"),
+        }
+        assert!(patches[0].is_state_preserving());
+    }
+
+    #[test]
+    fn kind_change_still_replaces() {
+        // A genuine node-kind change (Primitive → If) is not the same construct
+        // and must NOT silently inherit another node's state.
+        let a = single_node(1, NodeKind::Primitive);
+        let b = single_node(1, NodeKind::If);
+        let patches = diff(&a, &b);
+        assert_eq!(patches.len(), 1);
+        assert!(matches!(&patches[0], Patch::Replace { .. }));
+    }
+
+    #[test]
+    fn respanned_child_reattaches_rather_than_remove_insert() {
+        // The same primitive at the same parent/index but with a new node id
+        // (an edit shifted its span) must reattach, preserving its instance.
+        let tree = |child_id: u32| {
+            let mut b = ArenaBuilder::new();
+            b.pack(Node {
+                id: NodeId::from(1u32),
+                kind: NodeKind::Component,
+                component_id: ComponentId::from(1u32),
+                props: Props::from_fields(vec![]),
+                children: vec![Child::Node(NodeId::from(child_id))],
+                handlers: vec![],
+                span: Span::new(0, 0, 10),
+            });
+            b.pack(Node {
+                id: NodeId::from(child_id),
+                kind: NodeKind::Primitive,
+                component_id: ComponentId::from(7u32),
+                props: Props::from_fields(vec![]),
+                children: vec![],
+                handlers: vec![],
+                span: Span::new(0, 0, 4),
+            });
+            b.finish()
+        };
+        let patches = diff(&tree(2), &tree(3));
+        let reattach = patches
+            .iter()
+            .find(|p| matches!(p, Patch::Reattach { .. }))
+            .expect("re-spanned child must reattach");
+        match reattach {
+            Patch::Reattach { old_id, new_id, .. } => {
+                assert_eq!(*old_id, NodeId::from(2u32));
+                assert_eq!(*new_id, NodeId::from(3u32));
+            }
+            other => panic!("expected Reattach, got {other:?}"),
+        }
+        assert!(
+            !patches.iter().any(|p| matches!(p, Patch::Remove { .. })),
+            "reattached node must not also be removed: {patches:?}"
+        );
+        assert!(
+            !patches.iter().any(|p| matches!(p, Patch::Insert { .. })),
+            "reattached node must not also be inserted: {patches:?}"
+        );
+    }
+
+    #[test]
+    fn unrelated_component_still_remove_inserts() {
+        // Different component at the same slot with a different id: no shared
+        // identity, so state must NOT be transferred.
+        let mut b1 = ArenaBuilder::new();
+        b1.pack(Node {
+            id: NodeId::from(1u32),
+            kind: NodeKind::Component,
+            component_id: ComponentId::from(1u32),
+            props: Props::from_fields(vec![]),
+            children: vec![Child::Node(NodeId::from(2u32))],
+            handlers: vec![],
+            span: Span::new(0, 0, 10),
+        });
+        b1.pack(Node {
+            id: NodeId::from(2u32),
+            kind: NodeKind::Primitive,
+            component_id: ComponentId::from(7u32),
+            props: Props::from_fields(vec![]),
+            children: vec![],
+            handlers: vec![],
+            span: Span::new(0, 0, 4),
+        });
+        let a = b1.finish();
+
+        let mut b2 = ArenaBuilder::new();
+        b2.pack(Node {
+            id: NodeId::from(1u32),
+            kind: NodeKind::Component,
+            component_id: ComponentId::from(1u32),
+            props: Props::from_fields(vec![]),
+            children: vec![Child::Node(NodeId::from(3u32))],
+            handlers: vec![],
+            span: Span::new(0, 0, 10),
+        });
+        b2.pack(Node {
+            id: NodeId::from(3u32),
+            kind: NodeKind::Primitive,
+            component_id: ComponentId::from(9u32),
+            props: Props::from_fields(vec![]),
+            children: vec![],
+            handlers: vec![],
+            span: Span::new(0, 0, 4),
+        });
+        let b = b2.finish();
+
+        let patches = diff(&a, &b);
+        assert!(
+            !patches.iter().any(|p| matches!(p, Patch::Reattach { .. })),
+            "different components must not reattach: {patches:?}"
+        );
+        assert!(patches.iter().any(|p| matches!(p, Patch::Remove { .. })));
+        assert!(patches.iter().any(|p| matches!(p, Patch::Insert { .. })));
     }
 
     #[test]

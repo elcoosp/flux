@@ -614,6 +614,15 @@ pub(crate) fn encode_patch(w: &mut Writer, patch: &Patch) {
             w.u32(*id);
             encode_closure_ref(w, closure);
         }
+        Patch::Reattach {
+            old_id,
+            new_id,
+            node,
+        } => {
+            w.u32(*old_id);
+            w.u32(*new_id);
+            encode_node(w, node);
+        }
         // `Patch` is `#[non_exhaustive]`. An unknown variant cannot be encoded
         // without a wire tag, so it is skipped; the differ/pre-flight stage
         // guarantees only known variants reach the serializer.
@@ -661,6 +670,16 @@ pub(crate) fn decode_patch(r: &mut Reader<'_>) -> Result<Patch, WireError> {
             let id = r.u32("patch.handler.id")?;
             let closure = decode_closure_ref(r)?;
             Ok(Patch::Handler { id, closure })
+        }
+        0x07 => {
+            let old_id = r.u32("patch.reattach.old_id")?;
+            let new_id = r.u32("patch.reattach.new_id")?;
+            let node = decode_node(r)?;
+            Ok(Patch::Reattach {
+                old_id,
+                new_id,
+                node,
+            })
         }
         other => Err(WireError::InvalidTag {
             tag: other,
