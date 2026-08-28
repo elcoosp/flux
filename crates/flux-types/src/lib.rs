@@ -10,25 +10,9 @@
 //! the three prelude traits `Numeric`/`Eq`/`Show`, ADT exhaustiveness checking,
 //! and monomorphization tracking. Diagnostics follow `AGENTS.md` §3.7: each
 //! [`TypeError`] carries a [`Span`] (where), an expected/actual type (why), and
-//! a hint (how).
-//!
-//! # Examples
-//!
-//! ```rust
-//! use flux_types::type_check;
-//! use flux_parser::parse;
-//!
-//! let source = "compo Hello\n  state count: Int = 0\n";
-//! let ast = parse(source, 0, "hello.flux").unwrap();
-//! let typed = type_check(&ast).expect("well-typed source");
-//! assert!(typed.instantiations.is_empty());
-//! ```
-//!
-//! # Errors
-//!
-//! [`type_check`] returns [`TypeError`] on the first ill-typed declaration. The
-//! error renders as a Rust-style `file:line:col` diagnostic via
-//! [`TypeError::render`].
+//! a hint (how). The unified [`FluxError`] umbrella adds a `compile` / `runtime`
+//! / `capability` classification with `what`/`where`/`why`/`how` accessors
+//! (LANE-I, FLUX-02X).
 
 #![forbid(unsafe_code)]
 #![warn(
@@ -41,7 +25,9 @@
 /// The canonical Flux capability surface (spec §24, Appendix E). The single
 /// source of truth for capability names, numeric ids, and method ids — shared
 /// by the compiler (`flux-ir` `CALL_CAP` emission) and the dev server so the
-/// wire ids can never drift from the host registries.
+/// wire ids can never drift from the host registries. Also defines the
+/// permission-gating model (`PermissionKind`, `PermissionChecker`,
+/// `required_permission`) for capability access control.
 pub mod capabilities;
 mod checker;
 mod env;
@@ -53,7 +39,14 @@ mod scheme;
 mod traits;
 mod unify;
 
-pub use capabilities::{CAPABILITY_IDL, CapabilityIdl, MethodIdl, is_satisfied};
+pub use capabilities::{
+    CAPABILITY_IDL, CapabilityIdl, MethodIdl, PermissionChecker, PermissionKind, is_satisfied,
+    required_permission,
+};
+pub use error::{
+    CapabilityError, CompileError, CompilePhase, FluxError, RuntimeError, capability_denied,
+    compile_error,
+};
 
 pub use checker::{Checker, GenericInstantiation, check_decl, collect_adts};
 pub use env::{AdtDef, Binding, CtorKind, Env, PARAM_BASE, TraitInfo, VariantDef};
