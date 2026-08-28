@@ -8,6 +8,90 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+The entries below land the work committed since the changelog was last updated
+(`a8c86d0`, 2026-08-27). The `[skip ci]` merge-guard directory-recording commits
+are intentionally omitted (automation noise, not user-facing change).
+
+### LANE-A / LANE-B — router navigation + positional `Screen` route-prop blind spot — DONE
+
+- iOS runtime: router-aware reconciler + VM ip-advance fix, dispatch debug probes
+  stripped, router screen name-detection (`2bbfb61`, `a503719`, `79a588f`).
+- `Router.navigate` (signal 97) wired to the visible screen on both hosts
+  (`9c30d4c` iOS, `91605d2` Android); Android `FluxTreeView` threads `routerVersion`
+  (`49178b5`); router renders only the active Screen on a real tap, accepting a raw
+  `StrVal` signal 97 (`3975237`, `303ee45`, `9840ab5`, `b3905dc`).
+- Added `RouterUITapTests` UI test target (`1cf0fb3`) plus on-device positional-`Screen`
+  navigation trap tests for iOS and Android (`822f25c`, `0afc406`) and a Rust parity
+  gate pinning the route-prop blind spot (`c625a02`, `792cf73`).
+
+### LANE-C — Clipboard & Geolocation capabilities — DONE
+
+- Registered Clipboard (cap 4) and Geolocation (cap 5) in the type checker and added
+  them to the MLP manifest (`798fd03`, `1bca9d5`).
+
+### LANE-D — wire fuzzing harness + wire hardening — DONE
+
+- Added a wire-fuzzing harness + CI (`2aac405`); `flux-ir-serde` gained a frame-size
+  ceiling and bytecode validation (`99c443d`).
+
+### LANE-E — `flux build` release gate — DONE
+
+- `flux build` now invokes the native toolchain and fails on non-zero exit; release-leaking
+  debug logs gated behind `#if DEBUG` (`6947bec`, `d1ffbd8`). Tracing palette brightened for
+  readability on blue terminals (`86f6c7e`).
+
+### LANE-H — large-tree benchmarks — DONE
+
+- Added large-tree benchmarks measured against the §3.10 budgets (`680a9fb`).
+
+### LANE-I — unified `FluxError` hierarchy + permission gate — DONE
+
+- Introduced a unified `FluxError` hierarchy with a permission gate in `flux-types` /
+  `flux-devserver`; fixed the umbrella left half-disabled by LANE-D (`b972da4`, `c758e13`).
+
+### Codegen — unified data-driven release codegen (ADR-0047) — DONE
+
+- Unified data-driven release codegen via `flux-codegen-core`; emit one specialised native
+  type per generic instantiation and fully shape the six previously-bare primitives
+  (`8f5c5d5`, `5cea19d`, `12f2d97`). Emit valid SwiftUI / Compose for sum types + `match`
+  (`fcbd673`, `6d706c0`). `flux-devserver` exposes the merged monomorphization set
+  (`d18dc20`).
+
+### IR — `Patch::Reattach` applied, secondary string-intern region (Phase 1/3/5 follow-ups) — DONE
+
+- `bdcfa64` monomorphise generics + add the Reattach patch; `9012554` `InstanceRegistry::try_reattach`
+  for state-preserving structural edits; `a667998` apply `Patch::Reattach` to preserve instance
+  state on iOS / Android; `3173e0b` secondary host string-intern region so ids never alias.
+
+### Async wire — end-to-end suspension test — DONE
+
+- `4c2d5de` end-to-end async suspension over the `AwaitSuspend` / `Resume` wire against the
+  real reference VM.
+
+### Docs / ADR — reconcile to real code — DONE
+
+- ADR-0048 (iOS declarative dev tier) + §0.2 status correction (`9cd9e72`); AGENTS.md
+  §0.2 / §0.4 / §2.1 / §3.2 reconciled to real code (`1d3dd91`, `61559a9`); spec
+  `Patch::Reattach` / `AwaitSuspend` / `Resume` frames (`ecb82b3`); adapter prop-index and
+  adapter-count claims corrected (`a1e5ed6`, `5bba904`, `ce29276`); flux-architecture diagram
+  interactivity + readability (`73608ce`, `f974e70`, `9b0e508`); README / website / repo-URL fixes
+  (`3012103`, `512b220`, `4c1b5da`).
+
+### CI — real Kotlin / Compose codegen check + rust-check unblock — DONE
+
+- Provision the Compose toolchain and run the real `kotlinc` codegen check without platform-37;
+  gate on explicit Compose classpath and skip when no Android toolchain is present
+  (`99d12b2`, `8316f25`, `dff1b3a`, `57ca924`, `5f033d4`, `9ea941e`, `95e65d3`, `2fda50d`,
+  `42f38e7`, `f8a68d0`, `b0034e8`, `985dc31`, `6759fee`, `8087ea2`, `d21fc4d`). Unblock `rust-check`
+  on `flux-devserver` and port `flux-devtools-ui` to the pinned gpui API; switch workspace to
+  nightly (`25b8907`, `2b1e511`, `94488cc`).
+
+### Examples / stdlib
+
+- Router navigation example + parity test for the route prop (`609d10e`, `4c04d30`, `9013ce3`);
+  stdlib `platform.flux` drops the hand-written `RouterHandle.navigate` (`ba11a24`); scratch
+  `notify_fsevent_test.rs` and `AGENT-044` scratch notes removed (`4958ac4`, `baf8a7b`, `5077e63`).
+
 ### Roadmap Phase 1 — IR monomorphisation of generic components — DONE
 
 `LoweredIr` now carries `monomorphizations`: the generic instantiations lowering
@@ -394,6 +478,29 @@ Tests (`runtimes/ios/Tests`):
 Verification: out-of-tree xcodegen project wrapping `Sources`/`Tests` (the
 frozen `project.yml` is untouched); `xcodebuild test` on iOS Simulator passes
 14 tests, 0 failures (2 skipped), with `SWIFT_TREAT_WARNINGS_AS_ERRORS=YES`.
+
+#### Cross-host naming convergence (ADR-0049 / PRD-W) — DONE
+
+Unified the type names that had drifted between the Android host runtime
+(FLUX-007) and the iOS host runtime (FLUX-006/FLUX-016), which are both
+behavioral mirrors of `flux-vm-ref`. Each shared concept now has one canonical
+name, anchored to the Rust oracle; enum *cases* keep each language's idiomatic
+casing (Swift `lowerCamelCase`, Kotlin `PascalCase`/`SCREAMING_SNAKE`) and are
+not renamed. See `docs/adr/ADR-0049-cross-host-naming-convergence.md` and
+`docs/issues/PRD-W-cross-host-naming-convergence.md`.
+
+- iOS host (`b2e330b`): `VMValue`→`FluxValue`, `VMError`→`VmError`,
+  `OpCode`/`opCode`→`Opcode`/`opcode`, `StringResolvable`→`StringResolver`,
+  `FluxRuntime`→`FluxExecutor`. Builds green via `xcodebuild -scheme FluxHost
+  -sdk iphonesimulator`.
+- Android host (`fe4637f`): wire `Frame`→`FluxFrame` (the `FrameDeserializer`
+  type and the `TraceEvent.Frame` trace variant were left distinct). Builds
+  green via `./gradlew :runtimes:android:host:compileKotlin`.
+- Swift kit (`438510f`): the umbrella `enum FluxUIKit` was renamed to
+  `FluxUIKitModule` because it shadowed the module of the same name and blocked
+  module-qualified references (e.g. `FluxUIKit.FluxValue`) from the host bridge.
+- Docs (`a1bf136`): added ADR-0049 and PRD-W, and fixed the stale names in
+  `docs/flux-architecture.html` and the wave-1/wave-3 spawn docs.
 
 ### Phase 0 — Foundation
 
