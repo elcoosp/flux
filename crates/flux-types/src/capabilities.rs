@@ -68,10 +68,11 @@ impl CapabilityIdl {
 /// The MLP capability set (mirrors `stdlib/capabilities.flux`).
 ///
 /// IDs are stable and match the native `CapabilityRegistry` tables (cap 1 =
-/// Camera, cap 2 = Storage, cap 3 = Router). Sync vs async is a binding
-/// detail: sync methods return immediately; async methods (most platform
-/// calls — camera, permissions, network) resolve through the VM's await
-/// machinery (ADR-0044 / ADR-0045) and return a `Result` on failure.
+/// Camera, cap 2 = Storage, cap 3 = Router, cap 4 = Clipboard, cap 5 =
+/// Geolocation). Sync vs async is a binding detail: sync methods return
+/// immediately; async methods (most platform calls — camera, permissions,
+/// network) resolve through the VM's await machinery (ADR-0044 / ADR-0045) and
+/// return a `Result` on failure.
 pub const CAPABILITY_IDL: &[CapabilityIdl] = &[
     CapabilityIdl {
         name: "Camera",
@@ -111,6 +112,19 @@ pub const CAPABILITY_IDL: &[CapabilityIdl] = &[
             id: 1,
         }],
     },
+    CapabilityIdl {
+        name: "Clipboard",
+        id: 4,
+        methods: &[
+            MethodIdl { name: "set", id: 1 },
+            MethodIdl { name: "get", id: 2 },
+        ],
+    },
+    CapabilityIdl {
+        name: "Geolocation",
+        id: 5,
+        methods: &[MethodIdl { name: "get", id: 1 }],
+    },
 ];
 
 /// The OS-level permission a capability method requires before `CALL_CAP`
@@ -138,6 +152,13 @@ pub enum PermissionKind {
     Storage,
     /// No OS grant; the router's `navigate` is always permitted.
     None,
+    /// Read/write access to the system pasteboard (iOS `UIPasteboard`; Android
+    /// `ClipboardManager`).
+    Clipboard,
+    /// Read access to the device location (iOS `NSLocationWhenInUseUsageDescription`
+    /// / `CLLocationManager`; Android `ACCESS_FINE_LOCATION` /
+    /// `ACCESS_COARSE_LOCATION`).
+    Location,
 }
 
 impl PermissionKind {
@@ -149,6 +170,8 @@ impl PermissionKind {
             Self::Camera => ".camera",
             Self::Storage => ".storage",
             Self::None => ".none",
+            Self::Clipboard => ".clipboard",
+            Self::Location => ".location",
         }
     }
 
@@ -163,6 +186,8 @@ impl PermissionKind {
             ".camera" => Some(Self::Camera),
             ".storage" => Some(Self::Storage),
             ".none" => Some(Self::None),
+            ".clipboard" => Some(Self::Clipboard),
+            ".location" => Some(Self::Location),
             _ => None,
         }
     }
@@ -207,6 +232,10 @@ pub fn required_permission(cap_id: u32, method_id: u16) -> Option<PermissionKind
         (2, _) => Some(PermissionKind::Storage),
         // Router: navigation is always permitted.
         (3, _) => Some(PermissionKind::None),
+        // Clipboard: every method needs the pasteboard grant.
+        (4, _) => Some(PermissionKind::Clipboard),
+        // Geolocation: every method needs the location grant.
+        (5, _) => Some(PermissionKind::Location),
         _ => None,
     }
 }
@@ -298,7 +327,16 @@ mod tests {
             PermissionKind::from_token(".none"),
             Some(PermissionKind::None)
         );
-        assert_eq!(PermissionKind::from_token(".nope"), None);
+        assert_eq!(
+            PermissionKind::from_token(".clipboard"),
+            Some(PermissionKind::Clipboard)
+        );
+        assert_eq!(
+            PermissionKind::from_token(".location"),
+            Some(PermissionKind::Location)
+        );
+        assert_eq!(PermissionKind::Clipboard.token(), ".clipboard");
+        assert_eq!(PermissionKind::Location.token(), ".location");
         assert_eq!(PermissionKind::Camera.token(), ".camera");
         assert_eq!(PermissionKind::Storage.token(), ".storage");
         assert_eq!(PermissionKind::None.token(), ".none");
@@ -309,6 +347,8 @@ mod tests {
         assert_eq!(required_permission(1, 0), Some(PermissionKind::Camera));
         assert_eq!(required_permission(2, 1), Some(PermissionKind::Storage));
         assert_eq!(required_permission(3, 1), Some(PermissionKind::None));
+        assert_eq!(required_permission(4, 1), Some(PermissionKind::Clipboard));
+        assert_eq!(required_permission(5, 1), Some(PermissionKind::Location));
         assert_eq!(required_permission(9, 9), None);
     }
 
