@@ -38,25 +38,6 @@ public final class ButtonAdapter: FluxAdapter {
 
     public func bindHandler(_ handlerId: FluxHandlerId, to view: UIButton, nodeId: FluxNodeId) {
         let target = HandlerTarget(executor: executor, handlerId: handlerId, nodeId: nodeId) { nil }
-        #if DEBUG
-        NSLog("[FluxRT] ButtonAdapter.bindHandler handlerId=\(handlerId) nodeId=\(nodeId) executor=\(executor != nil ? "set" : "NIL")")
-        // Deep-dive probe: record the button's real window-space hit frame and
-        // what `hitTest` at its center actually returns, so we can tell whether
-        // a real tap reaches the button or is intercepted by an ancestor.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            let f = view.frame
-            let abs = view.convert(view.bounds, to: nil)
-            let center = CGPoint(x: abs.midX, y: abs.midY)
-            let hit = view.window?.hitTest(center, with: nil)
-            let hitDesc = String(describing: hit.map { type(of: $0) })
-            let selfIsHit = hit === view
-            let line = "[frame] handlerId=\(handlerId) nodeId=\(nodeId) frame=\(f) absWin=\(abs) enabled=\(view.isEnabled) userInt=\(view.isUserInteractionEnabled) superview=\(type(of: view.superview)) hitAtCenter=\(hitDesc) selfIsHit=\(selfIsHit) at \(Date())\n"
-            NSLog("[FluxRT] ButtonAdapter frame: \(line)")
-            UserDefaults.standard.set(line, forKey: "flux_frame")
-            let tmp = NSTemporaryDirectory() + "flux_frame.log"
-            try? line.write(to: URL(fileURLWithPath: tmp), atomically: true, encoding: .utf8)
-        }
-        #endif
         view.addAction(UIAction { _ in target.fire() }, for: .touchUpInside)
     }
 

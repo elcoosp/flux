@@ -244,9 +244,6 @@ struct ShadowTreeReconciler {
         for patch in frame.patches {
             applyPatch(patch, nodes: patchNodes, report: &report)
         }
-        #if DEBUG
-        debugDump()
-        #endif
         return report
     }
 
@@ -531,13 +528,12 @@ struct ShadowTreeReconciler {
             default:
                 routeId = nil
             }
-            // Signal 97's route is written by the `Router.navigate` capability,
-            // which interns the route string into the VM's `MaterializationStringTable`
-            // (the executor's `table`), NOT the reconciler's frame-seeded table.
-            // Resolving via `currentTable()` misses the cap-interned id (it returns
-            // nil) and navigation silently falls back to the first child. Resolve
-            // through the VM table the cap actually wrote into so the swap happens.
-            if let rid = routeId, let route = runtime.table.lookup(rid) {
+            // The route string id written by `Router.navigate` resolves through the
+            // reconciler's frame-seeded string table (the same table the screen's
+            // route prop is resolved from, below), so navigation swaps the visible
+            // screen on a real tap. If it is nil the signal is unset/malformed and we
+            // fall back to the first child.
+            if let rid = routeId, let route = currentTable().lookup(rid) {
                 activeRoute = route
             }
         }
@@ -554,35 +550,18 @@ struct ShadowTreeReconciler {
             }
             for cid in childIds {
                 if firstChildId == nil { firstChildId = cid }
-                let childKind = nodes[cid]?.kind
-                let childComp = nodes[cid].flatMap { componentNames[$0.componentId] }
-                let routeProp = nodes[cid].flatMap { $0.props.first { $0.index == Self.routePropIndex } }
-                #if DEBUG
-                let dbg = "[child] cid=\(cid) kind=\(childKind ?? NodeKind.primitive) comp=\(childComp ?? "?") routeProp=\(routeProp == nil ? "nil" : String(describing: routeProp!))\n"
-                let url = URL(fileURLWithPath: NSTemporaryDirectory() + "flux_apply.log")
-                if let data = dbg.data(using: .utf8) {
-                    if let handle = try? FileHandle(forWritingAtPath: url.path) {
-                        handle.seekToEndOfFile()
-                        handle.write(data)
-                        handle.closeFile()
-                    } else {
-                        try? data.write(to: url)
-                    }
-                }
-                #endif
-                guard let childNode = nodes[cid], childNode.kind == .screen else { continue }
+                guard let childNode = nodes[cid] else { continue }
+                // A `Screen` is lowered by the server as a *component*
+                // (`componentId="Screen"`), so its wire `NodeKind` is `.component`,
+                // not `.screen`. Detect it by the resolved adapter name, matching
+                // how Android finds screens (and how the router is detected above),
+                // otherwise every screen child is skipped and navigation silently
+                // falls back to the first child (no swap on tap).
+                let isScreen = childNode.kind == .screen || componentNames[childNode.componentId] == "Screen"
+                guard isScreen else { continue }
                 guard let prop = childNode.props.first(where: { $0.index == Self.routePropIndex }),
                       case let .str(id) = prop.value,
                       let route = currentTable().lookup(id) else { continue }
-                #if DEBUG
-                let childLine = "[routerChild] cid=\(cid) routeId=\(id) route=\(route) activeRoute=\(activeRoute ?? "nil")\n"
-                let crl = URL(fileURLWithPath: NSTemporaryDirectory() + "flux_apply.log")
-                if let d2 = childLine.data(using: .utf8) {
-                    if let h2 = try? FileHandle(forWritingAtPath: crl.path) {
-                        h2.seekToEndOfFile(); h2.write(d2); h2.closeFile()
-                    } else { try? d2.write(to: crl) }
-                }
-                #endif
                 // When signal 97 is unset (initial render) fall back to the first
                 // screen; when set, prefer the route match. Either way pick a
                 // screen so the router never blanks (mirrors Android).
@@ -594,40 +573,6 @@ struct ShadowTreeReconciler {
             }
         }
         return matchedChild ?? firstChildId
-    }
-
-    /// Dumps the live router subscription state to container tmp for deep-dive
-    /// debugging of navigation-not-swapping-on-tap.
-    func debugDump() {
-        var lines: [String] = []
-        lines.append("[apply] rootId=\(currentRootId.map { String($0) } ?? "nil") componentNamesHasRouter=\(componentNames.contains { $0.value == "Router" })")
-        if let runtime = executorRef as? FluxRuntime, let rec = runtime.graph.read(97) {
-            let str: String?
-            switch rec {
-            case let .str(id): str = currentTable().lookup(id)
-            default: str = nil
-            }
-            lines.append("[apply] sig97 raw=\(rec) resolved=\(str ?? "nil")")
-        } else {
-            lines.append("[apply] sig97=unset")
-        }
-        for (nid, node) in nodeTable where (node.kind == .router || componentNames[node.componentId] == "Router") {
-            let deps = signalDeps[nid] ?? []
-            let active = routerActiveChildId(node, nodes: nodeTable)
-            lines.append("[apply] ROUTER nid=\(nid) kind=\(node.kind) comp=\(node.componentId) deps=\(deps) active=\(active ?? 0)")
-        }
-        // Dump both tables' low-id entries to see where "settings"/"home" live.
-        let rt = executorRef as? FluxRuntime
-        var recTable = "[tables] runtime.table: "
-        for id in 0..<64 { if let s = rt?.table.lookup(UInt32(id)) { recTable += "\(id)=\(s) " } }
-        lines.append(recTable)
-        var recCur = "[tables] currentTable: "
-        for id in 0..<64 { if let s = currentTable().lookup(UInt32(id)) { recCur += "\(id)=\(s) " } }
-        lines.append(recCur)
-        let txt = lines.joined(separator: "\n") + "\n"
-        let tmp = NSTemporaryDirectory() + "flux_apply.log"
-        try? txt.write(to: URL(fileURLWithPath: tmp), atomically: true, encoding: .utf8)
-        NSLog("[FluxRT] \(txt)")
     }
 
     /// Materialises the props of `node` by running its ADR-0027 prop thunk
