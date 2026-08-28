@@ -91,6 +91,13 @@ fn check_brace_depth(source: &str, file_id: u32, path: &str) -> Option<ParseErro
                     });
                 }
             }
+            '}' => {
+                // Closing brace leaves the current block, so true nesting depth
+                // drops. Without this the counter only ever grew and any file
+                // with more than `MAX_NESTING_DEPTH` braces total (e.g. a real
+                // app with >16 components) was wrongly rejected.
+                depth = depth.saturating_sub(1);
+            }
             _ => {}
         }
     }
