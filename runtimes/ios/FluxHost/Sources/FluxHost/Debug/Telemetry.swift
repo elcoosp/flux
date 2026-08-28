@@ -54,9 +54,9 @@ public protocol VMTelemetrySink: AnyObject {
 /// enrichment happens server-side, so these carry raw IDs only.
 public enum TelemetryEvent {
     /// Emitted after each VM instruction executes.
-    case vmStep(bytecodeOffset: UInt32, opcode: UInt8, registers: [VMValue], gasRemaining: UInt32)
+    case vmStep(bytecodeOffset: UInt32, opcode: UInt8, registers: [FluxValue], gasRemaining: UInt32)
     /// Emitted when a signal's value changes.
-    case signalWrite(signalId: UInt32, oldValue: VMValue, newValue: VMValue, triggeredEffectIds: [UInt32])
+    case signalWrite(signalId: UInt32, oldValue: FluxValue, newValue: FluxValue, triggeredEffectIds: [UInt32])
     /// Emitted when the reconciler mutates a native view.
     case viewMutation(nodeId: UInt32, nativeViewId: UInt64, mutationKind: UInt8, frame: Rect?)
     /// Emitted when a handler starts or finishes.
@@ -282,8 +282,8 @@ public func fluxDevtoolsEmit(_ event: TelemetryEvent) {
     fluxDevtoolsSink?.emit(event)
 }
 
-/// Encodes a `VMValue` into `data` per Appendix D §D.5.
-func encodeValue(_ value: VMValue, into data: inout Data) {
+/// Encodes a `FluxValue` into `data` per Appendix D §D.5.
+func encodeValue(_ value: FluxValue, into data: inout Data) {
     data.append(value.tag)
     switch value {
     case .null:

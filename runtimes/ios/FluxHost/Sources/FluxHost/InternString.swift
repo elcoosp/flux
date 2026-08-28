@@ -29,7 +29,7 @@ let frameKindStringInterned: UInt8 = 0x08
 ///
 /// Ids below this bit are assigned by the server's string table (Appendix D
 /// §D.9) and are stable across edits. The host must only ever place ids `<
-/// this` into a `VMValue.str` it publishes, since anything at or above silently
+/// this` into a `FluxValue.str` it publishes, since anything at or above silently
 /// bypasses interning and reintroduces the brittleness 4c was raised to remove.
 let stringIdCanonicalCeiling: UInt32 = 0x8000_0000
 
@@ -87,7 +87,7 @@ public protocol AnyStringInterner: AnyObject {
     /// Implementations must return an id `< stringIdCanonicalCeiling`; a synthetic
     /// high-range id is never acceptable. The call is `async` because the canonical
     /// id is produced by the dev server, so the VM pauses its evaluation until the
-    /// reply arrives (the dispatch runs off the UI thread; see `FluxRuntime`).
+    /// reply arrives (the dispatch runs off the UI thread; see `FluxExecutor`).
     func intern(_ text: String) async -> UInt32
 }
 

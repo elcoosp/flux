@@ -9,7 +9,7 @@
 //
 // Type visibility: the engine is exercised by its own tests via
 // `@testable import FluxHost`; the app shell reaches the public surface
-// (`FluxRuntime`, `AdapterRegistry`, `SignalGraph`, …).
+// (`FluxExecutor`, `AdapterRegistry`, `SignalGraph`, …).
 
 import PackageDescription
 

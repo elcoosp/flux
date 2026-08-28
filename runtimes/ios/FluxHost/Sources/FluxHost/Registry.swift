@@ -23,7 +23,7 @@ import Foundation
 typealias CapabilityImpl = (
     _ capId: UInt32,
     _ methodId: UInt16,
-    _ argument: VMValue,
+    _ argument: FluxValue,
     _ signals: inout SignalStore
 ) throws -> UInt32
 
@@ -113,7 +113,7 @@ final class CapabilityRegistry: @unchecked Sendable {
                 // builds keep this echo; the app shell supplies real capture via
                 // a separate `CameraCapability` that still writes field 0 → 99.
                 guard case let .record(fields) = arg, let first = fields.first else {
-                    throw VMError.typeMismatch(offset: 0)
+                    throw VmError.typeMismatch(offset: 0)
                 }
                 signals.write(99, first.value)
                 return 99
@@ -132,11 +132,11 @@ final class CapabilityRegistry: @unchecked Sendable {
                 // value is the second. Persist into the backend store, then expose
                 // the value through signal 95 (the Storage result cell).
                 guard case let .record(fields) = arg, fields.count >= 2 else {
-                    throw VMError.typeMismatch(offset: 0)
+                    throw VmError.typeMismatch(offset: 0)
                 }
                 let key = fields[0].value
                 let value = fields[1].value
-                guard case let .str(keyId) = key else { throw VMError.typeMismatch(offset: 0) }
+                guard case let .str(keyId) = key else { throw VmError.typeMismatch(offset: 0) }
                 store.put(keyId, value)
                 signals.write(95, value)
                 return 95
@@ -145,9 +145,9 @@ final class CapabilityRegistry: @unchecked Sendable {
                 // Storage.get(key): read the persisted value, defaulting to `null`, and
                 // expose it through signal 95.
                 guard case let .record(fields) = arg, !fields.isEmpty else {
-                    throw VMError.typeMismatch(offset: 0)
+                    throw VmError.typeMismatch(offset: 0)
                 }
-                guard case let .str(keyId) = fields[0].value else { throw VMError.typeMismatch(offset: 0) }
+                guard case let .str(keyId) = fields[0].value else { throw VmError.typeMismatch(offset: 0) }
                 let value = store.get(keyId) ?? .null
                 signals.write(95, value)
                 return 95
@@ -155,9 +155,9 @@ final class CapabilityRegistry: @unchecked Sendable {
             (2, 3, { _, _, arg, signals in
                 // Storage.delete(key): clear the persisted value and surface `null`.
                 guard case let .record(fields) = arg, !fields.isEmpty else {
-                    throw VMError.typeMismatch(offset: 0)
+                    throw VmError.typeMismatch(offset: 0)
                 }
-                guard case let .str(keyId) = fields[0].value else { throw VMError.typeMismatch(offset: 0) }
+                guard case let .str(keyId) = fields[0].value else { throw VmError.typeMismatch(offset: 0) }
                 store.put(keyId, nil)
                 signals.write(95, .null)
                 return 95

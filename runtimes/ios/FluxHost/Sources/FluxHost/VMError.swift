@@ -1,4 +1,4 @@
-//  VMError.swift
+//  VmError.swift
 //  Fault types for the Flux Swift VM.
 //
 //  Every error carries the byte offset of the offending instruction. The kinds
@@ -9,7 +9,7 @@
 import Foundation
 
 /// Why a handler invocation terminated without producing a value.
-public enum VMErrorKind: Equatable {
+public enum VmErrorKind: Equatable {
     /// The 100,000-instruction gas budget was exhausted (Appendix E §E.3).
     case gasExhausted
     /// An index (list/record/string) fell outside its bounds.
@@ -28,7 +28,7 @@ public enum VMErrorKind: Equatable {
     case memoryExhausted
 }
 
-extension VMErrorKind {
+extension VmErrorKind {
     /// The string name emitted in diagnostics and matched by tests.
     public var name: String {
         switch self {
@@ -44,17 +44,17 @@ extension VMErrorKind {
 }
 
 /// A VM fault with its location in the bytecode.
-public struct VMError: Error, Equatable {
+public struct VmError: Error, Equatable {
     /// The category of fault.
-    public let kind: VMErrorKind
+    public let kind: VmErrorKind
     /// Byte offset of the offending instruction in the program.
     public let offset: Int
 
-    static func gasExhausted(offset: Int) -> VMError { VMError(kind: .gasExhausted, offset: offset) }
-    static func indexOutOfBounds(offset: Int) -> VMError { VMError(kind: .indexOutOfBounds, offset: offset) }
-    static func nullDereference(offset: Int) -> VMError { VMError(kind: .nullDereference, offset: offset) }
-    static func invalidDispatch(offset: Int) -> VMError { VMError(kind: .invalidDispatch, offset: offset) }
-    static func typeMismatch(offset: Int) -> VMError { VMError(kind: .typeMismatch, offset: offset) }
-    static func divByZero(offset: Int) -> VMError { VMError(kind: .divByZero, offset: offset) }
-    static func memoryExhausted(offset: Int) -> VMError { VMError(kind: .memoryExhausted, offset: offset) }
+    static func gasExhausted(offset: Int) -> VmError { VmError(kind: .gasExhausted, offset: offset) }
+    static func indexOutOfBounds(offset: Int) -> VmError { VmError(kind: .indexOutOfBounds, offset: offset) }
+    static func nullDereference(offset: Int) -> VmError { VmError(kind: .nullDereference, offset: offset) }
+    static func invalidDispatch(offset: Int) -> VmError { VmError(kind: .invalidDispatch, offset: offset) }
+    static func typeMismatch(offset: Int) -> VmError { VmError(kind: .typeMismatch, offset: offset) }
+    static func divByZero(offset: Int) -> VmError { VmError(kind: .divByZero, offset: offset) }
+    static func memoryExhausted(offset: Int) -> VmError { VmError(kind: .memoryExhausted, offset: offset) }
 }

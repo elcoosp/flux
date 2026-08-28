@@ -13,7 +13,7 @@
 //  awaits the server's `StringInternedFrame`, caching the canonical id so the
 //  same text always maps to the same low id. The await is safe: it runs on the
 //  main actor alongside the rest of dispatch, and the reply arrives over the same
-//  transport's `onFrame` callback (routed by `FluxRuntime.handleFrame`, which
+//  transport's `onFrame` callback (routed by `FluxExecutor.handleFrame`, which
 //  calls `handleResponse` here).
 
 import Foundation
@@ -86,7 +86,7 @@ public final class InternStringClient: AnyStringInterner {
     }
 
     /// Routes a received wire frame to this client. Called by
-    /// `FluxRuntime.handleFrame` for every frame whose kind is
+    /// `FluxExecutor.handleFrame` for every frame whose kind is
     /// `frameKindStringInterned`. Decodes the canonical id and resumes every
     /// waiter for that text; a malformed/short frame drops the pending waiters
     /// (they fall through to the offline id 0 rather than hanging forever).

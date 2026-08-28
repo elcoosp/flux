@@ -1,4 +1,4 @@
-//  VMValue.swift
+//  FluxValue.swift
 //  Native Swift mirror of `flux_syntax::Value` (Appendix C §C.1, Appendix D §D.5).
 //
 //  The reference VM (`flux-vm-ref`), the Swift VM (FLUX-006) and the Kotlin VM
@@ -14,14 +14,14 @@ import Foundation
 /// `Str` and `HandlerRef` carry an interned identifier rather than the payload
 /// itself; resolve strings through the owning string table and handlers through
 /// the closure registry. `Null` doubles as the representation of `Unit`.
-public enum VMValue: Equatable, Sendable, CustomStringConvertible {
+public enum FluxValue: Equatable, Sendable, CustomStringConvertible {
     case int(Int64)
     case float(Double)
     case bool(Bool)
     case str(UInt32)
     case handlerRef(UInt32)
-    case list([VMValue])
-    case record([(propIndex: UInt16, value: VMValue)])
+    case list([FluxValue])
+    case record([(propIndex: UInt16, value: FluxValue)])
     case `null`
 
     /// Wire type tag, per Appendix D §D.5. The deserializer and serializer
@@ -78,10 +78,10 @@ public enum VMValue: Equatable, Sendable, CustomStringConvertible {
     }
 }
 
-extension VMValue {
+extension FluxValue {
     /// Equality is defined explicitly because Swift cannot auto-synthesize
-    /// `Equatable` for a recursive enum (`.list`/`.record` contain `VMValue`).
-    public static func == (lhs: VMValue, rhs: VMValue) -> Bool {
+    /// `Equatable` for a recursive enum (`.list`/`.record` contain `FluxValue`).
+    public static func == (lhs: FluxValue, rhs: FluxValue) -> Bool {
         switch lhs {
         case let .int(a):
             if case let .int(b) = rhs { a == b } else { false }

@@ -2,7 +2,7 @@
 //  Spec-gap fixes for the iOS runtime (P1): G1–G6.
 //
 //  One RED test per gap, written before the implementation it exercises. Each
-//  test drives the real `FluxRuntime` / `FluxBytecodeVM` (no mocks) and asserts
+//  test drives the real `FluxExecutor` / `FluxBytecodeVM` (no mocks) and asserts
 //  observable behavior: a registered handler firing, a memory-cap fault, real
 //  string resolution, a data-driven capability dispatch, lifecycle hooks, and
 //  `@pure` subtree skipping.
@@ -136,7 +136,7 @@ final class GapG1RegisterHandlersTests: XCTestCase {
             state: [StateCell(signalId: 1, value: .int(0))]
         )
 
-        let executor = FluxRuntime(graph: SignalGraph(), registry: gapRegistry())
+        let executor = FluxExecutor(graph: SignalGraph(), registry: gapRegistry())
         executor.apply(frame)
         // The handler must be registered purely from the frame, with no explicit
         // `registerHandler` call from the test.
@@ -167,7 +167,7 @@ final class GapG2MemoryCapTests: XCTestCase {
             bytecodeOffset: 0, bytecodeLen: UInt16(big.count),
             signalCount: 0, signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0)
         )
-        let executor = FluxRuntime(graph: SignalGraph(), registry: gapRegistry())
+        let executor = FluxExecutor(graph: SignalGraph(), registry: gapRegistry())
         let result = executor.dispatch(bytecode: big, closure: closure, payload: .null)
         XCTAssertNotNil(result.error)
         XCTAssertEqual(result.error?.kind, .memoryExhausted)
@@ -185,7 +185,7 @@ final class GapG2MemoryCapTests: XCTestCase {
             bytecodeOffset: 0, bytecodeLen: UInt16(small.count),
             signalCount: 0, signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0)
         )
-        let executor = FluxRuntime(graph: SignalGraph(), registry: gapRegistry())
+        let executor = FluxExecutor(graph: SignalGraph(), registry: gapRegistry())
         let result = executor.dispatch(bytecode: small, closure: closure, payload: .null)
         XCTAssertNil(result.error)
     }
@@ -280,7 +280,7 @@ final class GapG4CapRegistryTests: XCTestCase {
             0x00,
         ]
         XCTAssertThrowsError(try FluxBytecodeVM.run(bc, signals: &signals, payload: .null, capRegistry: .dev)) { error in
-            XCTAssertEqual((error as? VMError)?.kind, .typeMismatch)
+            XCTAssertEqual((error as? VmError)?.kind, .typeMismatch)
         }
     }
 }
@@ -308,7 +308,7 @@ final class GapG5LifecycleTests: XCTestCase {
             handlers: [HandlerDef(handlerId: 1, closure: closure, bytecode: mountBc)],
             strings: [StringEntry(stringId: 7, value: "hi")]
         )
-        let executor = FluxRuntime(graph: SignalGraph(), registry: gapRegistry())
+        let executor = FluxExecutor(graph: SignalGraph(), registry: gapRegistry())
         executor.apply(frame)
         // onMount must have fired during apply, mutating signal 5.
         XCTAssertEqual(executor.graph.read(5), .int(1))
@@ -333,7 +333,7 @@ final class GapG5LifecycleTests: XCTestCase {
             handlers: [HandlerDef(handlerId: 2, closure: closure, bytecode: cleanupBc)],
             strings: [StringEntry(stringId: 7, value: "hi")]
         )
-        let executor = FluxRuntime(graph: SignalGraph(), registry: gapRegistry())
+        let executor = FluxExecutor(graph: SignalGraph(), registry: gapRegistry())
         executor.apply(frame)
         XCTAssertNil(executor.graph.read(6))
 
@@ -361,7 +361,7 @@ final class GapG6PureSkipTests: XCTestCase {
             root: pure, descendantNodes: [child],
             strings: [StringEntry(stringId: 7, value: "stable")]
         )
-        let executor = FluxRuntime(graph: SignalGraph(), registry: gapRegistry())
+        let executor = FluxExecutor(graph: SignalGraph(), registry: gapRegistry())
         let first = executor.apply(frame)
         XCTAssertEqual(Set(first), Set([10, 11]))
 
@@ -407,7 +407,7 @@ final class GapR1DirtySetTests: XCTestCase {
             descendantNodes: [dependent, unrelated],
             strings: [StringEntry(stringId: 7, value: "unrelated")]
         )
-        let executor = FluxRuntime(graph: SignalGraph(), registry: gapRegistry())
+        let executor = FluxExecutor(graph: SignalGraph(), registry: gapRegistry())
         _ = executor.apply(frame)
 
         executor.registerHandler(
@@ -445,7 +445,7 @@ final class GapR3CacheTests: XCTestCase {
 
     @MainActor
     func testReRegistrationInvalidatesDecodeCache() async {
-        let executor = FluxRuntime(graph: SignalGraph(), registry: gapRegistry())
+        let executor = FluxExecutor(graph: SignalGraph(), registry: gapRegistry())
 
         // First registration: handler 1 writes signal 5 = 2.
         executor.registerHandler(
@@ -493,12 +493,12 @@ final class CapabilityRoundTripTests: XCTestCase {
     func testStorageSetThenGetRoundTrips() async throws {
         var signals: any SignalStore = InMemorySignals()
         // Storage.set(key=Str(7), value=List[1,2,3]) → cap 2, method 1 returns cell id 95.
-        let setArgs = VMValue.record([(0, .str(7)), (1, .list([.int(1), .int(2), .int(3)]))])
+        let setArgs = FluxValue.record([(0, .str(7)), (1, .list([.int(1), .int(2), .int(3)]))])
         let written = try CapabilityRegistry.dev.lookup(2, 1)!(2, 1, setArgs, &signals)
         XCTAssertEqual(written, 95, "Storage.set returns its result-cell id")
 
         // Storage.get(key=Str(7)) → cap 2, method 2 exposes the persisted list via cell 95.
-        let getArgs = VMValue.record([(0, .str(7))])
+        let getArgs = FluxValue.record([(0, .str(7))])
         let gotCell = try CapabilityRegistry.dev.lookup(2, 2)!(2, 2, getArgs, &signals)
         XCTAssertEqual(gotCell, 95, "Storage.get returns its result-cell id")
         XCTAssertEqual(signals.read(95), .list([.int(1), .int(2), .int(3)]), "Storage.get returns the persisted value")
@@ -523,8 +523,8 @@ final class CapabilityRoundTripTests: XCTestCase {
     @MainActor
     func testStorageDeleteClearsValue() async throws {
         var signals: any SignalStore = InMemorySignals()
-        let key = VMValue.record([(0, .str(11))])
-        let value = VMValue.record([(0, .str(11)), (1, .list([.int(9)]))])
+        let key = FluxValue.record([(0, .str(11))])
+        let value = FluxValue.record([(0, .str(11)), (1, .list([.int(9)]))])
         _ = try CapabilityRegistry.dev.lookup(2, 1)!(2, 1, value, &signals)
         let beforeCell = try CapabilityRegistry.dev.lookup(2, 2)!(2, 2, key, &signals)
         XCTAssertEqual(beforeCell, 95, "Storage.get returns its result-cell id")
@@ -544,8 +544,8 @@ final class CapabilityRoundTripTests: XCTestCase {
         let suite = "flux.lane-c.storage.\(UUID().uuidString)"
         defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
 
-        let key = VMValue.record([(0, .str(7))])
-        let value = VMValue.record([(0, .str(7)), (1, .list([.int(1), .int(2), .int(3)]))])
+        let key = FluxValue.record([(0, .str(7))])
+        let value = FluxValue.record([(0, .str(7)), (1, .list([.int(1), .int(2), .int(3)]))])
 
         // Write with the first registry (persistent backend).
         var firstSignals: any SignalStore = InMemorySignals()

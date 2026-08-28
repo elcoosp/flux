@@ -1,28 +1,28 @@
-//  VMValueJSON.swift
-//  JSON (de)serialization for `VMValue`, used to persist `Storage` values to
+//  FluxValueJSON.swift
+//  JSON (de)serialization for `FluxValue`, used to persist `Storage` values to
 //  `UserDefaults` (Appendix D §D.5 wire shape, expressed as JSON). Kept
 //  dependency-free (Foundation only) so the pure runtime package stays
 //  platform-neutral.
 
 import Foundation
 
-/// JSON (de)serialization for `VMValue`.
-enum VMValueJSON {
+/// JSON (de)serialization for `FluxValue`.
+enum FluxValueJSON {
     /// Encodes `value` to JSON `Data`.
-    /// - Throws: `VMError.typeMismatch` if the value cannot be represented.
-    static func encode(_ value: VMValue) throws -> Data {
+    /// - Throws: `VmError.typeMismatch` if the value cannot be represented.
+    static func encode(_ value: FluxValue) throws -> Data {
         try JSONSerialization.data(withJSONObject: box(value))
     }
 
     /// Decodes `value` from JSON `Data`.
-    /// - Throws: `VMError.typeMismatch` if the bytes are not a valid encoding.
-    static func decode(_ data: Data) throws -> VMValue {
+    /// - Throws: `VmError.typeMismatch` if the bytes are not a valid encoding.
+    static func decode(_ data: Data) throws -> FluxValue {
         try unbox(try JSONSerialization.jsonObject(with: data))
     }
 
     // MARK: - encode
 
-    private static func box(_ v: VMValue) -> Any {
+    private static func box(_ v: FluxValue) -> Any {
         switch v {
         case .null:
             return ["t": "null"]
@@ -47,9 +47,9 @@ enum VMValueJSON {
 
     // MARK: - decode
 
-    private static func unbox(_ obj: Any) throws -> VMValue {
+    private static func unbox(_ obj: Any) throws -> FluxValue {
         guard let dict = obj as? [String: Any], let raw = dict["t"] as? String else {
-            throw VMError.typeMismatch(offset: 0)
+            throw VmError.typeMismatch(offset: 0)
         }
         switch raw {
         case "null":
@@ -65,22 +65,22 @@ enum VMValueJSON {
         case "handler":
             return .handlerRef(try u32(dict["v"]))
         case "list":
-            guard let arr = dict["v"] as? [Any] else { throw VMError.typeMismatch(offset: 0) }
+            guard let arr = dict["v"] as? [Any] else { throw VmError.typeMismatch(offset: 0) }
             return .list(try arr.map { try unbox($0) })
         case "rec":
-            guard let arr = dict["v"] as? [[String: Any]] else { throw VMError.typeMismatch(offset: 0) }
+            guard let arr = dict["v"] as? [[String: Any]] else { throw VmError.typeMismatch(offset: 0) }
             return .record(try arr.map {
                 let i = try u16($0["i"])
                 let v = try unbox($0["v"] as Any)
                 return (i, v)
             })
         default:
-            throw VMError.typeMismatch(offset: 0)
+            throw VmError.typeMismatch(offset: 0)
         }
     }
 
     private static func num(_ v: Any?) throws -> NSNumber {
-        guard let n = v as? NSNumber else { throw VMError.typeMismatch(offset: 0) }
+        guard let n = v as? NSNumber else { throw VmError.typeMismatch(offset: 0) }
         return n
     }
 

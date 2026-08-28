@@ -24,7 +24,7 @@ struct FluxAppMain: App {
 /// Host view for the reconciled native tree plus the error and reconnect
 /// overlays.
 ///
-/// The reconciler driving `FluxRuntime` builds real `UIView`s (FLUX-016) into a
+/// The reconciler driving `FluxExecutor` builds real `UIView`s (FLUX-016) into a
 /// tree keyed by stable node id. This view mounts that tree inside a
 /// `FluxHostController` via `UIViewControllerRepresentable`, feeds frames from
 /// the live `FluxWebSocketTransport` into the runtime, and layers two overlays
@@ -32,7 +32,7 @@ struct FluxAppMain: App {
 /// "Reconnecting…" banner while the socket is down.
 struct FluxRootView: View {
     /// The executor owning the graph, reconciler and last error.
-    @State private var executor: FluxRuntime
+    @State private var executor: FluxExecutor
     /// The connection state driving the reconnect banner (FR-017).
     @StateObject private var connection: HostConnectionState
     /// The live WebSocket transport feeding frames into the executor.
@@ -51,7 +51,7 @@ struct FluxRootView: View {
         table.intern(5, "Router")
         table.intern(6, "Screen")
         let registry = AdapterRegistry(table: table)
-        let runtime = FluxRuntime(graph: SignalGraph(), registry: registry)
+        let runtime = FluxExecutor(graph: SignalGraph(), registry: registry)
         let connection = HostConnectionState()
         // Dev server endpoint. Resolution order:
         //   1. `FLUX_WS_URL` launch environment variable (lets a simulator or
@@ -96,7 +96,7 @@ struct FluxRootView: View {
         }
         .task {
             // Open the socket and bind status → banner. Frames decode on the
-            // main actor (FluxRuntime is @MainActor) and drive the tree; the dev
+            // main actor (FluxExecutor is @MainActor) and drive the tree; the dev
             // server pushes a fresh Init frame on each (re)connect, so a
             // reconnect implicitly re-requests the tree (FR-017).
             connection.bind(transport)
@@ -115,7 +115,7 @@ struct FluxRootView: View {
 /// `UIView`. The controller is created once and retained; the reconciler still
 /// owns every per-node view (the controller only mounts the root).
 private struct FluxHostRepresentable: UIViewControllerRepresentable {
-    let executor: FluxRuntime
+    let executor: FluxExecutor
 
     func makeUIViewController(context: Context) -> FluxHostController {
         FluxHostController(executor: executor)
@@ -128,7 +128,7 @@ private struct FluxHostRepresentable: UIViewControllerRepresentable {
 
 /// Inline error overlay shown when a VM fault is captured by the executor.
 struct ErrorOverlay: View {
-    let error: VMError
+    let error: VmError
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {

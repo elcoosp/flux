@@ -10,7 +10,7 @@
 //  reconnect implicitly re-requests the tree (matches the Android onResume
 //  rebind model; there is no separate client→server "request Init" opcode).
 //
-//  All callbacks run on the main actor to respect `FluxRuntime`'s `@MainActor`
+//  All callbacks run on the main actor to respect `FluxExecutor`'s `@MainActor`
 //  confinement (P1).
 
 import Foundation

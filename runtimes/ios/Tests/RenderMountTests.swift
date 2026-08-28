@@ -2,7 +2,7 @@
 //  FA-RENDER Phase A — the reconciled tree must reach real on-screen UIKit
 //  views, not `Color.clear`.
 //
-//  Drives the real `FluxRuntime` + `FluxUIKit` adapters with a counter-shaped
+//  Drives the real `FluxExecutor` + `FluxUIKit` adapters with a counter-shaped
 //  `Init` frame (Column → Text + Button), then asserts the host mount presents
 //  a real view hierarchy: the executor's `rootView` is the Column's
 //  `UIStackView` and it contains the Text `UILabel` and Button `UIButton`.
@@ -39,7 +39,7 @@ private func mountNode(
 
 /// Builds a counter-shaped full `FluxFrame` and the executor it feeds.
 @MainActor
-private func counterExecutor() async -> FluxRuntime {
+private func counterExecutor() async -> FluxExecutor {
     let text = mountNode(10, componentId: 0, props: [Prop(index: 0, value: .str(7))])
     let button = mountNode(11, componentId: 1, props: [Prop(index: 0, value: .str(8))])
     let column = mountNode(20, componentId: 2, children: [.node(10), .node(11)])
@@ -67,7 +67,7 @@ private func counterExecutor() async -> FluxRuntime {
         ], signalMeta: [:]
     )
 
-    let executor = FluxRuntime(graph: SignalGraph(), registry: AdapterRegistry(table: table))
+    let executor = FluxExecutor(graph: SignalGraph(), registry: AdapterRegistry(table: table))
     executor.apply(frame)
     return executor
 }
@@ -117,7 +117,7 @@ final class RenderMountTests: XCTestCase {
     /// [initialRoute] is non-nil, signal 97 (the `Router.navigate` target,
     /// ADR-0045) is pre-seeded so the router presents that screen from the start.
     @MainActor
-    private func routerExecutor(initialRoute: String? = nil) -> FluxRuntime {
+    private func routerExecutor(initialRoute: String? = nil) -> FluxExecutor {
         let routeIndex: UInt16 = fnv1aRouteIndex()
         let home = mountNode(
             10, componentId: 6, kind: .screen,
@@ -154,7 +154,7 @@ final class RenderMountTests: XCTestCase {
             ], signalMeta: [:]
         )
 
-        let executor = FluxRuntime(graph: graph, registry: AdapterRegistry(table: table))
+        let executor = FluxExecutor(graph: graph, registry: AdapterRegistry(table: table))
         executor.apply(frame)
         return executor
     }
@@ -243,7 +243,7 @@ final class RenderMountTests: XCTestCase {
             ], signalMeta: [20: NodeSignalMeta(deps: [97], thunk: nil, layout: [])]
         )
 
-        let executor = FluxRuntime(graph: graph, registry: AdapterRegistry(table: table))
+        let executor = FluxExecutor(graph: graph, registry: AdapterRegistry(table: table))
         executor.apply(frame)
 
         // Before navigation: exactly one screen (home). Capture its view instance.
@@ -336,7 +336,7 @@ final class RenderMountTests: XCTestCase {
             ], signalMeta: [20: NodeSignalMeta(deps: [97], thunk: nil, layout: [])]
         )
 
-        let executor = FluxRuntime(graph: graph, registry: AdapterRegistry(table: table))
+        let executor = FluxExecutor(graph: graph, registry: AdapterRegistry(table: table))
         executor.apply(frame)
 
         guard let beforeHost = executor.view(for: 20) as? RouterHostView else {

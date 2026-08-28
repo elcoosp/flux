@@ -7,21 +7,21 @@
 //  the platform's durable storage. The MLP dev/test path registers an
 //  `InMemoryStorageBackend`; the app shell registers a
 //  `UserDefaultsStorageBackend` so `Storage.set`/`get` survive process
-//  restarts. Values are JSON-encoded via `VMValueJSON` (Appendix D §D.5 shape).
+//  restarts. Values are JSON-encoded via `FluxValueJSON` (Appendix D §D.5 shape).
 
 import Foundation
 
 /// A persistence backend for stateful capabilities.
 ///
-/// Implementations map an interned string id (`Storage` key) to a `VMValue`.
+/// Implementations map an interned string id (`Storage` key) to a `FluxValue`.
 /// `put(_:nil)` clears the key. Conforming types must be safe to share across
 /// the single reactive dispatcher the VM runs on (ADR-0027); the reference
 /// implementations hold no internal concurrency of their own.
 protocol StorageBackend: Sendable {
     /// Records `value` for `key`; `nil` clears it.
-    func put(_ key: UInt32, _ value: VMValue?)
+    func put(_ key: UInt32, _ value: FluxValue?)
     /// Reads the value for `key`, or `nil` if absent.
-    func get(_ key: UInt32) -> VMValue?
+    func get(_ key: UInt32) -> FluxValue?
 }
 
 /// In-memory backend: the MLP dev/test default.
@@ -29,18 +29,18 @@ protocol StorageBackend: Sendable {
 /// Values live only for the lifetime of the store; dropping the store drops its
 /// contents. Used by the unit tests and the headless VM.
 final class InMemoryStorageBackend: @unchecked Sendable, StorageBackend {
-    private var storage: [UInt32: VMValue] = [:]
+    private var storage: [UInt32: FluxValue] = [:]
 
-    func put(_ key: UInt32, _ value: VMValue?) {
+    func put(_ key: UInt32, _ value: FluxValue?) {
         if let value { storage[key] = value } else { storage.removeValue(forKey: key) }
     }
 
-    func get(_ key: UInt32) -> VMValue? { storage[key] }
+    func get(_ key: UInt32) -> FluxValue? { storage[key] }
 }
 
 /// `UserDefaults`-backed backend: real persistence for dev/release builds.
 ///
-/// Values are JSON-encoded (Appendix D §D.5 shape, see `VMValueJSON`) under a
+/// Values are JSON-encoded (Appendix D §D.5 shape, see `FluxValueJSON`) under a
 /// namespaced key `flux.storage.<keyId>` so they survive process restarts and
 /// never collide with other `UserDefaults` users. An isolated `suite` (e.g. a
 /// test-only suite name) scopes the store to a private persistent domain, which
@@ -66,21 +66,21 @@ final class UserDefaultsStorageBackend: @unchecked Sendable, StorageBackend {
 
     private func key(_ id: UInt32) -> String { "\(prefix)\(id)" }
 
-    func put(_ key: UInt32, _ value: VMValue?) {
+    func put(_ key: UInt32, _ value: FluxValue?) {
         let k = self.key(key)
         guard let value else {
             defaults.removeObject(forKey: k)
             defaults.synchronize()
             return
         }
-        defaults.set(try? VMValueJSON.encode(value), forKey: k)
+        defaults.set(try? FluxValueJSON.encode(value), forKey: k)
         // Flush so a separate `UserDefaults(suiteName:)` instance created later
         // in the same process observes the write (proves true persistence).
         defaults.synchronize()
     }
 
-    func get(_ key: UInt32) -> VMValue? {
+    func get(_ key: UInt32) -> FluxValue? {
         guard let data = defaults.data(forKey: self.key(key)) else { return nil }
-        return try? VMValueJSON.decode(data)
+        return try? FluxValueJSON.decode(data)
     }
 }

@@ -2,8 +2,8 @@
 //  Native adapter bridge (FLUX-016).
 //
 //  Wires the real `FluxUIKit` adapter kit into the FLUX-006 runtime. The
-//  runtime speaks an id-based value vocabulary (`VMValue` with interned
-//  string ids); the kit speaks resolved values (`VMValue` with
+//  runtime speaks an id-based value vocabulary (`FluxValue` with interned
+//  string ids); the kit speaks resolved values (`FluxValue` with
 //  concrete `String`s). This module is the translation layer plus a
 //  `ComponentId -> adapter instance` registry driven by the Init frame's
 //  string table.
@@ -65,7 +65,7 @@ public struct StringTable {
 /// type during materialisation, so the id the VM mints is the one the kit later
 /// resolves. This mirrors the Android host's shared `materializationStrings`
 /// resolver and avoids a round-trip to the dev server (brittleness 4c).
-protocol StringResolvable {
+protocol StringResolver {
     /// Resolves an interned `StringId` to its text, or `nil` if unknown.
     func lookup(_ id: UInt32) -> String?
 
@@ -75,7 +75,7 @@ protocol StringResolvable {
     mutating func intern(_ value: String) -> UInt32
 }
 
-extension StringTable: StringResolvable {
+extension StringTable: StringResolver {
     mutating func intern(_ value: String) -> UInt32 {
         if let existing = id(for: value) { return existing }
         // Mint above the server's seed range; collisions are astronomically
@@ -97,7 +97,7 @@ extension StringTable: StringResolvable {
 ///
 /// Resolution is read-only here; the canonical id for a freshly-derived string
 /// is produced by the `AnyStringInterner` RPC, never synthesized locally.
-final class MaterializationStringTable: StringResolvable {
+final class MaterializationStringTable: StringResolver {
     private var strings: [UInt32: String] = [:]
     private var reverseLookup: [String: UInt32] = [:]
     /// Host-local derived string id counter (above the server seed range).
@@ -127,22 +127,22 @@ final class MaterializationStringTable: StringResolvable {
     }
 }
 
-/// A `StringResolvable` that holds nothing: lookups miss. Used by offline VM
+/// A `StringResolver` that holds nothing: lookups miss. Used by offline VM
 /// evaluation (the ISA conformance vectors), where `STR_LEN` / `STR_CONCAT` are
 /// not exercised, so resolution is a no-op.
-struct EmptyStringTable: StringResolvable {
+struct EmptyStringTable: StringResolver {
     func lookup(_ id: UInt32) -> String? { nil }
     mutating func intern(_ value: String) -> UInt32 { 0 }
 }
 
-/// Translates a runtime `VMValue` (id-based, interned strings) into the
-/// kit's resolved `VMValue` using `table` for string ids.
+/// Translates a runtime `FluxValue` (id-based, interned strings) into the
+/// kit's resolved `FluxUIKit.FluxValue` using `table` for string ids.
 ///
 /// - Parameter table: the live string table used to resolve `.str` ids.
 /// - Returns: the equivalent kit value; unresolved string ids fall back to a
 ///   debug representation so an adapter never receives a dangling reference.
 @MainActor
-func toKit(_ value: VMValue, table: any StringResolvable) -> FluxValue {
+func toKit(_ value: FluxValue, table: any StringResolver) -> FluxUIKit.FluxValue {
     switch value {
     case let .int(i):
         return .int(i)
@@ -159,7 +159,7 @@ func toKit(_ value: VMValue, table: any StringResolvable) -> FluxValue {
     case let .list(items):
         return .list(items.map { toKit($0, table: table) })
     case let .record(fields):
-        var dict: [UInt16: FluxValue] = [:]
+        var dict: [UInt16: FluxUIKit.FluxValue] = [:]
         for field in fields {
             dict[field.propIndex] = toKit(field.value, table: table)
         }
@@ -169,8 +169,8 @@ func toKit(_ value: VMValue, table: any StringResolvable) -> FluxValue {
 
 /// Builds a kit `Props` map from runtime `Prop`s, resolving strings via `table`.
 @MainActor
-func kitProps(_ props: [Prop], table: any StringResolvable) -> Props {
-    var fields: [UInt16: FluxValue] = [:]
+func kitProps(_ props: [Prop], table: any StringResolver) -> Props {
+    var fields: [UInt16: FluxUIKit.FluxValue] = [:]
     for p in props {
         fields[p.index] = toKit(p.value, table: table)
     }
@@ -179,10 +179,10 @@ func kitProps(_ props: [Prop], table: any StringResolvable) -> Props {
 
 /// Content hash of raw runtime props (Perf R2), computed WITHOUT resolving
 /// interned strings through the string table. It folds each prop's index and the
-/// raw `VMValue` payload, so two prop sets that differ only in string *resolution*
-/// but share the same `VMValue` ids hash identically — which is the correct
+/// raw `FluxValue` payload, so two prop sets that differ only in string *resolution*
+/// but share the same `FluxValue` ids hash identically — which is the correct
 /// comparison domain for "did this node's props change": the adapter ultimately
-/// renders the `VMValue`, not the resolved Swift string. Hashing the raw values
+/// renders the `FluxValue`, not the resolved Swift string. Hashing the raw values
 /// also avoids the per-prop string-table walk that `kitProps(_:).hash` would do.
 func propHash(_ props: [Prop]) -> UInt64 {
     var h: UInt64 = 0xcbf2_9ce4_8422_2325
@@ -198,8 +198,8 @@ private func fnv1aMix(_ h: UInt64, _ v: UInt64) -> UInt64 {
     (h ^ v) &* 0x0000_0100_0000_01b3
 }
 
-/// Stable raw hash of a `VMValue` that does not consult the string table (R2).
-private func rawValueHash(_ v: VMValue) -> UInt64 {
+/// Stable raw hash of a `FluxValue` that does not consult the string table (R2).
+private func rawValueHash(_ v: FluxValue) -> UInt64 {
     switch v {
     case .null:
         return 0
@@ -227,8 +227,8 @@ private func rawValueHash(_ v: VMValue) -> UInt64 {
     }
 }
 
-/// Converts a kit `FluxValue` (resolved strings) back to the runtime's
-/// id-based `VMValue`, interning any resolved string through `interner`. Used to
+/// Converts a kit `FluxUIKit.FluxValue` (resolved strings) back to the runtime's
+/// id-based `FluxValue`, interning any resolved string through `interner`. Used to
 /// hand a native event's payload to the VM, which speaks id-based values.
 ///
 /// Native event payloads carry concrete Swift strings (e.g. text typed into a
@@ -236,12 +236,12 @@ private func rawValueHash(_ v: VMValue) -> UInt64 {
 /// string table to receive a canonical id `< stringIdCanonicalCeiling`, exactly
 /// like every other string the host publishes — the local `synthetic_str_id`
 /// fallback is retired (brittleness 4c). The call is `async` and never blocks the
-/// UI thread (see `FluxRuntime.dispatch`).
+/// UI thread (see `FluxExecutor.dispatch`).
 /// - Parameter interner: the host's `InternString` RPC client (or the offline
 ///   `NoOpStringInterner` when no live transport is attached).
-/// - Returns: the equivalent runtime `VMValue` with canonical `.str` ids.
+/// - Returns: the equivalent runtime `FluxValue` with canonical `.str` ids.
 @MainActor
-func toRuntime(_ value: FluxValue, interner: any AnyStringInterner) async -> VMValue {
+func toRuntime(_ value: FluxUIKit.FluxValue, interner: any AnyStringInterner) async -> FluxValue {
     switch value {
     case let .int(i):
         return .int(i)
@@ -258,7 +258,7 @@ func toRuntime(_ value: FluxValue, interner: any AnyStringInterner) async -> VMV
     case let .list(items):
         return .list(await items.asyncMap { await toRuntime($0, interner: interner) })
     case let .record(props):
-        var arr: [(propIndex: UInt16, value: VMValue)] = []
+        var arr: [(propIndex: UInt16, value: FluxValue)] = []
         for (idx, v) in props.fields {
             arr.append((propIndex: idx, value: await toRuntime(v, interner: interner)))
         }
@@ -343,7 +343,7 @@ struct AnyFluxAdapter {
 /// A closure that builds a fresh adapter pre-wired to `executor`, used by the
 /// registry so each created adapter dispatches native events back to the host
 /// coordinator without retaining the runtime.
-typealias RegistryFactory = ((any FluxExecutor)?) -> AnyFluxAdapter
+typealias RegistryFactory = ((any FluxUIKit.FluxExecutor)?) -> AnyFluxAdapter
 
 /// Resolves a `ComponentId` to a fresh adapter instance.
 ///
@@ -386,7 +386,7 @@ public struct AdapterRegistry {
     /// `ShadowTreeReconciler`). `make` itself returns `nil` for unbound ids;
     /// the reconciler supplies the container fallback so a typo'd primitive is
     /// surfaced (B8) rather than silently swallowed.
-    func make(for componentId: UInt32, executor: (any FluxExecutor)?) -> AnyFluxAdapter? {
+    func make(for componentId: UInt32, executor: (any FluxUIKit.FluxExecutor)?) -> AnyFluxAdapter? {
         guard let name = table.lookup(componentId), let factory = byName[name] else { return nil }
         return factory(executor)
     }
@@ -394,7 +394,7 @@ public struct AdapterRegistry {
     /// Produces a fresh adapter for a component resolved to `name` by the
     /// caller (typically via the frame-synced string table), wired to
     /// `executor`, or `nil` if the name is unbound.
-    func make(named name: String, executor: (any FluxExecutor)?) -> AnyFluxAdapter? {
+    func make(named name: String, executor: (any FluxUIKit.FluxExecutor)?) -> AnyFluxAdapter? {
         guard let factory = byName[name] else { return nil }
         return factory(executor)
     }

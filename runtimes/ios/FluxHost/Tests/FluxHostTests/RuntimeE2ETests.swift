@@ -4,7 +4,7 @@
 //
 //  Each test hand-builds an `Init` frame whose string table interns the
 //  stdlib primitive names, then drives the full pipeline —
-//  `FluxRuntime.apply` -> `ShadowTreeReconciler` -> real `UILabel` /
+//  `FluxExecutor.apply` -> `ShadowTreeReconciler` -> real `UILabel` /
 //  `UIButton` / `UIStackView` / `UINavigationController` adapters -> VM ->
 //  reconciler. View identity is asserted explicitly: an update path must
 //  re-apply in place and reuse the same `UIView`, never recreate it.
@@ -89,7 +89,7 @@ final class RuntimeE2ETests: XCTestCase {
             root: textNode,
             strings: [StringEntry(stringId: 7, value: "Hello, Flux")]
         )
-        let executor = FluxRuntime(graph: SignalGraph(), registry: buildRegistry())
+        let executor = FluxExecutor(graph: SignalGraph(), registry: buildRegistry())
         let built = executor.apply(frame)
 
         XCTAssertEqual(built, [10])
@@ -137,7 +137,7 @@ final class RuntimeE2ETests: XCTestCase {
             state: [StateCell(signalId: 1, value: .int(0))]
         )
 
-        let executor = FluxRuntime(graph: SignalGraph(), registry: buildRegistry())
+        let executor = FluxExecutor(graph: SignalGraph(), registry: buildRegistry())
         _ = executor.apply(frame)
         executor.registerHandler(1, closure: incrementClosure, bytecode: incrementBytecode)
 
@@ -175,7 +175,7 @@ final class RuntimeE2ETests: XCTestCase {
             root: textNode,
             strings: [StringEntry(stringId: 7, value: "first")]
         )
-        let executor = FluxRuntime(graph: SignalGraph(), registry: buildRegistry())
+        let executor = FluxExecutor(graph: SignalGraph(), registry: buildRegistry())
         _ = executor.apply(frame)
         let original = executor.view(for: 10) as! UILabel
 
@@ -221,7 +221,7 @@ final class RuntimeE2ETests: XCTestCase {
                 StateCell(signalId: 2, value: .str(8)),
             ]
         )
-        let executor = FluxRuntime(graph: SignalGraph(), registry: buildRegistry())
+        let executor = FluxExecutor(graph: SignalGraph(), registry: buildRegistry())
         _ = executor.apply(frame)
 
         // The router is a UINavigationController with both screens pushed.
@@ -293,7 +293,7 @@ final class RuntimeE2ETests: XCTestCase {
     func testGasExhaustionIsReported() async {
         let textNode = node(10, componentId: 0, props: [Prop(index: 0, value: .str(7))])
         let frame = initFrame(root: textNode, strings: [StringEntry(stringId: 7, value: "x")])
-        let executor = FluxRuntime(graph: SignalGraph(), registry: buildRegistry())
+        let executor = FluxExecutor(graph: SignalGraph(), registry: buildRegistry())
         _ = executor.apply(frame)
 
         // An unconditional backward jump to itself never reaches HALT.

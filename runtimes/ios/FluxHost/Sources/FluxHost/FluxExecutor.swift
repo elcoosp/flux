@@ -1,4 +1,4 @@
-//  FluxRuntime.swift
+//  FluxExecutor.swift
 //  Dispatches an incoming frame through the VM and signal graph (FLUX-006 scope
 //  items 7 & 9) and drives the real `FluxUIKit` adapters (FLUX-016), on the
 //  main actor.
@@ -20,9 +20,9 @@ struct DispatchResult: Sendable {
     /// Node ids whose views were (re)built or updated by the reconciler.
     let builtOrUpdated: [UInt32]
     /// The signals written by handler evaluation, sorted by id.
-    let signals: [(UInt32, VMValue)]
+    let signals: [(UInt32, FluxValue)]
     /// `nil` on success, or the VM error that occurred.
-    let error: VMError?
+    let error: VmError?
 }
 
 /// Resolves an awaited future handle to its settled value (ADR-0044, MLP v2 async).
@@ -30,7 +30,7 @@ struct DispatchResult: Sendable {
 /// When a handler suspends on `AWAIT`, the VM captures the future handle from the
 /// instruction's `future_reg` register and hands it here. The conforming type bridges
 /// that handle to the real asynchronous work (a network capability, a timer, a
-/// `CapabilityRegistry` async impl) and returns the resolved `VMValue`. The runtime
+/// `CapabilityRegistry` async impl) and returns the resolved `FluxValue`. The runtime
 /// then resumes the handler with the value in `r0`.
 ///
 /// The default [`PassthroughAsyncResolver`] treats the handle as already-resolved, so
@@ -43,17 +43,17 @@ public protocol AsyncResolver: Sendable {
     /// signal id (an `.int`) that the `CALL_CAP` returned. A resolver reads that
     /// cell from the graph, performs the real async work (network, timer,
     /// capability), and returns the value the handler should resume with in `r0`.
-    func resolve(_ future: VMValue) async -> VMValue
+    func resolve(_ future: FluxValue) async -> FluxValue
 }
 
 /// Default resolver: the awaited value is treated as already settled.
 ///
 /// Used headless and in tests where `await` is exercised without a real async
 /// backend; the future handle flows straight back as the resolved value. The
-/// live host replaces `FluxRuntime.asyncResolver` with a bridge (e.g.
+/// live host replaces `FluxExecutor.asyncResolver` with a bridge (e.g.
 /// `DelayAsyncResolver` or a `CapabilityAsyncResolver`) to real async work.
 public struct PassthroughAsyncResolver: AsyncResolver {
-    public func resolve(_ future: VMValue) async -> VMValue { future }
+    public func resolve(_ future: FluxValue) async -> FluxValue { future }
 }
 
 /// Resolves an awaited `Pending` cell after a real wall-clock delay.
@@ -76,7 +76,7 @@ public struct DelayAsyncResolver: AsyncResolver {
         self.suspend = suspend
     }
 
-    public func resolve(_ future: VMValue) async -> VMValue {
+    public func resolve(_ future: FluxValue) async -> FluxValue {
         await suspend(delay)
         // The cell id the handler parked on; a real capability-keyed resolver
         // would read it via the graph and return the capability's result. Here
@@ -93,7 +93,7 @@ public struct DelayAsyncResolver: AsyncResolver {
 /// receives the cell id and a read-only snapshot of the cell's current value.
 public struct CapabilityAsyncResolver: AsyncResolver {
     /// A single capability's resolution strategy.
-    typealias Resolve = @Sendable (UInt32, VMValue) async -> VMValue
+    typealias Resolve = @Sendable (UInt32, FluxValue) async -> FluxValue
 
     private let resolvers: [UInt32: Resolve]
     /// Used when no keyed resolver matches (or none are registered). The oracle's
@@ -116,7 +116,7 @@ public struct CapabilityAsyncResolver: AsyncResolver {
         (capId << 16) | (methodId & 0xFFFF)
     }
 
-    public func resolve(_ future: VMValue) async -> VMValue {
+    public func resolve(_ future: FluxValue) async -> FluxValue {
         guard case let .int(cellId) = future else { return .null }
         // LANE-C: the `(capId, methodId)` that owns `cellId` is looked up via the
         // graph's capability table; its keyed resolver runs the real OS bridge
@@ -135,11 +135,11 @@ public struct CapabilityAsyncResolver: AsyncResolver {
 /// reconciler, and applies decoded frames to them. Main-actor isolated so all
 /// UIKit view mutations happen on the main actor after evaluation.
 ///
-/// Conforms to `FluxRuntime`: native controls (via the kit's
+/// Conforms to `FluxExecutor`: native controls (via the kit's
 /// `HandlerTarget`) call `dispatch(_:)` with a `FluxEvent`, which evaluates the
 /// bound handler closure and reconciles the result.
 @MainActor
-public final class FluxRuntime: FluxExecutor {
+public final class FluxExecutor: FluxUIKit.FluxExecutor {
     /// The live signal graph.
     private(set) var graph: SignalGraph
     /// The reconciler driving the real UIKit views.
@@ -167,7 +167,7 @@ public final class FluxRuntime: FluxExecutor {
     /// The most recent full root id.
     private var currentRootId: UInt32?
     /// The most recent VM error, surfaced to the UI overlay.
-    public private(set) var lastError: VMError?
+    public private(set) var lastError: VmError?
     /// The most recent server-side compile/type error, delivered via an `Error`
     /// (0x03) frame. `nil` until a recompile fails. Surfaced as a banner overlay
     /// while the last successfully-rendered tree stays on screen (Appendix E §E.6).
@@ -330,7 +330,7 @@ public final class FluxRuntime: FluxExecutor {
     }
 
     /// Evaluates a pre-decoded instruction stream against the live graph and
-    /// returns the outcome (or the `VMError` that faulted). Does NOT reconcile —
+    /// returns the outcome (or the `VmError` that faulted). Does NOT reconcile —
     /// shared by both event dispatch and lifecycle hooks. Uses the concrete
     /// `SignalGraph` by reference (R3) so the dispatch hot path never boxes it into
     /// an `any SignalStore` existential. The VM interns derived strings (a
@@ -340,8 +340,8 @@ public final class FluxRuntime: FluxExecutor {
     /// is fully synchronous.
     private func evaluate(
         instructions: [Instruction],
-        payload: VMValue
-    ) -> (outcome: VmOutcome?, error: VMError?) {
+        payload: FluxValue
+    ) -> (outcome: VmOutcome?, error: VmError?) {
         var store = graph
         do {
             let outcome = try FluxBytecodeVM.run(
@@ -352,11 +352,11 @@ public final class FluxRuntime: FluxExecutor {
                 capRegistry: .dev
             )
             return (outcome, nil)
-        } catch let err as VMError {
+        } catch let err as VmError {
             return (nil, err)
         } catch {
-            // Should be unreachable: run only throws VMError.
-            return (nil, VMError(kind: .invalidDispatch, offset: 0))
+            // Should be unreachable: run only throws VmError.
+            return (nil, VmError(kind: .invalidDispatch, offset: 0))
         }
     }
 
@@ -370,13 +370,13 @@ public final class FluxRuntime: FluxExecutor {
     /// loop terminates at `HALT`. Does NOT reconcile — the caller folds signals and
     /// reconciles, exactly like the v1 `dispatch` path.
     ///
-    /// - Returns: the final `VmOutcome`, or the `VMError` that faulted.
+    /// - Returns: the final `VmOutcome`, or the `VmError` that faulted.
     private func runHandlerAsync(
         bytecode: [UInt8],
-        payload: VMValue
-    ) async -> (outcome: VmOutcome?, error: VMError?) {
+        payload: FluxValue
+    ) async -> (outcome: VmOutcome?, error: VmError?) {
         var store = graph
-        var current: Result<RunResult, VMError> = FluxBytecodeVM.runResumable(
+        var current: Result<RunResult, VmError> = FluxBytecodeVM.runResumable(
             bytecode,
             signals: &store,
             payload: payload,
@@ -398,9 +398,9 @@ public final class FluxRuntime: FluxExecutor {
                 if case let .int(id) = state.registers[Int(state.futureReg)] {
                     cellId = UInt32(id)
                 } else {
-                    return (nil, VMError(kind: .typeMismatch, offset: Int(state.resumeOffset)))
+                    return (nil, VmError(kind: .typeMismatch, offset: Int(state.resumeOffset)))
                 }
-                let resolved: VMValue
+                let resolved: FluxValue
                 switch store.cellState(cellId) {
                 case .ready:
                     resolved = store.read(cellId) ?? .null
@@ -436,7 +436,7 @@ public final class FluxRuntime: FluxExecutor {
     func dispatch(
         bytecode: [UInt8],
         closure: ClosureRef,
-        payload: VMValue
+        payload: FluxValue
     ) -> DispatchResult {
         let instructions = (try? Instruction.decode(bytecode)) ?? []
         return dispatch(instructions: instructions, payload: payload)
@@ -446,7 +446,7 @@ public final class FluxRuntime: FluxExecutor {
     /// - Returns: a `DispatchResult` describing what changed (signals written).
     func dispatch(
         instructions: [Instruction],
-        payload: VMValue
+        payload: FluxValue
     ) -> DispatchResult {
         let (outcome, error) = evaluate(instructions: instructions, payload: payload)
         guard let outcome else {
@@ -466,7 +466,7 @@ public final class FluxRuntime: FluxExecutor {
         )
     }
 
-    /// `FluxRuntime` entry point: evaluate the handler bound to
+    /// `FluxExecutor` entry point: evaluate the handler bound to
     /// `event.handlerId` against the current signal graph, then reconcile only the
     /// dirty subset of the tree (Perf R1).
     ///
@@ -484,7 +484,7 @@ public final class FluxRuntime: FluxExecutor {
         NSLog("[FluxRT] executor.dispatch(event) handlerId=\(event.handlerId) nodeId=\(event.nodeId)")
         #endif
         guard let entry = handlerClosures[event.handlerId] else {
-            lastError = VMError(kind: .invalidDispatch, offset: 0)
+            lastError = VmError(kind: .invalidDispatch, offset: 0)
             lastReconcile = ReconcileReport()
             return
         }
@@ -494,7 +494,7 @@ public final class FluxRuntime: FluxExecutor {
             // Convert the native event payload to the runtime's id-based value,
             // interning any resolved string through the dev server's canonical
             // string table (brittleness 4c).
-            let payload: VMValue = if let kitPayload = event.payload {
+            let payload: FluxValue = if let kitPayload = event.payload {
                 await toRuntime(kitPayload, interner: interner)
             } else {
                 .null

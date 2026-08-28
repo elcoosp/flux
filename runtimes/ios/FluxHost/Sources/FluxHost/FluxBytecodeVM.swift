@@ -14,9 +14,9 @@ import Foundation
 /// The signal graph a handler reads from and writes to.
 protocol SignalStore {
     /// Returns the current value of `id`, or `nil` if unbound.
-    func read(_ id: UInt32) -> VMValue?
+    func read(_ id: UInt32) -> FluxValue?
     /// Writes `value` into `id`.
-    mutating func write(_ id: UInt32, _ value: VMValue)
+    mutating func write(_ id: UInt32, _ value: FluxValue)
     /// Allocates a fresh, unbound signal id for a new capability result cell
     /// (ADR-0045). Drawn from a high ceiling so it never collides with the low,
     /// fixed ids handlers and golden vectors use (e.g. 99).
@@ -26,9 +26,9 @@ protocol SignalStore {
     /// Marks `id` as `.pending` (an async capability has started).
     mutating func markPending(_ id: UInt32)
     /// Resolves `id` to `value`, marking it `.ready` (an async capability finished).
-    mutating func resolveCell(_ id: UInt32, _ value: VMValue)
+    mutating func resolveCell(_ id: UInt32, _ value: FluxValue)
     /// Returns every written signal as a sorted `(id, value)` list.
-    func snapshot() -> [(UInt32, VMValue)]
+    func snapshot() -> [(UInt32, FluxValue)]
 }
 
 /// In-memory `SignalStore` used by tests, the reconciler and the dev server.
@@ -36,7 +36,7 @@ protocol SignalStore {
 /// A value type (not a class) so it can cross queue boundaries safely: the
 /// executor reassigns its copy after each handler dispatch.
 struct InMemorySignals: SignalStore {
-    private var store: [UInt32: VMValue]
+    private var store: [UInt32: FluxValue]
     /// Reactive state of each cell (ADR-0045). A `write`/ `resolveCell` resolves a
     /// cell to `.ready`; an async capability marks its cell `.pending` until the
     /// host resolves it.
@@ -45,14 +45,14 @@ struct InMemorySignals: SignalStore {
     /// never collides with fixed ids like 99.
     private var nextCell: UInt32 = 1_000_000
 
-    init(store: [UInt32: VMValue] = [:]) {
+    init(store: [UInt32: FluxValue] = [:]) {
         self.store = store
         self.cellStates = [:]
     }
 
-    func read(_ id: UInt32) -> VMValue? { store[id] }
+    func read(_ id: UInt32) -> FluxValue? { store[id] }
 
-    mutating func write(_ id: UInt32, _ value: VMValue) {
+    mutating func write(_ id: UInt32, _ value: FluxValue) {
         store[id] = value
         cellStates[id] = .ready
     }
@@ -70,12 +70,12 @@ struct InMemorySignals: SignalStore {
         cellStates[id] = .pending
     }
 
-    mutating func resolveCell(_ id: UInt32, _ value: VMValue) {
+    mutating func resolveCell(_ id: UInt32, _ value: FluxValue) {
         store[id] = value
         cellStates[id] = .ready
     }
 
-    func snapshot() -> [(UInt32, VMValue)] {
+    func snapshot() -> [(UInt32, FluxValue)] {
         store.map { ($0.key, $0.value) }.sorted { $0.0 < $1.0 }
     }
 }
@@ -83,9 +83,9 @@ struct InMemorySignals: SignalStore {
 /// Result of running a handler to completion.
 struct VmOutcome {
     /// Final values of all signal cells that were written, sorted by id.
-    let signals: [(UInt32, VMValue)]
+    let signals: [(UInt32, FluxValue)]
     /// Final values of the 16 registers (r0 = entry payload, r15 = remaining gas).
-    let registers: [VMValue]
+    let registers: [FluxValue]
     /// Number of non-`HALT` instructions executed (ADR-0021).
     let gasUsed: UInt32
 }
@@ -105,11 +105,11 @@ struct SuspendState {
     /// Byte offset of the instruction to execute on resume (the byte after `AWAIT`).
     let resumeOffset: UInt32
     /// Register file at the point of suspension.
-    let registers: [VMValue]
+    let registers: [FluxValue]
     /// Remaining gas at the point of suspension; continues decrementing on resume.
     let gasRemaining: UInt32
     /// Signal cells written before the suspend, replayed into the graph on resume.
-    let signals: [(UInt32, VMValue)]
+    let signals: [(UInt32, FluxValue)]
     /// The register holding the awaited future handle at suspension. The executor
     /// reads `registers[futureReg]` to obtain the future to resolve (ADR-0044).
     let futureReg: UInt8
@@ -144,7 +144,7 @@ enum FluxBytecodeVM {
     ///   - capRegistry: routes `CALL_CAP` (capability) invocations by
     ///     `(capId, methodId)` to native/dev implementations (G4). Defaults to
     ///     the `CapabilityRegistry.dev` placeholder table.
-    /// - Throws: a `VMError` when the handler faults (gas exhaustion, memory
+    /// - Throws: a `VmError` when the handler faults (gas exhaustion, memory
     ///   exhaustion, bad dispatch, type error, out-of-bounds access, null
     ///   dereference, or division by zero).
     /// Runs `bytecode` to completion against `signals`, with `payload` in `r0`.
@@ -156,8 +156,8 @@ enum FluxBytecodeVM {
     static func run<S: SignalStore>(
         _ bytecode: [UInt8],
         signals: inout S,
-        payload: VMValue,
-        stringTable: any StringResolvable = EmptyStringTable(),
+        payload: FluxValue,
+        stringTable: any StringResolver = EmptyStringTable(),
         capRegistry: CapabilityRegistry = .dev
     ) throws -> VmOutcome {
         let program = try Instruction.decode(bytecode)
@@ -170,12 +170,12 @@ enum FluxBytecodeVM {
     static func run<S: SignalStore>(
         _ program: [Instruction],
         signals: inout S,
-        payload: VMValue,
-        stringTable: any StringResolvable = EmptyStringTable(),
+        payload: FluxValue,
+        stringTable: any StringResolver = EmptyStringTable(),
         capRegistry: CapabilityRegistry = .dev
     ) throws -> VmOutcome {
         let offsets = program.map { $0.offset }
-        var regs = [VMValue](repeating: .null, count: 16)
+        var regs = [FluxValue](repeating: .null, count: 16)
         regs[0] = payload
         var gas = entryGas
         regs[15] = .int(Int64(gas))
@@ -187,17 +187,17 @@ enum FluxBytecodeVM {
 
         while ip < program.count {
             let instr = program[ip]
-            let op = instr.opCode
+            let op = instr.opcode
             if op == .halt { break }
             if gas == 0 {
-                throw VMError.gasExhausted(offset: instr.offset)
+                throw VmError.gasExhausted(offset: instr.offset)
             }
             gas -= 1
             // Mirror the live gas budget into r15 (Appendix E §E.3; ADR-0021).
             regs[15] = .int(Int64(gas))
             let nextIP = ip + 1
 
-            let reg = { (r: UInt8) -> VMValue in regs[Int(r)] }
+            let reg = { (r: UInt8) -> FluxValue in regs[Int(r)] }
 
             switch op {
             case .halt:
@@ -226,10 +226,10 @@ enum FluxBytecodeVM {
                 case .subI64: r = a &- b
                 case .mulI64: r = a &* b
                 case .divI64:
-                    if b == 0 { throw VMError.divByZero(offset: instr.offset) }
+                    if b == 0 { throw VmError.divByZero(offset: instr.offset) }
                     r = wrappingDiv(a, b)
                 case .modI64:
-                    if b == 0 { throw VMError.divByZero(offset: instr.offset) }
+                    if b == 0 { throw VmError.divByZero(offset: instr.offset) }
                     r = wrappingRem(a, b)
                 default:
                     fatalError("unreachable: matched arithmetic set")
@@ -350,7 +350,7 @@ enum FluxBytecodeVM {
                     // Without a live string table we cannot concatenate concrete
                     // text; the closure is being evaluated outside a frame (e.g.
                     // a conformance vector), where this opcode is not exercised.
-                    throw VMError.memoryExhausted(offset: instr.offset)
+                    throw VmError.memoryExhausted(offset: instr.offset)
                     }
                     let combined = a + b
                     let newId = stringTable.intern(combined)
@@ -378,13 +378,13 @@ enum FluxBytecodeVM {
                 let dst = instr.u8(0)
                 let count = Int(instr.u16(1))
                 // Each field reserves two words of storage (a `UInt16` prop index
-                // plus a `VMValue` tagged union). Bounds the total against the
+                // plus a `FluxValue` tagged union). Bounds the total against the
                 // per-dispatch allocation budget (§NFR-SEC-003 / ADR-0015).
                 allocated &+= UInt64(count) &* 16
                 if allocated > allocationBudget {
-                    throw VMError.memoryExhausted(offset: instr.offset)
+                    throw VmError.memoryExhausted(offset: instr.offset)
                 }
-                var fields: [(UInt16, VMValue)] = []
+                var fields: [(UInt16, FluxValue)] = []
                 fields.reserveCapacity(count)
                 for i in 0..<count {
                     fields.append((UInt16(i), .null))
@@ -413,7 +413,7 @@ enum FluxBytecodeVM {
                 // A freshly allocated list reserves one word for its header.
                 allocated &+= 8
                 if allocated > allocationBudget {
-                    throw VMError.memoryExhausted(offset: instr.offset)
+                    throw VmError.memoryExhausted(offset: instr.offset)
                 }
                 regs[Int(instr.u8(0))] = .list([])
 
@@ -423,10 +423,10 @@ enum FluxBytecodeVM {
                 // Pushing one element grows the backing storage by one word.
                 allocated &+= 8
                 if allocated > allocationBudget {
-                    throw VMError.memoryExhausted(offset: instr.offset)
+                    throw VmError.memoryExhausted(offset: instr.offset)
                 }
                 guard case var .list(items) = regs[Int(list)] else {
-                    throw VMError.typeMismatch(offset: instr.offset)
+                    throw VmError.typeMismatch(offset: instr.offset)
                 }
                 items.append(val)
                 regs[Int(list)] = .list(items)
@@ -436,7 +436,7 @@ enum FluxBytecodeVM {
                 let items = try requireList(reg(instr.u8(1)), at: instr.offset)
                 let i = Int(instr.u8(2))
                 guard i < items.count else {
-                    throw VMError.indexOutOfBounds(offset: instr.offset)
+                    throw VmError.indexOutOfBounds(offset: instr.offset)
                 }
                 regs[Int(dst)] = items[i]
 
@@ -460,7 +460,7 @@ enum FluxBytecodeVM {
                     // the loop below only raises on a *known but invalid* shape,
                     // so an unregistered capability is a type error at the call
                     // site (the MLP defines no such capability).
-                    throw VMError.typeMismatch(offset: instr.offset)
+                    throw VmError.typeMismatch(offset: instr.offset)
                 }
                 do {
                     // The capability signature is `inout any SignalStore`, so box
@@ -475,10 +475,10 @@ enum FluxBytecodeVM {
                     // id. A sync method has already written `Ready` into it; an async
                     // method has left it `Pending` for the host to resolve later.
                     regs[Int(resultReg)] = .int(Int64(cellId))
-                } catch let err as VMError {
+                } catch let err as VmError {
                     throw err
                 } catch {
-                    throw VMError.typeMismatch(offset: instr.offset)
+                    throw VmError.typeMismatch(offset: instr.offset)
                 }
 
             case .matchTag:
@@ -522,17 +522,17 @@ enum FluxBytecodeVM {
             case .gasCheck:
                 let budget = instr.u32(0)
                 if gas < budget {
-                    throw VMError.gasExhausted(offset: instr.offset)
+                    throw VmError.gasExhausted(offset: instr.offset)
                 }
             default:
                 // v1 handlers never emit `AWAIT`; treat any unassigned opcode as
                 // a malformed program (ADR-0044). v2 async runs through `execTailWith`.
-                throw VMError.invalidDispatch(offset: instr.offset)
+                throw VmError.invalidDispatch(offset: instr.offset)
             }
 
             ip = nextIP
             #if DEBUG
-            fluxDevtoolsEmit(.vmStep(bytecodeOffset: UInt32(instr.offset), opcode: instr.opCode.rawValue, registers: regs, gasRemaining: gas))
+            fluxDevtoolsEmit(.vmStep(bytecodeOffset: UInt32(instr.offset), opcode: instr.opcode.rawValue, registers: regs, gasRemaining: gas))
             #endif
         }
 
@@ -556,13 +556,13 @@ enum FluxBytecodeVM {
     static func runResumable<S: SignalStore>(
         _ bytecode: [UInt8],
         signals: inout S,
-        payload: VMValue,
-        stringTable: any StringResolvable = EmptyStringTable(),
+        payload: FluxValue,
+        stringTable: any StringResolver = EmptyStringTable(),
         capRegistry: CapabilityRegistry = .dev
-    ) -> Result<RunResult, VMError> {
+    ) -> Result<RunResult, VmError> {
         let program: [Instruction]
         do { program = try Instruction.decode(bytecode) }
-        catch let err as VMError { return .failure(err) }
+        catch let err as VmError { return .failure(err) }
         catch { return .failure(.invalidDispatch(offset: 0)) }
         return execTail(program, signals: &signals, startOffset: 0, payload: payload,
                         stringTable: stringTable, capRegistry: capRegistry, programBytes: bytecode)
@@ -575,14 +575,14 @@ enum FluxBytecodeVM {
     static func resume<S: SignalStore>(
         _ state: SuspendState,
         signals: inout S,
-        value: VMValue,
-        stringTable: any StringResolvable = EmptyStringTable(),
+        value: FluxValue,
+        stringTable: any StringResolver = EmptyStringTable(),
         capRegistry: CapabilityRegistry = .dev
-    ) -> Result<RunResult, VMError> {
+    ) -> Result<RunResult, VmError> {
         for (id, v) in state.signals { signals.write(id, v) }
         let program: [Instruction]
         do { program = try Instruction.decode(state.program) }
-        catch let err as VMError { return .failure(err) }
+        catch let err as VmError { return .failure(err) }
         catch { return .failure(.invalidDispatch(offset: 0)) }
         var regs = state.registers
         regs[0] = value
@@ -603,12 +603,12 @@ enum FluxBytecodeVM {
         _ program: [Instruction],
         signals: inout S,
         startOffset: Int,
-        payload: VMValue,
-        stringTable: any StringResolvable,
+        payload: FluxValue,
+        stringTable: any StringResolver,
         capRegistry: CapabilityRegistry,
         programBytes: [UInt8]
-    ) -> Result<RunResult, VMError> {
-        var regs = [VMValue](repeating: .null, count: 16)
+    ) -> Result<RunResult, VmError> {
+        var regs = [FluxValue](repeating: .null, count: 16)
         regs[0] = payload
         let gas = entryGas
         regs[15] = .int(Int64(gas))
@@ -623,13 +623,13 @@ enum FluxBytecodeVM {
         _ program: [Instruction],
         signals: inout S,
         startOffset: Int,
-        registers: [VMValue],
+        registers: [FluxValue],
         gas: UInt32,
-        payload: VMValue,
-        stringTable: any StringResolvable,
+        payload: FluxValue,
+        stringTable: any StringResolver,
         capRegistry: CapabilityRegistry,
         programBytes: [UInt8]
-    ) -> Result<RunResult, VMError> {
+    ) -> Result<RunResult, VmError> {
         let offsets = program.map { $0.offset }
         guard let startIndex = offsets.firstIndex(of: startOffset) else {
             return .failure(.invalidDispatch(offset: startOffset))
@@ -643,14 +643,14 @@ enum FluxBytecodeVM {
         do {
         while ip < program.count {
             let instr = program[ip]
-            let op = instr.opCode
+            let op = instr.opcode
             if op == .halt { break }
             if gas == 0 { return .failure(.gasExhausted(offset: instr.offset)) }
             gas -= 1
             regs[15] = .int(Int64(gas))
             let nextIP = ip + 1
 
-            let reg = { (r: UInt8) -> VMValue in regs[Int(r)] }
+            let reg = { (r: UInt8) -> FluxValue in regs[Int(r)] }
 
             switch op {
             case .halt:
@@ -673,7 +673,7 @@ enum FluxBytecodeVM {
                     let written = signals.snapshot()
                     return .success(.suspended(SuspendState(
                         program: programBytes,
-                        resumeOffset: UInt32(instr.offset) + UInt32(instr.opCode.instructionLen),
+                        resumeOffset: UInt32(instr.offset) + UInt32(instr.opcode.instructionLen),
                         registers: regs,
                         gasRemaining: gas,
                         signals: written,
@@ -852,7 +852,7 @@ enum FluxBytecodeVM {
                 let count = Int(instr.u16(1))
                 allocated &+= UInt64(count) &* 16
                 if allocated > allocationBudget { return .failure(.memoryExhausted(offset: instr.offset)) }
-                var fields: [(UInt16, VMValue)] = []
+                var fields: [(UInt16, FluxValue)] = []
                 fields.reserveCapacity(count)
                 for i in 0..<count { fields.append((UInt16(i), .null)) }
                 regs[Int(dst)] = .record(fields)
@@ -923,7 +923,7 @@ enum FluxBytecodeVM {
                     // Unified sync/async contract (ADR-0045): the impl returns the
                     // result-cell signal id; `resultReg` receives it.
                     regs[Int(resultReg)] = .int(Int64(cellId))
-                } catch let err as VMError {
+                } catch let err as VmError {
                     return .failure(err)
                 } catch {
                     return .failure(.typeMismatch(offset: instr.offset))
@@ -971,7 +971,7 @@ enum FluxBytecodeVM {
             }
             ip = nextIP
         }
-        } catch let err as VMError {
+        } catch let err as VmError {
             return .failure(err)
         } catch {
             return .failure(.invalidDispatch(offset: 0))
@@ -989,8 +989,8 @@ enum FluxBytecodeVM {
     /// map is the explicit form of the same dispatch; it exists so the perf
     /// review's "LuaJIT-style closure table" hypothesis can be measured
     /// directly (see Perf #9). The canonical evaluator remains `run`.
-    private static let opcodeIndex: [OpCode: Int] = Dictionary(
-        uniqueKeysWithValues: OpCode.allCases.enumerated().map { ($0.element, $0.offset) }
+    private static let opcodeIndex: [Opcode: Int] = Dictionary(
+        uniqueKeysWithValues: Opcode.allCases.enumerated().map { ($0.element, $0.offset) }
     )
 
     /// Experimental dispatch-table evaluator (Perf #9). Behaviorally identical
@@ -1002,13 +1002,13 @@ enum FluxBytecodeVM {
     static func runViaDispatchTable(
         _ bytecode: [UInt8],
         signals: inout SignalStore,
-        payload: VMValue,
-        stringTable: any StringResolvable = EmptyStringTable(),
+        payload: FluxValue,
+        stringTable: any StringResolver = EmptyStringTable(),
         capRegistry: CapabilityRegistry = .dev
     ) throws -> VmOutcome {
         let program = try Instruction.decode(bytecode)
         let offsets = program.map { $0.offset }
-        var regs = [VMValue](repeating: .null, count: 16)
+        var regs = [FluxValue](repeating: .null, count: 16)
         regs[0] = payload
         var gas = entryGas
         regs[15] = .int(Int64(gas))
@@ -1018,15 +1018,15 @@ enum FluxBytecodeVM {
 
         while ip < program.count {
             let instr = program[ip]
-            let tag = opcodeIndex[instr.opCode]!
-            if instr.opCode == .halt { break }
+            let tag = opcodeIndex[instr.opcode]!
+            if instr.opcode == .halt { break }
             if gas == 0 {
-                throw VMError.gasExhausted(offset: instr.offset)
+                throw VmError.gasExhausted(offset: instr.offset)
             }
             gas -= 1
             regs[15] = .int(Int64(gas))
             let nextIP = ip + 1
-            let reg = { (r: UInt8) -> VMValue in regs[Int(r)] }
+            let reg = { (r: UInt8) -> FluxValue in regs[Int(r)] }
 
             switch tag {
             case opcodeIndex[.halt]!: break
@@ -1042,15 +1042,15 @@ enum FluxBytecodeVM {
                 let a = try requireInt(reg(instr.u8(1)), at: instr.offset)
                 let b = try requireInt(reg(instr.u8(2)), at: instr.offset)
                 let r: Int64
-                switch instr.opCode {
+                switch instr.opcode {
                 case .addI64: r = a &+ b
                 case .subI64: r = a &- b
                 case .mulI64: r = a &* b
                 case .divI64:
-                    if b == 0 { throw VMError.divByZero(offset: instr.offset) }
+                    if b == 0 { throw VmError.divByZero(offset: instr.offset) }
                     r = wrappingDiv(a, b)
                 case .modI64:
-                    if b == 0 { throw VMError.divByZero(offset: instr.offset) }
+                    if b == 0 { throw VmError.divByZero(offset: instr.offset) }
                     r = wrappingRem(a, b)
                 default: fatalError("unreachable")
                 }
@@ -1064,7 +1064,7 @@ enum FluxBytecodeVM {
                 let a = try requireInt(reg(instr.u8(1)), at: instr.offset)
                 let b = try requireInt(reg(instr.u8(2)), at: instr.offset)
                 let r: Bool
-                switch instr.opCode {
+                switch instr.opcode {
                 case .eqI64: r = a == b
                 case .ltI64: r = a < b
                 case .gtI64: r = a > b
@@ -1078,7 +1078,7 @@ enum FluxBytecodeVM {
                 let a = try requireFloat(reg(instr.u8(1)), at: instr.offset)
                 let b = try requireFloat(reg(instr.u8(2)), at: instr.offset)
                 let r: Double
-                switch instr.opCode {
+                switch instr.opcode {
                 case .addF64: r = a + b
                 case .subF64: r = a - b
                 case .mulF64: r = a * b
@@ -1095,7 +1095,7 @@ enum FluxBytecodeVM {
                 let a = try requireFloat(reg(instr.u8(1)), at: instr.offset)
                 let b = try requireFloat(reg(instr.u8(2)), at: instr.offset)
                 let r: Bool
-                switch instr.opCode {
+                switch instr.opcode {
                 case .eqF64: r = (a == b) || (a.isNaN && b.isNaN)
                 case .ltF64: r = a < b
                 case .gtF64: r = a > b
@@ -1142,7 +1142,7 @@ enum FluxBytecodeVM {
                 let x = try requireStr(reg(instr.u8(1)), at: instr.offset)
                 let y = try requireStr(reg(instr.u8(2)), at: instr.offset)
                 guard let a = stringTable.lookup(x), let b = stringTable.lookup(y) else {
-                    throw VMError.memoryExhausted(offset: instr.offset)
+                    throw VmError.memoryExhausted(offset: instr.offset)
                 }
                 let combined = a + b
                 let newId = stringTable.intern(combined)
@@ -1157,7 +1157,7 @@ enum FluxBytecodeVM {
                 continue
             case opcodeIndex[.condJump]!, opcodeIndex[.condJumpNot]!:
                 let taken = truthy(reg(instr.u8(0)))
-                let want = instr.opCode == .condJump
+                let want = instr.opcode == .condJump
                 if taken == want {
                     ip = try jumpTarget(instr, nextIP: nextIP, offsets: offsets, delta: instr.i32(1))
                     continue
@@ -1166,8 +1166,8 @@ enum FluxBytecodeVM {
                 let dst = instr.u8(0)
                 let count = Int(instr.u16(1))
                 allocated &+= UInt64(count) &* 16
-                if allocated > allocationBudget { throw VMError.memoryExhausted(offset: instr.offset) }
-                var fields: [(UInt16, VMValue)] = []
+                if allocated > allocationBudget { throw VmError.memoryExhausted(offset: instr.offset) }
+                var fields: [(UInt16, FluxValue)] = []
                 fields.reserveCapacity(count)
                 for i in 0..<count { fields.append((UInt16(i), .null)) }
                 regs[Int(dst)] = .record(fields)
@@ -1188,21 +1188,21 @@ enum FluxBytecodeVM {
                 regs[Int(dst)] = .bool(recordsEqual(x, y))
             case opcodeIndex[.allocList]!:
                 allocated &+= 8
-                if allocated > allocationBudget { throw VMError.memoryExhausted(offset: instr.offset) }
+                if allocated > allocationBudget { throw VmError.memoryExhausted(offset: instr.offset) }
                 regs[Int(instr.u8(0))] = .list([])
             case opcodeIndex[.listPush]!:
                 let list = instr.u8(0)
                 let val = reg(instr.u8(1))
                 allocated &+= 8
-                if allocated > allocationBudget { throw VMError.memoryExhausted(offset: instr.offset) }
-                guard case var .list(items) = regs[Int(list)] else { throw VMError.typeMismatch(offset: instr.offset) }
+                if allocated > allocationBudget { throw VmError.memoryExhausted(offset: instr.offset) }
+                guard case var .list(items) = regs[Int(list)] else { throw VmError.typeMismatch(offset: instr.offset) }
                 items.append(val)
                 regs[Int(list)] = .list(items)
             case opcodeIndex[.listGet]!:
                 let dst = instr.u8(0)
                 let items = try requireList(reg(instr.u8(1)), at: instr.offset)
                 let i = Int(instr.u8(2))
-                guard i < items.count else { throw VMError.indexOutOfBounds(offset: instr.offset) }
+                guard i < items.count else { throw VmError.indexOutOfBounds(offset: instr.offset) }
                 regs[Int(dst)] = items[i]
             case opcodeIndex[.listLen]!:
                 let items = try requireList(reg(instr.u8(1)), at: instr.offset)
@@ -1218,12 +1218,12 @@ enum FluxBytecodeVM {
                 let methodID = instr.u16(5)
                 let argsReg = instr.u8(7)
                 guard let impl = capRegistry.lookup(capID, methodID) else {
-                    throw VMError.typeMismatch(offset: instr.offset)
+                    throw VmError.typeMismatch(offset: instr.offset)
                 }
                 do {
                     let result = try impl(capID, methodID, reg(argsReg), &signals)
                     regs[Int(resultReg)] = .int(Int64(result))
-                } catch let err as VMError { throw err } catch { throw VMError.typeMismatch(offset: instr.offset) }
+                } catch let err as VmError { throw err } catch { throw VmError.typeMismatch(offset: instr.offset) }
             case opcodeIndex[.matchTag]!:
                 let val = reg(instr.u8(0))
                 let tag2 = instr.u32(1)
@@ -1254,14 +1254,14 @@ enum FluxBytecodeVM {
                 regs[Int(instr.u8(0))] = reg(instr.u8(1))
             case opcodeIndex[.gasCheck]!:
                 let budget = instr.u32(0)
-                if gas < budget { throw VMError.gasExhausted(offset: instr.offset) }
+                if gas < budget { throw VmError.gasExhausted(offset: instr.offset) }
             default:
                 fatalError("unknown opcode tag \(tag)")
             }
 
             ip = nextIP
             #if DEBUG
-            fluxDevtoolsEmit(.vmStep(bytecodeOffset: UInt32(instr.offset), opcode: instr.opCode.rawValue, registers: regs, gasRemaining: gas))
+            fluxDevtoolsEmit(.vmStep(bytecodeOffset: UInt32(instr.offset), opcode: instr.opcode.rawValue, registers: regs, gasRemaining: gas))
             #endif
         }
 
@@ -1279,7 +1279,7 @@ enum FluxBytecodeVM {
         return x / y
     }
 
-    private static func truthy(_ v: VMValue) -> Bool {
+    private static func truthy(_ v: FluxValue) -> Bool {
         switch v {
         case let .bool(b): b
         case let .int(i): i != 0
@@ -1287,41 +1287,41 @@ enum FluxBytecodeVM {
         }
     }
 
-    private static func requireInt(_ v: VMValue, at offset: Int) throws -> Int64 {
-        guard case let .int(i) = v else { throw VMError.typeMismatch(offset: offset) }
+    private static func requireInt(_ v: FluxValue, at offset: Int) throws -> Int64 {
+        guard case let .int(i) = v else { throw VmError.typeMismatch(offset: offset) }
         return i
     }
 
-    private static func requireFloat(_ v: VMValue, at offset: Int) throws -> Double {
-        guard case let .float(f) = v else { throw VMError.typeMismatch(offset: offset) }
+    private static func requireFloat(_ v: FluxValue, at offset: Int) throws -> Double {
+        guard case let .float(f) = v else { throw VmError.typeMismatch(offset: offset) }
         return f
     }
 
-    private static func requireBool(_ v: VMValue, at offset: Int) throws -> Bool {
-        guard case let .bool(b) = v else { throw VMError.typeMismatch(offset: offset) }
+    private static func requireBool(_ v: FluxValue, at offset: Int) throws -> Bool {
+        guard case let .bool(b) = v else { throw VmError.typeMismatch(offset: offset) }
         return b
     }
 
-    private static func requireStr(_ v: VMValue, at offset: Int) throws -> UInt32 {
-        guard case let .str(id) = v else { throw VMError.typeMismatch(offset: offset) }
+    private static func requireStr(_ v: FluxValue, at offset: Int) throws -> UInt32 {
+        guard case let .str(id) = v else { throw VmError.typeMismatch(offset: offset) }
         return id
     }
 
-    private static func requireList(_ v: VMValue, at offset: Int) throws -> [VMValue] {
-        guard case let .list(items) = v else { throw VMError.typeMismatch(offset: offset) }
+    private static func requireList(_ v: FluxValue, at offset: Int) throws -> [FluxValue] {
+        guard case let .list(items) = v else { throw VmError.typeMismatch(offset: offset) }
         return items
     }
 
-    private static func requireRecord(_ v: VMValue, at offset: Int) throws -> [(UInt16, VMValue)] {
-        guard case let .record(fields) = v else { throw VMError.typeMismatch(offset: offset) }
+    private static func requireRecord(_ v: FluxValue, at offset: Int) throws -> [(UInt16, FluxValue)] {
+        guard case let .record(fields) = v else { throw VmError.typeMismatch(offset: offset) }
         return fields
     }
 
     /// Structural record equality: same field count, same prop indices in order,
     /// and equal values (recursively).
     private static func recordsEqual(
-        _ a: [(UInt16, VMValue)],
-        _ b: [(UInt16, VMValue)]
+        _ a: [(UInt16, FluxValue)],
+        _ b: [(UInt16, FluxValue)]
     ) -> Bool {
         guard a.count == b.count else { return false }
         for (lhs, rhs) in zip(a, b) {
@@ -1330,28 +1330,28 @@ enum FluxBytecodeVM {
         return true
     }
 
-    private static func getField(_ obj: VMValue, idx: Int, at offset: Int) throws -> VMValue {
+    private static func getField(_ obj: FluxValue, idx: Int, at offset: Int) throws -> FluxValue {
         if case .null = obj {
-            throw VMError.nullDereference(offset: offset)
+            throw VmError.nullDereference(offset: offset)
         }
         guard case let .record(fields) = obj else {
-            throw VMError.typeMismatch(offset: offset)
+            throw VmError.typeMismatch(offset: offset)
         }
         guard idx < fields.count else {
-            throw VMError.indexOutOfBounds(offset: offset)
+            throw VmError.indexOutOfBounds(offset: offset)
         }
         return fields[idx].value
     }
 
-    private static func setField(_ obj: inout VMValue, idx: Int, value: VMValue, at offset: Int) throws {
+    private static func setField(_ obj: inout FluxValue, idx: Int, value: FluxValue, at offset: Int) throws {
         if case .null = obj {
-            throw VMError.nullDereference(offset: offset)
+            throw VmError.nullDereference(offset: offset)
         }
         guard case var .record(fields) = obj else {
-            throw VMError.typeMismatch(offset: offset)
+            throw VmError.typeMismatch(offset: offset)
         }
         guard idx < fields.count else {
-            throw VMError.indexOutOfBounds(offset: offset)
+            throw VmError.indexOutOfBounds(offset: offset)
         }
         fields[idx].value = value
         obj = .record(fields)
@@ -1366,13 +1366,13 @@ enum FluxBytecodeVM {
         delta: Int32
     ) throws -> Int {
         guard nextIP < offsets.count else {
-            throw VMError.indexOutOfBounds(offset: instr.offset)
+            throw VmError.indexOutOfBounds(offset: instr.offset)
         }
         let base = Int64(offsets[nextIP])
         let target = base + Int64(delta)
         guard let t = UInt32(exactly: target),
               let index = offsets.firstIndex(of: Int(t)) else {
-            throw VMError.indexOutOfBounds(offset: instr.offset)
+            throw VmError.indexOutOfBounds(offset: instr.offset)
         }
         return index
     }
@@ -1386,7 +1386,7 @@ enum FluxBytecodeVM {
 /// the parity suite. An integral `Float` keeps one fractional digit (`1.0`), and
 /// a `Str` resolves through `table` (falling back to its id when the table has
 /// no entry, which only happens outside a live frame).
-func renderForToString(_ value: VMValue, table: any StringResolvable) -> String {
+func renderForToString(_ value: FluxValue, table: any StringResolver) -> String {
     switch value {
     case let .int(i):
         return String(i)

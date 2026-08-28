@@ -24,10 +24,10 @@ import FluxHost
 @MainActor
 final class FluxHostController: UIViewController {
     /// The executor whose reconciled tree this controller presents.
-    private let executor: FluxRuntime
+    private let executor: FluxExecutor
 
     /// Creates a controller bound to `executor`.
-    init(executor: FluxRuntime) {
+    init(executor: FluxExecutor) {
         self.executor = executor
         super.init(nibName: nil, bundle: nil)
     }

@@ -43,7 +43,7 @@ final class AsyncSuspendResumeTests: XCTestCase {
     @MainActor
     func testSyncCapabilityDoesNotSuspend() {
         var graph = SignalGraph()
-        let payload = VMValue.record([(0, .int(42))])
+        let payload = FluxValue.record([(0, .int(42))])
 
         let first = FluxBytecodeVM.runResumable(syncBytecode, signals: &graph, payload: payload)
         guard case let .success(.halt(outcome)) = first else {
@@ -63,7 +63,7 @@ final class AsyncSuspendResumeTests: XCTestCase {
     @MainActor
     func testAsyncCapabilitySuspendsThenResumesToHalt() {
         var graph = SignalGraph()
-        let payload = VMValue.record([(0, .int(42))])
+        let payload = FluxValue.record([(0, .int(42))])
 
         let first = FluxBytecodeVM.runResumable(asyncBytecode, signals: &graph, payload: payload)
         guard case let .success(.suspended(state)) = first else {

@@ -12,10 +12,10 @@ import Foundation
 /// A decoded instruction: its opcode and the raw operand bytes that follow it.
 struct Instruction {
     /// The decoded opcode.
-    let opCode: OpCode
+    let opcode: Opcode
     /// Byte offset of this instruction within the program (for diagnostics).
     let offset: Int
-    /// Raw operand bytes (length == `opCode.operandLen`).
+    /// Raw operand bytes (length == `opcode.operandLen`).
     private let operands: [UInt8]
 
     /// Reads a `u8` operand at `index` (0-based within the operand bytes).
@@ -49,25 +49,25 @@ struct Instruction {
     /// Decodes a whole program into a vector of instructions.
     ///
     /// - Parameter bytes: The flat bytecode buffer.
-    /// - Throws: `VMError.invalidDispatch` at the first byte that is not a valid
-    ///   opcode, or `VMError.indexOutOfBounds` if the program is truncated.
+    /// - Throws: `VmError.invalidDispatch` at the first byte that is not a valid
+    ///   opcode, or `VmError.indexOutOfBounds` if the program is truncated.
     static func decode(_ bytes: [UInt8]) throws -> [Instruction] {
         var instrs: [Instruction] = []
         instrs.reserveCapacity(bytes.count / 2)
         var ip = 0
         while ip < bytes.count {
             let byte = bytes[ip]
-            guard let op = OpCode(byte: byte) else {
-                throw VMError.invalidDispatch(offset: ip)
+            guard let op = Opcode(byte: byte) else {
+                throw VmError.invalidDispatch(offset: ip)
             }
             let n = op.operandLen
             let start = ip + 1
             let end = start + n
             if end > bytes.count {
-                throw VMError.indexOutOfBounds(offset: ip)
+                throw VmError.indexOutOfBounds(offset: ip)
             }
             let operands = Array(bytes[start..<end])
-            instrs.append(Instruction(opCode: op, offset: ip, operands: operands))
+            instrs.append(Instruction(opcode: op, offset: ip, operands: operands))
             ip = end
         }
         return instrs

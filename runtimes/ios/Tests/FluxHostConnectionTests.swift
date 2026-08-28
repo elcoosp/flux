@@ -54,7 +54,7 @@ final class FluxHostConnectionTests: XCTestCase {
 
     func testReceivedFrameBuildsNativeTree() async throws {
         // The transport's onFrame path decodes bytes and calls
-        // `FluxRuntime.apply`; decoding is covered by WireDecodeTests, so here we
+        // `FluxExecutor.apply`; decoding is covered by WireDecodeTests, so here we
         // assert the frame the transport would deliver actually mounts a real
         // native tree on the runtime.
         let frame = makeCounterInitFrame()
@@ -64,7 +64,7 @@ final class FluxHostConnectionTests: XCTestCase {
         table.intern(2, "Column"); table.intern(3, "Row")
         table.intern(4, "TextField"); table.intern(5, "Router")
         table.intern(6, "Screen")
-        let runtime = FluxRuntime(graph: SignalGraph(), registry: AdapterRegistry(table: table))
+        let runtime = FluxExecutor(graph: SignalGraph(), registry: AdapterRegistry(table: table))
         runtime.apply(frame)
 
         XCTAssertNotNil(runtime.rootView, "frame applied → native tree mounted")

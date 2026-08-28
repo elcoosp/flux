@@ -48,7 +48,7 @@ struct FileEntry: Equatable, Sendable {
 /// A state-cell seed carried by an Init or delta frame (Appendix D §D.10).
 struct StateCell: Equatable, Sendable {
     let signalId: UInt32
-    let value: VMValue
+    let value: FluxValue
 }
 
 /// Signal-graph metadata for a single node (ADR-0027 §T13/T14).

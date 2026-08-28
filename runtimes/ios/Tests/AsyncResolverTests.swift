@@ -1,7 +1,7 @@
 //  AsyncResolverTests.swift
 //  First-class async (ADR-0044) + unified capability bridge (ADR-0045): the
 //  executor's `AsyncResolver` settles a `Pending` result cell and resumes the
-//  parked handler. These tests drive `FluxRuntime.dispatch` (which runs the
+//  parked handler. These tests drive `FluxExecutor.dispatch` (which runs the
 //  resumable handler via `runHandlerAsync`) with a real async resolver to prove:
 //    1. a `Pending` cell genuinely parks the handler (it does not complete
 //       synchronously);
@@ -19,7 +19,7 @@ import FluxUIKit
 
 final class AsyncResolverTests: XCTestCase {
     /// Bytecode (iOS CALL_CAP is 9 bytes: op, result, cap u32 LE, method u16 LE,
-    /// args — matching `OpCodes.callCap` operandLen 8):
+    /// args — matching `Opcodes.callCap` operandLen 8):
     /// `CALL_CAP r2, cap=2, method=99, args=r0` · `AWAIT r0, r2` · `WRITE_SIGNAL s2, r0` · `HALT`.
     private let asyncHandler: [UInt8] = [
         0x90, 0x02, 0x02, 0x00, 0x00, 0x00, 0x63, 0x00, 0x00, // CALL_CAP r2, (2,99), args=r0
@@ -29,8 +29,8 @@ final class AsyncResolverTests: XCTestCase {
     ]
 
     @MainActor
-    private func executor(resolver: any AsyncResolver) -> FluxRuntime {
-        let executor = FluxRuntime(graph: SignalGraph(), registry: AdapterRegistry(table: StringTable()))
+    private func executor(resolver: any AsyncResolver) -> FluxExecutor {
+        let executor = FluxExecutor(graph: SignalGraph(), registry: AdapterRegistry(table: StringTable()))
         executor.asyncResolver = resolver
         let closure = ClosureRef(
             hash: [], bytecodeOffset: 0,

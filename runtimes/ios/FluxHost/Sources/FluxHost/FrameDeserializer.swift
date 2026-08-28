@@ -2,7 +2,7 @@
 //  Decodes Flux wire frames (Appendix D) into `FluxFrame`.
 //
 //  The decoder is a behavioral mirror of the Rust dev-server serializer: same
-//  magic, same little-endian layout, same implicit `string_id -> VMValue.str`
+//  magic, same little-endian layout, same implicit `string_id -> FluxValue.str`
 //  rule for `Str` values (Appendix D §D.5). A corrupt or truncated frame raises
 //  `WireError` with the failing byte offset rather than panicking.
 
@@ -249,7 +249,7 @@ enum FrameDeserializer {
     // MARK: - Value
 
     /// Decodes a `Value` (Appendix D §D.5).
-    static func decodeValue(_ r: inout ByteReader) throws -> VMValue {
+    static func decodeValue(_ r: inout ByteReader) throws -> FluxValue {
         let tag = try r.u8()
         switch tag {
         case 0x00: return .null
@@ -260,13 +260,13 @@ enum FrameDeserializer {
         case 0x05: return .handlerRef(try r.u32())
         case 0x06:
             let count = try r.u16()
-            var items = ContiguousArray<VMValue>()
+            var items = ContiguousArray<FluxValue>()
             items.reserveCapacity(Int(count))
             for _ in 0..<count { items.append(try decodeValue(&r)) }
             return .list(Array(items))
         case 0x07:
             let count = try r.u16()
-            var fields = ContiguousArray<(UInt16, VMValue)>()
+            var fields = ContiguousArray<(UInt16, FluxValue)>()
             fields.reserveCapacity(Int(count))
             for _ in 0..<count {
                 let propIdx = try r.u16()

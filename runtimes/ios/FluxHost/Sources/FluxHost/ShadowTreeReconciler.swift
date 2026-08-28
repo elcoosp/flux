@@ -48,7 +48,7 @@ final class BuiltNode {
 struct ShadowTreeReconciler {
     private let registry: AdapterRegistry
     /// The host coordinator adapters dispatch events back into.
-    private weak var executorRef: (any FluxExecutor)?
+    private weak var executorRef: FluxExecutor?
     /// Built views keyed by node id. Persists across frames so identities are
     /// stable and view state survives updates/pushes/pops.
     private var built: [UInt32: BuiltNode]
@@ -100,7 +100,7 @@ struct ShadowTreeReconciler {
     private var thunkBlobs: [Data: [UInt8]] = [:]
 
     /// Creates a reconciler bound to `registry` and `executor`.
-    init(registry: AdapterRegistry, executor: (any FluxExecutor)? = nil) {
+    init(registry: AdapterRegistry, executor: FluxExecutor? = nil) {
         self.registry = registry
         self.executorRef = executor
         self.built = [:]
@@ -109,7 +109,7 @@ struct ShadowTreeReconciler {
     /// Points the reconciler (and every adapter it builds) at the host
     /// coordinator, so native controls can dispatch handlers without retaining
     /// the runtime.
-    mutating func setExecutor(_ executor: (any FluxExecutor)?) {
+    mutating func setExecutor(_ executor: FluxExecutor?) {
         executorRef = executor
     }
 
@@ -339,7 +339,7 @@ struct ShadowTreeReconciler {
             }
             // Run the node's `onMount` block exactly once, on first build (G5).
             if let mount = node.mountHandler {
-                (executorRef as? FluxRuntime)?.runLifecycle(mount)
+                (executorRef as? FluxExecutor)?.runLifecycle(mount)
             }
         }
 
@@ -509,7 +509,7 @@ struct ShadowTreeReconciler {
         let isRouter = node.kind == .router || componentNames[node.componentId] == "Router"
         guard isRouter else { return nil }
         var activeRoute: String?
-        if let runtime = executorRef as? FluxRuntime,
+        if let runtime = executorRef as? FluxExecutor,
            let record = runtime.graph.read(Self.navigationRouteSignalId) {
             // `Router.navigate(target)` writes the VM's CALL_CAP `args` register to
             // signal 97. The iOS compiler lowers `Router.navigate("x")` to
@@ -592,7 +592,7 @@ struct ShadowTreeReconciler {
             return fallbackProps
         }
         guard let bytecode = thunkBlobs[Data(thunk.hash)],
-              let runtime = executorRef as? FluxRuntime else {
+              let runtime = executorRef as? FluxExecutor else {
             #if DEBUG
             NSLog("[materialize] node \(nodeId) thunk present but bytecode missing (blobs=\(thunkBlobs.count), hash=\(Data(thunk.hash).map { String(format: "%02x", $0) }.joined()))")
             #endif
@@ -662,7 +662,7 @@ struct ShadowTreeReconciler {
             // Run the node's `onCleanup` block (§18.4) before tearing down its
             // native view, so resources it acquired in `onMount` are released.
             if let node = nodeTable[id], let cleanup = node.cleanupHandler {
-                (executorRef as? FluxRuntime)?.runLifecycle(cleanup)
+                (executorRef as? FluxExecutor)?.runLifecycle(cleanup)
             }
             if let existing = built.removeValue(forKey: id) {
                 existing.adapter.destroy(existing.view)

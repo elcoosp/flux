@@ -1,4 +1,4 @@
-//  OpCodes.swift
+//  Opcodes.swift
 //  Native Swift mirror of `flux_syntax::opcode` (Appendix E §E.1).
 //
 //  The instruction set is intentionally minimal and monomorphized: there is no
@@ -11,7 +11,7 @@ import Foundation
 /// A decoded VM opcode. Decoding is total: an unassigned byte yields `nil`
 /// rather than an invalid variant, so a corrupt or future-versioned frame is
 /// reported as a protocol error instead of producing undefined behaviour.
-enum OpCode: UInt8, CaseIterable, Equatable {
+enum Opcode: UInt8, CaseIterable, Equatable {
     case halt = 0x00
     case nop = 0x01
 

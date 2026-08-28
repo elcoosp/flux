@@ -22,12 +22,12 @@ final class CapabilityRoundTripTests: XCTestCase {
     func testStorageSetThenGetRoundTrips() throws {
         var signals: any SignalStore = InMemorySignals()
         // Storage.set(key=Str(7), value=List[1,2,3]) → cap 2, method 1 returns cell id 95.
-        let setArgs = VMValue.record([(0, .str(7)), (1, .list([.int(1), .int(2), .int(3)]))])
+        let setArgs = FluxValue.record([(0, .str(7)), (1, .list([.int(1), .int(2), .int(3)]))])
         let written = try CapabilityRegistry.dev.lookup(2, 1)!(2, 1, setArgs, &signals)
         XCTAssertEqual(written, 95, "Storage.set returns its result-cell id")
 
         // Storage.get(key=Str(7)) → cap 2, method 2 exposes the persisted list via cell 95.
-        let getArgs = VMValue.record([(0, .str(7))])
+        let getArgs = FluxValue.record([(0, .str(7))])
         let gotCell = try CapabilityRegistry.dev.lookup(2, 2)!(2, 2, getArgs, &signals)
         XCTAssertEqual(gotCell, 95, "Storage.get returns its result-cell id")
         XCTAssertEqual(signals.read(95), .list([.int(1), .int(2), .int(3)]), "Storage.get returns the persisted value")
@@ -49,8 +49,8 @@ final class CapabilityRoundTripTests: XCTestCase {
 
     func testStorageDeleteClearsValue() throws {
         var signals: any SignalStore = InMemorySignals()
-        let key = VMValue.record([(0, .str(11))])
-        let value = VMValue.record([(0, .str(11)), (1, .list([.int(9)]))])
+        let key = FluxValue.record([(0, .str(11))])
+        let value = FluxValue.record([(0, .str(11)), (1, .list([.int(9)]))])
         _ = try CapabilityRegistry.dev.lookup(2, 1)!(2, 1, value, &signals)
         let beforeCell = try CapabilityRegistry.dev.lookup(2, 2)!(2, 2, key, &signals)
         XCTAssertEqual(beforeCell, 95, "Storage.get returns its result-cell id")
@@ -69,8 +69,8 @@ final class CapabilityRoundTripTests: XCTestCase {
         let suite = "flux.lane-c.storage.\(UUID().uuidString)"
         defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
 
-        let key = VMValue.record([(0, .str(7))])
-        let value = VMValue.record([(0, .str(7)), (1, .list([.int(1), .int(2), .int(3)]))])
+        let key = FluxValue.record([(0, .str(7))])
+        let value = FluxValue.record([(0, .str(7)), (1, .list([.int(1), .int(2), .int(3)]))])
 
         // Write with the first registry (persistent backend).
         var firstSignals: any SignalStore = InMemorySignals()
