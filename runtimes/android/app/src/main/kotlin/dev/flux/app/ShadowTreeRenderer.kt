@@ -48,8 +48,8 @@ public fun FluxTreeView(
 ) {
     if (node == null) return
     when (node.kind) {
-        "column" -> RenderColumn(node, onButtonClick)
-        "row" -> RenderRow(node, onButtonClick)
+        "column" -> RenderColumn(node, onButtonClick, routerVersion)
+        "row" -> RenderRow(node, onButtonClick, routerVersion)
         "text" -> RenderText(node)
         "button" -> RenderButton(node, onButtonClick)
         // A router shows exactly one screen — the one whose `route` prop matches
@@ -58,10 +58,10 @@ public fun FluxTreeView(
         // stacking all screens in a column.
         "router" -> RenderRouter(node, onButtonClick, routerVersion)
         // A screen renders the content it wraps (its own children).
-        "screen" -> RenderContainer(node, onButtonClick)
+        "screen" -> RenderContainer(node, onButtonClick, routerVersion)
         // TextField/Image have no live adapter subtree in the MLP host; surface
         // a contained placeholder so the tree stays visible.
-        else -> RenderContainer(node, onButtonClick)
+        else -> RenderContainer(node, onButtonClick, routerVersion)
     }
 }
 
@@ -103,12 +103,13 @@ private fun ShadowNode.observeProps(): dev.flux.ui.Props = propsState.value
 private fun RenderColumn(
     node: ShadowNode,
     onButtonClick: (UInt) -> Unit,
+    routerVersion: Int,
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(gapOf(node)),
     ) {
-        for (child in node.children) FluxTreeView(child, onButtonClick)
+        for (child in node.children) FluxTreeView(child, onButtonClick, routerVersion)
     }
 }
 
@@ -117,12 +118,13 @@ private fun RenderColumn(
 private fun RenderRow(
     node: ShadowNode,
     onButtonClick: (UInt) -> Unit,
+    routerVersion: Int,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(gapOf(node)),
     ) {
-        for (child in node.children) FluxTreeView(child, onButtonClick)
+        for (child in node.children) FluxTreeView(child, onButtonClick, routerVersion)
     }
 }
 
@@ -156,9 +158,10 @@ private fun RenderButton(
 private fun RenderContainer(
     node: ShadowNode,
     onButtonClick: (UInt) -> Unit,
+    routerVersion: Int,
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        for (child in node.children) FluxTreeView(child, onButtonClick)
+        for (child in node.children) FluxTreeView(child, onButtonClick, routerVersion)
     }
 }
 
