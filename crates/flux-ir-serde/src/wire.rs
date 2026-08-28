@@ -57,6 +57,162 @@ pub enum WireError {
         /// Byte offset of the string.
         at: usize,
     },
+    /// A handler closure blob decoded into a bytecode program that is not
+    /// safe to hand to the VM: an instruction's operand bytes run past the end
+    /// of the blob, a jump/relative-offset target lands outside `[0, len)`, or
+    /// an unknown opcode byte appears. The decoder must reject such programs
+    /// rather than let the VM index out of bounds (LANE-D).
+    #[error("malformed bytecode in {context}: {detail} at offset {at}, blob is {blob_len} bytes")]
+    MalformedBytecode {
+        /// Short field description (e.g. `closure.bytecode`).
+        context: &'static str,
+        /// Human-readable reason: `truncated-operands`, `jump-out-of-range`, or
+        /// `unknown-opcode`.
+        detail: &'static str,
+        /// Byte offset within the blob where the fault was detected.
+        at: usize,
+        /// Total length of the decoded bytecode blob.
+        blob_len: usize,
+    },
+    /// A frame declared a payload larger than the hard ceiling
+    /// ([`MAX_FRAME_BYTES`]), so the decoder refuses to allocate or scan it
+    /// (defense in depth beyond the per-dispatch gas/gas cap).
+    #[error("frame too large: declared {declared} bytes exceeds ceiling {ceiling} in {context}")]
+    FrameTooLarge {
+        /// Short field description (e.g. `init.payload` / `delta.payload`).
+        context: &'static str,
+        /// Declared payload length in bytes.
+        declared: usize,
+        /// The hard ceiling in bytes.
+        ceiling: usize,
+    },
+}
+
+/// Hard ceiling on a decoded `Init`/`Delta` payload (Appendix D §D.12 + D.1),
+/// defense in depth beyond the 16 MiB per-dispatch allocation cap. A frame that
+/// declares more than this is rejected outright by the decoder; the host never
+/// allocates or scans an attacker-controlled multi-gigabyte buffer.
+pub const MAX_FRAME_BYTES: usize = 64 * 1024 * 1024;
+
+/// Validates a decoded handler closure blob as a self-consistent bytecode
+/// program before the VM ever runs it (LANE-D, task 2).
+///
+/// A program is valid when every instruction's operand bytes fit inside the
+/// blob and every `Jump`/`CondJump`/`CondJumpNot` relative target (`i32`,
+/// offset from the *next* instruction) lands on an instruction boundary within
+/// `[0, len)`. An unknown opcode byte is likewise rejected — the wire only
+/// carried known [`crate::Opcode`]s (Appendix E §E.1), so a stray byte is corruption,
+/// not a future opcode the decoder should silently pass through.
+///
+/// Returns `Err(WireError::MalformedBytecode)` on the first fault; `Ok(())`
+/// when the blob is an empty program (no handlers) or a fully valid one.
+///
+/// # Examples
+///
+/// ```ignore
+/// use flux_ir_serde::wire::validate_bytecode;
+/// // `HALT` is a valid empty-ish program.
+/// assert!(validate_bytecode(&[0x00]).is_ok());
+/// // A `JUMP` of `0` (self-fall-through to the next instruction) is in range.
+/// assert!(validate_bytecode(&[0x60, 0, 0, 0, 0, 0x00]).is_ok());
+/// // A `JUMP` whose target runs past the blob is rejected.
+/// assert!(validate_bytecode(&[0x60, 0xFF, 0xFF, 0xFF, 0xFF]).is_err());
+/// ```
+#[must_use = "bytecode validation is only meaningful if its Result is checked"]
+pub fn validate_bytecode(bytecode: &[u8]) -> Result<(), WireError> {
+    use flux_syntax::opcode::Opcode;
+
+    let len = bytecode.len();
+    if len == 0 {
+        return Ok(());
+    }
+
+    // Pass 1: decode every instruction, recording its byte offset and the
+    // byte offset of the instruction that follows it. This mirrors the VM's own
+    // `decode_program` layout checks (truncation + unknown opcode) but returns
+    // the wire [`WireError`] instead of the VM's [`VmError`].
+    #[derive(Clone, Copy)]
+    struct Decoded {
+        offset: usize,
+        next_offset: usize,
+    }
+    let mut instrs: Vec<Decoded> = Vec::with_capacity(len / 2);
+    let mut ip = 0usize;
+    while ip < len {
+        let opcode = match Opcode::from_byte(bytecode[ip]) {
+            Some(op) => op,
+            None => {
+                return Err(WireError::MalformedBytecode {
+                    context: "closure.bytecode",
+                    detail: "unknown-opcode",
+                    at: ip,
+                    blob_len: len,
+                });
+            }
+        };
+        let n = opcode.operand_len() as usize;
+        let start = ip + 1;
+        let end = start + n;
+        if end > len {
+            return Err(WireError::MalformedBytecode {
+                context: "closure.bytecode",
+                detail: "truncated-operands",
+                at: ip,
+                blob_len: len,
+            });
+        }
+        let next_offset = end;
+        instrs.push(Decoded {
+            offset: ip,
+            next_offset,
+        });
+        ip = end;
+    }
+
+    // Pass 2: every jump must land on an instruction boundary inside the blob.
+    for decoded in &instrs {
+        let opcode = Opcode::from_byte(bytecode[decoded.offset]).expect("known opcode from pass 1");
+        let jump = match opcode {
+            Opcode::Jump => Some(read_i32(bytecode, decoded.offset + 1)),
+            Opcode::CondJump | Opcode::CondJumpNot => Some(read_i32(bytecode, decoded.offset + 1)),
+            _ => None,
+        };
+        let Some(relative) = jump else { continue };
+        let base = decoded.next_offset as i64;
+        let target = base + i64::from(relative);
+        if target < 0 || target > len as i64 {
+            return Err(WireError::MalformedBytecode {
+                context: "closure.bytecode",
+                detail: "jump-out-of-range",
+                at: decoded.offset,
+                blob_len: len,
+            });
+        }
+        // The target must coincide with an instruction boundary.
+        if !instrs.iter().any(|d| d.offset as i64 == target) {
+            return Err(WireError::MalformedBytecode {
+                context: "closure.bytecode",
+                detail: "jump-out-of-range",
+                at: decoded.offset,
+                blob_len: len,
+            });
+        }
+    }
+
+    Ok(())
+}
+
+/// Reads a little-endian `i32` from `bytecode[start..start+4]`.
+///
+/// Callers only invoke this at an already-validated operand slice (pass 1 has
+/// confirmed the four bytes exist), so the slice is in bounds by construction.
+fn read_i32(bytecode: &[u8], start: usize) -> i32 {
+    i32::from_le_bytes([
+        bytecode[start],
+        bytecode[start + 1],
+        bytecode[start + 2],
+        bytecode[start + 3],
+    ])
 }
 
 /// A grow-only little-endian byte sink.
@@ -128,6 +284,31 @@ impl<'a> Reader<'a> {
     #[must_use]
     pub(crate) fn remaining(&self) -> usize {
         self.bytes.len().saturating_sub(self.pos)
+    }
+
+    /// Rejects a declared element `count` that is impossible to satisfy with the
+    /// bytes still available (LANE-D, OOM hardening).
+    ///
+    /// Every decoded element occupies at least one byte on the wire, so a count
+    /// larger than `remaining()` can never be fulfilled — it is corruption, not a
+    /// real collection. Without this guard an attacker-controlled `u32` count in
+    /// an `Init` frame would drive `Vec::with_capacity(count)` to attempt a
+    /// multi-gigabyte allocation and abort the process (libFuzzer flags this as
+    /// `out-of-memory`). We fail with [`WireError::Truncated`] instead.
+    pub(crate) fn ensure_capacity(
+        &self,
+        count: usize,
+        context: &'static str,
+    ) -> Result<(), WireError> {
+        if count > self.remaining() {
+            return Err(WireError::Truncated {
+                at: self.pos,
+                needed: count,
+                context,
+                available: self.remaining(),
+            });
+        }
+        Ok(())
     }
 
     pub(crate) fn take(
@@ -240,6 +421,7 @@ pub(crate) fn decode_value(r: &mut Reader<'_>) -> Result<Value, WireError> {
         TAG_HANDLER => Ok(Value::HandlerRef(r.u32("value.handler")?)),
         TAG_LIST => {
             let count = r.u16("value.list.count")?;
+            r.ensure_capacity(count as usize, "value.list")?;
             let mut items = Vec::with_capacity(count as usize);
             for _ in 0..count {
                 items.push(decode_value(r)?);
@@ -248,6 +430,7 @@ pub(crate) fn decode_value(r: &mut Reader<'_>) -> Result<Value, WireError> {
         }
         TAG_RECORD => {
             let count = r.u16("value.record.count")?;
+            r.ensure_capacity(count as usize, "value.record")?;
             let mut fields = Vec::with_capacity(count as usize);
             for _ in 0..count {
                 let index = r.u16("value.record.index")?;
@@ -294,6 +477,7 @@ pub(crate) fn decode_child(r: &mut Reader<'_>) -> Result<Child, WireError> {
         0x01 => Ok(Child::Node(r.u32("child.node")?)),
         0x02 => {
             let count = r.u16("child.splice.count")?;
+            r.ensure_capacity(count as usize, "child.splice")?;
             let mut items = Vec::with_capacity(count as usize);
             for _ in 0..count {
                 let key = r.u64("child.splice.key")?;
@@ -322,6 +506,7 @@ pub(crate) fn encode_props(w: &mut Writer, props: &Props) {
 
 pub(crate) fn decode_props(r: &mut Reader<'_>) -> Result<Props, WireError> {
     let count = r.u16("props.count")?;
+    r.ensure_capacity(count as usize, "props")?;
     let mut fields = Vec::with_capacity(count as usize);
     for _ in 0..count {
         let index = r.u16("props.index")?;
@@ -375,11 +560,13 @@ pub(crate) fn decode_node(r: &mut Reader<'_>) -> Result<NodeRef, WireError> {
     let component_id = r.u32("node.component_id")?;
     let props = decode_props(r)?;
     let child_count = r.u16("node.child_count")?;
+    r.ensure_capacity(child_count as usize, "node.children")?;
     let mut children = Vec::with_capacity(child_count as usize);
     for _ in 0..child_count {
         children.push(decode_child(r)?);
     }
     let handler_count = r.u16("node.handler_count")?;
+    r.ensure_capacity(handler_count as usize, "node.handlers")?;
     let mut handlers = Vec::with_capacity(handler_count as usize);
     for _ in 0..handler_count {
         handlers.push(r.u32("node.handler")?);
@@ -412,6 +599,7 @@ pub(crate) fn encode_prop_diff(w: &mut Writer, diff: &PropDiff) {
 
 pub(crate) fn decode_prop_diff(r: &mut Reader<'_>) -> Result<PropDiff, WireError> {
     let change_count = r.u16("propdiff.change_count")?;
+    r.ensure_capacity(change_count as usize, "propdiff.changes")?;
     let mut changes = Vec::with_capacity(change_count as usize);
     for _ in 0..change_count {
         let index = r.u16("propdiff.index")?;
@@ -419,6 +607,7 @@ pub(crate) fn decode_prop_diff(r: &mut Reader<'_>) -> Result<PropDiff, WireError
         changes.push((index, value));
     }
     let removal_count = r.u16("propdiff.removal_count")?;
+    r.ensure_capacity(removal_count as usize, "propdiff.removals")?;
     let mut removals = Vec::with_capacity(removal_count as usize);
     for _ in 0..removal_count {
         removals.push(r.u16("propdiff.removal")?);
@@ -444,6 +633,7 @@ pub(crate) fn decode_closure_ref(r: &mut Reader<'_>) -> Result<ClosureRef, WireE
     let bytecode_offset = r.u32("closure.offset")?;
     let bytecode_len = r.u16("closure.len")?;
     let signal_count = r.u16("closure.signal_count")?;
+    r.ensure_capacity(signal_count as usize, "closure.signals")?;
     let mut captured_signals = Vec::with_capacity(signal_count as usize);
     for _ in 0..signal_count {
         captured_signals.push(r.u32("closure.signal")?);
@@ -529,6 +719,7 @@ impl StateDelta {
     #[allow(dead_code)]
     pub(crate) fn decode(r: &mut Reader<'_>) -> Result<StateDelta, WireError> {
         let count = r.u16("state.count")?;
+        r.ensure_capacity(count as usize, "state.cells")?;
         let mut cells = Vec::with_capacity(count as usize);
         for _ in 0..count {
             let signal = r.u32("state.signal")?;
@@ -563,6 +754,7 @@ impl SourceMapDelta {
     #[allow(dead_code)]
     pub(crate) fn decode(r: &mut Reader<'_>) -> Result<SourceMapDelta, WireError> {
         let count = r.u16("srcmap.count")?;
+        r.ensure_capacity(count as usize, "srcmap.files")?;
         let mut files = Vec::with_capacity(count as usize);
         for _ in 0..count {
             let file_id = r.u32("srcmap.file")?;
@@ -660,6 +852,7 @@ pub(crate) fn decode_patch(r: &mut Reader<'_>) -> Result<Patch, WireError> {
         0x05 => {
             let parent = r.u32("patch.reorder.parent")?;
             let key_count = r.u16("patch.reorder.keys")?;
+            r.ensure_capacity(key_count as usize, "patch.reorder")?;
             let mut keys = Vec::with_capacity(key_count as usize);
             for _ in 0..key_count {
                 keys.push(r.u32("patch.reorder.key")?);
@@ -744,6 +937,7 @@ pub(crate) fn encode_signal_meta(w: &mut Writer, meta: &NodeSignalMeta) {
 pub(crate) fn decode_signal_meta(r: &mut Reader<'_>) -> Result<NodeSignalMeta, WireError> {
     let node_id = NodeId::from(r.u32("signal_meta.node")?);
     let dep_count = r.u16("signal_meta.deps.count")?;
+    r.ensure_capacity(dep_count as usize, "signal_meta.deps")?;
     let mut deps = Vec::with_capacity(dep_count as usize);
     for _ in 0..dep_count {
         deps.push(SignalId::from(r.u32("signal_meta.deps.signal")?));
@@ -764,6 +958,7 @@ pub(crate) fn decode_signal_meta(r: &mut Reader<'_>) -> Result<NodeSignalMeta, W
         });
     }
     let layout_count = r.u16("signal_meta.layout.count")?;
+    r.ensure_capacity(layout_count as usize, "signal_meta.layout")?;
     let mut layout = Vec::with_capacity(layout_count as usize);
     for _ in 0..layout_count {
         layout.push(r.u16("signal_meta.layout.idx")?);
@@ -789,6 +984,7 @@ pub(crate) fn decode_signal_meta_section(
     r: &mut Reader<'_>,
 ) -> Result<Vec<NodeSignalMeta>, WireError> {
     let count = r.u16("signal_meta.section.count")?;
+    r.ensure_capacity(count as usize, "signal_meta.section")?;
     let mut metas = Vec::with_capacity(count as usize);
     for _ in 0..count {
         metas.push(decode_signal_meta(r)?);

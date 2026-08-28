@@ -18,10 +18,10 @@
 //! transport.
 
 use crate::wire::{
-    NodeSignalMeta, Reader, WireError, Writer, decode_bytecode_blob, decode_handler_def,
-    decode_node, decode_patch, decode_signal_meta_section, decode_string_entry, decode_value,
-    encode_bytecode_blob, encode_handler_def, encode_node, encode_patch,
-    encode_signal_meta_section, encode_string_entry, encode_value,
+    MAX_FRAME_BYTES, NodeSignalMeta, Reader, WireError, Writer, decode_bytecode_blob,
+    decode_handler_def, decode_node, decode_patch, decode_signal_meta_section, decode_string_entry,
+    decode_value, encode_bytecode_blob, encode_handler_def, encode_node, encode_patch,
+    encode_signal_meta_section, encode_string_entry, encode_value, validate_bytecode,
 };
 use flux_ir::ClosureIR;
 use flux_syntax::{
@@ -190,6 +190,11 @@ fn write_closures(w: &mut Writer, closures: &[ClosureIR]) {
 
 /// Validates the magic + version prefix and returns the `frame_type` byte and
 /// the remaining payload.
+///
+/// Rejects a frame whose payload (everything after the 6-byte header) exceeds
+/// [`MAX_FRAME_BYTES`] — a defense-in-depth ceiling above the per-dispatch
+/// allocation cap, so an attacker cannot force the host to scan/allocate an
+/// unbounded buffer (LANE-D, task 3).
 fn read_frame_type(bytes: &[u8]) -> Result<(u8, FrameKind, &[u8]), WireError> {
     if bytes.len() < 6 {
         return Err(WireError::Truncated {
@@ -220,10 +225,30 @@ fn read_frame_type(bytes: &[u8]) -> Result<(u8, FrameKind, &[u8]), WireError> {
         context: "frame.type",
         at: 5,
     })?;
-    Ok((version, kind, &bytes[6..]))
+    let payload = &bytes[6..];
+    if payload.len() > MAX_FRAME_BYTES {
+        return Err(WireError::FrameTooLarge {
+            context: "frame.payload",
+            declared: payload.len(),
+            ceiling: MAX_FRAME_BYTES,
+        });
+    }
+    Ok((version, kind, payload))
 }
 
 // ── str helpers (not exported by wire.rs) ───────────────────────────────────
+
+/// Capacity guard for [`Frame::from_hello_bytes`], which decodes the Hello
+/// payload via raw `pos`/`payload` indexing rather than the `Reader` cursor
+/// (LANE-D, OOM hardening). A declared `cap_count` that exceeds the remaining
+/// bytes cannot be satisfied, so we reject the frame with `None` instead of
+/// letting the later `Vec::with_capacity` attempt a giant allocation.
+fn r_ensure_capacity(payload: &[u8], pos: usize, count: usize, _ctx: &'static str) -> Option<()> {
+    if count > payload.len().saturating_sub(pos) {
+        return None;
+    }
+    Some(())
+}
 
 fn encode_str(w: &mut Writer, s: &str) {
     w.u16(s.len() as u16);
@@ -320,6 +345,7 @@ impl Frame {
         let cap_count =
             u16::from_le_bytes([payload.get(pos).copied()?, payload.get(pos + 1).copied()?])
                 as usize;
+        r_ensure_capacity(payload, pos, cap_count, "hello.capabilities")?;
         pos += 2;
         let mut capabilities = Vec::with_capacity(cap_count);
         for _ in 0..cap_count {
@@ -452,6 +478,7 @@ impl Frame {
         // descendant node, flat. The host rebuilds the full node table from these
         // so it can resolve the root's child ids without a second round-trip.
         let extra_count = r.u32("init.extra_count")? as usize;
+        r.ensure_capacity(extra_count, "init.extra_count")?;
         let mut extra_nodes = Vec::with_capacity(extra_count);
         for _ in 0..extra_count {
             extra_nodes.push(decode_node(&mut r)?);
@@ -463,8 +490,9 @@ impl Frame {
             let val = decode_value(&mut r)?;
             state_seed.push((sig, val));
         }
-        let sm_count = r.u16("init.srcmap")?;
-        let mut source_map = Vec::with_capacity(sm_count as usize);
+        let sm_count = r.u16("init.srcmap")? as usize;
+        r.ensure_capacity(sm_count, "init.srcmap")?;
+        let mut source_map = Vec::with_capacity(sm_count);
         for _ in 0..sm_count {
             let fid = FileId::from(r.u32("init.srcmap.file")?);
             let len = r.u16("init.srcmap.path.len")? as usize;
@@ -479,6 +507,7 @@ impl Frame {
         }
         // D.12.2: `string_count` is a u32.
         let str_count = r.u32("init.string_count")? as usize;
+        r.ensure_capacity(str_count, "init.string_count")?;
         let mut entries: Vec<(StringId, String)> = Vec::with_capacity(str_count);
         for _ in 0..str_count {
             entries.push(decode_string_entry(&mut r)?);
@@ -492,6 +521,7 @@ impl Frame {
         // `(u32 ComponentId, utf8 name)` pairs. Mirrors the encoder exactly so
         // the two id spaces never collide on the wire.
         let component_count = r.u16("init.component_names.count")? as usize;
+        r.ensure_capacity(component_count, "init.component_names")?;
         let mut component_names = Vec::with_capacity(component_count);
         for _ in 0..component_count {
             let cid: ComponentId = r.u32("init.component_names.cid")?;
@@ -541,7 +571,24 @@ fn decode_closures(r: &mut Reader<'_>) -> Result<Vec<ClosureIR>, WireError> {
     if blob.is_empty() {
         return Ok(Vec::new());
     }
+    // LANE-D (task 2): the decoded bytecode blob must be a self-consistent
+    // program before the VM runs it. `validate_bytecode` rejects truncated
+    // operands, out-of-range jump targets, and unknown opcodes, so the VM
+    // never indexes out of bounds on a crafted closure.
+    validate_bytecode(&blob)?;
     let handler_count = r.u16("closures.count")? as usize;
+    // Defense in depth: a malformed frame could claim far more handler
+    // definitions than the blob can contain. We already validate the blob
+    // below, but reject a clearly-impossible count up front so the allocation
+    // (and the subsequent per-handler scan) cannot be driven unbounded.
+    if handler_count > blob.len().saturating_add(1) {
+        return Err(WireError::MalformedBytecode {
+            context: "closures.count",
+            detail: "truncated-operands",
+            at: r.pos(),
+            blob_len: blob.len(),
+        });
+    }
     let mut closures = Vec::with_capacity(handler_count);
     for _ in 0..handler_count {
         let (id, closure_ref) = decode_handler_def(r)?;
@@ -691,25 +738,25 @@ impl Frame {
                 at: 5,
             });
         }
-        if payload.len() < 10 {
-            return Err(WireError::Truncated {
-                at: 6,
-                needed: 10,
-                context: "delta.header",
-                available: payload.len(),
-            });
-        }
-        let seq = u32::from_le_bytes(payload[0..4].try_into().unwrap());
-        let flags = payload[4];
-        let patch_count = u16::from_le_bytes([payload[5], payload[6]]) as usize;
-        let _handler_count = u16::from_le_bytes([payload[7], payload[8]]);
-        let str_count = u16::from_le_bytes([payload[9], payload[10]]) as usize;
-        let mut r = Reader::new(&payload[11..]);
+        // Read the fixed D.1 header through the bounds-checked `Reader` rather
+        // than raw indexing. The header is `seq(4) flags(1) patch_count(2)
+        // handler_count(2) string_count(2)` = 11 bytes; indexing `payload[10]`
+        // when the payload is exactly 10 bytes would panic on attacker input
+        // (libFuzzer flagged this as an out-of-bounds read → abort). The `Reader`
+        // yields `WireError::Truncated` instead, so the decoder stays total.
+        let mut r = Reader::new(payload);
+        let seq = r.u32("delta.seq")?;
+        let flags = r.u8("delta.flags")?;
+        let patch_count = r.u16("delta.patch_count")? as usize;
+        let _handler_count = r.u16("delta.handler_count")?;
+        let str_count = r.u16("delta.string_count")? as usize;
         let mut patches = Vec::with_capacity(patch_count);
+        r.ensure_capacity(patch_count, "delta.patches")?;
         for _ in 0..patch_count {
             patches.push(decode_patch(&mut r)?);
         }
         let mut strings = Vec::with_capacity(str_count);
+        r.ensure_capacity(str_count, "delta.strings")?;
         for _ in 0..str_count {
             strings.push(decode_string_entry(&mut r)?);
         }

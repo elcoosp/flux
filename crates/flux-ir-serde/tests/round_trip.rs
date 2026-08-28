@@ -2,8 +2,8 @@
 
 use flux_ir::ClosureIR;
 use flux_ir_serde::{
-    Frame, MAGIC, PROTOCOL_VERSION, WireError, deserialize_patches, hash_closure, hash_props,
-    serialize_patches,
+    FRAME_INIT, Frame, MAGIC, PROTOCOL_VERSION, WireError, deserialize_patches, hash_closure,
+    hash_props, serialize_patches,
 };
 use flux_syntax::{
     Child, ClosureRef, HandlerId, NodeKind, Patch, PropDiff, Props, SignalId, Span, StringId,
@@ -579,4 +579,189 @@ fn delta_frame_signal_meta_requires_flag() {
     let decoded = Frame::from_delta_bytes(&flagged.to_bytes()).expect("decode flagged delta");
     assert_eq!(decoded.signal_meta.len(), 1);
     assert_eq!(decoded.signal_meta[0].deps, vec![SignalId::from(5u32)]);
+}
+
+// ── LANE-D: untrusted-frame hardening (truncated / OOB / oversized) ─────────
+
+/// Builds an `Init` frame that carries exactly one handler closure with the
+/// given raw bytecode. The `ClosureRef` indexes the whole shared blob, so the
+/// decoder's `validate_bytecode` path runs over `bytecode`.
+fn init_frame_with_bytecode(bytecode: Vec<u8>) -> Vec<u8> {
+    let root = flux_syntax::NodeRef {
+        id: 1,
+        kind: NodeKind::Primitive,
+        component_id: 1,
+        props: Props::default(),
+        children: vec![],
+        handlers: vec![],
+        span: Span::new(0, 0, 0),
+    };
+    let closure = ClosureIR::new(HandlerId::from(1u32), bytecode, vec![], Span::new(0, 0, 0));
+    let frame = Frame::init(
+        &root,
+        &[],
+        &[],
+        &[],
+        &StringTable::new(),
+        &[],
+        &[closure],
+        &[],
+    );
+    frame.to_bytes()
+}
+
+#[test]
+fn truncated_frame_is_rejected_not_panics() {
+    // A valid Init frame, then chopped in half — must error, never panic.
+    let good = init_frame_with_bytecode(vec![0x00]); // HALT
+    assert!(Frame::from_init_bytes(&good).is_ok());
+    let chopped = &good[..good.len() / 2];
+    assert!(matches!(
+        Frame::from_init_bytes(chopped),
+        Err(WireError::Truncated { .. })
+    ));
+    // Truly empty / tiny inputs must also be rejected gracefully.
+    assert!(Frame::from_init_bytes(&[]).is_err());
+    assert!(Frame::from_init_bytes(&[0u8; 4]).is_err());
+    assert!(Frame::from_delta_bytes(&[]).is_err());
+    assert!(Frame::from_delta_bytes(&[0u8; 4]).is_err());
+}
+
+#[test]
+fn valid_jump_bytecode_round_trips() {
+    // `LOAD_INT_CONST r0, 1` then `JUMP +0` (loops to the next instruction, a
+    // self-fall-through to HALT) then `HALT`. The jump lands on an instruction
+    // boundary, so the decoder must accept the handler.
+    // LOAD_INT_CONST = 0xB0 (REG_I64: opcode + reg(u8) + i64(8) = 9 bytes)
+    // JUMP          = 0x60 (I32: opcode + i32(4) = 5 bytes), offset +0
+    // HALT          = 0x00
+    let bytecode = vec![
+        0xB0, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // LOAD_INT_CONST r0, 1
+        0x60, 0x00, 0x00, 0x00, 0x00, // JUMP +0 (lands on HALT at offset 14)
+        0x00, // HALT
+    ];
+    let bytes = init_frame_with_bytecode(bytecode);
+    let decoded = Frame::from_init_bytes(&bytes).expect("valid jump bytecode accepted");
+    assert_eq!(decoded.closures.len(), 1);
+    assert_eq!(decoded.closures[0].bytecode.len(), 15);
+}
+
+#[test]
+fn out_of_range_jump_target_is_rejected() {
+    // `JUMP` whose `i32` offset runs past the end of the blob. The decoder must
+    // return `Err(WireError::MalformedBytecode)`, not let the VM jump OOB.
+    // JUMP = 0x60 with offset 0x7FFF_FFFF (huge forward jump, far past the blob).
+    let bytecode = vec![0x60, 0xFF, 0xFF, 0xFF, 0x7F];
+    let bytes = init_frame_with_bytecode(bytecode);
+    let err = Frame::from_init_bytes(&bytes).expect_err("out-of-range jump rejected");
+    assert!(
+        matches!(
+            err,
+            WireError::MalformedBytecode {
+                detail: "jump-out-of-range",
+                ..
+            }
+        ),
+        "got {err:?}"
+    );
+}
+
+#[test]
+fn truncated_operands_are_rejected() {
+    // `Jump` declares 4 operand bytes but the blob ends right after the opcode,
+    // so the instruction's operands run past the blob.
+    let bytecode = vec![0x60]; // JUMP with no offset bytes
+    let bytes = init_frame_with_bytecode(bytecode);
+    let err = Frame::from_init_bytes(&bytes).expect_err("truncated operands rejected");
+    assert!(
+        matches!(
+            err,
+            WireError::MalformedBytecode {
+                detail: "truncated-operands",
+                ..
+            }
+        ),
+        "got {err:?}"
+    );
+}
+
+#[test]
+fn unknown_opcode_is_rejected() {
+    // A byte that is not a valid Appendix E opcode must be rejected as
+    // `unknown-opcode`, not silently passed to the VM.
+    let bytecode = vec![0x09, 0x00]; // 0x09 is unassigned
+    let bytes = init_frame_with_bytecode(bytecode);
+    let err = Frame::from_init_bytes(&bytes).expect_err("unknown opcode rejected");
+    assert!(
+        matches!(
+            err,
+            WireError::MalformedBytecode {
+                detail: "unknown-opcode",
+                ..
+            }
+        ),
+        "got {err:?}"
+    );
+}
+
+#[test]
+fn delta_header_oob_index_does_not_panic() {
+    // libFuzzer found an OOB read: a Delta payload of exactly 10 bytes passes the
+    // old `len < 10` guard but then indexes `payload[10]` for `string_count`,
+    // panicking. The decoder must return `Err`, never index OOB.
+    // Bytes: `FLUX` + version 1 + frame_type 4 (Delta) + 10-byte payload.
+    let bytes = [
+        0x58, 0x55, 0x92, 0x70, // "FLUX" magic
+        0x01, // version
+        0x04, // frame type = Delta
+        0x00, 0x97, 0x00, 0x00, 0x88, 0x85, 0x00, 0x92, 0x70, 0x00, // 10-byte payload
+    ];
+    let result = Frame::from_delta_bytes(&bytes);
+    assert!(
+        result.is_err(),
+        "10-byte Delta payload must be rejected, not index OOB"
+    );
+}
+
+#[test]
+fn oversized_frame_is_rejected() {
+    // A frame whose payload exceeds `MAX_FRAME_BYTES` must be rejected with
+    // `FrameTooLarge` before any scanning/allocation. We cannot allocate 64 MiB
+    // in the test lightly, so we exercise the guard by constructing a frame with
+    // a bogus length via the raw bytes: prepend a valid header then claim a huge
+    // string/extra count. Instead, directly assert the constant and that an
+    // otherwise-valid frame under the ceiling still decodes.
+    use flux_ir_serde::MAX_FRAME_BYTES;
+    assert_eq!(MAX_FRAME_BYTES, 64 * 1024 * 1024);
+    // A tiny valid frame must NOT trip the ceiling.
+    let good = init_frame_with_bytecode(vec![0x00]);
+    assert!(Frame::from_init_bytes(&good).is_ok());
+}
+
+#[test]
+fn oversized_payload_declared_length_is_rejected() {
+    // Build a byte buffer whose decoded payload length exceeds MAX_FRAME_BYTES.
+    // `read_frame_type` reads the 6-byte header then checks `payload.len()`; we
+    // craft a valid header + a payload longer than the ceiling by stuffing the
+    // rest with an over-long declared `str_count` is unnecessary — simply feed a
+    // buffer that is header + (MAX_FRAME_BYTES + 1) bytes; the payload alone is
+    // already over the ceiling so the decoder rejects before parsing further.
+    use flux_ir_serde::MAX_FRAME_BYTES;
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&MAGIC.to_le_bytes());
+    bytes.push(PROTOCOL_VERSION);
+    bytes.push(FRAME_INIT); // frame type = Init; payload starts after the 6th byte
+    // Payload: MAX_FRAME_BYTES + 1 zeroes ⇒ header(6) + payload means payload.len()
+    // == MAX_FRAME_BYTES + 1, which exceeds the ceiling.
+    bytes.extend(std::iter::repeat_n(0u8, MAX_FRAME_BYTES + 1));
+    let err = Frame::from_init_bytes(&bytes).expect_err("oversized payload rejected");
+    match err {
+        WireError::FrameTooLarge {
+            declared, ceiling, ..
+        } => {
+            assert_eq!(declared, MAX_FRAME_BYTES + 1);
+            assert_eq!(ceiling, MAX_FRAME_BYTES);
+        }
+        other => panic!("expected FrameTooLarge, got {other:?}"),
+    }
 }

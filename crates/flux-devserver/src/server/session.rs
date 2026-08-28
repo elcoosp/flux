@@ -156,7 +156,6 @@ fn unknown_frame(tag: u8) -> Diagnostic {
 /// CPU-bound step in the WebSocket path and must not stall the reactor.
 async fn handle_hello(bytes: &[u8], shared: &Arc<Shared>) -> Option<Vec<u8>> {
     use flux_ir_serde::Frame;
-    eprintln!("[FLUXRT-srv] handle_hello: {} bytes", bytes.len());
     let Some(hello) = Frame::from_hello_bytes(bytes) else {
         let shared = Arc::clone(shared);
         return blocking(move || shared.pipeline.lock().error_frame(&malformed_hello())).await;

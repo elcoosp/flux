@@ -31,6 +31,7 @@ mod telemetry;
 mod wire;
 
 pub use encode::{deserialize_patches, hash_closure, hash_props, serialize_patches};
+pub use flux_syntax::opcode::Opcode;
 pub use frame::{
     DeltaFrame, ErrorFrame, Frame, FrameKind, HeartbeatFrame, HelloFrame, InitFrame,
     InternStringFrame, MAGIC, PROTOCOL_VERSION, STRING_ID_CANONICAL_CEILING, StringInternedFrame,
@@ -47,4 +48,4 @@ pub use telemetry::{
     enrich_telemetry, enrich_with_span,
 };
 pub use wire::NodeSignalMeta;
-pub use wire::WireError;
+pub use wire::{MAX_FRAME_BYTES, WireError, validate_bytecode};
