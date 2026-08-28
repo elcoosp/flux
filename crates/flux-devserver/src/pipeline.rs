@@ -261,6 +261,23 @@ impl Pipeline {
             .collect()
     }
 
+    /// The generic instantiations the last good compile specialised, merged
+    /// across every source file (roadmap Phase 1).
+    ///
+    /// A generic component instantiated in two different files (`Counter[Int]`
+    /// in one, `Counter[Float]` in another) yields one entry per distinct
+    /// instantiation, deduplicated — the release backends emit one native type
+    /// per entry, so a duplicate would emit the same type twice and a missing
+    /// entry would erase the type argument. Empty before the first successful
+    /// compile and for programs with no generic call sites.
+    #[must_use]
+    pub fn monomorphizations(&self) -> Vec<flux_ir::Monomorphization> {
+        self.last_good
+            .as_ref()
+            .map(|ir| ir.monomorphizations.clone())
+            .unwrap_or_default()
+    }
+
     /// Builds the DevTools [`SourceMap`] from the last-good lowered IR so the
     /// debug bridge can enrich telemetry with `.flux` source spans (Phase 3).
     ///
@@ -826,5 +843,85 @@ mod tests {
         pipeline.last_good = Some(ir);
         let required = pipeline.required_capabilities();
         assert_eq!(required, vec![(2, 2), (3, 1)], "CALL_CAP pairs, deduped");
+    }
+
+    /// A generic `Counter` and one call site, self-contained: the pipeline
+    /// type-checks each file independently, so a cross-file reference is an
+    /// unbound name. The merge is still what's under test — each file lowers its
+    /// own instantiation and the tree must collect all of them.
+    fn generic_file(component: &str, initial: &str) -> String {
+        format!(
+            "trait Numeric[T] {{\n  fn zero() -> T\n  fn one() -> T\n}}\n\ncompo Counter[T: Numeric](initial: T)\n  state count: T = initial\n\n\ncompo {component}\n  Counter(initial: {initial})\n\n"
+        )
+    }
+
+    #[test]
+    fn monomorphizations_are_empty_before_the_first_compile() {
+        let pipeline = Pipeline::new("/tmp/project", false);
+        assert!(pipeline.monomorphizations().is_empty());
+    }
+
+    #[test]
+    fn a_program_without_generics_has_no_monomorphizations() {
+        let mut pipeline = Pipeline::new("/tmp/project", false);
+        pipeline.set_source(
+            Path::new("/tmp/project/main.flux"),
+            "compo Hello\n  Button(text: \"tap\")\n".to_owned(),
+        );
+        pipeline.compile().expect("compiles");
+        assert!(
+            pipeline.monomorphizations().is_empty(),
+            "no generic call sites means nothing to specialise"
+        );
+    }
+
+    #[test]
+    fn the_tree_merge_collects_instantiations_from_every_file() {
+        // Phase 1's pipeline task: instantiations discovered in separate files
+        // must all survive into the merged tree, or a backend emits only the
+        // types it happened to see in one file.
+        let mut pipeline = Pipeline::new("/tmp/project", false);
+        pipeline.set_source(
+            Path::new("/tmp/project/int.flux"),
+            generic_file("IntCase", "0"),
+        );
+        pipeline.set_source(
+            Path::new("/tmp/project/float.flux"),
+            generic_file("FloatCase", "0.0"),
+        );
+        pipeline.compile().expect("the generic program compiles");
+
+        let mut names: Vec<String> = pipeline
+            .monomorphizations()
+            .into_iter()
+            .map(|mono| mono.mangled)
+            .collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(
+            names,
+            vec!["Counter_Float", "Counter_Int"],
+            "both instantiations must reach the merged tree"
+        );
+    }
+
+    #[test]
+    fn merged_instantiations_are_deduplicated() {
+        // Two files instantiating `Counter[Int]` must not yield two identical
+        // entries, or the backend would emit the same native type twice.
+        let mut pipeline = Pipeline::new("/tmp/project", false);
+        pipeline.set_source(Path::new("/tmp/project/a.flux"), generic_file("ACase", "0"));
+        pipeline.set_source(Path::new("/tmp/project/b.flux"), generic_file("BCase", "0"));
+        pipeline.compile().expect("compiles");
+
+        let monos = pipeline.monomorphizations();
+        let int_entries = monos
+            .iter()
+            .filter(|mono| mono.mangled == "Counter_Int")
+            .count();
+        assert_eq!(
+            int_entries, 1,
+            "the same instantiation in two files is one specialisation"
+        );
     }
 }

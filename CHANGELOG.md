@@ -18,7 +18,11 @@ instantiation gets its own `ComponentId` and the release backends can emit one
 native type per instantiation instead of erasing the type argument.
 `LoweredIr::requires_monomorph()` / `specialised_names()` expose the set to
 codegen; non-generic programs are byte-identical to before. `flux-devserver`
-merges each file's instantiations into the compiled tree.
+merges each file's instantiations into the compiled tree and exposes the merged,
+deduplicated set as `Pipeline::monomorphizations()` — one entry per distinct
+instantiation, so a backend emits each specialised native type exactly once even
+when two files instantiate the same one. (Type checking is per-file, so each file
+carries its own generic definition; the merge is what makes the tree complete.)
 
 ### Roadmap Phase 3 — `Patch::Reattach`, state-preserving structural edits — DONE
 
