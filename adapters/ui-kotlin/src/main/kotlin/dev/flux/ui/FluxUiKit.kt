@@ -6,7 +6,7 @@ package dev.flux.ui
  * Mirrors the Swift `FluxUIKit` (FLUX-008). This object re-exports the kit's
  * public types and the adapter-contract version so consumers and tests import
  * everything from one place. Adapters translate Flux IR nodes into native
- * views; the props (read through [Props]) are the contract (Appendix F).
+ * the props (read through [Props]) are the contract (AGENTS.md §3.5).
  *
  * The kit hands out **factories**, not shared adapter instances. Every IR node
  * resolves a fresh [FluxAdapter] through [factoryFor]/[adapterFor] so per-node
@@ -15,10 +15,10 @@ package dev.flux.ui
  * the delegate-leak brittleness (FLUX-007).
  */
 public object FluxUiKit {
-    /** The adapter contract version this kit implements (Appendix F). */
+    /** The adapter contract version this kit implements (contract version 1, per AGENTS.md §3.5). */
     public const val ADAPTER_CONTRACT_VERSION: Int = 1
 
-    /** The 8 dev adapters, keyed by their IR node-kind tag, as factories. */
+    /** The 9 declarative adapters, keyed by their IR node-kind tag, as factories. */
     public val adapters: Map<String, FluxAdapterFactory> =
         mapOf(
             TextAdapter.KIND to FluxAdapterFactory(TextAdapter::create),

@@ -3,9 +3,10 @@
 
 import UIKit
 
-/// Dev adapter mapping a Flux `Screen` node to a `UIViewController`.
+/// Declarative adapter mapping a Flux `Screen` node to a `UIViewController`
+/// (unified tier; AGENTS.md §3.5).
 ///
-/// A screen has no props of its own (Appendix F.7); its single child is the
+/// A screen has no props of its own (see AGENTS.md §3.5); its single child is the
 /// screen's content, hosted in the view controller's root view. Because the
 /// runtime reuses the same `UIViewController` instance across patches (keyed by
 /// node id), a screen's navigation state and its content's state survive router

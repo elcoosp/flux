@@ -11,7 +11,8 @@
 
 import UIKit
 
-/// Dev adapter mapping a Flux `Component` node to a plain `UIView` that simply
+/// Declarative adapter (unified tier; AGENTS.md §3.5) mapping a Flux
+/// `Component` node to a plain `UIView` that simply
 /// hosts its children. User components carry no host-native props of their own;
 /// their visual content is entirely their descendant primitives.
 public final class ContainerAdapter: FluxAdapter {
