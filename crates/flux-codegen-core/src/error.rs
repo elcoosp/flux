@@ -1,15 +1,15 @@
-//! Codegen error type (FLUX-021).
+//! Codegen error type (shared, FLUX-047).
 //!
 //! Every codegen failure carries the source [`Span`] it occurred at, following
-//! the diagnostic contract in AGENTS.md §3.7 (what / where / why / how).
+//! the diagnostic contract in AGENTS.md §3.11 (what / where / why / how).
 //! `codegen` itself never panics on well-formed input — it renders best-effort
-//! Compose and only returns a [`CodegenError`] when a construct cannot be
-//! represented at all.
+//! native source and only returns a [`CodegenError`] when a construct cannot be
+//! represented at all (e.g. an unknown primitive that is not in the registry).
 
 use flux_syntax::Span;
 use thiserror::Error;
 
-/// An error produced while generating Kotlin/Compose from a lowered Flux program.
+/// An error produced while generating native source from a lowered Flux program.
 #[derive(Error, Debug, Clone, PartialEq)]
 pub enum CodegenError {
     /// A construct could not be codegen'd; `message` explains why, `span`

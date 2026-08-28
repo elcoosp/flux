@@ -2,15 +2,11 @@
 //!
 //! This crate consumes the lowered Flux reactive tree ([`flux_ir::LoweredIr`])
 //! together with its originating surface AST ([`flux_parser::Ast`]) and emits
-//! idiomatic SwiftUI source (spec FR-011, Appendix F, ADR-0003 / ADR-0004).
-//! The dev server ships the same IR as binary patches; in release, this crate
-//! codegen's it to a native SwiftUI app.
-//!
-//! The lowered arena carries only numeric component identifiers and no
-//! runtime values (it is kept compact on purpose — Appendix C §C.1). Component
-//! names, generics, `@pure` annotations, prop/state types and string
-//! interpolations are therefore recovered from the AST through the ADR-0027
-//! node-ID bridge exposed in the `bridge` module."
+//! idiomatic SwiftUI source (spec FR-011, Appendix F, ADR-0003 / ADR-0004). The
+//! shared traversal, primitive registry, node-ID bridge and expression renderer
+//! live in `flux-codegen-core`; this crate supplies only the Swift-specific
+//! syntax via the [`Backend`](flux_codegen_core::Backend) impl in `backend_impl`
+//! and the component/sum-type header forms in `component`.
 //!
 //! # Examples
 //!
@@ -35,15 +31,8 @@
     unreachable_pub
 )]
 
-mod bridge;
+mod backend_impl;
 mod codegen;
-mod error;
-mod expressions;
-mod model;
-mod nodes;
-mod printers;
-mod program;
-mod sumtypes;
 
 pub use codegen::codegen;
-pub use error::CodegenError;
+pub use flux_codegen_core::CodegenError;

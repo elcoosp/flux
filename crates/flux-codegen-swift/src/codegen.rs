@@ -1,32 +1,18 @@
-//! Top-level codegen orchestration for FLUX-020.
+//! Top-level codegen orchestration for FLUX-020 (SwiftUI).
 //!
 //! [`codegen`] turns a lowered Flux reactive tree plus its originating surface
 //! AST into idiomatic SwiftUI source (spec FR-011, Appendix F). The lowered
 //! arena provides tree *structure*; the AST (reached via the ADR-0027 node-ID
 //! bridge) provides *semantics* — component names, generics, `@pure`, props,
 //! `state`, string interpolations — that the arena deliberately drops to stay
-//! compact.
+//! compact. The shared emitter and primitive registry live in `flux-codegen-core`;
+//! this function only wires the Swift [`Backend`].
 
+use flux_codegen_core::{Bridge, Emitter};
 use flux_ir::LoweredIr;
 use flux_parser::Ast;
 
-use crate::bridge::Bridge;
-use crate::program::Emitter;
-
 /// Generates SwiftUI source from a lowered Flux program and its surface AST.
-///
-/// The two inputs are complementary: `lowered` is the packed reactive tree
-/// (structure — what nodes exist and how they nest), while `ast` is the
-/// original surface syntax. Because the arena stores only numeric component
-/// identifiers and drops runtime values, names, generics and interpolations
-/// are recovered from `ast` through the ADR-0027 node-ID bridge (the `bridge`
-/// module).
-///
-/// # Panics
-///
-/// Does not panic on well-formed input: every construct that cannot be
-/// represented degrades to a parseable placeholder (a Swift comment or
-/// `EmptyView`) rather than aborting the whole file.
 ///
 /// # Examples
 ///
@@ -41,13 +27,12 @@ use crate::program::Emitter;
 /// let typed = type_check(&ast).expect("well-typed");
 /// let lowered = lower(&ast, &typed).expect("lowers");
 /// let swift = codegen(&lowered, &ast);
-/// assert!(swift.contains("struct Hello: View"));
-/// assert!(swift.contains("@State private var count"));
+/// assert!(swift.contains("@State private var count: Int = 0"));
 /// ```
 #[must_use]
 pub fn codegen(lowered: &LoweredIr, ast: &Ast) -> String {
     let bridge = Bridge::build(ast);
-    let mut emitter = Emitter::new(lowered, &bridge);
+    let mut emitter = Emitter::<crate::backend_impl::Swift>::new(lowered, &bridge);
     emitter.emit_program();
     emitter.finish()
 }

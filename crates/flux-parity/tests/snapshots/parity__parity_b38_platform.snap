@@ -1,6 +1,5 @@
 ---
 source: crates/flux-parity/tests/parity.rs
-assertion_line: 41
 expression: serialized
 ---
 verdict: equivalent
@@ -34,7 +33,7 @@ swift  == [
         name: "PlatformButton",
         children: [
             If {
-                cond: "( /* unsupported expr */ 0 == \"ios\" )",
+                cond: "( 0 /* unsupported */ == \"ios\" )",
                 then_branch: [
                     Primitive {
                         name: "CupertinoButton",

@@ -1,16 +1,15 @@
 //! Node-ID bridge (ADR-0027) from the lowered arena back to the surface AST.
 //!
-//! [`flux_ir`] lowers every component-body expression under
-//! [`EXPR_TAG`] and every component declaration under [`COMPONENT_TAG`], always
-//! with parent `0`. Lowered nodes therefore carry the exact [`NodeId`]s the
-//! type checker assigned. We rebuild those IDs from the AST so each packed node
-//! can recover its originating surface construct (its name, props,
-//! interpolations, generics, `@pure` annotation, …) — information the arena
-//! deliberately drops to stay compact.
+//! [`flux_ir`] lowers every component-body expression under [`EXPR_TAG`] and
+//! every component declaration under [`COMPONENT_TAG`], always with parent `0`.
+//! Lowered nodes therefore carry the exact [`NodeId`]s the type checker
+//! assigned. We rebuild those IDs from the AST so each packed node can recover
+//! its originating surface construct (its name, props, interpolations,
+//! generics, `@pure` annotation, …) — information the arena deliberately drops
+//! to stay compact.
 //!
-//! The bridge *owns* cloned references to the originating AST nodes (they are
-//! cheap, `Clone` types) so it carries no lifetime parameter and can be passed
-//! freely through the emitter.
+//! This bridge is shared by both backends (FLUX-047): it owns no language
+//! specifics, only the deterministic ID reconstruction the lowering pass uses.
 
 use flux_parser::{Ast, ComponentDecl, Decl, Expr, TypeDecl};
 use flux_syntax::{DeclTag, ExprTag, NodeId, Span};
@@ -23,43 +22,32 @@ pub(crate) const COMPONENT_TAG: u8 = 3;
 /// Derives the [`NodeId`] for `span` as an expression-origin node.
 #[must_use]
 pub(crate) fn expr_id(span: Span) -> NodeId {
-    // `ExprTag::into_u8` returns the discriminant unchanged, so this reproduces
-    // the exact `NodeId` the type checker/lowering assigned under `EXPR_TAG`
-    // (see `flux_ir::lower::ids`); the canonical `compute_node_id` now requires
-    // `impl NodeTag` (ADR/issue 3a).
     flux_syntax::compute_node_id(0, ExprTag(EXPR_TAG), span, None)
 }
 
 /// Derives the [`NodeId`] for `span` as a component-declaration node.
-///
-/// The lowerer records every `component` declaration under [`DeclTag`] (see
-/// `flux-ir::lower::ids::decl_node_id`), so the bridge must use the same
-/// family. `DeclTag` and `ExprTag` map to disjoint byte ranges; using
-/// `ExprTag` here silently produces an ID that never matches the lowered node
-/// and forces the emitter into its `FluxComponent_<id>` placeholder branch.
 #[must_use]
 pub(crate) fn component_id(span: Span) -> NodeId {
     flux_syntax::compute_node_id(0, DeclTag(COMPONENT_TAG), span, None)
 }
 
 /// Registry of surface constructs keyed by the [`NodeId`] the lowering pass
-/// assigned them. Built once per [`crate::codegen`] run from the AST.
+/// assigned them. Built once per codegen run from the AST.
 #[derive(Debug, Default)]
-pub(crate) struct Bridge {
+pub struct Bridge {
     /// Expression-origin nodes (primitives, `if`/`when`, `ForEach`, `match`).
-    exprs: std::collections::HashMap<NodeId, Expr>,
+    pub(crate) exprs: std::collections::HashMap<NodeId, Expr>,
     /// Component declarations.
-    components: std::collections::HashMap<NodeId, ComponentDecl>,
-    /// Algebraic data type declarations, in source order (emitted as Kotlin
-    /// `sealed interface` + `data class` variants).
-    types: Vec<TypeDecl>,
+    pub(crate) components: std::collections::HashMap<NodeId, ComponentDecl>,
+    /// Algebraic data type declarations, in source order.
+    pub(crate) types: Vec<TypeDecl>,
 }
 
 impl Bridge {
     /// Builds the bridge by walking every declaration and (recursively) every
     /// expression in the AST, recording each under its derived [`NodeId`].
     #[must_use]
-    pub(crate) fn build(ast: &Ast) -> Bridge {
+    pub fn build(ast: &Ast) -> Bridge {
         let mut bridge = Bridge::default();
         for decl in &ast.decls {
             match decl {

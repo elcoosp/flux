@@ -1,5 +1,5 @@
 [package]
-name = "flux-codegen-kotlin"
+name = "flux-codegen-core"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,7 +11,6 @@ flux-syntax.workspace = true
 flux-ir.workspace = true
 flux-parser.workspace = true
 flux-types.workspace = true
-flux-codegen-core.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
