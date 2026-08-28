@@ -56,6 +56,7 @@ jobs:
       - name: Install Android platform & accept licenses
         run: |
           yes | sdkmanager --licenses >/dev/null
+          sdkmanager --update >/dev/null 2>&1 || true
           sdkmanager "platforms;android-37"
 
       - name: Run adapter & runtime unit tests
@@ -83,15 +84,17 @@ jobs:
           fi
           if [ -d "$gradle_cache" ]; then
             tmp_dir="$(mktemp -d)"
+            # Full transitive Compose classpath: every androidx AAR resolved by
+            # Gradle (runtime/foundation/material3/ui + navigation + activity +
+            # their annotation/collection/lifecycle dependencies) contains the
+            # classes.jar we need on kotlinc's -classpath.
             while IFS= read -r aar; do
               extracted="$tmp_dir/$(basename "$aar" .aar).jar"
               if unzip -o -q "$aar" classes.jar -d "$tmp_dir" >/dev/null 2>&1; then
                 mv "$tmp_dir/classes.jar" "$extracted"
                 compose_cp="${compose_cp:+$compose_cp:}$extracted"
               fi
-            done < <(find "$gradle_cache" \
-              \( -path '*/androidx/compose/*' -o -path '*/androidx/navigation/navigation-compose/*' \
-                 -o -path '*/androidx/activity/activity-compose/*' \) -name '*.aar' 2>/dev/null)
+            done < <(find "$gradle_cache" -path '*/androidx/*' -name '*.aar' 2>/dev/null)
           fi
           compose_compiler="$(find "$HOME/.gradle" -name 'kotlin-compose-compiler-plugin-embeddable-*.jar' 2>/dev/null | head -n1)"
           if [ -n "$compose_cp" ] && [ -f "$compose_compiler" ]; then
