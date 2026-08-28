@@ -36,7 +36,7 @@ struct DispatchResult: Sendable {
 /// The default [`PassthroughAsyncResolver`] treats the handle as already-resolved, so
 /// synchronous-style `await` (and headless tests) work without a transport. A live
 /// host overrides `asyncResolver` with a bridge to its real async capability surface.
-protocol AsyncResolver: Sendable {
+public protocol AsyncResolver: Sendable {
     /// Resolves `future` to its settled value, possibly after awaiting real async work.
     ///
     /// `future` is the value the handler's `AWAIT` parked on — the result-cell
@@ -52,8 +52,8 @@ protocol AsyncResolver: Sendable {
 /// backend; the future handle flows straight back as the resolved value. The
 /// live host replaces `FluxRuntime.asyncResolver` with a bridge (e.g.
 /// `DelayAsyncResolver` or a `CapabilityAsyncResolver`) to real async work.
-struct PassthroughAsyncResolver: AsyncResolver {
-    func resolve(_ future: VMValue) async -> VMValue { future }
+public struct PassthroughAsyncResolver: AsyncResolver {
+    public func resolve(_ future: VMValue) async -> VMValue { future }
 }
 
 /// Resolves an awaited `Pending` cell after a real wall-clock delay.
@@ -64,7 +64,7 @@ struct PassthroughAsyncResolver: AsyncResolver {
 /// `Null` — the oracle's `(2,99)` async capability leaves the cell empty, and a
 /// `Null` resume is the faithful "no payload" settle. A real capability (LANE-C)
 /// supplies a value-bearing resolver via `CapabilityAsyncResolver` instead.
-struct DelayAsyncResolver: AsyncResolver {
+public struct DelayAsyncResolver: AsyncResolver {
     /// Seconds to wait before settling an otherwise-empty `Pending` cell.
     let delay: TimeInterval
     /// The suspend closure; defaults to `Task.sleep` but is injectable so tests
@@ -76,7 +76,7 @@ struct DelayAsyncResolver: AsyncResolver {
         self.suspend = suspend
     }
 
-    func resolve(_ future: VMValue) async -> VMValue {
+    public func resolve(_ future: VMValue) async -> VMValue {
         await suspend(delay)
         // The cell id the handler parked on; a real capability-keyed resolver
         // would read it via the graph and return the capability's result. Here
@@ -91,15 +91,24 @@ struct DelayAsyncResolver: AsyncResolver {
 /// lets a live host register a resolver per capability-method key so a camera /
 /// network / location call resolves through its real OS bridge. The resolver
 /// receives the cell id and a read-only snapshot of the cell's current value.
-struct CapabilityAsyncResolver: AsyncResolver {
+public struct CapabilityAsyncResolver: AsyncResolver {
     /// A single capability's resolution strategy.
     typealias Resolve = @Sendable (UInt32, VMValue) async -> VMValue
 
     private let resolvers: [UInt32: Resolve]
+    /// Used when no keyed resolver matches (or none are registered). The oracle's
+    /// `(2,99)` async capability leaves the cell empty, so the default settles to
+    /// `Null` after a real (tiny) suspension, mirroring `DelayAsyncResolver`.
+    private let `default`: Resolve
 
-    /// Builds a resolver from `(capId << 16 | methodId)` -> resolver closures.
-    init(_ entries: [UInt32: Resolve]) {
+    /// Builds a resolver from `(capId << 16 | methodId)` -> resolver closures, with
+    /// an optional `default` used when no key matches.
+    init(_ entries: [UInt32: Resolve] = [:], default: @escaping Resolve = { _, _ in
+        try? await Task.sleep(nanoseconds: 1_000_000)
+        return .null
+    }) {
         self.resolvers = entries
+        self.default = `default`
     }
 
     /// The composite key used to look a resolver up.
@@ -107,14 +116,18 @@ struct CapabilityAsyncResolver: AsyncResolver {
         (capId << 16) | (methodId & 0xFFFF)
     }
 
-    func resolve(_ future: VMValue) async -> VMValue {
+    public func resolve(_ future: VMValue) async -> VMValue {
         guard case let .int(cellId) = future else { return .null }
-        // Without a registered capability resolver the cell is settled as `Null`
-        // after a real (but tiny) suspension, mirroring `DelayAsyncResolver`.
-        // LANE-C attaches the real OS resolvers here keyed by `cellId`'s owning
-        // capability via the graph's capability table.
-        _ = try? await Task.sleep(nanoseconds: 1_000_000)
-        return .null
+        // LANE-C: the `(capId, methodId)` that owns `cellId` is looked up via the
+        // graph's capability table; its keyed resolver runs the real OS bridge
+        // (camera/network/location) and returns the settled value. The key is not
+        // derivable from the cell id here, so the live host registers resolvers
+        // keyed by capability and this entry point dispatches by key. Until that
+        // wiring lands, the `default` resolver settles the (empty) reference cell.
+        if let resolver = resolvers[UInt32(cellId)] {
+            return await resolver(UInt32(cellId), future)
+        }
+        return await `default`(UInt32(cellId), future)
     }
 }
 
@@ -142,7 +155,7 @@ public final class FluxRuntime: FluxExecutor {
     /// The async-future resolver for `await` (ADR-0044). Defaults to the synchronous
     /// pass-through; a live host replaces it with a bridge to its real async
     /// capability surface (network/timer/etc.).
-    private(set) var asyncResolver: any AsyncResolver = PassthroughAsyncResolver()
+    public var asyncResolver: any AsyncResolver = PassthroughAsyncResolver()
     /// Handler id → (closure descriptor + bytecode blob + pre-decoded instruction
     /// stream). The decoded `[Instruction]` is produced once at registration (R3)
     /// and reused on every dispatch, so the per-tap hot path never re-decodes. A
@@ -388,12 +401,12 @@ public final class FluxRuntime: FluxExecutor {
                     return (nil, VMError(kind: .typeMismatch, offset: Int(state.resumeOffset)))
                 }
                 let resolved: VMValue
-                switch graph.cellState(cellId) {
+                switch store.cellState(cellId) {
                 case .ready:
-                    resolved = graph.read(cellId) ?? .null
+                    resolved = store.read(cellId) ?? .null
                 case .pending:
                     let settled = await asyncResolver.resolve(.int(Int64(cellId)))
-                    graph.resolveCell(cellId, settled)
+                    store.resolveCell(cellId, settled)
                     resolved = settled
                 case .error:
                     resolved = .null
