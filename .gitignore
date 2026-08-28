@@ -40,3 +40,6 @@ dump.txt
 .build
 .kotlin
 docs/ideas
+fuzz/corpus
+fuzz/target
+fuzz/artifacts
