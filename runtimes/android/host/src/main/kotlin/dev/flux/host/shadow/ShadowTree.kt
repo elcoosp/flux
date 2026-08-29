@@ -9,6 +9,8 @@ import dev.flux.host.vm.StringResolver
 import dev.flux.host.vm.VmResult
 import dev.flux.host.wire.ClosureRef
 import dev.flux.host.wire.FluxFrame
+import dev.flux.host.vm.debug.TelemetryBridge
+import dev.flux.host.vm.debug.TelemetryEvent
 import dev.flux.host.wire.NodeSignalMeta
 import dev.flux.host.wire.Patch
 import dev.flux.host.wire.PropDiff
@@ -468,6 +470,21 @@ public class ShadowTree(
                 withAdapter(node.kind, node.componentId, node.view) { adapter, view ->
                     adapter.update(view, newKit)
                 }
+                // DevTools: report the view mutation so the component tree shows
+                // the live node graph. The host crate is Android-free and drives
+                // in-memory adapter views, so geometry (frame) is unavailable here
+                // — it is filled by the platform shell (ADR-0048). `null` still
+                // records node presence in the DevTools state.
+                if (TelemetryBridge.sink != null) {
+                    TelemetryBridge.emit(
+                        TelemetryEvent.ViewMutation(
+                            nodeId = node.id,
+                            nativeViewId = node.view.nodeId.toULong(),
+                            mutationKind = 0u.toUByte(),
+                            frame = null,
+                        ),
+                    )
+                }
                 emitTrace(TraceEvent.Update(seq = lastSeq, id = patch.id))
             }
             0x03 -> { // Insert
@@ -490,6 +507,19 @@ public class ShadowTree(
                 withAdapter(parent.kind, parent.componentId, parent.view) { adapter, view ->
                     adapter.setChildren(view, parent.children.map { it.id }, parent.children.map { it.view })
                 }
+                // DevTools: report the newly-created node so the component tree
+                // shows the live node graph (geometry is unavailable in the
+                // Android-free host crate; the shell fills it — ADR-0048).
+                if (TelemetryBridge.sink != null) {
+                    TelemetryBridge.emit(
+                        TelemetryEvent.ViewMutation(
+                            nodeId = built.id,
+                            nativeViewId = built.view.nodeId.toULong(),
+                            mutationKind = 0u.toUByte(),
+                            frame = null,
+                        ),
+                    )
+                }
             }
             0x04 -> { // Remove
                 val node = nodes.remove(patch.id) ?: return
@@ -503,6 +533,18 @@ public class ShadowTree(
                 destroySubtree(node)
                 detachedCount++
                 emitTrace(TraceEvent.Detach(seq = lastSeq, id = patch.id))
+                // DevTools: report the removed node (mutation_kind 1) so the
+                // component tree drops it from the live node graph.
+                if (TelemetryBridge.sink != null) {
+                    TelemetryBridge.emit(
+                        TelemetryEvent.ViewMutation(
+                            nodeId = patch.id,
+                            nativeViewId = node.view.nodeId.toULong(),
+                            mutationKind = 1u.toUByte(),
+                            frame = null,
+                        ),
+                    )
+                }
             }
             0x06 -> { // Handler
                 val node = nodes[patch.id] ?: return

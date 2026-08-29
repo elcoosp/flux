@@ -11,6 +11,7 @@
 //  identity is preserved across updates, pushes and pops.
 
 import Foundation
+import UIKit
 import FluxUIKit
 
 /// A node whose native view has been built and is being kept alive.
@@ -308,6 +309,20 @@ struct ShadowTreeReconciler {
                 existing.runtimeProps = effectiveProps
                 existing.lastPropHash = newHash
                 report.updated.append(nodeId)
+                // DevTools: report the updated node with its live layout frame
+                // (the view is a real `UIView`, so geometry is available here).
+                #if DEBUG
+                let uiv = existing.view as? UIView
+                let rect = uiv.map {
+                    Rect(
+                        x: Double($0.frame.origin.x),
+                        y: Double($0.frame.origin.y),
+                        width: Double($0.frame.size.width),
+                        height: Double($0.frame.size.height),
+                    )
+                }
+                fluxDevtoolsEmit(.viewMutation(nodeId: nodeId, nativeViewId: UInt64(nodeId), mutationKind: 0, frame: rect))
+                #endif
             }
         } else {
             // A `Component` node (Appendix C) is a host-side container: it has no
@@ -332,6 +347,12 @@ struct ShadowTreeReconciler {
             let hash = propHash(effectiveProps)
             built[nodeId] = BuiltNode(adapter: adapter, view: view, runtimeProps: effectiveProps, lastPropHash: hash, isRouter: isRouter)
             report.built.append(nodeId)
+            // DevTools: report the newly-built node so the component tree shows
+            // the live node graph. Geometry (frame) is unavailable until the view
+            // is laid out, so it is sent on the first update instead.
+            #if DEBUG
+            fluxDevtoolsEmit(.viewMutation(nodeId: nodeId, nativeViewId: UInt64(nodeId), mutationKind: 0, frame: nil))
+            #endif
             // Bind handlers once, at build time — re-binding on every frame
             // would stack UIControl actions (ButtonAdapter adds one per call).
             for handlerId in node.handlers {
@@ -421,6 +442,19 @@ struct ShadowTreeReconciler {
                 owner.runtimeProps = effectiveProps
                 owner.lastPropHash = propHash(effectiveProps)
                 report.updated.append(nodeId)
+                // DevTools: report the updated node with its live layout frame.
+                #if DEBUG
+                let uiv = owner.view as? UIView
+                let rect = uiv.map {
+                    Rect(
+                        x: Double($0.frame.origin.x),
+                        y: Double($0.frame.origin.y),
+                        width: Double($0.frame.size.width),
+                        height: Double($0.frame.size.height),
+                    )
+                }
+                fluxDevtoolsEmit(.viewMutation(nodeId: nodeId, nativeViewId: UInt64(nodeId), mutationKind: 0, frame: rect))
+                #endif
             }
             // Re-parent children so a dirty descendant lands in this view. For a
             // Router, navigation (signal 97) changes which single child is active,

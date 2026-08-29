@@ -4,9 +4,6 @@ use std::sync::Arc;
 
 use gpui::{AnyElement, Context, IntoElement, Render, Window};
 
-use flux_ir_serde::Rect;
-use flux_syntax::NodeId;
-
 use crate::row::{empty_row, into_any, kv_row, rows_column};
 use crate::state::DevToolsState;
 use crate::time_travel::ReconstructedState;
@@ -38,13 +35,16 @@ impl ComponentTreeView {
             rows.push(into_any(empty_row("no layout frames received yet")));
         }
         for (id, frame) in live.view_frames.iter() {
-            rows.push(into_any(kv_row(
-                format!("node#{id}"),
-                format!(
+            let value = match frame {
+                Some(rect) => format!(
                     "{}×{} @ ({}, {})",
-                    frame.width, frame.height, frame.x, frame.y
+                    rect.width, rect.height, rect.x, rect.y
                 ),
-            )));
+                // The host knows the node exists but cannot measure geometry
+                // (Android-free host crate driving in-memory adapter views).
+                None => "node present · geometry pending".to_string(),
+            };
+            rows.push(into_any(kv_row(format!("node#{id}"), value)));
         }
         rows_column(rows)
     }

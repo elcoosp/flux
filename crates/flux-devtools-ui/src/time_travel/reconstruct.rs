@@ -27,8 +27,12 @@ pub struct ReconstructedState {
     pub gas_remaining: Option<u32>,
     /// Signal cell values keyed by [`SignalId`].
     pub signals: Vec<(SignalId, Value)>,
-    /// Native view layout frames keyed by [`NodeId`].
-    pub view_frames: Vec<(NodeId, Rect)>,
+    /// Native view layout frames keyed by [`NodeId`]. The rect is `None` when
+    /// the host knows the node exists but cannot measure its geometry (the
+    /// host crate is Android-free and drives in-memory adapter views, so pixel
+    /// rects are only available in the platform shell — see ADR-0048). We still
+    /// record node presence so the component tree renders the live node graph.
+    pub view_frames: Vec<(NodeId, Option<Rect>)>,
     /// Reactive dependency edges: for each written signal, the effect IDs that
     /// re-run when it changes (PRD-P user story 2 — "what reads" a signal). The
     /// signal-graph view renders these so a developer can see reactivity the way
@@ -103,11 +107,15 @@ pub fn reconstruct_state(
                 mutation_kind,
                 ..
             } => {
-                if let Some(rect) = frame {
-                    upsert(&mut state.view_frames, *node_id, *rect);
-                } else if *mutation_kind == 1 {
-                    // Remove (mutation_kind 1): drop the frame if present.
+                if *mutation_kind == 1 {
+                    // Remove (mutation_kind 1): drop the node if present.
                     state.view_frames.retain(|(id, _)| *id != *node_id);
+                } else {
+                    // Create/update: record node presence. The rect is `None`
+                    // when the host cannot measure geometry (the host crate is
+                    // Android-free and drives in-memory adapter views); we still
+                    // track the node so the component tree shows the live graph.
+                    upsert(&mut state.view_frames, *node_id, *frame);
                 }
             }
             EnrichedTelemetryEvent::HandlerInvocation { is_start: true, .. } => {

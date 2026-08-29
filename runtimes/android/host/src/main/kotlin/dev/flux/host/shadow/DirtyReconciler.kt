@@ -1,5 +1,8 @@
 package dev.flux.host.shadow
 
+import dev.flux.host.vm.debug.TelemetryBridge
+import dev.flux.host.vm.debug.TelemetryEvent
+
 /**
  * The Phase-1 + R1 dirty-set reconcile (ADR-0027): after a handler dispatch writes
  * a set of signals, only the nodes whose prop expressions read those signals may
@@ -72,6 +75,20 @@ public fun ShadowTree.reconcileDirty(
         propMaterializations += 2u
         withAdapter(node.kind, node.componentId, node.view) { adapter, view ->
             adapter.update(view, newKit)
+        }
+        // DevTools: report the updated node so the component tree tracks the
+        // live node graph. Geometry is unavailable in the Android-free host
+        // crate; the platform shell fills it (ADR-0048). `null` still records
+        // node presence in the DevTools state.
+        if (TelemetryBridge.sink != null) {
+            TelemetryBridge.emit(
+                TelemetryEvent.ViewMutation(
+                    nodeId = id,
+                    nativeViewId = node.view.nodeId.toULong(),
+                    mutationKind = 0u.toUByte(),
+                    frame = null,
+                ),
+            )
         }
         // A `Router` node re-reconciles when its navigation signal (97) changes;
         // re-attach only the active-route child so the visible stack swaps.
