@@ -373,16 +373,33 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
     /// - Returns: the final `VmOutcome`, or the `VmError` that faulted.
     private func runHandlerAsync(
         bytecode: [UInt8],
+        decoded: [Instruction]?,
         payload: FluxValue
     ) async -> (outcome: VmOutcome?, error: VmError?) {
         var store = graph
-        var current: Result<RunResult, VmError> = FluxBytecodeVM.runResumable(
-            bytecode,
-            signals: &store,
-            payload: payload,
-            stringTable: table,
-            capRegistry: .dev
-        )
+        // Use the registration-time decoded cache (R3) when present; otherwise
+        // fall back to the raw-bytecode path (which also handles decode errors
+        // the same way `dispatch(bytecode:)` does). This avoids re-decoding the
+        // handler on every tap (dispatch hot path).
+        var current: Result<RunResult, VmError>
+        if let program = decoded {
+            current = FluxBytecodeVM.runResumable(
+                program,
+                signals: &store,
+                payload: payload,
+                stringTable: table,
+                capRegistry: .dev,
+                programBytes: bytecode
+            )
+        } else {
+            current = FluxBytecodeVM.runResumable(
+                bytecode,
+                signals: &store,
+                payload: payload,
+                stringTable: table,
+                capRegistry: .dev
+            )
+        }
         while true {
             switch current {
             case let .success(.halt(outcome)):
@@ -488,8 +505,10 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
             lastReconcile = ReconcileReport()
             return
         }
-        // The raw `entry.bytecode` is handed to `runHandlerAsync`, which re-decodes
-        // internally (R3 cache is irrelevant for the resumable VM's own decode).
+        // Hand the raw `entry.bytecode` AND the registration-time decoded cache
+        // to `runHandlerAsync`, which uses the cache (R3) so the handler is not
+        // re-decoded on every tap; it falls back to re-decoding the raw bytes
+        // only when the cache is absent.
         Task { @MainActor in
             // Convert the native event payload to the runtime's id-based value,
             // interning any resolved string through the dev server's canonical
@@ -501,7 +520,13 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
             }
             // Run the handler with resumable semantics (ADR-0044): every `AWAIT`
             // is settled by `asyncResolver` and the handler is resumed until `HALT`.
-            let (outcome, error) = await runHandlerAsync(bytecode: entry.bytecode, payload: payload)
+            // Pass the cached decoded instructions (R3) so the handler is not
+            // re-decoded on every tap.
+            let (outcome, error) = await runHandlerAsync(
+                bytecode: entry.bytecode,
+                decoded: entry.decoded,
+                payload: payload
+            )
             guard let outcome else {
                 #if DEBUG
                 NSLog("[executor] async dispatch FAILED: \(String(describing: error))")

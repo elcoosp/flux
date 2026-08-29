@@ -531,9 +531,7 @@ enum FluxBytecodeVM {
             }
 
             ip = nextIP
-            #if DEBUG
             fluxDevtoolsEmit(.vmStep(bytecodeOffset: UInt32(instr.offset), opcode: instr.opcode.rawValue, registers: regs, gasRemaining: gas))
-            #endif
         }
 
         return VmOutcome(
@@ -566,6 +564,27 @@ enum FluxBytecodeVM {
         catch { return .failure(.invalidDispatch(offset: 0)) }
         return execTail(program, signals: &signals, startOffset: 0, payload: payload,
                         stringTable: stringTable, capRegistry: capRegistry, programBytes: bytecode)
+    }
+
+    /// Runs an already-decoded instruction stream with resumable semantics (R3).
+    ///
+    /// The executor caches `[Instruction]` per handler at registration
+    /// (`registerHandler`); the async dispatch hot path (`FluxExecutor.runHandlerAsync`)
+    /// passes that cache here so a tap never re-decodes bytecode it already decoded
+    /// once. `programBytes` is the raw bytecode, retained in the suspend state so a
+    /// later `AWAIT`/`resume` can re-enter correctly. Behavior is identical to
+    /// `runResumable(_ bytecode:)` for a decoded program that matches `programBytes`.
+    static func runResumable<S: SignalStore>(
+        _ program: [Instruction],
+        signals: inout S,
+        payload: FluxValue,
+        stringTable: any StringResolver = EmptyStringTable(),
+        capRegistry: CapabilityRegistry = .dev,
+        programBytes: [UInt8]
+    ) -> Result<RunResult, VmError> {
+        let offsets = program.map { $0.offset }
+        return execTail(program, signals: &signals, startOffset: 0, payload: payload,
+                        stringTable: stringTable, capRegistry: capRegistry, programBytes: programBytes)
     }
 
     /// Continues a suspended handler (ADR-0044), delivering `value` as the awaited result.
@@ -1260,9 +1279,7 @@ enum FluxBytecodeVM {
             }
 
             ip = nextIP
-            #if DEBUG
             fluxDevtoolsEmit(.vmStep(bytecodeOffset: UInt32(instr.offset), opcode: instr.opcode.rawValue, registers: regs, gasRemaining: gas))
-            #endif
         }
 
         return VmOutcome(signals: signals.snapshot(), registers: regs, gasUsed: entryGas - gas)
