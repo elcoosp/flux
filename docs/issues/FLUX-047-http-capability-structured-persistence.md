@@ -1,6 +1,6 @@
 ---
 id: FLUX-047
-status: todo
+status: partial
 lane: LANE-Q
 phase: "Phase 2/6"
 blocked_by: []
@@ -13,6 +13,14 @@ related_adrs:
 ---
 
 # FLUX-047: HTTP capability (fetch/JSON) + structured local persistence
+
+> **Status note (2026-08-29):** relabeled `todo` → `partial`. The capability
+> *contract* is complete in source: `CAPABILITY_IDL` declares `Http` (`fetch`/
+> `getJson`/`postJson`) and `Persist` (`put`/`get`/`query`/`delete`) with real
+> method ids; `stdlib/capabilities.flux` declares them; and the native HelloFrame
+> advertisement tables on both iOS and Android were regenerated this session.
+> Remaining: the host *handler bodies* (`URLSession`/`OkHttp` fetch,
+> `UserDefaults`/room persistence) are not yet implemented.
 
 - **Lane:** LANE-Q (Phase 6, data axis)
 - **Depends on:** PRD-Q (capability contract), LANE-A (real `AsyncResolver` for network)
