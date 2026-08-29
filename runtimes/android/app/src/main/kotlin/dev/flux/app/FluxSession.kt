@@ -9,6 +9,8 @@ import dev.flux.host.shadow.ShadowTree
 import dev.flux.host.signal.SignalGraph
 import dev.flux.host.transport.FluxTransport
 import dev.flux.host.transport.OkHttpTransport
+import dev.flux.host.vm.DevNativeCapabilityHost
+import dev.flux.host.vm.NativeCapabilityHost
 
 /**
  * Retained host session (roast fix 3 / ADR-0027 lifecycle).
@@ -32,6 +34,12 @@ import dev.flux.host.transport.OkHttpTransport
  */
 public class FluxSession(
     private val wsUrl: String = "ws://127.0.0.1:7331",
+    /** The real device-OS capability host (FLUX-045). The app shell passes
+     * [dev.flux.app.native.AndroidNativeCapabilityHost] so the six concrete caps
+     * (6..=11) perform real OS calls; when omitted the headless
+     * [DevNativeCapabilityHost] dev echoes are used (so unit tests need no
+     * emulator). */
+    private val nativeHost: NativeCapabilityHost = DevNativeCapabilityHost(),
 ) : ViewModel() {
     /** The live signal graph (also the VM's [dev.flux.host.vm.SignalStore]). */
     public val signals: SignalGraph = SignalGraph()
@@ -52,7 +60,8 @@ public class FluxSession(
     public val transport: FluxTransport = OkHttpTransport(wsUrl)
 
     /** The executor that ties the above together. */
-    public val executor: FluxExecutor = FluxExecutor(shadowTree, signals, transport)
+    public val executor: FluxExecutor =
+        FluxExecutor(shadowTree, signals, transport, nativeHost = nativeHost)
 
     /** Starts (or re-binds) the transport → executor frame feed. Idempotent. */
     public fun start() {
@@ -69,12 +78,13 @@ public class FluxSession(
         executor.dispose()
     }
 
-    /** Factory injecting the configured [wsUrl] into [FluxSession]. */
+    /** Factory injecting the configured [wsUrl] and real [nativeHost] into [FluxSession]. */
     public class Factory(
         private val wsUrl: String,
+        private val nativeHost: NativeCapabilityHost = DevNativeCapabilityHost(),
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
-            FluxSession(wsUrl) as T
+            FluxSession(wsUrl, nativeHost = nativeHost) as T
     }
 }

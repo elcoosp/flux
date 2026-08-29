@@ -12,7 +12,14 @@ import dev.flux.host.vm.FileStorageBackend
 import dev.flux.host.vm.FluxBytecodeVM
 import dev.flux.host.vm.FluxValue
 import dev.flux.host.vm.InMemorySignals
+import dev.flux.host.vm.InMemoryStorageBackend
+import dev.flux.host.vm.HttpRequestStore
+import dev.flux.host.vm.HttpTransport
 import dev.flux.host.vm.TableStringResolver
+import dev.flux.host.vm.makeHttpResolver
+import dev.flux.host.vm.httpPersistEntries
+import dev.flux.host.vm.SignalStore
+import dev.flux.host.signal.CellState
 import dev.flux.host.vm.PermissionChecker
 import dev.flux.host.vm.VmErrorKind
 import dev.flux.host.vm.VmResult
@@ -397,6 +404,97 @@ class RuntimeFixesTest {
         val getCell = registry.lookup(5u, 1u.toUShort())!!.call(FluxValue.NullVal, signals)
         assertEquals(92u, getCell, "Geolocation.get returns its result-cell id")
         assertEquals(FluxValue.NullVal, signals.read(92u), "Geolocation.get is null on the dev host")
+    }
+
+    // ── FLUX-047: Http (cap 14) + Persist (cap 15) host bodies ──────────────
+
+    @Test
+    fun `Persist put then get round-trips through the DEV registry`() {
+        val registry = CapabilityRegistry.DEV
+        val signals = InMemorySignals()
+        val key = FluxValue.StrVal(7u)
+        val value = FluxValue.ListVal(listOf(FluxValue.IntVal(1), FluxValue.IntVal(2)))
+        val putCell = registry.lookup(15u, 1u.toUShort())!!.call(
+            FluxValue.RecordVal(listOf(FluxValue.Field(0u.toUShort(), key), FluxValue.Field(1u.toUShort(), value))),
+            signals,
+        )
+        // Persist.put allocates a fresh cell carrying the stored value.
+        val putValue = signals.read(putCell)
+        assertTrue(putValue is FluxValue.ListVal, "Persist.put returns the stored value")
+        // Persist.get reads it back through a new cell.
+        val getCell = registry.lookup(15u, 2u.toUShort())!!.call(FluxValue.RecordVal(listOf(FluxValue.Field(0u.toUShort(), key))), signals)
+        assertEquals(value, signals.read(getCell), "Persist.get returns the value put earlier")
+    }
+
+    @Test
+    fun `Persist query enumerates every stored entry`() {
+        val backend = InMemoryStorageBackend()
+        val registry = CapabilityRegistry.makeDev(backend = backend)
+        val signals = InMemorySignals()
+        val valueA = FluxValue.IntVal(11)
+        val valueB = FluxValue.IntVal(22)
+        registry.lookup(15u, 1u.toUShort())!!.call(
+            FluxValue.RecordVal(listOf(FluxValue.Field(0u.toUShort(), FluxValue.StrVal(100u)), FluxValue.Field(1u.toUShort(), valueA))),
+            signals,
+        )
+        registry.lookup(15u, 1u.toUShort())!!.call(
+            FluxValue.RecordVal(listOf(FluxValue.Field(0u.toUShort(), FluxValue.StrVal(200u)), FluxValue.Field(1u.toUShort(), valueB))),
+            signals,
+        )
+        val queryCell = registry.lookup(15u, 3u.toUShort())!!.call(FluxValue.NullVal, signals)
+        val listed = signals.read(queryCell)
+        assertTrue(listed is FluxValue.ListVal, "Persist.query returns a list")
+        assertEquals(2, (listed as FluxValue.ListVal).items.size, "Persist.query lists both stored entries")
+    }
+
+    @Test
+    fun `Persist delete clears the stored value`() {
+        val registry = CapabilityRegistry.DEV
+        val signals = InMemorySignals()
+        val key = FluxValue.StrVal(7u)
+        registry.lookup(15u, 1u.toUShort())!!.call(
+            FluxValue.RecordVal(listOf(FluxValue.Field(0u.toUShort(), key), FluxValue.Field(1u.toUShort(), FluxValue.IntVal(99)))),
+            signals,
+        )
+        registry.lookup(15u, 4u.toUShort())!!.call(FluxValue.RecordVal(listOf(FluxValue.Field(0u.toUShort(), key))), signals)
+        val getCell = registry.lookup(15u, 2u.toUShort())!!.call(FluxValue.RecordVal(listOf(FluxValue.Field(0u.toUShort(), key))), signals)
+        assertEquals(FluxValue.NullVal, signals.read(getCell), "Persist.get is null after Persist.delete")
+    }
+
+    @Test
+    fun `Http fetch returns a pending cell stashed for the resolver`() {
+        val registry = CapabilityRegistry.DEV
+        val signals = InMemorySignals()
+        // Http.fetch(url) (14,1): allocates a Pending cell and records the GET.
+        val cell = registry.lookup(14u, 1u.toUShort())!!.call(
+            FluxValue.RecordVal(listOf(FluxValue.Field(0u.toUShort(), FluxValue.StrVal(42u)))),
+            signals,
+        )
+        assertEquals(1_000_001u, cell, "Http.fetch allocates a fresh result-cell id")
+        assertEquals(CellState.Pending, signals.cellState(cell), "Http.fetch parks the cell as Pending")
+    }
+
+    @Test
+    fun `Http getJson parks a pending cell that the resolver settles to JSON`() = runTest {
+        val sharedStore = HttpRequestStore()
+        val url = "http://example.test/data.json"
+        val transport = object : HttpTransport {
+            override fun request(method: String, url: String, body: String?): String = """{"ok":true,"n":3}"""
+        }
+        val backend = InMemoryStorageBackend()
+        // Build the registry with the SAME request store the resolver reads from.
+        val registry = CapabilityRegistry.fromEntries(httpPersistEntries(sharedStore, transport, backend))
+        val signals = InMemorySignals()
+        val resolver = makeHttpResolver(sharedStore, transport, TableStringResolver(mapOf(42u to url)))
+        val cell = registry.lookup(14u, 2u.toUShort())!!.call(
+            FluxValue.RecordVal(listOf(FluxValue.Field(0u.toUShort(), FluxValue.StrVal(42u)))),
+            signals,
+        )
+        assertEquals(CellState.Pending, signals.cellState(cell))
+        val settled = resolver.resolve(FluxValue.IntVal(cell.toLong()))
+        assertTrue(settled is FluxValue.RecordVal, "Http.getJson response parses to a RecordVal")
+        signals.resolveCell(cell, settled)
+        assertEquals(settled, signals.read(cell), "Resolved JSON reaches the awaiter")
     }
 
     // ── G5: lifecycle hooks ──────────────────────────────────────────────────

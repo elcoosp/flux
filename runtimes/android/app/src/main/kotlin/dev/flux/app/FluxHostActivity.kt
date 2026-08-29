@@ -5,6 +5,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.material3.MaterialTheme
 import androidx.lifecycle.viewmodel.compose.viewModel
+import dev.flux.app.native.ActivityTracker
+import dev.flux.app.native.AndroidNativeCapabilityHost
 
 /**
  * The Flux dev-mode host activity (FLUX-007).
@@ -22,12 +24,22 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 class FluxHostActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ActivityTracker.register(this)
         val wsUrl = getString(R.string.flux_ws_url)
         setContent {
             MaterialTheme {
                 // Retained across rotations; the factory injects the configured
-                // dev-server WebSocket URL from the `flux_ws_url` resource.
-                val session: FluxSession = viewModel(factory = FluxSession.Factory(wsUrl))
+                // dev-server WebSocket URL from the `flux_ws_url` resource and the
+                // real device-OS capability host (FLUX-045) so the six concrete
+                // caps perform genuine Android framework calls.
+                val session: FluxSession =
+                    viewModel(
+                        factory =
+                            FluxSession.Factory(
+                                wsUrl,
+                                nativeHost = AndroidNativeCapabilityHost(this),
+                            ),
+                    )
                 FluxRoot(session)
             }
         }
