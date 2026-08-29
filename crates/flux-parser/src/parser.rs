@@ -1124,6 +1124,10 @@ impl<'s> Parser<'s> {
                 } else if text == "fn" {
                     // A bare `fn` token in value position is a lambda header.
                     self.lambda()
+                } else if text == "Null" {
+                    // The `Null` literal (FLUX-053 / ADR-0051) — the absent
+                    // value inhabiting every `Option[T]`.
+                    Ok(lit(ExprKind::Null, self.span_of(tok)))
                 } else {
                     Ok(lit(ExprKind::Ident(self.ident_at(tok)), self.span_of(tok)))
                 }
@@ -2029,6 +2033,7 @@ fn shift_kind(kind: ExprKind, delta: u32) -> ExprKind {
         ExprKind::Int(v) => ExprKind::Int(v),
         ExprKind::Float(v) => ExprKind::Float(v),
         ExprKind::Bool(v) => ExprKind::Bool(v),
+        ExprKind::Null => ExprKind::Null,
         ExprKind::Str(parts) => ExprKind::Str(
             parts
                 .into_iter()

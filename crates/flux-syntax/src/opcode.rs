@@ -153,13 +153,16 @@ pub enum Opcode {
     ToString = raw::TO_STRING,
     /// `AWAIT` — suspend the VM, capturing the continuation (ADR-0044, MLP v2).
     Await = raw::AWAIT,
+    /// `IS_NULL` — test whether a register holds `Null` (used to short-circuit
+    /// optional field reads; see `raw::IS_NULL` and its doc note).
+    IsNull = raw::IS_NULL,
 }
 
 impl Opcode {
     /// Every opcode defined by Appendix E §E.1, in ascending byte order.
     ///
     /// Useful for exhaustive conformance tests and disassembler tables.
-    pub const ALL: [Self; 56] = [
+    pub const ALL: [Self; 57] = [
         Self::Halt,
         Self::Nop,
         Self::ReadSignal,
@@ -216,5 +219,6 @@ impl Opcode {
         Self::GasCheck,
         Self::ToString,
         Self::Await,
+        Self::IsNull,
     ];
 }
