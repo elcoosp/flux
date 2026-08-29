@@ -232,4 +232,47 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
         handler_prop: None,
         label_prop: None,
     },
+    // --- FLUX-037 layout primitives (PRD-N family) ---
+    PrimitiveSpec {
+        flux_name: "Stack",
+        node_kind: NodeKind::Primitive,
+        kind: PrimitiveKind::Container,
+        // Z-order overlay container.
+        kotlin_view: "Box",
+        swift_view: "ZStack",
+        primary_prop: None,
+        handler_prop: None,
+        label_prop: None,
+    },
+    PrimitiveSpec {
+        flux_name: "Grid",
+        node_kind: NodeKind::Primitive,
+        kind: PrimitiveKind::Container,
+        kotlin_view: "LazyVerticalGrid",
+        swift_view: "Grid",
+        primary_prop: None,
+        handler_prop: None,
+        label_prop: None,
+    },
+    PrimitiveSpec {
+        flux_name: "Spacer",
+        node_kind: NodeKind::Primitive,
+        kind: PrimitiveKind::Leaf,
+        kotlin_view: "Spacer",
+        swift_view: "Spacer",
+        primary_prop: None,
+        handler_prop: None,
+        label_prop: None,
+    },
+    PrimitiveSpec {
+        flux_name: "SafeArea",
+        node_kind: NodeKind::Primitive,
+        kind: PrimitiveKind::Container,
+        // Insets the content within the platform safe area.
+        kotlin_view: "Scaffold",
+        swift_view: "SafeArea",
+        primary_prop: None,
+        handler_prop: None,
+        label_prop: None,
+    },
 ];

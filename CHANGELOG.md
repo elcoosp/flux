@@ -100,6 +100,17 @@ are intentionally omitted (automation noise, not user-facing change).
 - Added `import kotlinx.coroutines.*` to the Kotlin codegen compile-check preamble and a
   focused emission test asserting the wrap on both backends.
 
+### Stdlib — layout primitives (FLUX-037, PRD-N family) — DONE
+
+- Registered `Stack` (→ `ZStack`/`Box`, z-order overlay), `Grid` (→ `Grid`/`LazyVerticalGrid`),
+  `Spacer` (→ `Spacer`), and `SafeArea` (→ `SafeArea`/`Scaffold`) in the single-source ADR-0047
+  primitive registry (`crates/flux-codegen-core/src/primitives.rs`) and seeded them in the
+  type-checker prelude (`crates/flux-types/src/prelude.rs`). The parity guard (`registry_covers_every_prelude_primitive`
+  / `registry_has_no_unknown_entries`) was extended both directions and stays green.
+- Added a Kotlin codegen trace test asserting each lowers to its native view. The native host
+  view bodies (UIKit/SwiftUI + Compose) read these registry names; their render mapping is the
+  same contract the other primitives use.
+
 ### IR — B.3 handler-lowering gap closed (FLUX-063) — DONE
 
 - The 6 B.3 examples the issue flagged (b32, b33, b35, b36, b38, b310) with

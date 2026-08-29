@@ -30,6 +30,11 @@ fn registry_covers_every_prelude_primitive() {
         "Provider",
         "When",
         "Switch",
+        // FLUX-037 layout primitives (PRD-N family).
+        "Stack",
+        "Grid",
+        "Spacer",
+        "SafeArea",
     ];
     for name in prelude_primitives {
         assert!(
@@ -58,6 +63,11 @@ fn registry_has_no_unknown_entries() {
         "Provider",
         "When",
         "Switch",
+        // FLUX-037 layout primitives (PRD-N family).
+        "Stack",
+        "Grid",
+        "Spacer",
+        "SafeArea",
     ];
     for spec in PrimitiveSpec::all() {
         assert!(

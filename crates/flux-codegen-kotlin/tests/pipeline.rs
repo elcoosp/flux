@@ -406,3 +406,35 @@ fn button_emits_handler_and_label() {
         "missing trailing-block label in:\n{out2}"
     );
 }
+
+#[test]
+fn flux_037_layout_primitives_codegen() {
+    // FLUX-037: Stack / Grid / Spacer / SafeArea must lower to their native
+    // views on the Kotlin backend (PRD-N layout family).
+    let src = r#"compo Layout
+  Stack {
+    Text("a")
+  }
+  Grid {
+    Text("b")
+  }
+  Spacer()
+  SafeArea {
+    Text("c")
+  }
+"#;
+    let out = codegen_example("layout_primitives", src);
+    assert!(out.contains("Box {"), "Stack missing Box mapping:\n{out}");
+    assert!(
+        out.contains("LazyVerticalGrid {"),
+        "Grid missing LazyVerticalGrid mapping:\n{out}"
+    );
+    assert!(
+        out.contains("Spacer(\"\")"),
+        "Spacer missing mapping:\n{out}"
+    );
+    assert!(
+        out.contains("Scaffold {"),
+        "SafeArea missing Scaffold mapping:\n{out}"
+    );
+}
