@@ -420,7 +420,7 @@ graph TB
     ParserCrate -->|AST| TypeCrate
     TypeCrate -->|typed AST| IRCrate
     IRCrate -->|RT-IR| DifferCrate
-    DifferCrate -->|Patch[]| SerdeCrate
+    DifferCrate -->|Patch list| SerdeCrate
     SerdeCrate -->|binary frame| WSCrate
 ```
 
