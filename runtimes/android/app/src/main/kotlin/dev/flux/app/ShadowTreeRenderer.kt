@@ -5,9 +5,16 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import dev.flux.host.shadow.ShadowNode
@@ -46,7 +53,11 @@ public fun FluxTreeView(
      * own props do not change on navigation. */
     routerVersion: Int = 0,
     /** Fired with a text-input's `onChangeText` handler id and the new value. */
-    onTextChange: (handlerId: UInt, value: String) -> Unit = { _, _ -> },
+    onTextChange: (UInt, String) -> Unit = { _, _ -> },
+    /** Layout weight applied to this node by a parent [Row] (so a [TextInput]
+     * shares the row with its sibling button instead of filling the whole
+     * width). Defaults to none. */
+    childModifier: Modifier = Modifier,
 ) {
     if (node == null) return
     when (node.kind) {
@@ -54,7 +65,7 @@ public fun FluxTreeView(
         "row" -> RenderRow(node, onButtonClick, routerVersion, onTextChange)
         "text" -> RenderText(node)
         "button" -> RenderButton(node, onButtonClick)
-        "textinput" -> RenderTextInput(node, onTextChange)
+        "textinput" -> RenderTextInput(node, onTextChange, childModifier)
         // A router shows exactly one screen — the one whose `route` prop matches
         // the active navigation signal (ADR-0045). Every other screen is hidden,
         // so tapping "Go to Settings" actually swaps the visible view instead of
@@ -130,7 +141,13 @@ private fun RenderRow(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(gapOf(node)),
     ) {
-        for (child in node.children) FluxTreeView(child, onButtonClick, routerVersion, onTextChange)
+        for (child in node.children) {
+            // A TextInput inside a row takes the remaining width (weight 1f) so its
+            // sibling button stays visible instead of being pushed off-screen by
+            // fillMaxWidth. Every other child keeps its intrinsic size.
+            val childModifier = if (child.kind == "textinput") Modifier.weight(1f) else Modifier
+            FluxTreeView(child, onButtonClick, routerVersion, onTextChange, childModifier)
+        }
     }
 }
 
@@ -185,16 +202,36 @@ private fun RenderContainer(
 private fun RenderTextInput(
     node: ShadowNode,
     onTextChange: (UInt, String) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val props = node.observeProps()
-    val text = props.getString(PropsIndex.TEXT_INPUT_TEXT).orEmpty()
+    val propsText = props.getString(PropsIndex.TEXT_INPUT_TEXT).orEmpty()
     val placeholder = props.getString(PropsIndex.TEXT_INPUT_PLACEHOLDER).orEmpty()
     val handlerId = props.getHandler(PropsIndex.TEXT_INPUT_ON_CHANGE_TEXT)
+    // The field is a controlled TextField whose displayed value is held in a local
+    // MutableState so keystrokes appear instantly. Routing every keystroke through
+    // the executor → VM → signal → reconcile round-trip and reading `value` straight
+    // from the shadow prop would snap the field back to the stale snapshot on the
+    // next recomposition and drop characters (FLUX-014: the compiler binds the
+    // payload to the handler's first parameter). We seed the local state from the
+    // prop once, then re-sync it only when the *external* prop actually changes
+    // (e.g. the Add-task handler clears `newTask`), so in-flight typed edits are
+    // never overwritten by the round-trip. `modifier` carries the row weight so the
+    // field shares the row with its sibling button instead of filling the width.
+    var textState by remember { mutableStateOf(propsText) }
+    LaunchedEffect(propsText) {
+        if (propsText != textState) textState = propsText
+    }
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
     androidx.compose.material3.TextField(
-        value = text,
-        onValueChange = { onTextChange(handlerId, it) },
+        value = textState,
+        onValueChange = {
+            textState = it
+            onTextChange(handlerId, it)
+        },
         placeholder = { Text(placeholder) },
-        modifier = Modifier.fillMaxWidth().padding(4.dp),
+        modifier = modifier.fillMaxWidth().padding(4.dp).focusRequester(focusRequester),
     )
 }
 
