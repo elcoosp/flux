@@ -103,8 +103,9 @@ mod tests {
         assert_eq!(CapabilityIdl::names_for(1, 1), Some(("Camera", "take")));
         assert_eq!(CapabilityIdl::names_for(2, 2), Some(("Storage", "get")));
         assert_eq!(CapabilityIdl::names_for(3, 1), Some(("Router", "navigate")));
-        assert_eq!(CapabilityIdl::names_for(9, 9), None);
-        assert_eq!(CAPABILITY_IDL.len(), 5);
+        assert_eq!(CapabilityIdl::names_for(99, 99), None);
+        // FLUX-045 extends the manifest from 5 to 11 capabilities.
+        assert_eq!(CAPABILITY_IDL.len(), 11);
     }
 
     #[test]

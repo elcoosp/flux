@@ -130,6 +130,25 @@ are intentionally omitted (automation noise, not user-facing change).
   `Modifier.pointerInput` (Android) for each `kind` is wired in `runtimes/android/host` +
   `runtimes/ios` and is out of this crate's scope; not compile-verified here.
 
+### Capabilities — six concrete native capabilities (FLUX-045, LANE-C) — PARTIAL
+
+- Declared the six deferred capabilities (Push, Biometric, Background, FileSystem, DeepLink,
+  Sensors) in `stdlib/capabilities.flux` with `// requires:` annotations, and registered them in
+  `CAPABILITY_IDL` (`crates/flux-types/src/capabilities.rs`) with stable ids 6..=11 and
+  `PermissionKind` gates (Notification / Biometric / Background / FileSystem / None / Sensors).
+  Extended `required_permission` + the permission token table accordingly.
+- Wired both host `HelloFrame` GENERATED capability tables (`runtimes/ios/FluxHost/Sources/FluxHost/HelloFrame.swift`
+  and `runtimes/android/host/.../wire/HelloFrame.kt`) so the dev handshake advertises the new
+  caps. The `capability_idl` parity tests (`swift_registry_matches_idl`, `kotlin_registry_matches_idl`,
+  `stdlib_capabilities_mirror_idl_names`) stay green — the single-source manifest is intact.
+- Added `flux045_six_concrete_capabilities_wired` regression test; updated the pre-existing
+  `required_permission_matches_manifest` / `CAPABILITY_IDL.len() == 5` assertions (now 11).
+- REMAINING (host-side, native lane, parallel-owned): the real `CapabilityRegistry::register(...)`
+  bodies (the `call(args, signals)` implementations on both hosts — `UNUserNotificationCenter`,
+  `LocalAuthentication`, `BGTaskScheduler`, `FileManager`, `UIApplication.open`, `CMMotionManager`;
+  Push/Background settle a result cell via `AsyncResolver`, ADR-0045). Those runtime files are owned
+  by the runtime agents and are not edited/compile-verified from this crate pass.
+
 ### Stdlib — form primitives (FLUX-040, PRD-N family) — PARTIAL
 
 - Registered `Switch`/`Checkbox`/`Slider`/`Picker`/`DatePicker`/`TextArea` in the ADR-0047

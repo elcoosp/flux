@@ -50,3 +50,43 @@ capability Geolocation {
   // returns a `Capability` error, never a crash.
   fn get() -> Option[Data]
 }
+
+// --- FLUX-045: six concrete native capabilities (PRD-Q deferred set) ---
+// IDs continue the stable sequence (cap 6..=11) and must match
+// `CAPABILITY_IDL` in crates/flux-types/src/capabilities.rs. The bodies are
+// bound per-platform in the native `CapabilityRegistry` (runtimes/android/host
+// + runtimes/ios); dev mode runs in-memory stand-ins.
+
+capability Push {
+  // requires: .notification — posting local/remote notifications needs the OS
+  // notification grant; resolves async via the VM's await machinery (ADR-0045).
+  fn register() -> Unit
+  fn notify(payload: Data) -> Unit
+}
+
+capability Biometric {
+  // requires: .biometric — local device authentication via LAContext / BiometricPrompt.
+  fn authenticate() -> Result[Bool, Data]
+}
+
+capability Background {
+  // requires: .background — scheduling background work (BGTaskScheduler / WorkManager).
+  fn schedule(task: Data) -> Unit
+}
+
+capability FileSystem {
+  // requires: .filesystem — read/write/delete the app's sandboxed file system.
+  fn read(path: String) -> Option[Data]
+  fn write(path: String, value: Data) -> Unit
+  fn delete(path: String) -> Unit
+}
+
+capability DeepLink {
+  // requires: .none — opening external URLs / universal links is always permitted.
+  fn open(url: String) -> Unit
+}
+
+capability Sensors {
+  // requires: .sensors — reading device motion / ambient sensors (CMMotionManager / SensorManager).
+  fn read(kind: String) -> Option[Data]
+}

@@ -72,6 +72,27 @@ private val idlCapabilities: List<Triple<String, UInt, List<Pair<String, UInt>>>
     Triple("Geolocation", 5u, listOf(
         "get" to 1u,
     )),
+    Triple("Push", 6u, listOf(
+        "register" to 1u,
+        "notify" to 2u,
+    )),
+    Triple("Biometric", 7u, listOf(
+        "authenticate" to 1u,
+    )),
+    Triple("Background", 8u, listOf(
+        "schedule" to 1u,
+    )),
+    Triple("FileSystem", 9u, listOf(
+        "read" to 1u,
+        "write" to 2u,
+        "delete" to 3u,
+    )),
+    Triple("DeepLink", 10u, listOf(
+        "open" to 1u,
+    )),
+    Triple("Sensors", 11u, listOf(
+        "read" to 1u,
+    )),
 )
 // ===== GENERATED-END =====
 

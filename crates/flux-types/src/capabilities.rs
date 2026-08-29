@@ -125,6 +125,73 @@ pub const CAPABILITY_IDL: &[CapabilityIdl] = &[
         id: 5,
         methods: &[MethodIdl { name: "get", id: 1 }],
     },
+    // --- FLUX-045: six concrete native capabilities (PRD-Q deferred set) ---
+    // IDs continue the stable sequence; native host bodies are wired in
+    // `runtimes/android/host` + `runtimes/ios` (parallel-owned, not here).
+    CapabilityIdl {
+        name: "Push",
+        id: 6,
+        methods: &[
+            MethodIdl {
+                name: "register",
+                id: 1,
+            },
+            MethodIdl {
+                name: "notify",
+                id: 2,
+            },
+        ],
+    },
+    CapabilityIdl {
+        name: "Biometric",
+        id: 7,
+        methods: &[MethodIdl {
+            name: "authenticate",
+            id: 1,
+        }],
+    },
+    CapabilityIdl {
+        name: "Background",
+        id: 8,
+        methods: &[MethodIdl {
+            name: "schedule",
+            id: 1,
+        }],
+    },
+    CapabilityIdl {
+        name: "FileSystem",
+        id: 9,
+        methods: &[
+            MethodIdl {
+                name: "read",
+                id: 1,
+            },
+            MethodIdl {
+                name: "write",
+                id: 2,
+            },
+            MethodIdl {
+                name: "delete",
+                id: 3,
+            },
+        ],
+    },
+    CapabilityIdl {
+        name: "DeepLink",
+        id: 10,
+        methods: &[MethodIdl {
+            name: "open",
+            id: 1,
+        }],
+    },
+    CapabilityIdl {
+        name: "Sensors",
+        id: 11,
+        methods: &[MethodIdl {
+            name: "read",
+            id: 1,
+        }],
+    },
 ];
 
 /// The OS-level permission a capability method requires before `CALL_CAP`
@@ -159,6 +226,23 @@ pub enum PermissionKind {
     /// / `CLLocationManager`; Android `ACCESS_FINE_LOCATION` /
     /// `ACCESS_COARSE_LOCATION`).
     Location,
+    /// Posting local/remote notifications (iOS `UNUserNotificationCenter`;
+    /// Android `POST_NOTIFICATIONS`).
+    Notification,
+    /// Local device biometric authentication (iOS `LocalAuthentication`;
+    /// Android `BiometricPrompt`).
+    Biometric,
+    /// Scheduling background work (iOS `BGTaskScheduler`; Android `WorkManager` /
+    /// `JobScheduler`).
+    Background,
+    /// Reading/writing the app's sandboxed file system (NSFileManager /
+    /// `java.io.File`).
+    FileSystem,
+    /// Opening external URLs / universal links (always permitted).
+    NoneLink,
+    /// Reading device motion / ambient sensors (iOS `CMMotionManager`; Android
+    /// `SensorManager`).
+    Sensors,
 }
 
 impl PermissionKind {
@@ -172,6 +256,12 @@ impl PermissionKind {
             Self::None => ".none",
             Self::Clipboard => ".clipboard",
             Self::Location => ".location",
+            Self::Notification => ".notification",
+            Self::Biometric => ".biometric",
+            Self::Background => ".background",
+            Self::FileSystem => ".filesystem",
+            Self::NoneLink => ".none",
+            Self::Sensors => ".sensors",
         }
     }
 
@@ -188,6 +278,11 @@ impl PermissionKind {
             ".none" => Some(Self::None),
             ".clipboard" => Some(Self::Clipboard),
             ".location" => Some(Self::Location),
+            ".notification" => Some(Self::Notification),
+            ".biometric" => Some(Self::Biometric),
+            ".background" => Some(Self::Background),
+            ".filesystem" => Some(Self::FileSystem),
+            ".sensors" => Some(Self::Sensors),
             _ => None,
         }
     }
@@ -236,6 +331,18 @@ pub fn required_permission(cap_id: u32, method_id: u16) -> Option<PermissionKind
         (4, _) => Some(PermissionKind::Clipboard),
         // Geolocation: every method needs the location grant.
         (5, _) => Some(PermissionKind::Location),
+        // Push: posting notifications (async, ADR-0045 AsyncResolver).
+        (6, _) => Some(PermissionKind::Notification),
+        // Biometric: local device authentication.
+        (7, _) => Some(PermissionKind::Biometric),
+        // Background: scheduling background work.
+        (8, _) => Some(PermissionKind::Background),
+        // FileSystem: sandboxed file read/write/delete.
+        (9, _) => Some(PermissionKind::FileSystem),
+        // DeepLink: opening URLs is always permitted.
+        (10, _) => Some(PermissionKind::None),
+        // Sensors: device motion / ambient sensors.
+        (11, _) => Some(PermissionKind::Sensors),
         _ => None,
     }
 }
@@ -261,6 +368,7 @@ pub fn is_satisfied(
 mod tests {
     use super::*;
     use crate::error::{CapabilityError, FluxError};
+    use std::fs;
 
     /// The stdlib `capabilities.flux` `requires:` annotations must match the
     /// permission the host gates `CALL_CAP` on for each capability id. This is a
@@ -349,7 +457,7 @@ mod tests {
         assert_eq!(required_permission(3, 1), Some(PermissionKind::None));
         assert_eq!(required_permission(4, 1), Some(PermissionKind::Clipboard));
         assert_eq!(required_permission(5, 1), Some(PermissionKind::Location));
-        assert_eq!(required_permission(9, 9), None);
+        assert_eq!(required_permission(99, 99), None);
     }
 
     /// A test double for [`PermissionChecker`]: returns a fixed grant state.
@@ -429,6 +537,45 @@ mod tests {
         let allowed = StubChecker { granted: true };
         let err = gate_call(&allowed, 99, 1).expect_err("unknown capability must be denied");
         assert!(matches!(err, FluxError::Capability(_)));
+    }
+
+    /// FLUX-045: the six concrete native capabilities (Push, Biometric,
+    /// Background, FileSystem, DeepLink, Sensors) must be present in the manifest
+    /// with stable ids 6..=11 and the permission each resolves through the gate.
+    #[test]
+    fn flux045_six_concrete_capabilities_wired() {
+        let expected = [
+            ("Push", 6u32, PermissionKind::Notification),
+            ("Biometric", 7, PermissionKind::Biometric),
+            ("Background", 8, PermissionKind::Background),
+            ("FileSystem", 9, PermissionKind::FileSystem),
+            ("DeepLink", 10, PermissionKind::None),
+            ("Sensors", 11, PermissionKind::Sensors),
+        ];
+        for (name, id, perm) in expected {
+            let resolved = CapabilityIdl::id_for(name)
+                .unwrap_or_else(|| panic!("CAPABILITY_IDL missing {name}"));
+            assert_eq!(resolved, id, "stable id for {name}");
+            assert_eq!(
+                required_permission(id, 1),
+                Some(perm),
+                "gate permission for {name}"
+            );
+        }
+        // The stdlib declaration must mirror the manifest names (single-source).
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("stdlib")
+            .join("capabilities.flux");
+        let src =
+            fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        for (name, _id, _perm) in expected {
+            assert!(
+                src.contains(&format!("capability {name} {{")),
+                "stdlib/capabilities.flux missing declaration for `{name}`"
+            );
+        }
     }
 
     // `CapabilityError` is referenced to keep the import meaningful in this module

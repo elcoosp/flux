@@ -48,6 +48,27 @@ extension HelloFrame {
         ("Geolocation", 5, [
             ("get", 1),
         ]),
+        ("Push", 6, [
+            ("register", 1),
+            ("notify", 2),
+        ]),
+        ("Biometric", 7, [
+            ("authenticate", 1),
+        ]),
+        ("Background", 8, [
+            ("schedule", 1),
+        ]),
+        ("FileSystem", 9, [
+            ("read", 1),
+            ("write", 2),
+            ("delete", 3),
+        ]),
+        ("DeepLink", 10, [
+            ("open", 1),
+        ]),
+        ("Sensors", 11, [
+            ("read", 1),
+        ]),
     ]
     // ===== GENERATED-END =====
 
