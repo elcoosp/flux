@@ -138,6 +138,13 @@ pub(crate) fn prelude(supply: &mut Supply) -> Env {
         "Grid",
         "Spacer",
         "SafeArea",
+        // FLUX-040 form primitives (PRD-N family).
+        "Switch",
+        "Checkbox",
+        "Slider",
+        "Picker",
+        "DatePicker",
+        "TextArea",
     ] {
         env.insert(
             comp.to_owned(),

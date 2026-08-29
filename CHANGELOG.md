@@ -121,6 +121,17 @@ are intentionally omitted (automation noise, not user-facing change).
   `URLCache` on iOS) is a host concern that lives in `runtimes/android/host` + `runtimes/ios`
   and is out of this crate's scope; not compile-verified here.
 
+### Stdlib — form primitives (FLUX-040, PRD-N family) — PARTIAL
+
+- Registered `Switch`/`Checkbox`/`Slider`/`Picker`/`DatePicker`/`TextArea` in the ADR-0047
+  registry with a `value`/`onChange` signal contract (same as `TextField`) and seeded them in
+  the prelude; parity guard extended both directions and stays green. A Kotlin codegen trace
+  test pins each lowers to its native control (`Switch`/`Checkbox`/`Slider`/`DropdownMenu`/
+  `DatePickerDialog`/`TextField`).
+- REMAINING (host-side, native lane): the native controls' actual behavior (toggle writes its
+  signal, picker selection, etc.) is wired in `runtimes/android/host` + `runtimes/ios` and is
+  out of this crate's scope; not compile-verified here.
+
 ### IR — B.3 handler-lowering gap closed (FLUX-063) — DONE
 
 - The 6 B.3 examples the issue flagged (b32, b33, b35, b36, b38, b310) with

@@ -35,6 +35,13 @@ fn registry_covers_every_prelude_primitive() {
         "Grid",
         "Spacer",
         "SafeArea",
+        // FLUX-040 form primitives (PRD-N family).
+        "Switch",
+        "Checkbox",
+        "Slider",
+        "Picker",
+        "DatePicker",
+        "TextArea",
     ];
     for name in prelude_primitives {
         assert!(
@@ -68,6 +75,13 @@ fn registry_has_no_unknown_entries() {
         "Grid",
         "Spacer",
         "SafeArea",
+        // FLUX-040 form primitives (PRD-N family).
+        "Switch",
+        "Checkbox",
+        "Slider",
+        "Picker",
+        "DatePicker",
+        "TextArea",
     ];
     for spec in PrimitiveSpec::all() {
         assert!(

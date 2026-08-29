@@ -453,3 +453,32 @@ fn flux_039_image_primitive_codegen() {
         "Image missing painterResource mapping:\n{out}"
     );
 }
+
+#[test]
+fn flux_040_form_primitives_codegen() {
+    // FLUX-040: each form primitive lowers to its native control on Kotlin,
+    // carrying a `value`/`onChange` signal contract (like `TextField`).
+    let src = r#"compo Form
+  state on: Bool = false
+  state n: Int = 0
+  state sel: Int = 0
+  state d: Int = 0
+  state t: String = ""
+  Switch(value: on, onChange: fn() { on = on })
+  Checkbox(value: on, onChange: fn() { on = on })
+  Slider(value: n, onChange: fn() { n = n })
+  Picker(value: sel, onChange: fn() { sel = sel })
+  DatePicker(value: d, onChange: fn() { d = d })
+  TextArea(value: t, onChange: fn() { t = t })
+"#;
+    let out = codegen_example("form_primitives", src);
+    assert!(out.contains("Switch("), "Switch missing:\n{out}");
+    assert!(out.contains("Checkbox("), "Checkbox missing:\n{out}");
+    assert!(out.contains("Slider("), "Slider missing:\n{out}");
+    assert!(out.contains("DropdownMenu("), "Picker missing:\n{out}");
+    assert!(
+        out.contains("DatePickerDialog("),
+        "DatePicker missing:\n{out}"
+    );
+    assert!(out.contains("TextField("), "TextArea missing:\n{out}");
+}

@@ -1,6 +1,6 @@
 ---
 id: FLUX-040
-status: todo
+status: partial
 lane: LANE-N
 phase: "Phase 2"
 blocked_by: []
