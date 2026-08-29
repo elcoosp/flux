@@ -104,43 +104,43 @@ impl Render for DevToolsRoot {
             .size_full()
             .bg(colors.background)
             .text_color(colors.foreground)
-            // ── Top bar: app title + live host identity ──
+            // ── Top bar: gpui-component TitleBar (auto-indents past macOS traffic
+            //    lights) with app title + live host identity ──
             .child(
-                gpui::div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .justify_between()
-                    .h(px(36.))
-                    .px(px(12.))
-                    .border_color(colors.border)
-                    .border(px(1.))
-                    .child(
-                        gpui::div()
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .gap(px(8.))
-                            .child(
-                                gpui::div()
-                                    .text_sm()
-                                    .font_weight(FontWeight::BOLD)
-                                    .child("Flux DevTools"),
-                            )
-                            .child(Badge::new().child(if is_connected {
-                                "connected"
-                            } else {
-                                "no host"
-                            })),
-                    )
-                    .child(host_badge.unwrap_or_else(|| {
-                        gpui::div().flex().flex_row().items_center().child(
+                TitleBar::new().child(
+                    gpui::div()
+                        .flex()
+                        .flex_row()
+                        .items_center()
+                        .justify_between()
+                        .flex_1()
+                        .child(
                             gpui::div()
-                                .text_xs()
-                                .text_color(colors.muted_foreground)
-                                .child("awaiting host…"),
+                                .flex()
+                                .flex_row()
+                                .items_center()
+                                .gap(px(8.))
+                                .child(
+                                    gpui::div()
+                                        .text_sm()
+                                        .font_weight(FontWeight::BOLD)
+                                        .child("Flux DevTools"),
+                                )
+                                .child(Badge::new().child(if is_connected {
+                                    "connected"
+                                } else {
+                                    "no host"
+                                })),
                         )
-                    })),
+                        .child(host_badge.unwrap_or_else(|| {
+                            gpui::div().flex().flex_row().items_center().child(
+                                gpui::div()
+                                    .text_xs()
+                                    .text_color(colors.muted_foreground)
+                                    .child("awaiting host…"),
+                            )
+                        })),
+                ),
             )
             // ── Body: four panes separated by dividers ──
             .child(
