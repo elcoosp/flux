@@ -44,6 +44,14 @@ fn registry_covers_every_prelude_primitive() {
         "TextArea",
         // FLUX-041 gestures (PRD-N family).
         "Gesture",
+        // FLUX-038 overlay container primitives (PRD-N family).
+        "Modal",
+        "Sheet",
+        "Dialog",
+        // FLUX-042 signal-graph animation primitive (PRD-N family).
+        "Animate",
+        // FLUX-043 design-token theme primitive (PRD-N family).
+        "Theme",
     ];
     for name in prelude_primitives {
         assert!(
@@ -86,6 +94,14 @@ fn registry_has_no_unknown_entries() {
         "TextArea",
         // FLUX-041 gestures (PRD-N family).
         "Gesture",
+        // FLUX-038 overlay container primitives (PRD-N family).
+        "Modal",
+        "Sheet",
+        "Dialog",
+        // FLUX-042 signal-graph animation primitive (PRD-N family).
+        "Animate",
+        // FLUX-043 design-token theme primitive (PRD-N family).
+        "Theme",
     ];
     for spec in PrimitiveSpec::all() {
         assert!(

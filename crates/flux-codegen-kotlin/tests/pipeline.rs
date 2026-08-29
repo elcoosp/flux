@@ -495,9 +495,94 @@ fn flux_041_gesture_primitive_codegen() {
   }
 "#;
     let out = codegen_example("gesture_primitive", src);
-    assert!(out.contains("Box {"), "Gesture missing Box mapping:\n{out}");
+    assert!(
+        out.contains("Box {"),
+        "Gesture missing Box mapping:\\n{out}"
+    );
     assert!(
         out.contains("Text(\"tap\")"),
-        "Gesture child not emitted:\n{out}"
+        "Gesture child not emitted:\\n{out}"
     );
+}
+
+#[test]
+fn flux_038_overlay_container_codegen() {
+    // FLUX-038: `Modal`/`Sheet`/`Dialog` lower to their host-native overlay
+    // surface on the Kotlin backend, each carrying its `content` children. The
+    // `onDismiss` handler is the presentation contract the host maps to the
+    // native dismiss action; here we pin the structural mapping + child emission.
+    let src = r#"compo Overlays
+  state open: Bool = false
+  Sheet(onDismiss: fn() { open = false }) {
+    Text("sheet body")
+  }
+  Dialog(onDismiss: fn() { open = false }) {
+    Text("dialog body")
+  }
+  Modal(onDismiss: fn() { open = false }) {
+    Text("modal body")
+  }
+"#;
+    let out = codegen_example("overlay_containers", src);
+    assert!(
+        out.contains("ModalBottomSheet {"),
+        "Sheet missing ModalBottomSheet mapping:\\n{out}"
+    );
+    assert!(
+        out.contains("AlertDialog {"),
+        "Dialog missing AlertDialog mapping:\\n{out}"
+    );
+    assert!(
+        out.contains("Dialog {"),
+        "Modal missing Dialog mapping:\\n{out}"
+    );
+    // Children must be carried through on every overlay surface.
+    assert!(
+        out.contains("Text(\"sheet body\")"),
+        "Sheet child dropped:\\n{out}"
+    );
+    assert!(
+        out.contains("Text(\"dialog body\")"),
+        "Dialog child dropped:\\n{out}"
+    );
+    assert!(
+        out.contains("Text(\"modal body\")"),
+        "Modal child dropped:\\n{out}"
+    );
+}
+
+/// FLUX-042: an `Animate` primitive emits the host-native `withAnimation`
+/// call wrapping its child subtree, with the curve mapped onto a Compose
+/// `AnimationSpec`. The signal/curve is data the host consumes; no frames ship.
+#[test]
+fn flux_042_animate_codegen() {
+    let src = "compo Animated\n  state value: Int = 0\n  Animate(curve: \"easeInOut\") {\n    Text(\"hello\")\n  }\n\n";
+    let out = codegen_example("flux_042_animate", src);
+    assert!(
+        out.contains("withAnimation(tween(easing = FastOutSlowInEasing)) {"),
+        "Animate must wrap children in a withAnimation call:\n{out}"
+    );
+    assert!(
+        out.contains("Text(\"hello\")"),
+        "Animate child dropped from the wrapped subtree:\n{out}"
+    );
+}
+
+/// FLUX-043: the design-token theme extension must be emitted once and must
+/// contain every declared token name on the Kotlin backend.
+#[test]
+fn flux_043_theme_extension_codegen() {
+    let src = "compo UsesTheme\n  Theme {\n    Text(\"themed\")\n  }\n\n";
+    let out = codegen_example("flux_043_theme", src);
+    assert!(
+        out.contains("object FluxTheme {"),
+        "missing native theme extension on Kotlin backend:\n{out}"
+    );
+    for token in flux_codegen_core::primitives::theme_tokens() {
+        assert!(
+            out.contains(token.name),
+            "theme token `{}` missing from generated Kotlin theme extension:\n{out}",
+            token.name
+        );
+    }
 }

@@ -215,6 +215,11 @@ pub(crate) fn parse_screen_comment(tokens: &[Token], start: usize) -> Option<Vie
 
 /// Parses a view expression `Name(...)` possibly with a `{ … }` trailing block —
 /// e.g. `Text("…")`, `VStack(spacing: 12) { … }`, `Button(action: {}) { … }`.
+///
+/// Overlay containers (`Modal`/`Sheet`/`Dialog`, FLUX-038) are emitted with no
+/// argument list — `FullScreenCover { … }`, `Sheet { … }`, `Alert { … }` — so the
+/// trailing `{` may follow the name directly (no `( … )`). The same applies to
+/// their Kotlin surface names (`Dialog {`, `ModalBottomSheet {`, `AlertDialog {`).
 pub(crate) fn parse_view(
     tokens: &[Token],
     start: usize,
@@ -222,18 +227,19 @@ pub(crate) fn parse_view(
     let name = tokens[start].text.clone();
     let normalized = normalize_view_name(&name);
     let mut i = start + 1;
-    // Skip the `( ... )` argument list (it may be empty, e.g. `Avatar()`,
-    // `Home()`, or contain the `action: {}` closure — none affect structure).
+    // Skip an optional `( ... )` argument list (present for normal adapters;
+    // absent for no-arg overlay containers like `FullScreenCover {`).
     if tokens.get(i).map(|t| t.text.as_str()) == Some("(") {
         let end = match_paren(tokens, i)
             .ok_or_else(|| SwiftRecognitionError(format!("unbalanced args in {normalized}")))?;
         i = end + 1;
     }
     if tokens.get(i).map(|t| t.text.as_str()) == Some("{") {
-        // Container layouts (Column/Row/VStack/HStack/Stack) carry real structural
-        // children. Every other adapter is a leaf: its trailing block is a codegen
-        // placeholder (e.g. `Button(action: {}) { Text("") }`) and must not be
-        // recovered as a child — the dev path models those adapters as childless.
+        // Container layouts (Column/Row/VStack/HStack/Stack) and FLUX-038 overlay
+        // containers (Modal/Sheet/Dialog) carry real structural children. Every
+        // other adapter is a leaf: its trailing block is a codegen placeholder
+        // (e.g. `Button(action: {}) { Text("") }`) and must not be recovered as a
+        // child — the dev path models those adapters as childless.
         if is_container(&normalized) {
             let (children, after) = parse_body(tokens, i)?;
             return Ok((

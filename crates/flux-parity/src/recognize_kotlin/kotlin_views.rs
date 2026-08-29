@@ -190,6 +190,12 @@ pub(crate) fn parse_composable_dest(
 
 /// Parses a view expression `Name(...)` possibly with a `{ … }` trailing block —
 /// e.g. `Text("…")`, `Column(...) { … }`, `Home()`.
+///
+/// Overlay containers (`Modal`/`Sheet`/`Dialog`, FLUX-038) are emitted with no
+/// argument list — `Dialog { … }`, `ModalBottomSheet { … }`, `AlertDialog { … }`
+/// — so the trailing `{` may follow the name directly (no `( … )`). `parse_body`
+/// only routes `Name(` forms here; this helper additionally accepts the bare
+/// `Name {` form for known containers.
 pub(crate) fn parse_view(
     tokens: &[Token],
     start: usize,
@@ -197,18 +203,18 @@ pub(crate) fn parse_view(
     let name = tokens[start].text.clone();
     let normalized = normalize_view_name(&name);
     let mut i = start + 1;
-    // Skip the `( ... )` argument list (may contain closures — none affect
-    // structure).
+    // Skip an optional `( ... )` argument list (present for normal adapters;
+    // absent for no-arg overlay containers like `Dialog {`).
     if tokens.get(i).map(|t| t.text.as_str()) == Some("(") {
         let end = match_paren(tokens, i)
             .ok_or_else(|| KotlinRecognitionError(format!("unbalanced args in {normalized}")))?;
         i = end + 1;
     }
     if tokens.get(i).map(|t| t.text.as_str()) == Some("{") {
-        // Container layouts (Column/Row/VStack/HStack/Stack) carry real structural
-        // children. Every other adapter is a leaf: its trailing block is a codegen
-        // placeholder (e.g. `Button(onClick = {}) { Text("") }`) and must not be
-        // recovered as a child — the dev path models those adapters as childless.
+        // Container layouts (Column/Row/VStack/HStack/Stack) and FLUX-038 overlay
+        // containers (Modal/Sheet/Dialog) carry real structural children. Every
+        // other adapter is a leaf: its trailing block is a codegen placeholder and
+        // must not be recovered as a child.
         if is_container(&normalized) {
             let (children, after) = parse_body(tokens, i)?;
             return Ok((

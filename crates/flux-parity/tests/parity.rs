@@ -302,3 +302,45 @@ fn positional_screen_does_not_emit_route_prop_at_fnv_index() {
         "POSITIONAL Screen must NOT carry a `route` prop at FNV-1a(\"route\") — the device-only blind spot"
     );
 }
+
+/// FLUX-038: a `Modal` (overlay container) open must pin the dev/release node
+/// mapping on both backends. This is the issue's required parity trace test — it
+/// proves the `Modal`/`Sheet`/`Dialog` overlay primitives lower and codegen to
+/// structurally identical view trees across the dev (reduced AST) path and both
+/// release (SwiftUI / Compose) backends, with their `content` children carried
+/// through on every path.
+#[test]
+fn flux_038_modal_open_pins_dev_release_mapping() {
+    let source = r#"compo SettingsScreen
+  state open: Bool = false
+  Column(gap: 16) {
+    Button(text: "Open", onPress: { open = true })
+    Modal(onDismiss: fn() { open = false }) {
+      Column(gap: 8) {
+        Text("Modal title")
+        Text("Modal body")
+      }
+    }
+    Sheet(onDismiss: fn() { open = false }) {
+      Text("Sheet body")
+    }
+    Dialog(onDismiss: fn() { open = false }) {
+      Text("Dialog body")
+    }
+  }
+"#;
+    let report = check_parity(source, 380)
+        .expect("Modal/Sheet/Dialog example parses, type-checks and lowers");
+    assert!(
+        report.is_equivalent(),
+        "parity divergence for FLUX-038 Modal/Sheet/Dialog: dev vs swift vs kotlin trees differ"
+    );
+    let serialized = format!(
+        "verdict: {}\n\n dev    == {:#?}\nswift  == {:#?}\nkotlin == {:#?}\n",
+        report.verdict(),
+        report.dev,
+        report.swift,
+        report.kotlin
+    );
+    insta::assert_snapshot!("parity_flux_038_modal_open", serialized);
+}

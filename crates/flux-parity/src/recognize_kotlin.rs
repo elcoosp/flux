@@ -17,7 +17,7 @@
 //! compared for structural parity. `state`/`prop` declarations and the
 //! `by remember { … }` wrappers are skipped; only the view tree is recovered.
 
-use crate::model::ViewNode;
+use crate::model::{ViewNode, is_container, normalize_view_name};
 use crate::tokenize::{Token, tokenize};
 
 mod kotlin_views;
@@ -145,18 +145,21 @@ pub(crate) fn parse_body(
             continue;
         }
         // A generic view expression is `Name(...)` where the identifier is not a
-        // known non-view token. This excludes `remember`, `mutableStateOf`,
-        // `Alignment`, `Arrangement`, `painterResource`, value constructors, etc.
-        if tok
+        // known non-view token. FLUX-038 overlay containers are emitted with no
+        // argument list (`Dialog {`, `ModalBottomSheet {`, `AlertDialog {`), so we
+        // also dispatch a bare `Name {` when `Name` is a known container.
+        let is_ident = tok
             .chars()
             .next()
-            .is_some_and(|c| c.is_alphabetic() || c == '_')
-            && tokens.get(i + 1).map(|t| t.text.as_str()) == Some("(")
-            && !is_non_view(strip_generics(&tok))
+            .is_some_and(|c| c.is_alphabetic() || c == '_');
+        let next = tokens.get(i + 1).map(|t| t.text.as_str());
+        if is_ident
+            && ((next == Some("(") && !is_non_view(strip_generics(&tok)))
+                || (next == Some("{") && is_container(&normalize_view_name(&tok))))
         {
-            let (node, next) = parse_view(tokens, i)?;
+            let (node, next_idx) = parse_view(tokens, i)?;
             children.push(node);
-            i = next;
+            i = next_idx;
             continue;
         }
         i += 1;

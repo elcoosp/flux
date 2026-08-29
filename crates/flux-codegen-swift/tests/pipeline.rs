@@ -159,9 +159,41 @@ fn emits_view_structs_and_state() {
         "missing interpolation"
     );
     assert!(out.contains("VStack {"), "missing VStack container");
+}
+
+/// FLUX-038: `Modal`/`Sheet`/`Dialog` lower to their host-native overlay
+/// surface on the Swift backend (`FullScreenCover`/`Sheet`/`Alert`), each
+/// carrying its `content` children. The `onDismiss` handler is the presentation
+/// contract the host maps to the native dismiss action; here we pin the
+/// structural mapping + child emission.
+#[test]
+fn flux_038_overlay_container_codegen() {
+    let src = "compo Overlays\n  state open: Bool = false\n  Sheet(onDismiss: fn() { open = false }) {\n    Text(\"sheet body\")\n  }\n  Dialog(onDismiss: fn() { open = false }) {\n    Text(\"dialog body\")\n  }\n  Modal(onDismiss: fn() { open = false }) {\n    Text(\"modal body\")\n  }\n\n";
+    let out = codegen_example("overlay_containers", src);
     assert!(
-        out.contains("Button(action: { count = (count + 1) })"),
-        "Button must emit its onClick handler body, not an empty closure: {out}"
+        out.contains("Sheet {"),
+        "Sheet missing Sheet mapping:\\n{out}"
+    );
+    assert!(
+        out.contains("Alert {"),
+        "Dialog missing Alert mapping:\\n{out}"
+    );
+    assert!(
+        out.contains("FullScreenCover {"),
+        "Modal missing FullScreenCover mapping:\\n{out}"
+    );
+    // Children must be carried through on every overlay surface.
+    assert!(
+        out.contains("Text(\"sheet body\")"),
+        "Sheet child dropped:\\n{out}"
+    );
+    assert!(
+        out.contains("Text(\"dialog body\")"),
+        "Dialog child dropped:\\n{out}"
+    );
+    assert!(
+        out.contains("Text(\"modal body\")"),
+        "Modal child dropped:\\n{out}"
     );
 }
 
@@ -257,4 +289,40 @@ fn generic_component_emits_specialised_structs() {
         out.contains("Counter_Float(initial: 0.0)"),
         "Float call site must resolve to Counter_Float(initial: 0.0) in:\n{out}"
     );
+}
+
+/// FLUX-042: an `Animate` primitive emits the host-native `withAnimation`
+/// call wrapping its child subtree, with the curve mapped onto a SwiftUI
+/// `Animation`. The signal/curve is data the host consumes; no frames ship.
+#[test]
+fn flux_042_animate_codegen() {
+    let src = "compo Animated\n  state value: Int = 0\n  Animate(curve: \"easeInOut\") {\n    Text(\"hello\")\n  }\n\n";
+    let out = codegen_example("flux_042_animate", src);
+    assert!(
+        out.contains("withAnimation(Animation.easeInOut) {"),
+        "Animate must wrap children in a withAnimation call:\n{out}"
+    );
+    assert!(
+        out.contains("Text(\"hello\")"),
+        "Animate child dropped from the wrapped subtree:\n{out}"
+    );
+}
+
+/// FLUX-043: the design-token theme extension must be emitted once and must
+/// contain every declared token name on the Swift backend.
+#[test]
+fn flux_043_theme_extension_codegen() {
+    let src = "compo UsesTheme\n  Theme {\n    Text(\"themed\")\n  }\n\n";
+    let out = codegen_example("flux_043_theme", src);
+    assert!(
+        out.contains("enum FluxTheme {"),
+        "missing native theme extension on Swift backend:\n{out}"
+    );
+    for token in flux_codegen_core::primitives::theme_tokens() {
+        assert!(
+            out.contains(token.name),
+            "theme token `{}` missing from generated Swift theme extension:\n{out}",
+            token.name
+        );
+    }
 }

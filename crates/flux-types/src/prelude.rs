@@ -147,6 +147,16 @@ pub(crate) fn prelude(supply: &mut Supply) -> Env {
         "TextArea",
         // FLUX-041 gestures (PRD-N family).
         "Gesture",
+        // FLUX-038 overlay container primitives (PRD-N family). Host adapter
+        // wiring is deferred (ADR-0048); the type-checker seeds them so source
+        // can name them and codegen can emit their native surface.
+        "Modal",
+        "Sheet",
+        "Dialog",
+        // FLUX-042 signal-graph animation primitive (PRD-N family).
+        "Animate",
+        // FLUX-043 design-token theme primitive (PRD-N family).
+        "Theme",
     ] {
         env.insert(
             comp.to_owned(),

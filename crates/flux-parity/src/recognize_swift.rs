@@ -19,7 +19,7 @@
 //! compared for structural parity. Declarations of `state`/`props` and the
 //! `var body: some View` wrapper are skipped; only the view tree is recovered.
 
-use crate::model::ViewNode;
+use crate::model::{ViewNode, is_container, normalize_view_name};
 use crate::tokenize::{Token, match_brace, tokenize};
 
 mod swift_views;
@@ -163,18 +163,22 @@ pub(crate) fn parse_body(
             i += 1;
             continue;
         }
-        // A generic view expression is `Name(...)` (so an identifier immediately
-        // followed by `(`). This excludes `@State`, `var`, `count`, `Int`,
-        // `body`, `some`, `View`, `UIImage`, property declarations, etc.
-        if tok
+        // A generic view expression is `Name(...)` (identifier immediately
+        // followed by `(`) or, for no-arg overlay containers (FLUX-038), a bare
+        // `Name {` (e.g. `FullScreenCover {`). `parse_view` accepts both forms;
+        // here we dispatch when the identifier is followed by `(` or by `{` and is
+        // a known container.
+        let is_ident = tok
             .chars()
             .next()
-            .is_some_and(|c| c.is_alphabetic() || c == '_')
-            && tokens.get(i + 1).map(|t| t.text.as_str()) == Some("(")
+            .is_some_and(|c| c.is_alphabetic() || c == '_');
+        let next = tokens.get(i + 1).map(|t| t.text.as_str());
+        if is_ident
+            && (next == Some("(") || (next == Some("{") && is_container(&normalize_view_name(tok))))
         {
-            let (node, next) = parse_view(tokens, i)?;
+            let (node, next_idx) = parse_view(tokens, i)?;
             children.push(node);
-            i = next;
+            i = next_idx;
             continue;
         }
         i += 1;

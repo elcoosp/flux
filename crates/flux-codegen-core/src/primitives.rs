@@ -42,7 +42,102 @@ pub enum PrimitiveKind {
     /// call; the registry entry exists only so `PRIMITIVES` covers every prelude
     /// name and the parity guard stays honest.
     Other,
+    /// A signal-graph animation wrapper (FLUX-042): drives a signal through a
+    /// spring/timing curve. The release backends emit the host-native
+    /// `withAnimation(<spec>) { … }` call (SwiftUI `withAnimation` /
+    /// Compose `withAnimation`) wrapping the child subtree; the curve is data the
+    /// host consumes, never animation frames on the wire. Parity reduces both
+    /// backends' `withAnimation` to the flux surface name `Animate`.
+    Animate,
 }
+
+/// A design-token group, used to pick the native value spelling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TokenGroup {
+    /// A color token (`Color(0xRRGGBB)` / `Color(...)`).
+    Color,
+    /// A spacing token (`N.dp` / `N`).
+    Spacing,
+    /// A typography token (point size: `N.sp` / `N`).
+    Typography,
+}
+
+/// A single design token, declared once and emitted into a native theme
+/// extension on both backends (FLUX-043). `kotlin`/`swift` carry the
+/// already-spelled native literal so codegen stays a pure table read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DesignToken {
+    /// The token's surface name (referenced by components, not hardcoded).
+    pub name: &'static str,
+    /// The token group, driving the native value type.
+    pub group: TokenGroup,
+    /// The native Kotlin/Compose literal (e.g. `Color(0xFF6750A4)`, `8.dp`).
+    pub kotlin: &'static str,
+    /// The native Swift/SwiftUI literal (e.g. `Color(...)`, `8`).
+    pub swift: &'static str,
+}
+
+/// The single source of truth for design tokens (FLUX-043, ADR-0047).
+///
+/// Codegen emits every token here into a native theme extension on both
+/// backends so components reference tokens by name rather than per-component
+/// literals. Mirrors `PRIMITIVES`: one declarative table, two backends reading
+/// it. A test asserts both backends emit every token's name.
+pub fn theme_tokens() -> &'static [DesignToken] {
+    &TOKENS
+}
+
+/// The design-token table — color / spacing / typography scales.
+const TOKENS: &[DesignToken] = &[
+    DesignToken {
+        name: "colorPrimary",
+        group: TokenGroup::Color,
+        kotlin: "Color(0xFF6750A4)",
+        swift: "Color(red: 0.404, green: 0.314, blue: 0.643)",
+    },
+    DesignToken {
+        name: "colorSecondary",
+        group: TokenGroup::Color,
+        kotlin: "Color(0xFF625B71)",
+        swift: "Color(red: 0.384, green: 0.357, blue: 0.443)",
+    },
+    DesignToken {
+        name: "colorSurface",
+        group: TokenGroup::Color,
+        kotlin: "Color(0xFFFEF7FF)",
+        swift: "Color(red: 0.996, green: 0.969, blue: 1.0)",
+    },
+    DesignToken {
+        name: "spaceSm",
+        group: TokenGroup::Spacing,
+        kotlin: "4.dp",
+        swift: "4",
+    },
+    DesignToken {
+        name: "spaceMd",
+        group: TokenGroup::Spacing,
+        kotlin: "8.dp",
+        swift: "8",
+    },
+    DesignToken {
+        name: "spaceLg",
+        group: TokenGroup::Spacing,
+        kotlin: "16.dp",
+        swift: "16",
+    },
+    DesignToken {
+        name: "textBody",
+        group: TokenGroup::Typography,
+        kotlin: "17.sp",
+        swift: "17",
+    },
+    DesignToken {
+        name: "textTitle",
+        group: TokenGroup::Typography,
+        kotlin: "28.sp",
+        swift: "28",
+    },
+];
 
 /// Declarative metadata for one Flux primitive, shared by both backends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,6 +163,31 @@ pub struct PrimitiveSpec {
     pub handler_prop: Option<&'static str>,
     /// The prop naming the button's label (`text`).
     pub label_prop: Option<&'static str>,
+    /// The presentation/transition contract for overlay containers
+    /// (`Modal`/`Sheet`/`Dialog`, FLUX-038). `None` for non-overlay primitives.
+    /// This is **data the host consumes** — a named transition it maps to the
+    /// native equivalent (`.sheet`/`.fullScreenCover`, `ModalBottomSheet`,
+    /// `AlertDialog`) — never a wire animation frame. The codegen emits it as a
+    /// code comment documenting the intended presentation; the host adapter kit
+    /// resolves the actual native surface (host wiring is gated on ADR-0048).
+    pub presentation: Option<Presentation>,
+}
+
+/// The named transition an overlay container maps to on each host.
+///
+/// Mirrors the FLUX-038 design: animation is specified as a named transition the
+/// host maps to its native equivalent, not as frame-by-frame wire data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Presentation {
+    /// Full-screen centered dialog with a dimmed scrim (e.g. iOS
+    /// `.fullScreenCover`, Compose `AlertDialog` / `Dialog`).
+    Dialog,
+    /// Bottom-anchored sheet that slides up (iOS `.sheet`, Compose
+    /// `ModalBottomSheet`).
+    Sheet,
+    /// Centered modal over a scrim, dismissal by tap-outside (iOS
+    /// `.presentationDetents`-free `fullScreenCover`, Compose `Dialog`).
+    Modal,
 }
 
 impl PrimitiveSpec {
@@ -77,10 +197,39 @@ impl PrimitiveSpec {
         PRIMITIVES.iter().find(|p| p.flux_name == name)
     }
 
-    /// All registered primitive specs, in source order.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// The surface prop names this primitive exposes, in registry order.
+    ///
+    /// Built from the declared `primary_prop` / `handler_prop` / `label_prop`
+    /// fields so the set can never drift from what the emitters actually read.
+    /// This is the authoritative prop-name list consumed by the LSP completion
+    /// provider (FLUX-027); callers must not hand-maintain a duplicate copy.
     #[must_use]
-    pub(crate) fn all() -> &'static [PrimitiveSpec] {
+    pub fn prop_names(&self) -> Vec<&'static str> {
+        let mut names: Vec<&'static str> = Vec::new();
+        if let Some(p) = self.primary_prop {
+            names.push(p);
+        }
+        if let Some(p) = self.handler_prop {
+            names.push(p);
+        }
+        if let Some(p) = self.label_prop {
+            names.push(p);
+        }
+        names
+    }
+
+    /// All registered primitive specs, in source order.
+    ///
+    /// This is the authoritative, single-source-of-truth list of every built-in
+    /// primitive's surface name and prop surface (its `primary_prop` /
+    /// `handler_prop` / `label_prop`). Consumers that need the set of known
+    /// prop names — e.g. the LSP completion provider (FLUX-027) — must read it
+    /// from here rather than maintaining a parallel list that can drift from
+    /// the registry. The parity test `registry_covers_every_prelude_primitive`
+    /// fails if `PRIMITIVES` ever desyncs from what `flux_types::prelude`
+    /// registers, so this list is guaranteed to match the compiler.
+    #[must_use]
+    pub fn all() -> &'static [PrimitiveSpec] {
         PRIMITIVES
     }
 }
@@ -101,6 +250,7 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
         primary_prop: None,
         handler_prop: None,
         label_prop: None,
+        presentation: None,
     },
     PrimitiveSpec {
         flux_name: "Row",
@@ -111,6 +261,7 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
         primary_prop: None,
         handler_prop: None,
         label_prop: None,
+        presentation: None,
     },
     PrimitiveSpec {
         flux_name: "Text",
@@ -121,6 +272,7 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
         primary_prop: Some("text"),
         handler_prop: None,
         label_prop: None,
+        presentation: None,
     },
     PrimitiveSpec {
         flux_name: "Image",
@@ -131,6 +283,7 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
         primary_prop: Some("source"),
         handler_prop: None,
         label_prop: None,
+        presentation: None,
     },
     PrimitiveSpec {
         flux_name: "Button",
@@ -141,6 +294,7 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
         primary_prop: None,
         handler_prop: Some("onPress"),
         label_prop: Some("text"),
+        presentation: None,
     },
     PrimitiveSpec {
         flux_name: "CupertinoButton",
@@ -151,6 +305,7 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
         primary_prop: None,
         handler_prop: Some("onPress"),
         label_prop: Some("text"),
+        presentation: None,
     },
     PrimitiveSpec {
         flux_name: "MaterialButton",
@@ -161,6 +316,7 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
         primary_prop: None,
         handler_prop: Some("onPress"),
         label_prop: Some("text"),
+        presentation: None,
     },
     PrimitiveSpec {
         flux_name: "TextInput",
@@ -171,6 +327,7 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
         primary_prop: Some("text"),
         handler_prop: Some("onChangeText"),
         label_prop: None,
+        presentation: None,
     },
     PrimitiveSpec {
         flux_name: "Provider",
@@ -181,6 +338,7 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
         primary_prop: None,
         handler_prop: None,
         label_prop: None,
+        presentation: None,
     },
     PrimitiveSpec {
         flux_name: "When",
@@ -191,6 +349,7 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
         primary_prop: None,
         handler_prop: None,
         label_prop: None,
+        presentation: None,
     },
     PrimitiveSpec {
         flux_name: "Switch",
@@ -201,6 +360,7 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
         primary_prop: None,
         handler_prop: None,
         label_prop: None,
+        presentation: None,
     },
     PrimitiveSpec {
         flux_name: "Router",
@@ -211,6 +371,7 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
         primary_prop: None,
         handler_prop: None,
         label_prop: None,
+        presentation: None,
     },
     PrimitiveSpec {
         flux_name: "Screen",
@@ -221,6 +382,7 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
         primary_prop: None,
         handler_prop: None,
         label_prop: None,
+        presentation: None,
     },
     PrimitiveSpec {
         flux_name: "ForEach",
@@ -231,6 +393,7 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
         primary_prop: None,
         handler_prop: None,
         label_prop: None,
+        presentation: None,
     },
     // --- FLUX-037 layout primitives (PRD-N family) ---
     PrimitiveSpec {
@@ -243,6 +406,7 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
         primary_prop: None,
         handler_prop: None,
         label_prop: None,
+        presentation: None,
     },
     PrimitiveSpec {
         flux_name: "Grid",
@@ -253,6 +417,7 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
         primary_prop: None,
         handler_prop: None,
         label_prop: None,
+        presentation: None,
     },
     PrimitiveSpec {
         flux_name: "Spacer",
@@ -263,6 +428,7 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
         primary_prop: None,
         handler_prop: None,
         label_prop: None,
+        presentation: None,
     },
     PrimitiveSpec {
         flux_name: "SafeArea",
@@ -274,6 +440,7 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
         primary_prop: None,
         handler_prop: None,
         label_prop: None,
+        presentation: None,
     },
     // --- FLUX-040 form primitives (PRD-N family) ---
     // Each carries a `value` signal + `onChange` callback (same contract as
@@ -288,6 +455,7 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
         primary_prop: Some("value"),
         handler_prop: Some("onChange"),
         label_prop: None,
+        presentation: None,
     },
     PrimitiveSpec {
         flux_name: "Checkbox",
@@ -298,6 +466,7 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
         primary_prop: Some("value"),
         handler_prop: Some("onChange"),
         label_prop: None,
+        presentation: None,
     },
     PrimitiveSpec {
         flux_name: "Slider",
@@ -308,6 +477,7 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
         primary_prop: Some("value"),
         handler_prop: Some("onChange"),
         label_prop: None,
+        presentation: None,
     },
     PrimitiveSpec {
         flux_name: "Picker",
@@ -318,6 +488,7 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
         primary_prop: Some("value"),
         handler_prop: Some("onChange"),
         label_prop: None,
+        presentation: None,
     },
     PrimitiveSpec {
         flux_name: "DatePicker",
@@ -328,6 +499,7 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
         primary_prop: Some("value"),
         handler_prop: Some("onChange"),
         label_prop: None,
+        presentation: None,
     },
     PrimitiveSpec {
         flux_name: "TextArea",
@@ -338,6 +510,7 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
         primary_prop: Some("value"),
         handler_prop: Some("onChange"),
         label_prop: None,
+        presentation: None,
     },
     // --- FLUX-041 gestures (PRD-N family) ---
     // A `Gesture` wrapper carrying a `kind` (longPress/swipe/drag/pinch) + an
@@ -352,5 +525,89 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
         primary_prop: Some("kind"),
         handler_prop: Some("onGesture"),
         label_prop: None,
+        presentation: None,
+    },
+    // --- FLUX-038 overlay container primitives (PRD-N family) ---
+    // Each is an overlay surface that presents `content` above the current
+    // scene. The `presentation` field is data the host consumes: a named
+    // transition it maps to the native equivalent (`.sheet` / `.fullScreenCover`,
+    // `ModalBottomSheet` / `AlertDialog`). Animation is never a wire frame — it is
+    // the host's native transition. Host adapter wiring is deferred pending
+    // ADR-0048 (iOS dev-tier convergence); the registry entry exists so codegen
+    // and the type-checker prelude can name the primitive today.
+    PrimitiveSpec {
+        flux_name: "Sheet",
+        node_kind: NodeKind::Primitive,
+        kind: PrimitiveKind::Container,
+        // Bottom-anchored sheet that slides up.
+        kotlin_view: "ModalBottomSheet",
+        swift_view: "Sheet",
+        primary_prop: None,
+        handler_prop: Some("onDismiss"),
+        label_prop: None,
+        presentation: Some(Presentation::Sheet),
+    },
+    PrimitiveSpec {
+        flux_name: "Dialog",
+        node_kind: NodeKind::Primitive,
+        kind: PrimitiveKind::Container,
+        // Modal dialog with a dimmed scrim. On Swift the canonical overlay is
+        // `Alert`; on Kotlin it is `AlertDialog`. Neither collides with `Modal`'s
+        // native tokens (`Dialog` / `FullScreenCover`), so the parity reducer maps
+        // each overlay back to its own Flux surface unambiguously.
+        kotlin_view: "AlertDialog",
+        swift_view: "Alert",
+        primary_prop: None,
+        handler_prop: Some("onDismiss"),
+        label_prop: None,
+        presentation: Some(Presentation::Dialog),
+    },
+    PrimitiveSpec {
+        flux_name: "Modal",
+        node_kind: NodeKind::Primitive,
+        kind: PrimitiveKind::Container,
+        // Centered modal over a scrim; dismiss on tap-outside.
+        kotlin_view: "Dialog",
+        swift_view: "FullScreenCover",
+        primary_prop: None,
+        handler_prop: Some("onDismiss"),
+        label_prop: None,
+        presentation: Some(Presentation::Modal),
+    },
+    // --- FLUX-042 signal-graph animation primitive (PRD-N family) ---
+    // Wraps a child subtree and drives a signal through a spring/timing curve.
+    // The release backends emit the host-native `withAnimation(<spec>) { … }`
+    // call (SwiftUI `withAnimation` / Compose `withAnimation`) wrapping the
+    // children; the curve is data the host consumes, never animation frames on
+    // the wire. Parity reduces both backends' `withAnimation` to the flux
+    // surface name `Animate` (see `flux-parity` `normalize_view_name`).
+    PrimitiveSpec {
+        flux_name: "Animate",
+        node_kind: NodeKind::Primitive,
+        kind: PrimitiveKind::Animate,
+        // SwiftUI `withAnimation(spec) { … }` wrapping the child subtree.
+        kotlin_view: "withAnimation",
+        swift_view: "withAnimation",
+        primary_prop: Some("signal"),
+        handler_prop: None,
+        label_prop: None,
+        presentation: None,
+    },
+    // --- FLUX-043 design-token theme primitive (PRD-N family) ---
+    // Declares the design-token theme; codegen emits the token table into a
+    // native theme extension on both backends (see `theme_tokens`). The node
+    // itself is a thin container that applies the active theme to its children
+    // (e.g. `MaterialTheme`/`ColorScheme`). It is a control-flow-free
+    // container so the parity reducer keeps its children as a subtree.
+    PrimitiveSpec {
+        flux_name: "Theme",
+        node_kind: NodeKind::Primitive,
+        kind: PrimitiveKind::Container,
+        kotlin_view: "MaterialTheme",
+        swift_view: "FluxTheme",
+        primary_prop: None,
+        handler_prop: None,
+        label_prop: None,
+        presentation: None,
     },
 ];

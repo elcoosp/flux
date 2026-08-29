@@ -84,7 +84,13 @@ fn node_from_ast(expr: &Expr, out: &mut Vec<ViewNode>) {
                         .map(|b| block_children(b))
                         .unwrap_or_default();
                     out.push(ViewNode::Primitive {
-                        name: normalized,
+                        // The dev path reduces the *source* (canonical Flux surface
+                        // names like `Modal`/`Sheet`/`Dialog`); do NOT run
+                        // `normalize_view_name` on it — that mapping is for codegen
+                        // native output (Swift `FullScreenCover`/Kotlin `Dialog`),
+                        // and folding the dev name through it would mislabel a
+                        // `Dialog` call as `Modal`. Keep the source spelling.
+                        name: name.clone(),
                         props: vec![],
                         children,
                     });
@@ -236,6 +242,22 @@ pub fn normalize_view_name(name: &str) -> String {
         "HStack" => "Row",
         "CupertinoButton" | "MaterialButton" => "Button",
         "TextField" => "TextInput",
+        // FLUX-038 overlay containers: the codegen emits host-native surface
+        // names; parity reduces them back to the common Flux surface spelling.
+        // Tokens are chosen so no two overlays collide: Modal's Compose view is
+        // `Dialog` (Swift `FullScreenCover`), Dialog's is `AlertDialog` (Swift
+        // `Alert`), Sheet's is `ModalBottomSheet` (Swift `Sheet`). So `Dialog`
+        // belongs to Modal, `Alert`/`AlertDialog` to Dialog, unambiguously.
+        "ModalBottomSheet" => "Sheet",
+        "AlertDialog" => "Dialog",
+        "Alert" => "Dialog",
+        "Dialog" => "Modal",
+        "FullScreenCover" => "Modal",
+        "Sheet" => "Sheet",
+        // FLUX-042: both backends emit `withAnimation(...)` for `Animate`.
+        "withAnimation" => "Animate",
+        // FLUX-043: the native theme extension surface names reduce to `Theme`.
+        "MaterialTheme" | "FluxTheme" => "Theme",
         other => other,
     }
     .to_owned()
@@ -245,10 +267,23 @@ pub fn normalize_view_name(name: &str) -> String {
 /// (their trailing block is part of the view tree). Every other adapter is a
 /// leaf: a trailing block in emitted code is a codegen placeholder and must not
 /// be recovered as a child.
+///
+/// FLUX-038 overlay containers (`Modal`/`Sheet`/`Dialog`) are included: their
+/// `content` children form the overlay's structural tree and must be recovered
+/// on every path so dev/release parity holds.
 #[must_use]
 pub(crate) fn is_container(name: &str) -> bool {
     matches!(
         name,
-        "Column" | "Row" | "VStack" | "HStack" | "ZStack" | "Stack" | "Provider"
+        "Column"
+            | "Row"
+            | "VStack"
+            | "HStack"
+            | "ZStack"
+            | "Stack"
+            | "Provider"
+            | "Modal"
+            | "Sheet"
+            | "Dialog"
     )
 }
