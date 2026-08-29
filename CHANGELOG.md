@@ -121,6 +121,15 @@ are intentionally omitted (automation noise, not user-facing change).
   `URLCache` on iOS) is a host concern that lives in `runtimes/android/host` + `runtimes/ios`
   and is out of this crate's scope; not compile-verified here.
 
+### Stdlib — gestures (FLUX-041, PRD-N family) — PARTIAL
+
+- Registered `Gesture` (a `kind` + `onGesture` container) in the ADR-0047 registry and
+  seeded it in the prelude; parity guard extended both directions and stays green. A Kotlin
+  codegen trace test pins it lowers to a native container (`Box`) carrying its child subtree.
+- REMAINING (host-side, native lane): attaching the matching `UIGestureRecognizer` (iOS) /
+  `Modifier.pointerInput` (Android) for each `kind` is wired in `runtimes/android/host` +
+  `runtimes/ios` and is out of this crate's scope; not compile-verified here.
+
 ### Stdlib — form primitives (FLUX-040, PRD-N family) — PARTIAL
 
 - Registered `Switch`/`Checkbox`/`Slider`/`Picker`/`DatePicker`/`TextArea` in the ADR-0047

@@ -339,4 +339,18 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
         handler_prop: Some("onChange"),
         label_prop: None,
     },
+    // --- FLUX-041 gestures (PRD-N family) ---
+    // A `Gesture` wrapper carrying a `kind` (longPress/swipe/drag/pinch) + an
+    // `onGesture` callback (reuses the onClick contract). Native hosts attach
+    // the matching recognizer/modifier.
+    PrimitiveSpec {
+        flux_name: "Gesture",
+        node_kind: NodeKind::Primitive,
+        kind: PrimitiveKind::Container,
+        kotlin_view: "Box",
+        swift_view: "VStack",
+        primary_prop: Some("kind"),
+        handler_prop: Some("onGesture"),
+        label_prop: None,
+    },
 ];

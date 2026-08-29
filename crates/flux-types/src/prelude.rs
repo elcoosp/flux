@@ -145,6 +145,8 @@ pub(crate) fn prelude(supply: &mut Supply) -> Env {
         "Picker",
         "DatePicker",
         "TextArea",
+        // FLUX-041 gestures (PRD-N family).
+        "Gesture",
     ] {
         env.insert(
             comp.to_owned(),

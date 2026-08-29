@@ -482,3 +482,22 @@ fn flux_040_form_primitives_codegen() {
     );
     assert!(out.contains("TextField("), "TextArea missing:\n{out}");
 }
+
+#[test]
+fn flux_041_gesture_primitive_codegen() {
+    // FLUX-041: a `Gesture` wrapper lowers to a native container carrying the
+    // gesture recognizer on Kotlin (`Box`). The native recognizer attach is
+    // host-side; this pins the structural mapping + the onGesture callback.
+    let src = r#"compo G
+  state fired: Bool = false
+  Gesture(kind: "longPress", onGesture: fn() { fired = fired }) {
+    Text("tap")
+  }
+"#;
+    let out = codegen_example("gesture_primitive", src);
+    assert!(out.contains("Box {"), "Gesture missing Box mapping:\n{out}");
+    assert!(
+        out.contains("Text(\"tap\")"),
+        "Gesture child not emitted:\n{out}"
+    );
+}

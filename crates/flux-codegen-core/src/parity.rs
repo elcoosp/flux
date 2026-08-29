@@ -42,6 +42,8 @@ fn registry_covers_every_prelude_primitive() {
         "Picker",
         "DatePicker",
         "TextArea",
+        // FLUX-041 gestures (PRD-N family).
+        "Gesture",
     ];
     for name in prelude_primitives {
         assert!(
@@ -82,6 +84,8 @@ fn registry_has_no_unknown_entries() {
         "Picker",
         "DatePicker",
         "TextArea",
+        // FLUX-041 gestures (PRD-N family).
+        "Gesture",
     ];
     for spec in PrimitiveSpec::all() {
         assert!(
