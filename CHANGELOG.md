@@ -6,6 +6,37 @@ from `/docs/agents-boundaries-contract.md` Part 2.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 2026-08-29 — Flux syntax highlighting: grammar rebuild + compiler-driven LSP tokens
+
+### Docs site + LSP (flux-lsp, flux-parser) — `[verified]`
+- **Grammar rebuild (was stale).** `website/src/flux-grammar.mjs` (a hand-written
+  regex shiki grammar) no longer matched the live parser: it listed
+  `component/return/for/while/struct/enum/impl/pub/where/export/in` as keywords
+  (none are real), missed `when/otherwise/use/capability/untrack/resource/await/
+  createRef/provide/useContext/compo`, and used `#` comments while the lexer uses
+  `//`. Rebuilt as `website/src/flux.tmLanguage.json` (TextMate JSON) driven directly
+  from `flux-parser`'s `TokenKind` keyword set, and wired `astro.config.mjs` to it;
+  the stale `.mjs` is deleted.
+- **Doc examples used the dead brace syntax.** `counter-example` + `adding-a-primitive`
+  (root + `fr` + `es`) had been written against `component Counter { … }` with `state`
+  and `fn()` handlers; rewrote them to the real indentation grammar
+  (`compo`/`$count:`/`Column gap:`/onClick `|| { … }`) so the snippets parse against
+  the current compiler.
+- **Compiler-driven semantic tokens (FLUX-024 / PRD-O).** `flux-parser` now exposes
+  its lexer publicly (`TokenKind`, `Token`, `LexError`, `lex`, `tokenize`,
+  `keyword_kind`) so consumers can reuse the real surface grammar. `flux-lsp` adds a
+  `textDocument/semanticTokens/full` provider (`crates/flux-lsp/src/semantic_tokens.rs`)
+  that highlights keywords, string/number literals, and `//` comments using the actual
+  lexer — not a second regex grammar — and advertises the legend in `initialize`.
+  - Scope note: highlighting is lexer-driven, so type names, `null`/`None`/`Some`, and
+    component/prop identifiers are not distinguished from plain identifiers (the lexer
+    cannot tell them apart); a parser/AST-aware pass is FLUX-027 territory.
+  - Verification: `cargo clippy -p flux-parser -p flux-lsp --all-targets -D warnings`
+    clean; `cargo nextest run -p flux-parser -p flux-lsp` 68/68 green; `cargo doc`
+    clean; shiki tokenizes a real `.flux` sample through the new `flux.tmLanguage.json`
+    (`compo` → keyword color).
+
+
 ## [Unreleased]
 
 The entries below land the work committed since the changelog was last updated

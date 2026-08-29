@@ -8,14 +8,12 @@ This is the smallest interesting Flux program. It is the real file shipped at
 recorded trace is built from.
 
 ```flux
-component Counter {
-    state count: Int = 0
+compo Counter
+    $count: Int = 0
 
-    Column(gap: 8.0) {
-        Text(text: "tapped {count} times")
-        Button(text: "Increment", onClick: fn() { count = count + 1 })
-    }
-}
+    Column gap: 8.0
+        Text text: "tapped {count} times"
+        Button text: "Increment", onClick: || { count = count + 1 }
 ```
 
 `flux build ios` on this exact file emits the Swift below; `flux build android`
@@ -24,12 +22,12 @@ emits the Kotlin. Both are reproducible — run them yourself from
 
 ## What each line means
 
-- `state count: Int = 0` — a mutable signal cell. The **host** owns `count`; the
+- `$count: Int = 0` — a mutable signal cell. The **host** owns `count`; the
   server only ever sees its type and initial value. This is
   [host-authoritative state](/concepts/host-authoritative-state/).
 - `Text(text: "tapped {count} times")` — interpolates the signal into a string
   literal. This node's `signal_deps` is exactly the id of `count`.
-- `Button(text: "Increment", onClick: fn() { count = count + 1 })` — registers a
+- `Button(text: "Increment", onClick: || { count = count + 1 })` — registers a
   handler closure whose body writes `count`. The closure is shipped to the host as
   bytecode (Appendix D §D.8) and run in the host VM on tap.
 

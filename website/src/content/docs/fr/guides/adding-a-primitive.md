@@ -16,14 +16,13 @@ et le même type.
 
 ```flux
 // slider.flux — composant adapter `Slider` (Appendice F.N).
-component Slider(
+compo Slider(
   value: Float,
   min: Float = 0.0,
   max: Float = 1.0,
   onValueChange: Handler,
-) {
+)
   // Feuille adapter — rendu natif défini par l'Appendice F.N.
-}
 ```
 
 ## 2. Implémentez-le sur les deux hôtes

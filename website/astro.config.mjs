@@ -4,7 +4,7 @@ import starlight from '@astrojs/starlight';
 import react from '@astrojs/react';
 import mdx from '@astrojs/mdx';
 import sitemap from '@astrojs/sitemap';
-import { fluxGrammar } from './src/flux-grammar.mjs';
+import fluxGrammar from './src/flux.tmLanguage.json';
 
 // Flux documentation site.
 //

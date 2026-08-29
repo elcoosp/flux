@@ -23,6 +23,8 @@ pub use ast::{
     TraitDecl, Type, TypeDecl, TypeKindAst, TypeParam, UseDecl, Variant,
 };
 pub use error::{Location, ParseError};
+pub use lexer::{LexError, Token, TokenKind, keyword_kind};
+pub use lexer::{lex, tokenize};
 
 use crate::parser::parse_source;
 

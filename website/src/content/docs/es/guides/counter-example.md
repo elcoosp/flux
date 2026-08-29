@@ -7,16 +7,14 @@ Este es el programa Flux más pequeño interesante, y la forma sobre la que se
 construye el escenario golden `counter_1000` del playground.
 
 ```flux
-component Counter {
-  state count: Int = 0
+compo Counter
+  $count: Int = 0
 
-  Column(gap: 12) {
-    Text("Count: {count}")
-    Button(text: "Increment", onClick: {
+  Column gap: 12.0
+    Text text: "Count: {count}"
+    Button text: "Increment", onClick: || {
       count = count + 1
-    })
-  }
-}
+    }
 ```
 
 ## Qué significa cada línea

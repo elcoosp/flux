@@ -1,0 +1,59 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Flux",
+  "scopeName": "source.flux",
+  "fileTypes": ["flux"],
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#string" },
+    { "include": "#keyword" },
+    { "include": "#type" },
+    { "include": "#constant" },
+    { "include": "#number" }
+  ],
+  "repository": {
+    "comment": {
+      "match": "//.*$",
+      "name": "comment.line.double-slash.flux"
+    },
+    "string": {
+      "begin": "\"",
+      "end": "\"",
+      "name": "string.quoted.double.flux",
+      "patterns": [
+        {
+          "name": "constant.character.escape.flux",
+          "match": "\\\\."
+        },
+        {
+          "name": "meta.embedded.expression.flux",
+          "match": "\\{[^{}]*\\}"
+        }
+      ]
+    },
+    "keyword": {
+      "patterns": [
+        {
+          "match": "\\b(compo|component|type|trait|capability|state|derived|fn|let|use|import)\\b",
+          "name": "keyword.declaration.flux"
+        },
+        {
+          "match": "\\b(if|else|when|otherwise|match|effect|onMount|onCleanup|batch|untrack|resource|await|provide|useContext|createRef)\\b",
+          "name": "keyword.control.flux"
+        }
+      ]
+    },
+    "type": {
+      "match": "\\b(Int|Float|String|Bool|Unit|List|Map|Option|Ref|Handler|Signal|Color|Alignment|Overflow|KeyboardType|WebSocket|Result|Data|ContentMode|Fn|Font|DateTime|Duration|Image)\\b",
+      "name": "support.type.flux"
+    },
+    "constant": {
+      "match": "\\b(true|false|null|None|Some)\\b",
+      "name": "constant.language.flux"
+    },
+    "number": {
+      "match": "(?x)\n  (?: -? \\d+ (?: \\. \\d+ )? )\n  (?: [eE] [+-]? \\d+ )?",
+      "name": "constant.numeric.flux"
+    }
+  }
+}

@@ -7,16 +7,14 @@ C'est le plus petit programme Flux int√©ressant, et la forme sur laquelle le sc√
 golden `counter_1000` du terrain de jeu est construit.
 
 ```flux
-component Counter {
-  state count: Int = 0
+compo Counter
+  $count: Int = 0
 
-  Column(gap: 12) {
-    Text("Count: {count}")
-    Button(text: "Increment", onClick: {
+  Column gap: 12.0
+    Text text: "Count: {count}"
+    Button text: "Increment", onClick: || {
       count = count + 1
-    })
-  }
-}
+    }
 ```
 
 ## Ce que signifie chaque ligne

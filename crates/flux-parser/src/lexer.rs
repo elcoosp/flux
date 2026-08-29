@@ -22,8 +22,13 @@
 use flux_syntax::Span;
 
 /// A lexical token kind.
+///
+/// The discriminant values are stable for the lifetime of the surface grammar;
+/// downstream consumers (the `flux-lsp` semantic-tokens provider) match on the
+/// variant, not the numeric value. Layout tokens (`Indent`/`Dedent`/`Newline`)
+/// carry no highlights of their own.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TokenKind {
+pub enum TokenKind {
     /// Layout: indentation increased relative to the enclosing level.
     Indent,
     /// Layout: indentation decreased; closes one or more blocks.
@@ -159,13 +164,13 @@ pub(crate) enum TokenKind {
 
 /// One lexical token: its kind and the byte span it covers in the source.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Token {
+pub struct Token {
     /// Token classification.
-    pub(crate) kind: TokenKind,
+    pub kind: TokenKind,
     /// Inclusive-start byte offset.
-    pub(crate) start: usize,
+    pub start: usize,
     /// Exclusive-end byte offset.
-    pub(crate) end: usize,
+    pub end: usize,
 }
 
 impl Token {
@@ -178,7 +183,7 @@ impl Token {
 
 /// A lexical error with a byte span for diagnostics.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct LexError {
+pub struct LexError {
     /// Human-readable description.
     pub(crate) message: String,
     /// Byte span of the offending text.
@@ -195,8 +200,10 @@ impl LexError {
 }
 
 /// Maps an identifier's text to its keyword kind, if it is a keyword.
+///
+/// Returns `None` for identifiers and the `$name` state sigil.
 #[must_use]
-pub(crate) fn keyword_kind(text: &str) -> Option<TokenKind> {
+pub fn keyword_kind(text: &str) -> Option<TokenKind> {
     Some(match text {
         "compo" | "component" => TokenKind::Compo,
         "fn" => TokenKind::Fn,
@@ -230,13 +237,31 @@ pub(crate) fn keyword_kind(text: &str) -> Option<TokenKind> {
 
 /// Lexes `source` into tokens, resolving indentation into layout tokens.
 ///
+/// The returned tokens carry byte spans; callers that only need highlighting
+/// (e.g. the `flux-lsp` semantic-tokens provider) can iterate `(kind, start,
+/// end)` without involving the parser. A `LexError` is returned for an
+/// unterminated string literal or a dedent that matches no enclosing indent.
+///
 /// # Errors
 ///
 /// Returns a [`LexError`] for an unterminated string literal or a dedent that
 /// matches no enclosing indent level.
-pub(crate) fn lex(source: &str, file_id: u32) -> Result<Vec<Token>, LexError> {
+pub fn lex(source: &str, file_id: u32) -> Result<Vec<Token>, LexError> {
     let lexer = Lexer::new(source, file_id);
     lexer.run()
+}
+
+/// Lexes `source` for a highlight-only consumer, using synthetic `file_id` `0`.
+///
+/// Unlike [`parse`](crate::parse) this never builds an `Ast`; it returns the raw
+/// token stream with byte spans so a client (such as the LSP semantic-tokens
+/// provider) can classify each token without running the full pipeline.
+///
+/// # Errors
+///
+/// See [`lex`].
+pub fn tokenize(source: &str) -> Result<Vec<Token>, LexError> {
+    lex(source, 0)
 }
 
 /// The mutable lexer state.

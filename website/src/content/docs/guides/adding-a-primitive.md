@@ -15,14 +15,13 @@ new prop must be added in **both** dev and release, with the same name and type.
 
 ```flux
 // slider.flux — `Slider` adapter component (Appendix F.N).
-component Slider(
+compo Slider(
   value: Float,
   min: Float = 0.0,
   max: Float = 1.0,
   onValueChange: Handler,
-) {
+)
   // Adapter leaf — native rendering defined by Appendix F.N.
-}
 ```
 
 ## 2. Implement it on both hosts

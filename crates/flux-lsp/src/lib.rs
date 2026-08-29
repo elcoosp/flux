@@ -29,12 +29,15 @@ use async_lsp::{
     LanguageServer, MainLoop,
     lsp_types::{
         Diagnostic, DiagnosticSeverity, DidOpenTextDocumentParams, InitializeParams,
-        InitializeResult, InitializedParams, Range, ServerCapabilities, ServerInfo,
-        TextDocumentItem, TextDocumentSyncCapability, TextDocumentSyncKind, Url,
+        InitializeResult, InitializedParams, Range, SemanticTokensParams, SemanticTokensResult,
+        ServerCapabilities, ServerInfo, TextDocumentItem, TextDocumentSyncCapability,
+        TextDocumentSyncKind, Url,
     },
     router::Router,
     stdio::{PipeStdin, PipeStdout},
 };
+
+mod semantic_tokens;
 
 /// One LSP-shaped diagnostic, reusing the shape `flux-cli`'s `mod lsp` emits
 /// (`line`/`character`/`length`/`severity`/`message`/`source`) so the CLI JSON
@@ -132,6 +135,16 @@ impl LanguageServer for FluxLsp {
                     text_document_sync: Some(TextDocumentSyncCapability::Kind(
                         TextDocumentSyncKind::FULL,
                     )),
+                    semantic_tokens_provider: Some(
+                        async_lsp::lsp_types::SemanticTokensServerCapabilities::SemanticTokensOptions(
+                            async_lsp::lsp_types::SemanticTokensOptions {
+                                legend: semantic_tokens::legend(),
+                                full: Some(async_lsp::lsp_types::SemanticTokensFullOptions::Bool(true)),
+                                range: None,
+                                ..Default::default()
+                            },
+                        ),
+                    ),
                     ..Default::default()
                 },
                 server_info: Some(ServerInfo {
@@ -163,6 +176,36 @@ impl LanguageServer for FluxLsp {
             .expect("documents mutex poisoned")
             .insert(uri, text);
         ControlFlow::Continue(())
+    }
+
+    fn semantic_tokens_full(
+        &mut self,
+        params: SemanticTokensParams,
+    ) -> futures::future::BoxFuture<
+        'static,
+        Result<Option<SemanticTokensResult>, async_lsp::ResponseError>,
+    > {
+        // Read the document text out of the cache first so the returned future
+        // owns everything it needs and is `'static` (the trait requires
+        // `BoxFuture<'static>`). The highlight pass itself is CPU-bound and runs
+        // inside the future.
+        let uri = params.text_document.uri;
+        let text = self
+            .documents
+            .lock()
+            .expect("documents mutex poisoned")
+            .get(&uri)
+            .cloned()
+            .unwrap_or_default();
+        Box::pin(async move {
+            let data = semantic_tokens::tokens_for_text(&text);
+            Ok(Some(async_lsp::lsp_types::SemanticTokensResult::Tokens(
+                async_lsp::lsp_types::SemanticTokens {
+                    result_id: None,
+                    data,
+                },
+            )))
+        })
     }
 }
 

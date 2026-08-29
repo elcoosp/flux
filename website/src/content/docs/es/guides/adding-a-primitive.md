@@ -14,15 +14,15 @@ Añade las props del primitivo al contrato. Cada prop es parte del contrato: una
 prop nueva debe añadirse en **dev y release**, con el mismo nombre y tipo.
 
 ```flux
-component Slider(
+compo Slider(
   value: Float,
   min: Float = 0.0,
   max: Float = 1.0,
   onValueChange: Handler,
-) {
+)
   // Adapter leaf — native rendering defined by Appendix F.N.
-}
 ```
+
 
 ## 2. Impleméntalo en ambos hosts
 
