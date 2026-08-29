@@ -37,13 +37,32 @@ const NON_EN_DIRS = new Set(['es', 'fr', 'adr']);
 const EXEMPT_SLUGS = new Set(['guides/quickstart']);
 
 /**
- * Returns the slug set for a locale. `''` is the default (English) locale, whose
- * files live at the content root but must skip the locale directories themselves.
- * A non-empty `locale` reads from `docs/<locale>` and strips that prefix so its
- * slugs are comparable to the English ones.
+ * Verifies that every English doc exists in all translation locales.
+ * Returns a map of locale -> missing slug list (empty when clean).
+ *
+ * `root` overrides the docs directory (used by tests with temp fixtures);
+ * defaults to the real `docsDir` when omitted so production usage is unchanged.
  */
-async function slugSet(locale: string): Promise<Set<string>> {
-  const localeDir = locale ? join(docsDir, locale) : docsDir;
+export async function findMissingTranslations(
+  root: string = docsDir,
+): Promise<Record<string, string[]>> {
+  const en = await slugSetIn(root, '');
+  const result: Record<string, string[]> = {};
+  for (const locale of TRANSLATION_LOCALES) {
+    const target = await slugSetIn(root, locale);
+    const missing: string[] = [];
+    for (const slug of en) {
+      if (EXEMPT_SLUGS.has(slug)) continue;
+      if (!target.has(slug)) missing.push(slug);
+    }
+    result[locale] = missing;
+  }
+  return result;
+}
+
+/** slugSet anchored at an explicit docs root (so tests can use temp trees). */
+async function slugSetIn(root: string, locale: string): Promise<Set<string>> {
+  const localeDir = locale ? join(root, locale) : root;
   const slugs = new Set<string>();
   const walk = async (dir: string) => {
     let entries: import('node:fs').Dirent[];
@@ -55,7 +74,6 @@ async function slugSet(locale: string): Promise<Set<string>> {
     for (const entry of entries) {
       const full = join(dir, entry.name);
       if (entry.isDirectory()) {
-        // Skip the locale and exempt directories when scanning the root.
         if (!locale && NON_EN_DIRS.has(entry.name)) continue;
         await walk(full);
       } else if (/\.(md|mdx)$/.test(entry.name)) {
@@ -66,25 +84,6 @@ async function slugSet(locale: string): Promise<Set<string>> {
   };
   await walk(localeDir);
   return slugs;
-}
-
-/**
- * Verifies that every English doc exists in all translation locales.
- * Returns a map of locale -> missing slug list (empty when clean).
- */
-export async function findMissingTranslations(): Promise<Record<string, string[]>> {
-  const en = await slugSet('');
-  const result: Record<string, string[]> = {};
-  for (const locale of TRANSLATION_LOCALES) {
-    const target = await slugSet(locale);
-    const missing: string[] = [];
-    for (const slug of en) {
-      if (EXEMPT_SLUGS.has(slug)) continue;
-      if (!target.has(slug)) missing.push(slug);
-    }
-    result[locale] = missing;
-  }
-  return result;
 }
 
 const isMain =
