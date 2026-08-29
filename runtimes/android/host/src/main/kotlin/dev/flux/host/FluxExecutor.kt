@@ -7,9 +7,11 @@ import dev.flux.host.signal.CellState
 import dev.flux.host.signal.SignalGraph
 import dev.flux.host.transport.FluxTransport
 import dev.flux.host.vm.CapabilityRegistry
+import dev.flux.host.vm.Decoder
 import dev.flux.host.vm.FluxBytecodeVM
 import dev.flux.host.vm.FluxBytecodeVM.RunResult
 import dev.flux.host.vm.FluxValue
+import dev.flux.host.vm.Instruction
 import dev.flux.host.vm.StringResolver
 import dev.flux.host.vm.TableStringResolver
 import dev.flux.host.vm.VmErrorKind
@@ -293,13 +295,23 @@ public class FluxExecutor(
     ) {
         val closure = closureFor(handlerId) ?: return
         val result =
-            FluxBytecodeVM.run(
-                closure.bytecode,
-                signals,
-                payload,
-                stringResolver,
-                capabilities,
-            )
+            if (closure.instructions.isNotEmpty()) {
+                FluxBytecodeVM.run(
+                    closure.instructions,
+                    signals,
+                    payload,
+                    stringResolver,
+                    capabilities,
+                )
+            } else {
+                FluxBytecodeVM.run(
+                    closure.bytecode,
+                    signals,
+                    payload,
+                    stringResolver,
+                    capabilities,
+                )
+            }
         when (result) {
             is VmResult.Success -> {
                 val seq = shadowTree.lastSeq()
@@ -346,13 +358,23 @@ public class FluxExecutor(
     ) {
         val closure = closureFor(handlerId) ?: return
         var current =
-            FluxBytecodeVM.runResumable(
-                closure.bytecode,
-                signals,
-                payload,
-                stringResolver,
-                capabilities,
-            )
+            if (closure.instructions.isNotEmpty()) {
+                FluxBytecodeVM.runResumable(
+                    closure.instructions,
+                    signals,
+                    payload,
+                    stringResolver,
+                    capabilities,
+                )
+            } else {
+                FluxBytecodeVM.runResumable(
+                    closure.bytecode,
+                    signals,
+                    payload,
+                    stringResolver,
+                    capabilities,
+                )
+            }
         // Settle every `AWAIT` in turn; the loop terminates at `HALT`. Binding `step`
         // (immutable) inside the `when` keeps the smart-cast valid despite reassigning
         // `current` (Kotlin cannot smart-cast a `var` that is written in a branch).
@@ -526,8 +548,11 @@ public class FluxExecutor(
                 onError?.invoke("handler ${def.handlerId}: bytecode range out of bounds")
                 continue
             }
-            // Last-wins: overwrite, never skip on re-registration (T7).
-            closures[def.handlerId] = Closure(blob.data.copyOfRange(absStart, absStart + len))
+            // Last-wins: overwrite, never skip on re-registration (T7). The decode
+            // is cached here (R3) so subsequent taps reuse it; a malformed handler
+            // falls back to empty and the dispatch path re-decodes (surfacing the
+            // fault the same way it always did).
+            closures[def.handlerId] = decodeClosure(blob.data.copyOfRange(absStart, absStart + len))
         }
     }
 
@@ -539,7 +564,7 @@ public class FluxExecutor(
         handlerId: UInt,
         bytecode: ByteArray,
     ) {
-        closures[handlerId] = Closure(bytecode)
+        closures[handlerId] = decodeClosure(bytecode)
     }
 
     private val closures = LinkedHashMap<UInt, Closure>()
@@ -592,7 +617,15 @@ public class FluxExecutor(
     /** A registered handler closure: bytecode + captured signals. */
     public data class Closure(
         val bytecode: ByteArray,
+        /** Decoded once at registration (R3) so dispatch never re-decodes on every tap. */
+        val instructions: List<Instruction> = emptyList(),
     )
+
+    /** Builds a [Closure], decoding its bytecode into [Closure.instructions] once. */
+    private fun decodeClosure(bytecode: ByteArray): Closure {
+        val instructions = runCatching { Decoder.decodeProgram(bytecode) }.getOrDefault(emptyList())
+        return Closure(bytecode, instructions)
+    }
 
     /** Tears down the executor and transport. */
     public fun dispose() {

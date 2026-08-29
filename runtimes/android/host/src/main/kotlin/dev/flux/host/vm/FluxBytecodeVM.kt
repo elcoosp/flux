@@ -122,6 +122,56 @@ public object FluxBytecodeVM {
     }
 
     /**
+     * Runs an already-decoded [program] with resumable semantics (R3). Mirrors
+     * [runResumable] but skips the decode step; the executor passes the cache it
+     * built at registration so a tap never re-decodes. Equivalent to
+     * `runResumable(bytecode:)` for a [program] decoded from the same bytecode.
+     */
+    public fun runResumable(
+        program: List<Instruction>,
+        signals: SignalStore,
+        payload: FluxValue,
+        strings: StringResolver = DecimalStringResolver,
+        capabilities: CapabilityRegistry = CapabilityRegistry.default(),
+    ): RunResult {
+        val offsets: List<UInt> = program.map { it.offset }
+        val regs = Array<FluxValue>(16) { FluxValue.NullVal }
+        regs[0] = payload
+        regs[15] = FluxValue.IntVal(ENTRY_GAS.toLong())
+        return execTail(program, offsets, signals, 0, regs, ENTRY_GAS, strings, capabilities)
+    }
+
+    /**
+     * Runs an already-decoded [program] to completion (R3). The executor caches
+     * the decoded `List<Instruction>` per handler at registration and passes it
+     * here so a tap never re-decodes bytecode it already decoded once. Equivalent
+     * to [run] for a [program] produced by [Decoder.decodeProgram] from the same
+     * bytecode. Decode failures are handled by the caller's bytecode overload.
+     */
+    public fun run(
+        program: List<Instruction>,
+        signals: SignalStore,
+        payload: FluxValue,
+        strings: StringResolver = DecimalStringResolver,
+        capabilities: CapabilityRegistry = CapabilityRegistry.default(),
+    ): VmResult {
+        val offsets: List<UInt> = program.map { it.offset }
+        val regs = Array<FluxValue>(16) { FluxValue.NullVal }
+        regs[0] = payload
+        regs[15] = FluxValue.IntVal(ENTRY_GAS.toLong())
+        return when (
+            val tail = execTail(
+                program, offsets, signals, 0, regs, ENTRY_GAS, strings, capabilities
+            )
+        ) {
+            is RunResult.Halt -> VmResult.Success(tail.outcome)
+            is RunResult.Suspended ->
+                VmResult.Failure(VmErrorKind.INVALID_DISPATCH, tail.state.resumeIndex.toUInt())
+            is RunResult.Fault -> VmResult.Failure(tail.kind, tail.offset)
+        }
+    }
+
+    /**
      * Continues a suspended handler (ADR-0044), delivering [value] as the awaited result.
      * Replays the captured signal writes, then re-enters the interpreter at [state.resumeIndex]
      * with [value] in `r0`.
