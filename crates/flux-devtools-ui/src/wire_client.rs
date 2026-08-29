@@ -187,4 +187,68 @@ mod tests {
             }
         );
     }
+
+    /// Proves the DevTools data path end-to-end without a display: a local
+    /// WebSocket server emits one enriched telemetry frame; the client connects
+    /// and the ingest loop feeds it into `DevToolsState`. This is the headless
+    /// equivalent of launching the app against a running dev server (PRD-P
+    /// "ship it, not scaffold it" — the connect + ingest path is verified).
+    #[tokio::test]
+    async fn ingest_loop_pulls_from_live_server() {
+        use futures_util::SinkExt;
+        use futures_util::StreamExt;
+        use tokio::net::TcpListener;
+        use tokio_tungstenite::accept_async;
+
+        // Build one enriched telemetry frame (mirrors what the dev server sends).
+        let events = vec![TelemetryEvent::SignalWrite {
+            signal_id: SignalId::from(7u32),
+            old_value: Value::Null,
+            new_value: Value::Int(3),
+            triggered_effect_ids: vec![],
+        }];
+        let enriched: Vec<EnrichedTelemetryEvent> =
+            events.into_iter().map(enrich_telemetry).collect();
+        let frame = EnrichedTelemetryFrame {
+            version: flux_ir_serde::PROTOCOL_VERSION,
+            event_count: enriched.len() as u16,
+            events: enriched,
+        }
+        .to_bytes();
+
+        // Start a server that sends the frame then closes.
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (sock, _) = listener.accept().await.expect("accept");
+            let ws = accept_async(sock).await.expect("accept ws");
+            let (mut w, _) = ws.split();
+            w.send(tokio_tungstenite::tungstenite::Message::Binary(
+                frame.into(),
+            ))
+            .await
+            .expect("send frame");
+        });
+
+        // Connect the real client and run the ingest loop.
+        let state = Arc::new(DevToolsState::new());
+        let stream = connect(&addr.to_string()).await.expect("client connect");
+        let ingest = state.clone();
+        let handle = tokio::spawn(async move {
+            let _ = run_ingest_loop(stream, ingest).await;
+        });
+        // Give the loop a moment to receive and apply the frame.
+        for _ in 0..50 {
+            if state.timeline_len() >= 1 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        handle.abort();
+        assert!(
+            state.timeline_len() >= 1,
+            "DevTools must ingest the frame the server sent"
+        );
+        assert_eq!(state.vm_state().bytecode_offset, None);
+    }
 }

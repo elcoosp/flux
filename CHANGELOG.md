@@ -286,9 +286,29 @@ are already taken by unrelated topics, so the next free slots were used).
   trait leaked `pub(crate)` `Writer`/`Reader` types and produced dead-code;
   the two concrete types are cleaner and keep the channel types explicit.
   The `gpui` desktop UI (views) is nightly-gated because the pinned `gpui`
-  revision requires `std::hint::cold_path`; the always-on data path
+  `gpui` revision requires `std::hint::cold_path`; the always-on data path
   (host → `:7333` → `serve_devtools` → DevTools clients) is fully exercised by
   the Rust integration test on stable.
+
+- **PRD-P follow-up — shipped the scaffolded app (formerly deferred pieces)**:
+  - Signal-graph dependency edges (user story 2): `ReconstructedState` now
+    carries `signal_edges` (signal → effects that re-run when it changes,
+    derived from `SignalWrite::triggered_effect_ids`); `reconstruct_state`
+    records them and `signal_graph` view renders `sig#n → fx#m, fx#k`.
+  - `run_app` no longer dead-ends: it now spawns the real `wire_client`
+    ingest loop against `127.0.0.1:7333` and feeds the shared `DevToolsState`,
+    which all four views read (state shared as `Arc<DevToolsState>` between the
+    async loop and the gpui views — the prior `Entity` indirection was replaced
+    so the ingest loop and UI hold the same `Arc`). A failed handshake is logged
+    and tolerated; the window still opens.
+  - Headless end-to-end proof: `ingest_loop_pulls_from_live_server` boots a real
+    WebSocket server, the DevTools client connects and the ingest loop applies
+    the frame to `DevToolsState` (`timeline_len >= 1`). 17 devtools-ui nextest
+    cases green.
+  - **Live launch verified**: `flux dev --root examples/counter` boots and binds
+    the DevTools WebSocket on `:7333`; a DevTools client handshake against the
+    live endpoint succeeds and the connection is held (telemetry flows once a
+    native host connects — the on-device piece).
 
 ### FLUX-019 — dev server (`flux-devserver`) — DONE
 

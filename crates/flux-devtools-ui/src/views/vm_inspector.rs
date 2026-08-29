@@ -1,28 +1,30 @@
 //! VM inspector view (spec §5.3): register bank + current instruction.
 
-use gpui::{Context, Entity, IntoElement, ParentElement, Render, Styled, Window};
+use std::sync::Arc;
+
+use gpui::{Context, IntoElement, ParentElement, Render, Styled, Window};
 
 use crate::state::{DevToolsState, VmState};
 
 /// Renders the live VM register bank and instruction pointer.
 pub struct VmInspectorView {
-    state: Entity<DevToolsState>,
+    state: Arc<DevToolsState>,
 }
 
 impl VmInspectorView {
     /// Creates the view bound to the shared state.
-    pub fn new(state: Entity<DevToolsState>) -> Self {
+    pub fn new(state: Arc<DevToolsState>) -> Self {
         Self { state }
     }
 
     /// The current VM snapshot for rendering.
-    fn vm_state(&self, cx: &Context<'_, Self>) -> VmState {
-        self.state.read(cx).vm_state()
+    fn vm_state(&self) -> VmState {
+        self.state.vm_state()
     }
 
     /// Renders the view as a standalone pane (used by the root layout).
-    pub fn render_pane(&self, cx: &Context<'_, Self>) -> impl IntoElement {
-        let vm = self.vm_state(cx);
+    pub fn render_pane(&self, _cx: &Context<'_, Self>) -> impl IntoElement {
+        let vm = self.vm_state();
         let offset = vm
             .bytecode_offset
             .map_or_else(|| "?".into(), |o| format!("0x{o:04X}"));

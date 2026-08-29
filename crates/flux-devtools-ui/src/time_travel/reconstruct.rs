@@ -6,7 +6,7 @@
 //! scrubbing always yields the same result for a given index.
 
 use flux_ir_serde::{EnrichedTelemetryEvent, Rect};
-use flux_syntax::{NodeId, SignalId, Value};
+use flux_syntax::{EffectId, NodeId, SignalId, Value};
 
 /// The reconstructed VM register view at a point in time.
 pub type Registers = Box<[Value; 16]>;
@@ -29,6 +29,11 @@ pub struct ReconstructedState {
     pub signals: Vec<(SignalId, Value)>,
     /// Native view layout frames keyed by [`NodeId`].
     pub view_frames: Vec<(NodeId, Rect)>,
+    /// Reactive dependency edges: for each written signal, the effect IDs that
+    /// re-run when it changes (PRD-P user story 2 — "what reads" a signal). The
+    /// signal-graph view renders these so a developer can see reactivity the way
+    /// the VM actually works.
+    pub signal_edges: Vec<(SignalId, Vec<EffectId>)>,
     /// Whether the VM is currently paused.
     pub paused: bool,
 }
@@ -44,6 +49,7 @@ impl ReconstructedState {
             gas_remaining: None,
             signals: Vec::new(),
             view_frames: Vec::new(),
+            signal_edges: Vec::new(),
             paused: false,
         }
     }
@@ -79,9 +85,17 @@ pub fn reconstruct_state(
             EnrichedTelemetryEvent::SignalWrite {
                 signal_id,
                 new_value,
+                triggered_effect_ids,
                 ..
             } => {
                 upsert(&mut state.signals, *signal_id, new_value.clone());
+                // Record the reactivity edge: effects that re-run when this
+                // signal changes (PRD-P user story 2).
+                upsert(
+                    &mut state.signal_edges,
+                    *signal_id,
+                    triggered_effect_ids.clone(),
+                );
             }
             EnrichedTelemetryEvent::ViewMutation {
                 node_id,
@@ -148,6 +162,16 @@ mod tests {
         }
     }
 
+    fn signal_write_with_effects(id: u32, value: i64, effects: &[u32]) -> EnrichedTelemetryEvent {
+        EnrichedTelemetryEvent::SignalWrite {
+            signal_id: SignalId::from(id),
+            old_value: Value::Null,
+            new_value: Value::Int(value),
+            triggered_effect_ids: effects.iter().map(|e| EffectId::from(*e)).collect(),
+            source_span: None,
+        }
+    }
+
     fn view_layout(node: u32, w: f64) -> EnrichedTelemetryEvent {
         EnrichedTelemetryEvent::ViewMutation {
             node_id: NodeId::from(node),
@@ -190,6 +214,34 @@ mod tests {
             .map(|(_, v)| v.clone())
             .unwrap();
         assert_eq!(s1, Value::Int(150));
+    }
+
+    #[test]
+    fn replay_tracks_signal_dependency_edges() {
+        let events = vec![
+            signal_write(1, 100),
+            signal_write(2, 200),
+            // A write to signal 1 triggers effects 4 and 5 (they read signal 1).
+            signal_write_with_effects(1, 150, &[4, 5]),
+        ];
+        let state = reconstruct_state(&ReconstructedState::base(), &events);
+        let edges_1 = state
+            .signal_edges
+            .iter()
+            .find(|(id, _)| *id == SignalId::from(1u32))
+            .map(|(_, e)| e.clone())
+            .unwrap_or_default();
+        assert_eq!(edges_1, vec![EffectId::from(4u32), EffectId::from(5u32)]);
+        // Signal 2 was written by the `signal_write` helper, which carries one
+        // dependent effect (id 0).
+        assert!(
+            state
+                .signal_edges
+                .iter()
+                .find(|(id, _)| *id == SignalId::from(2u32))
+                .map(|(_, e)| e == &vec![EffectId::from(0u32)])
+                .unwrap_or(false)
+        );
     }
 
     #[test]

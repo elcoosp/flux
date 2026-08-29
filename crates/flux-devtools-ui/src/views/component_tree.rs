@@ -1,6 +1,8 @@
 //! Component tree view (spec §5.3): the shadow tree node layout frames.
 
-use gpui::{Context, Entity, IntoElement, ParentElement, Render, Styled, Window};
+use std::sync::Arc;
+
+use gpui::{Context, IntoElement, ParentElement, Render, Styled, Window};
 
 use flux_ir_serde::Rect;
 use flux_syntax::NodeId;
@@ -10,23 +12,23 @@ use crate::time_travel::ReconstructedState;
 
 /// Renders the live component (shadow) tree as node layout frames.
 pub struct ComponentTreeView {
-    state: Entity<DevToolsState>,
+    state: Arc<DevToolsState>,
 }
 
 impl ComponentTreeView {
     /// Creates the view bound to the shared state.
-    pub fn new(state: Entity<DevToolsState>) -> Self {
+    pub fn new(state: Arc<DevToolsState>) -> Self {
         Self { state }
     }
 
     /// The current reconstructed view frames.
-    fn live(&self, cx: &Context<'_, Self>) -> ReconstructedState {
-        self.state.read(cx).live.read().clone()
+    fn live(&self) -> ReconstructedState {
+        self.state.live.read().clone()
     }
 
     /// Renders the view as a standalone pane.
-    pub fn render_pane(&self, cx: &Context<'_, Self>) -> impl IntoElement {
-        let live = self.live(cx);
+    pub fn render_pane(&self, _cx: &Context<'_, Self>) -> impl IntoElement {
+        let live = self.live();
         gpui::div()
             .flex()
             .flex_col()
@@ -38,7 +40,7 @@ impl ComponentTreeView {
                     .justify_between()
                     .child(gpui::div().child(format!("node#{id}")))
                     .child(gpui::div().child(format!(
-                        "{}×{} @ ({},{})",
+                        "{}×{} @ ({},{}",
                         frame.width, frame.height, frame.x, frame.y
                     )))
             }))
