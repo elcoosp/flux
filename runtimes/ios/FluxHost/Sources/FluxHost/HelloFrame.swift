@@ -69,6 +69,14 @@ extension HelloFrame {
         ("Sensors", 11, [
             ("read", 1),
         ]),
+        ("WebView", 12, [
+            ("load", 1),
+            ("evaluate", 2),
+            ("sendMessage", 3),
+        ]),
+        ("NativeModule", 13, [
+            ("invoke", 1),
+        ]),
     ]
     // ===== GENERATED-END =====
 

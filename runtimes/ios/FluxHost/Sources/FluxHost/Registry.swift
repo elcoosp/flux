@@ -191,6 +191,21 @@ final class CapabilityRegistry: @unchecked Sendable {
                 signals.write(92, .null)
                 return 92
             }),
+            (12, 1, { _, _, arg, signals in
+                // WebView.load(src) (FLUX-048): record the requested `src` into
+                // signal 82 so the UI kit can mount a sandboxed WKWebView; no OS
+                // permission required (PermissionKind.none).
+                signals.write(82, arg)
+                return 82
+            }),
+            (13, 1, { _, _, arg, signals in
+                // NativeModule.invoke(name, method, args) (FLUX-046): record the
+                // requested SDK call into signal 83; gated by PermissionKind.nativeModule
+                // (the LANE-I allow-list), never an open CALL_NATIVE. The host binding
+                // performs the real native SDK call.
+                signals.write(83, arg)
+                return 83
+            }),
             (2, 99, { _, _, _, signals in
                 // Reference async capability: allocates a fresh result cell, marks it
                 // `Pending`, and returns its id immediately (ADR-0045). The host
