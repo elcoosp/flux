@@ -225,6 +225,30 @@ mod tests {
         std::fs::write(dir.join("main.flux"), body).unwrap();
     }
 
+    /// Writes an executable shell stub and returns its path. The file handle is
+    /// dropped before returning so the stub is not left open for writing —
+    /// spawning it again must not hit `ETXTBSY` ("Text file busy") on Linux,
+    /// which refuses to `execve` a file that is still open for write. macOS
+    /// does not enforce this, so the bug only surfaces on the `ubuntu-latest`
+    /// CI runner, not locally.
+    fn create_stub(dir: &Path, name: &str, body: &str) -> String {
+        let stub = dir.join(name);
+        {
+            let mut f = std::fs::File::create(&stub).expect("create stub script");
+            writeln!(f, "{body}").expect("write stub script");
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&stub)
+                .expect("stat stub script")
+                .permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&stub, perms).expect("chmod stub script");
+        }
+        stub.to_string_lossy().into_owned()
+    }
+
     #[test]
     fn absent_toolchain_emits_and_returns_ok() {
         // No xcodebuild/gradle on PATH and no platforms/ios scheme dir → the
@@ -267,19 +291,9 @@ mod tests {
             "compo Main\n  state count: Int = 0\n\n  Text(text: \"hi\")\n",
         );
 
-        // Stub: a tiny shell that exits 1, capturing nothing useful.
-        let stub = tmp.join("fake_xcodebuild");
-        let mut f = std::fs::File::create(&stub).unwrap();
-        writeln!(f, "#!/bin/sh\nexit 1\n").unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = f.metadata().unwrap().permissions();
-            perms.set_mode(0o755);
-            std::fs::set_permissions(&stub, perms).unwrap();
-        }
-
-        let stub_path = stub.to_string_lossy().into_owned();
+        // Stub: a tiny shell that exits 1, capturing nothing useful. The handle
+        // is closed by `create_stub`, so spawning it does not trip ETXTBSY.
+        let stub_path = create_stub(&tmp, "fake_xcodebuild", "#!/bin/sh\nexit 1\n");
         let resolver: Box<CommandResolver> =
             Box::new(move |_, _| Some(vec![stub_path.clone(), "build".to_owned()]));
         let result = run_with(Platform::Ios, &tmp, &*resolver);
@@ -305,18 +319,7 @@ mod tests {
             "compo Main\n  state count: Int = 0\n\n  Text(text: \"hi\")\n",
         );
 
-        let stub = tmp.join("fake_xcodebuild_ok");
-        let mut f = std::fs::File::create(&stub).unwrap();
-        writeln!(f, "#!/bin/sh\nexit 0\n").unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = f.metadata().unwrap().permissions();
-            perms.set_mode(0o755);
-            std::fs::set_permissions(&stub, perms).unwrap();
-        }
-
-        let stub_path = stub.to_string_lossy().into_owned();
+        let stub_path = create_stub(&tmp, "fake_xcodebuild_ok", "#!/bin/sh\nexit 0\n");
         let resolver: Box<CommandResolver> =
             Box::new(move |_, _| Some(vec![stub_path.clone(), "build".to_owned()]));
         let result = run_with(Platform::Ios, &tmp, &*resolver);
