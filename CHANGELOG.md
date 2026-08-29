@@ -90,6 +90,16 @@ are intentionally omitted (automation noise, not user-facing change).
 - ADR-0052 records the structural-vs-nominal decision and scope boundary (no new VM opcode
   or IR node; codegen already walks `ExprKind::Record` fields).
 
+### Codegen — async handler emission (FLUX-064) — DONE
+
+- Release codegen now emits a suspending wrapper around `await`ing capability-call handlers:
+  Kotlin wraps the `onClick` body in `GlobalScope.launch { ... }`, Swift wraps it in
+  `Task { ... }`. Sync handlers (no `await`) stay plain `() -> Unit` / `() -> Void` closures,
+  so the release path can suspend on a real capability without blocking the UI thread
+  (`crates/flux-codegen-{kotlin,swift}/src/backend_impl.rs`, `button_open`).
+- Added `import kotlinx.coroutines.*` to the Kotlin codegen compile-check preamble and a
+  focused emission test asserting the wrap on both backends.
+
 ### IR — B.3 handler-lowering gap closed (FLUX-063) — DONE
 
 - The 6 B.3 examples the issue flagged (b32, b33, b35, b36, b38, b310) with

@@ -284,6 +284,7 @@ fn generated_kotlin_parses() {
     combined.push_str("import androidx.compose.ui.geometry.*\n");
     combined.push_str("import androidx.compose.ui.graphics.*\n");
     combined.push_str("import androidx.navigation.compose.*\n");
+    combined.push_str("import kotlinx.coroutines.*\n");
     for (name, src) in examples() {
         combined.push_str(&codegen_example(name, src));
         combined.push('\n');

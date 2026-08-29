@@ -85,7 +85,15 @@ impl Backend for Swift {
 
     fn button_open(name: &str, handler: &str) -> String {
         let _ = name;
-        format!("Button(action: {{ {handler} }}) {{")
+        // FLUX-064: an async handler (one that `await`s a capability call) must
+        // be wrapped in `Task { }` so the release path can suspend. `Task` is
+        // part of the Swift concurrency runtime (no extra import needed).
+        let inner = if handler.contains("await") {
+            format!("Task {{ {handler} }}")
+        } else {
+            handler.to_owned()
+        };
+        format!("Button(action: {{ {inner} }}) {{")
     }
 
     fn button_style(name: &str) -> &'static str {
@@ -262,5 +270,29 @@ impl Backend for Swift {
             }
         }
         em.line(indent, "}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::backend_impl::Swift;
+    use flux_codegen_core::Backend;
+
+    #[test]
+    fn sync_handler_stays_plain_closure() {
+        let out = <Swift as Backend>::button_open("Button", "taps = (taps + 1)");
+        assert!(out.contains("Button(action: { taps = (taps + 1) })"));
+        assert!(!out.contains("Task "), "sync handler must not be wrapped");
+    }
+
+    #[test]
+    fn async_handler_wrapped_in_task() {
+        // FLUX-064: an `await`ing handler is wrapped in `Task { }` so the
+        // release path can suspend.
+        let out = <Swift as Backend>::button_open("Button", "await Auth.login(\"u\")");
+        assert!(
+            out.contains("Button(action: { Task { await Auth.login(\"u\") } })"),
+            "async handler not wrapped in Task: {out}"
+        );
     }
 }

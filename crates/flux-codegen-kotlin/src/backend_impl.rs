@@ -86,11 +86,19 @@ impl Backend for Kotlin {
     }
 
     fn button_open(name: &str, handler: &str) -> String {
+        // FLUX-064: an async handler (one that `await`s a capability call) must
+        // be wrapped in a coroutine so the release path can suspend without
+        // blocking the UI thread. A sync handler stays a plain `() -> Unit`.
+        let inner = if handler.contains("await") {
+            format!("GlobalScope.launch {{ {handler} }}")
+        } else {
+            handler.to_owned()
+        };
         match name {
             "CupertinoButton" => {
-                format!("Button(onClick = {{ {handler} }}, shape = RoundedCornerShape(12.dp)) {{")
+                format!("Button(onClick = {{ {inner} }}, shape = RoundedCornerShape(12.dp)) {{")
             }
-            _ => format!("Button(onClick = {{ {handler} }}) {{"),
+            _ => format!("Button(onClick = {{ {inner} }}) {{"),
         }
     }
 
@@ -274,5 +282,30 @@ impl Backend for Kotlin {
             }
         }
         em.line(indent, "}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::backend_impl::Kotlin;
+    use flux_codegen_core::Backend;
+
+    #[test]
+    fn sync_handler_stays_plain_closure() {
+        // A non-async handler must not be wrapped in a coroutine.
+        let out = <Kotlin as Backend>::button_open("Button", "taps = (taps + 1)");
+        assert!(out.contains("Button(onClick = { taps = (taps + 1) })"));
+        assert!(!out.contains("launch"), "sync handler must not be wrapped");
+    }
+
+    #[test]
+    fn async_handler_wrapped_in_launch() {
+        // FLUX-064: an `await`ing handler is wrapped in `GlobalScope.launch`
+        // so the release path can suspend without blocking the UI thread.
+        let out = <Kotlin as Backend>::button_open("Button", "await Auth.login(\"u\")");
+        assert!(
+            out.contains("Button(onClick = { GlobalScope.launch { await Auth.login(\"u\") } })"),
+            "async handler not wrapped in launch: {out}"
+        );
     }
 }
