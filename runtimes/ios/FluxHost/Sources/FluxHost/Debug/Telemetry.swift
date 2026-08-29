@@ -57,7 +57,7 @@ public enum TelemetryEvent {
     /// Emitted when a signal's value changes.
     case signalWrite(signalId: UInt32, oldValue: FluxValue, newValue: FluxValue, triggeredEffectIds: [UInt32])
     /// Emitted when the reconciler mutates a native view.
-    case viewMutation(nodeId: UInt32, nativeViewId: UInt64, mutationKind: UInt8, frame: Rect?)
+    case viewMutation(nodeId: UInt32, nativeViewId: UInt64, parentId: UInt32, mutationKind: UInt8, frame: Rect?)
     /// Emitted when a handler starts or finishes.
     case handlerInvocation(handlerId: UInt32, isStart: Bool, gasUsed: UInt32?)
 
@@ -84,10 +84,11 @@ public enum TelemetryEvent {
             for effect in effects {
                 data.append(contentsOf: effect.bytesLE())
             }
-        case let .viewMutation(node, native, kind, frame):
+        case let .viewMutation(node, native, parent, kind, frame):
             data.append(0x03)
             data.append(contentsOf: node.bytesLE())
             data.append(contentsOf: native.bytesLE())
+            data.append(contentsOf: parent.bytesLE())
             data.append(kind)
             if let rect = frame {
                 data.append(0x01)
@@ -283,7 +284,18 @@ public func fluxDevtoolsConnect(send: @escaping (Data) -> Void) {
     bridge.onFlush = { frame in
         send(frame)
     }
+    // Replay the host's current shadow tree so a freshly-connected DevTools
+    // shows the component hierarchy immediately, without waiting for the next
+    // mount/tap. The reconciler registers this hook at startup.
+    fluxDevtoolsOnConnect?()
 }
+
+/// Hook the host sets to replay its current shadow tree when DevTools connects.
+///
+/// Called exactly once, right after the telemetry sink is attached, so the
+/// DevTools component tree populates from the already-built node graph instead
+/// of requiring a fresh reconcile (which only happens on mount or interaction).
+nonisolated(unsafe) public var fluxDevtoolsOnConnect: (() -> Void)?
 
 /// Attaches (or clears) the DevTools telemetry sink.
 public func fluxDevtoolsSetSink(_ sink: (any VMTelemetrySink)?) {

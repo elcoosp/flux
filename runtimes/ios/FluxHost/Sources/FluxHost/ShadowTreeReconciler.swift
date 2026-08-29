@@ -245,6 +245,14 @@ struct ShadowTreeReconciler {
         for patch in frame.patches {
             applyPatch(patch, nodes: patchNodes, report: &report)
         }
+        // DevTools: after the tree is (re)built, replay the full hierarchy so a
+        // connected debugger reflects the current node graph even if it attached
+        // after the initial mount (snapshot-on-connect, FLUX-039).
+        #if DEBUG
+        if fluxDevtoolsSink != nil {
+            emitSnapshot()
+        }
+        #endif
         return report
     }
 
@@ -369,6 +377,57 @@ struct ShadowTreeReconciler {
         if let owner = built[nodeId] {
             owner.adapter.setChildren(childViews, on: owner.view)
         }
+    }
+
+    /// Replays the currently-built shadow tree to DevTools as `viewMutation(add)`
+    /// events, so a freshly-connected debugger shows the full hierarchy without
+    /// waiting for the next mount or interaction. Walks `nodeTable` from the root,
+    /// emitting each node with its true parent id and live layout frame.
+    ///
+    /// Non-mutating: it only reads the built views and node table and emits
+    /// telemetry; it never creates or destroys views.
+    func emitSnapshot() {
+        #if DEBUG
+        guard let root = currentRootId else { return }
+        emitSubtree(nodeId: root, parentId: 0, nodes: nodeTable)
+        #endif
+    }
+
+    /// Recursive helper for `emitSnapshot`: emits `nodeId` with `parentId`, then
+    /// descends into the node's declared children.
+    private func emitSubtree(nodeId: UInt32, parentId: UInt32, nodes: [UInt32: ShadowNode]) {
+        #if DEBUG
+        guard let node = nodes[nodeId] else { return }
+        let rect = (built[nodeId]?.view as? UIView).map {
+            Rect(
+                x: Double($0.frame.origin.x),
+                y: Double($0.frame.origin.y),
+                width: Double($0.frame.size.width),
+                height: Double($0.frame.size.height),
+            )
+        }
+        fluxDevtoolsEmit(
+            .viewMutation(
+                nodeId: nodeId,
+                nativeViewId: UInt64(nodeId),
+                parentId: parentId,
+                mutationKind: 0,
+                frame: rect,
+            )
+        )
+        for child in node.children {
+            let childIds: [UInt32]
+            switch child {
+            case let .node(id):
+                childIds = [id]
+            case let .splice(_, items):
+                childIds = items.map { $0.node }
+            }
+            for cid in childIds {
+                emitSubtree(nodeId: cid, parentId: nodeId, nodes: nodes)
+            }
+        }
+        #endif
     }
 
     /// Re-reconciles only the nodes whose recorded signal dependencies intersect

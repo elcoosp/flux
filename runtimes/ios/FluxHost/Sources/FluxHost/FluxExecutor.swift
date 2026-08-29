@@ -206,6 +206,11 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
         self.currentRootId = nil
         self.lastError = nil
         self.reconciler.setExecutor(self)
+        // When DevTools connects, replay the current shadow tree so its component
+        // tree populates immediately (FLUX-039: snapshot-on-connect).
+        fluxDevtoolsOnConnect = { [weak self] in
+            self?.reconciler.emitSnapshot()
+        }
     }
 
     /// Applies a raw wire frame (decoding it first) and drives the reconciler.

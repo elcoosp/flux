@@ -36,6 +36,7 @@ public sealed interface TelemetryEvent {
     public data class ViewMutation(
         val nodeId: UInt,
         val nativeViewId: ULong,
+        val parentId: UInt,
         val mutationKind: UByte,
         val frame: Rect?,
     ) : TelemetryEvent

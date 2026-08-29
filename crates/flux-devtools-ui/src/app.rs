@@ -63,15 +63,16 @@ impl DevToolsRoot {
 
 impl Render for DevToolsRoot {
     fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
-        // Re-arm a repaint so freshly ingested telemetry (or a new host identity)
-        // is reflected. We only keep the animation-frame loop alive while the
-        // timeline is still growing or the host changed, then let it settle — this
-        // keeps the debugger live during interaction without spinning at 60fps idle.
+        // Keep the window live while a host is connected: re-arm an animation
+        // frame every render so freshly ingested telemetry (VM steps, signals,
+        // layout frames) is reflected immediately — including when the DevTools
+        // window is in the background while you interact with the host app. macOS
+        // would otherwise defer presentation until the window is refocused.
         let len = self.state.timeline_len();
         let host = self.state.host_info();
-        if len != self.last_len || host != self.last_host {
-            self.last_len = len;
-            self.last_host = host.clone();
+        self.last_len = len;
+        self.last_host = host.clone();
+        if host.is_some() {
             window.request_animation_frame();
         }
 

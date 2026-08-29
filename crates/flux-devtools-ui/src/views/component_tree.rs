@@ -37,6 +37,8 @@ impl ComponentTreeView {
             children.entry(vf.parent_id).or_default().push(vf.clone());
         }
         let known: std::collections::HashSet<u32> = ids.iter().copied().collect();
+        // A node is a root if its parent is the synthetic root (0) or a node that
+        // was never reported (phantom parent — e.g. the host's top container).
         let roots: Vec<ViewFrame> = frames
             .iter()
             .filter(|vf| vf.parent_id == 0 || !known.contains(&vf.parent_id))

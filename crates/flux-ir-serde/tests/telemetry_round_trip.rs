@@ -37,6 +37,7 @@ fn sample_events() -> Vec<TelemetryEvent> {
         TelemetryEvent::ViewMutation {
             node_id: NodeId::from(7u32),
             native_view_id: 0xDEAD_BEEF,
+            parent_id: NodeId::from(2u32),
             mutation_kind: 3, // Layout
             frame: Some(Rect {
                 x: 1.0,
@@ -48,6 +49,7 @@ fn sample_events() -> Vec<TelemetryEvent> {
         TelemetryEvent::ViewMutation {
             node_id: NodeId::from(8u32),
             native_view_id: 0x1,
+            parent_id: NodeId::from(2u32),
             mutation_kind: 1, // Remove
             frame: None,
         },
