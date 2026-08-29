@@ -57,6 +57,23 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **iOS host observability:** `FluxWebSocketTransport` appends connect/send events to
   `Documents/flux_host.log` (os_log captured nothing in CI's headless sim env).
 
+### DevTools — Component Tree populated (FLUX-039) — DONE `[verified: rust]`
+- **Root cause.** Neither host ever emitted `TelemetryEvent::ViewMutation` — the
+  constructor + wire encoder existed in both iOS (`Telemetry.swift`) and Android
+  (`Telemetry.kt`) but had zero call sites, so `view_frames` stayed empty and the
+  DevTools Component Tree rendered nothing.
+- **Android host** now emits `ViewMutation` at node create (`0x03` Insert), update
+  (`0x02` + `DirtyReconciler.reconcileDirty`) and remove (`0x04`), guarded by a
+  non-null `TelemetryBridge.sink`. The host crate is Android-free and drives
+  in-memory adapter views, so the layout `frame` is `nil` (geometry pending); node
+  *presence* is still recorded.
+- **iOS host** now emits `ViewMutation` at node create and on every update in
+  `ShadowTreeReconciler`, carrying the **real** `UIView` layout frame (iOS has
+  real UIKit views), guarded by `#if DEBUG`.
+- **DevTools reconstructor** records node presence on every `ViewMutation` (frame
+  optional) instead of requiring `Some(rect)`; the Component Tree renders
+  `node present · geometry pending` when the host cannot measure geometry.
+
 The entries below land the work committed since the changelog was last updated
 (`a8c86d0`, 2026-08-27). The `[skip ci]` merge-guard directory-recording commits
 are intentionally omitted (automation noise, not user-facing change).
@@ -243,31 +260,32 @@ are intentionally omitted (automation noise, not user-facing change).
   handshake is now done — see the FLUX-050 subsection below; it was delivered and
   verified on both simulators.)
 
-### BLOCKED — release crash reporting (FLUX-035)
+### BLOCKED — release crash reporting (FLUX-035) — RESOLVED below
 
-- Cannot land solo: the deliverable is native Swift/Kotlin crash reporters in the release
-  hosts (`runtimes/ios`, `runtimes/android`), which are parallel-owned runtime dirs the
-  boundary contract forbids editing, and cannot be compile-verified here (no `kotlinc`).
-  The `FluxError` shape it feeds IS present (PRD-K / LANE-I done), so the only remaining
-  work is the native-lane host integration. Issue marked `status: blocked`; not fabricated.
+- *Original note:* the deliverable is native Swift/Kotlin crash reporters in the release
+  hosts (`runtimes/ios`, `runtimes/android`), which were parallel-owned runtime dirs the
+  boundary contract forbade editing. **Superseded:** the native halves landed
+  (`3d166c0` iOS, `a01f29d` Android) — `CrashReporter.swift` / `CrashReporter.kt`
+  (release-only `#if !DEBUG`) now map a crash into the PRD-K `FluxError` taxonomy.
+  See the reconciled `[Unreleased]` section (FLUX-035 — DONE).
 
-### BLOCKED — large-list scroll benchmark (FLUX-056)
+### BLOCKED — large-list scroll benchmark (FLUX-056) — still BLOCKED
 
-- Cannot land: both dependencies are absent from the tree. `flux-perf-harness` (PRD-J)
-  is not a crate, and `ScrollView` / virtualized `List` (PRD-N) is not a Flux primitive
-  (stdlib is 8 primitives, "no scrollable list"; `ForEach` is non-virtualized in MLP). A
-  1k/10k virtualized-scroll benchmark needs a `ScrollView` to feed; authored against a
-  non-virtualized `ForEach` it would measure diff/reconcile, not scroll. Issue marked
-  `status: blocked`; unblock when PRD-J + PRD-N land.
+- *Updated:* `flux-perf-harness` (PRD-J / FLUX-066) now **exists** as a crate and is
+  wired into CI, so that dependency is resolved. The remaining blocker is the absence of
+  a `ScrollView` / virtualized `List` primitive — still not a Flux primitive (stdlib has
+  no scroll view), so a 1k/10k virtualized-scroll benchmark has nothing to feed. Issue
+  remains `status: blocked`; unblock when a ScrollView primitive lands (see "Unowned
+  roadmap gaps" in the reconciled `[Unreleased]` section — no FLUX-0XX owns it yet).
 
-### BLOCKED — timeline / flamegraph (FLUX-059)
+### BLOCKED — timeline / flamegraph (FLUX-059) — still BLOCKED
 
-- Cannot land: the dependency `MetricRecord` (PRD-J) is absent from the tree. `flux-perf-harness`
-  is not a crate, and `MetricRecord` is referenced only in docs/README — never defined as a Rust
-  type in `crates/`. The `timeline` view (`views/timeline.rs`) exists but renders only a scrubber
-  counter; there is no perf-metric event variant to feed a flamegraph. Issue marked
-  `status: blocked`; unblock when PRD-J lands `flux-perf-harness` + `MetricRecord` (and FLUX-066
-  on-device instrumentation).
+- *Updated:* `flux-perf-harness` (PRD-J / FLUX-066) now **exists** and defines
+  `MetricRecord` as a Rust type. The remaining blocker is that no perf-metric *event
+  variant* feeds a flamegraph yet — the `timeline` view (`views/timeline.rs`) still
+  renders only a scrubber counter. Issue remains `status: blocked`; unblock when a
+  `MetricRecord`-emitting telemetry event variant lands (see reconciled `[Unreleased]`
+  section).
 
 ### PARTIAL — DevTools log viewer + network inspector (FLUX-060, LANE-P)
 
@@ -314,17 +332,16 @@ are intentionally omitted (automation noise, not user-facing change).
   device/simulator + `xcodebuild`/`kotlinc`, unavailable here. The per-tier numbers
   that close the ADR-0048 decision are produced by those adapters, not this crate.
 
-### BLOCKED — iOS render-tier convergence decision (FLUX-065)
+### BLOCKED — iOS render-tier convergence decision (FLUX-065) — still BLOCKED
 
-- Cannot run ADR-0048 Phase 0/1: the render-perf harness (FLUX-066) does not exist
-  and is itself blocked on PRD-J (`flux-perf-harness`), which is absent from the
-  tree (same root blocker as FLUX-056/059). There is still no render-perf test on
-  either platform, so the §3.10 "< 3 ms" budget is unverified everywhere and the
-  UIKit-vs-SwiftUI tradeoff is unmeasured. The convergence question is therefore
-  not decidable from this repo yet. No prose papered over the gap — AGENTS.md §0.2
-  and ADR-0048 already describe the divergence accurately. Issue marked
-  `status: blocked`; unblock when PRD-J + FLUX-066 land the harness and the two
-  tiers are measured.
+- *Updated:* the render-perf harness (FLUX-066 / `flux-perf-harness`) now **exists** and
+  is wired into CI, so the harness dependency is resolved. The remaining blocker is the
+  on-device *measurement runs* — timing the iOS `FluxUIKit` reconciler and the Android
+  `ShadowTreeRenderer` requires the `runtimes/` adapters to wire in `MeasureFn` closures
+  (device/simulator + `xcodebuild`/`kotlinc`, unavailable in the changelog authoring env).
+  Until those numbers exist, the §3.10 "< 3 ms" budget is unverified on-device and the
+  UIKit-vs-SwiftUI tradeoff is unmeasured, so ADR-0048 is not decidable yet. See the
+  reconciled `[Unreleased]` section.
 
 ### CI — real Kotlin / Compose codegen check + rust-check unblock — DONE
 
@@ -1106,6 +1123,174 @@ Resolution (see `docs/adr/ADR-0028-adr-naming-and-numbering.md`):
 - `mlp-spec.md` Appendix A no longer duplicates the canonical ADRs; it is now a
   single pointer to `mlp-appendices.md` Appendix A. `mlp-appendices.md` gained an
   "Appendix A — Continuation (ADR-0021…)" block recording the renumbered decisions.
+
+---
+
+## [Unreleased] — reconciled from working tree (a8c86d0..HEAD)
+
+The entries below cover every landed commit between `a8c86d0` (2026-08-27) and
+`HEAD`; statuses were reconciled against the issue frontmatter (see
+docs/issues) and the on-disk tree, not the prose above. Items marked
+`[unverified]` have a commit but no green platform build recorded here.
+
+### Language maturity — FLUX-051/052/053/054/055 — DONE
+- `edabdfb` lands the FLUX-051/052/053/055 language-maturity batch: optional
+  chaining (`?.`, FLUX-053, `0474cfb`), `Null` literal + `IsNull` opcode
+  (`1788c95`), structural record typing / width-subtyping (`unify_records`,
+  FLUX-054 / ADR-0052, `f93cbc7`), in-language `Result[T,E]` (`FLUX-055`),
+  slot/children composition (FLUX-052), and ForEach iteration syntax (ADR-0050).
+- **Caveat (carried by FLUX-072):** ForEach lowers to an *empty* `Child::Splice`
+  and `flux-vm-ref` still has no list ops (`APPEND`/`LIST_GET`/`LIST_LEN`/
+  `LIST_REMOVE`/`LIST_CLEAR`); `FLUX-051` is parse+type-complete only, not
+  end-to-end. The list-value + VM-ops work is tracked in FLUX-072.
+
+### Stdlib — Modal/Sheet/Dialog (FLUX-038) — DONE
+- `ba66f0e` registers `Modal`/`Sheet`/`Dialog` overlay containers in the
+  ADR-0047 single-source primitive registry; native adapter mapping inherits the
+  container contract. Public surface aligned to RN/Expo naming (`62b8db3`,
+  `aaf8fd2`, `b057a36`, `e8e936a`, `5a047fa`) — `TextField`→`TextInput`,
+  `onClick`→`onPress`; stale adapters deleted (`fd1bb00`, `5f0fd48`).
+
+### Stdlib — animation + design tokens (FLUX-042/043) — DONE
+- `606bd94` adds the `Animate` primitive (wraps the child subtree in the backend's
+  `withAnimation`) and the design-token theme extension (`DesignToken` registry in
+  `flux-codegen-core/src/primitives.rs`); `ea28fc6` aligns dev/release tree shape.
+
+### Stdlib — form primitives (FLUX-040) — PARTIAL
+- `c4a6dc4` registers `Switch`/`Checkbox`/`Slider`/`Picker`/`DatePicker`/`TextArea`
+  in the ADR-0047 registry + prelude with a `value`/`onChange` signal contract;
+  Kotlin codegen trace test pins each to its native control. **REMAINING
+  (host-side):** native control behavior (toggle writes its signal, picker
+  selection) is not wired in `runtimes/android/host` / `runtimes/ios` yet.
+
+### Stdlib — gestures (FLUX-041) — PARTIAL
+- `396c800` registers `Gesture` (`kind` + `onGesture`) in the registry + prelude;
+  codegen trace test pins it to a native container. **REMAINING (host-side):**
+  `UIGestureRecognizer` / `Modifier.pointerInput` wiring is not in the hosts yet.
+
+### Stdlib — Image (FLUX-039) — PARTIAL
+- `882215d` pins `Image` lowers to its native binding; native `ImageAdapter.swift`
+  / `ImageAdapter.kt` exist. **REMAINING (host-side):** the local/remote cache
+  (Coil on Android, `URLCache` on iOS) is not wired — grep finds no cache call
+  site in either adapter.
+
+### Capabilities — six concrete native caps (FLUX-045) — PARTIAL
+- `597f969` declares Push/Biometric/Background/FileSystem/DeepLink/Sensors in
+  `stdlib/capabilities.flux` (caps 6..=11) + `CAPABILITY_IDL` with permission
+  gates; host `HelloFrame` tables advertise them; parity tests green. **REMAINING
+  (host-side):** the real `CapabilityRegistry::register(...)` bodies
+  (`UNUserNotificationCenter`, `LocalAuthentication`, `BGTaskScheduler`,
+  `FileManager`, `UIApplication.open`, `CMMotionManager`; Push/Background settle a
+  result cell via `AsyncResolver`) are not in the hosts yet.
+
+### Capabilities — WebView + NativeModule escape hatch (FLUX-048/046) — DONE
+- `b99ead7` adds `WebView` (cap 12) + `NativeModule` (cap 13) to
+  `stdlib/capabilities.flux` with deterministic id derivation; `0756ded` /
+  `ed696c5` register them in the iOS/Android dev registries; `e947967` adds the
+  `WebHost` native adapters + parity tests; `bcb46c0` records ADR-0057 (threat
+  model) + the native-module escape-hatch guide (FLUX-050/049/046).
+
+### Capabilities — permission gate + fail-closed handshake (FLUX-049/050) — DONE
+- `1fefed6` / `31c1435` wire `PermissionChecker` into `CALL_CAP` on Android/iOS;
+  `ed696c5` / `31c1435` add the fail-closed `PROTOCOL_VERSION` handshake
+  (FLUX-050, ADR-0056 verified on both simulators); `04c0110` / `26d0e4d` add
+  permission-gate + version-mismatch round-trip tests; `6ca0c3d` fixes TextInput
+  keystrokes sticking; `67c6a1a` fixes `BUTTON_ON_CLICK`→`BUTTON_ON_PRESS` to
+  unblock the APK build; `238344f` adds the Flux To-Do example.
+
+### LSP — crate + type-check + VS Code extension (FLUX-024/025/026/027) — DONE
+- `cc61d41` scaffolds `crates/flux-lsp` on `async-lsp`; `339eb1d` adds type-check
+  diagnostics (`diagnostics_with_types` reuses `flux-types`); `4b805c4` adds the
+  spawnable `flux-lsp` binary; `b153fa1` ships the `editors/vscode` extension
+  (semantic tokens + LSP client + hot-reload status + run-on-device); `050eb37`
+  adds `flux lsp <file>` to the CLI; `3c783b0` adds a loopback
+  `publishDiagnostics` integration test. Goto/hover/completion (FLUX-027) live in
+  `goto_def.rs` / `hover.rs` / `completion.rs`.
+
+### DevTools — log viewer + multi-device + signal-graph (FLUX-060/061/058) — PARTIAL
+- `cf6494d` ships the structured log viewer (fifth pane, `LogBuffer` model, 23/23
+  green); `3d0604d` ships the multi-device session map (`sessions` keyed by
+  `HostAnnounce`, 24/24 green) — per-event attribution still BLOCKED on a wire
+  host-id tag (ADR-0039 gap). `32c65bd` renders signal-graph dependency edges
+  (FLUX-058, 18/18 green). `f0a3952` / `18589e4` revamp the gpui UI
+  (gpui-component, host identity, `1a6f349` pane polish).
+- **Network inspector (FLUX-060) still BLOCKED:** no `TelemetryEvent::NetworkRequest`
+  variant and FLUX-047 (HTTP cap) is not in `capabilities.flux`, so there is no
+  real traffic to inspect.
+
+### Docs / guides / website (FLUX-030/031/032/033/036) — DONE
+- `1be0333` wires the en/es/fr i18n-drift checker into `pnpm test:i18n` with a
+  failure-path test (FLUX-030); `f35d438` / `1b286b9` / `adeb801` / `67cfe7f` add
+  getting-started + per-primitive cookbook, troubleshooting keyed to `FluxError`,
+  RN/Flutter migration guides, and state-management/app-i18n/showcase guides
+  (FLUX-031/033/032/036); `f79547c` adds the docs-ecosystem coverage checker.
+  README (`3012103`, `f9b9c59`) and repo URLs (`4c1b5da`, `512b220`) grounded in
+  the real codebase.
+
+### Headless app-test harness (FLUX-034) — DONE
+- `65807d5` adds a user-facing `.flux` test API over the parity pipeline
+  (`render_component`, `find_first`/`count`/`find_all`, `run_tap`/`run_input`) —
+  the foundation for PRD-R's package-level testing.
+
+### Perf harness + CI (PRD-J / FLUX-066 / FLUX-067) — DONE
+- `0a18fb7` stands up `crates/flux-perf-harness` (MetricRecord schema + §3.10 gate);
+  `f2cb45b` wires it into CI (`.github/workflows/perf-harness.yml` + `scripts/
+  run-perf-harness.sh`). `16a38ee` adds mutation testing + toolchain compat matrix
+  (FLUX-067); `6a9ffbf` / `8c3a526` / `6b9b3c9` / `71c264c` / `91e3874` / `a0eab67` /
+  `f5a4ef7` add criterion benches with budget assertions across parser/types/vm/
+  ir-serde/codegen/devserver. **Caveat:** the harness exists but the on-device
+  measurement runs (iOS `FluxUIKit` / Android `ShadowTreeRenderer` timing) are not
+  executed here, so the §3.10 "native mutation < 3ms" number is still unverified
+  on-device (see FLUX-065).
+
+### Node-ID non-crypto hash (FLUX-071) — DONE
+- `cd96cdb` replaces BLAKE3 with FNV-1a-32 in `compute_node_id` (FLUX-071); spec
+  updated (`a0084f2`). `71c264c` adds a `compute_node_id` micro-bench.
+
+### Router / async hosts / cross-host naming (LANE-A/B, ADR-0049) — DONE
+- Router navigate wired to visible screen on both hosts (`9c30d4c`, `91605d2`);
+  on-device positional-`Screen` navigation trap tests (`0afc406`, `822f25c`);
+  async-resolver bridges Pending cells to real async work on Android/iOS
+  (`14557ae`, `06d7e7d`, `323f082`, `8fbe5db`); cross-host naming convergence
+  (ADR-0049) renames `VMValue`→`FluxValue`, `OpCode`→`Opcode`, `FluxRuntime`→
+  `FluxExecutor`, Android `Frame`→`FluxFrame`, kit umbrella `FluxUIKit`→
+  `FluxUIKitModule` (`b2e330b`, `fe4637f`, `438510f`, `a69b4bb`).
+
+### Release — artifact publish (FLUX-068) — DONE
+- `06b1fe5` adds `.github/workflows/artifact-publish.yml` producing
+  `FluxHost.xcframework` + the `:runtimes:android:host` AAR as release artifacts
+  (closes the ADR-0036 packaging path). The `docs/embed-flux.md` "Embed Flux"
+  guide remains unwritten (REMAINING).
+
+### BLOCKED — items with no tree presence
+- **FLUX-047 (HTTP cap + structured persistence):** `capability Http` /
+  `Persist` is absent from `stdlib/capabilities.flux` (grep count 0) and
+  `CAPABILITY_IDL` — not started; this also keeps FLUX-060's network inspector
+  blocked.
+- **FLUX-056 (large-list scroll benchmark):** blocked — no `ScrollView` /
+  virtualized `List` primitive exists (stdlib is still 8+ registered primitives,
+  no scroll view); needs FLUX-073-style work.
+- **FLUX-059 (timeline/flamegraph):** blocked — `MetricRecord` exists but no
+  perf-metric event variant feeds a flamegraph yet.
+- **FLUX-065 (iOS convergence decision):** blocked — needs the on-device
+  measurement runs from PRD-J/FLUX-066 before ADR-0048 can be closed.
+- **FLUX-029 (incremental `didChange`):** only a stub note in `flux-lsp/src/
+  lib.rs`; no debounced re-analysis committed.
+- **FLUX-062 (DevTools on-device verification):** no beta/on-device-evidence
+  commit; the §13 "ship it, not scaffold it" gate is open.
+- **FLUX-069 (beta/dogfood/bug-bash):** no dogfood-app or closed-beta commit; the
+  1.0 evidence gate (PRD-U) is unstarted.
+
+### Unowned roadmap gaps (no FLUX-0XX yet — RC blockers)
+- **ScrollView / virtualized `List`** (roadmap §1 criterion #1) — no issue, absent
+  from stdlib. Largest single hole; FLUX-056/FLUX-072 depend on it.
+- **`Icon` primitive** (PRD-N §4) — no issue, absent from stdlib.
+- **`flux doctor` CLI** (roadmap §5) — no issue; CLI exposes only
+  init/dev/build/doc.
+- **Full spec reconciliation** (AGENTS.md §0.7) — mlp-spec/appendices vs real code
+  only partially reconciled; no owning issue.
+- **iOS convergence PORT** (roadmap §1 #5) — FLUX-065 owns the decision only; if
+  ADR-0048 says "port", the FluxUIKit port has no issue.
 
 ---
 
