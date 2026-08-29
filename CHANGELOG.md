@@ -90,6 +90,15 @@ are intentionally omitted (automation noise, not user-facing change).
 - ADR-0052 records the structural-vs-nominal decision and scope boundary (no new VM opcode
   or IR node; codegen already walks `ExprKind::Record` fields).
 
+### IR — B.3 handler-lowering gap closed (FLUX-063) — DONE
+
+- The 6 B.3 examples the issue flagged (b32, b33, b35, b36, b38, b310) with
+  `unsupported handler operand/expression` now lower through `flux-ir` without error; the
+  lowering gap had already been closed in-tree (the bytecode.rs handler emitter covers
+  method/constructor calls, capability calls, and `...` spreads). Pinned with a permanent
+  regression test `crates/flux-parity/tests/b3_lowering.rs` asserting all 10 B.3 examples
+  lower cleanly, so the gap cannot silently reopen.
+
 ### CI — real Kotlin / Compose codegen check + rust-check unblock — DONE
 
 - Provision the Compose toolchain and run the real `kotlinc` codegen check without platform-37;
