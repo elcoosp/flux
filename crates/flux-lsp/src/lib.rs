@@ -42,7 +42,14 @@ mod semantic_tokens;
 /// One LSP-shaped diagnostic, reusing the shape `flux-cli`'s `mod lsp` emits
 /// (`line`/`character`/`length`/`severity`/`message`/`source`) so the CLI JSON
 /// and the LSP `Diagnostic` never diverge.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// One LSP-shaped diagnostic, reusing the shape `flux-cli`'s `mod lsp` emits
+/// (`line`/`character`/`length`/`severity`/`message`/`source`) so the CLI JSON
+/// and the LSP `Diagnostic` never diverge.
+///
+/// `Serialize`/`Deserialize` are derived so the `flux lsp` CLI subcommand emits
+/// the exact same JSON the language server would, keeping the contract stable
+/// for the VS Code extension (FLUX-026) and any non-LSP consumer.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LspDiagnostic {
     /// 1-based line of the diagnostic's start.
     pub line: u32,
@@ -75,9 +82,8 @@ impl FluxLsp {
         Self::default()
     }
 
-    /// Computes the compiler diagnostics for `text`, mapping `flux-parser`
-    /// parse errors into [`LspDiagnostic`]s. Type-checking (FLUX-025) extends
-    /// this to also run `flux-types`.
+    /// Computes parse-only compiler diagnostics for `text`, mapping
+    /// `flux-parser` parse errors into [`LspDiagnostic`]s.
     ///
     /// Parse errors themselves are returned in the `Vec`, never as an `Err`.
     #[must_use]
@@ -117,6 +123,57 @@ impl FluxLsp {
             message: d.message.clone(),
             ..Default::default()
         }
+    }
+}
+
+/// A 1-based `line`/`character` position resolved from a type-checker span.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct FluxTypeSpan {
+    line: u32,
+    character: u32,
+}
+
+/// Resolves a `TypeError`'s byte-offset span start into a 1-based line/column.
+/// The type checker emits absolute byte offsets in its [`flux_syntax::Span`];
+/// [`flux_parser::Location::from_offset`] is the same routine the parser uses.
+#[must_use]
+fn resolve_type_span(source: &str, offset: usize) -> FluxTypeSpan {
+    let loc = flux_parser::Location::from_offset(source, offset);
+    FluxTypeSpan { line: loc.line as u32, character: loc.column as u32 }
+}
+
+impl FluxLsp {
+    /// Computes the full `parse -> type_check` diagnostics for `text` (FLUX-025).
+    /// Reuses `flux_parser::parse` then `flux_types::type_check` so editor
+    /// diagnostics match `flux dev`. Parse/type errors are tagged `source`
+    /// `"parse"`/`"type"`. When parsing fails the type-checker is skipped.
+    /// `types_enabled` selects whether type-checking runs (the `flux lsp --types`
+    /// flag); when `false` this equals [`Self::diagnostics_for_text`].
+    #[must_use]
+    pub fn diagnostics_with_types(
+        &self, path: &std::path::Path, text: &str, types_enabled: bool,
+    ) -> Vec<LspDiagnostic> {
+        let path_str = path.to_string_lossy().into_owned();
+        let mut out = Vec::new();
+        let ast = match flux_parser::parse(text, 0, &path_str) {
+            Ok(ast) => ast,
+            Err(err) => { out.push(LspDiagnostic {
+                line: err.location.line, character: err.location.column,
+                length: err.span.len().max(1), severity: 1,
+                message: err.message.clone(), source: "parse".to_owned() });
+                return out; } };
+        if !types_enabled { return out; }
+        if let Err(type_err) = flux_types::type_check(&ast) {
+            let FluxTypeSpan { line, character } =
+                resolve_type_span(text, type_err.span.start as usize);
+            let hint = type_err.hint.as_deref()
+                .map(|h| format!(" (hint: {h})")).unwrap_or_default();
+            out.push(LspDiagnostic { line, character,
+                length: type_err.span.len().max(1), severity: 1,
+                message: format!("{}{}", type_err.message, hint),
+                source: "type".to_owned() });
+        }
+        out
     }
 }
 
@@ -270,5 +327,51 @@ mod tests {
         let text = std::fs::read_to_string(&path).expect("read");
         let diags = FluxLsp::new().diagnostics_for_text(&path, &text);
         assert!(diags.is_empty(), "expected no diagnostics, got: {diags:?}");
+    }
+
+    #[test]
+    fn diagnostics_with_types_reports_type_error_with_hint() {
+        let src = "compo Bad\n  let s = 1 + \"not a number\"\n\n";
+        let path = fixture(src);
+        let text = std::fs::read_to_string(&path).expect("read");
+        let diags = FluxLsp::new().diagnostics_with_types(&path, &text, true);
+        let type_diag = diags.iter().find(|d| d.source == "type")
+            .expect("expected a type-source diagnostic");
+        assert!(!type_diag.message.is_empty());
+        assert!(type_diag.message.contains("hint"), "type diagnostic must carry a how-hint: {type_diag:?}");
+        assert!(type_diag.line >= 1);
+        assert_eq!(type_diag.severity, 1);
+        assert_eq!(type_diag.source, "type");
+    }
+
+    #[test]
+    fn diagnostics_with_types_flags_parse_error_without_running_types() {
+        let src = "compo Broken\n  if true {\n";
+        let path = fixture(src);
+        let text = std::fs::read_to_string(&path).expect("read");
+        let diags = FluxLsp::new().diagnostics_with_types(&path, &text, true);
+        assert!(diags.iter().any(|d| d.source == "parse"));
+        assert!(!diags.iter().any(|d| d.source == "type"));
+    }
+
+    #[test]
+    fn diagnostics_with_types_disabled_skips_type_check() {
+        let src = "compo Bad\n  let s = 1 + \"not a number\"\n\n";
+        let path = fixture(src);
+        let text = std::fs::read_to_string(&path).expect("read");
+        let diags = FluxLsp::new().diagnostics_with_types(&path, &text, false);
+        assert!(!diags.iter().any(|d| d.source == "type"), "types disabled must skip type-check");
+    }
+
+    #[test]
+    fn diagnostics_with_types_serializes_like_cli_contract() {
+        let src = "compo Bad\n  let s = 1 + \"not a number\"\n\n";
+        let path = fixture(src);
+        let text = std::fs::read_to_string(&path).expect("read");
+        let diags = FluxLsp::new().diagnostics_with_types(&path, &text, true);
+        let json = serde_json::to_string(&diags).expect("serialize");
+        assert!(json.contains("\"source\":\"type\""), "JSON must carry the type source: {json}");
+        let back: Vec<LspDiagnostic> = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back, diags);
     }
 }
