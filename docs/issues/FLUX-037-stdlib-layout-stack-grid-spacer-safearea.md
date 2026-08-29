@@ -1,6 +1,6 @@
 ---
 id: FLUX-037
-status: done
+status: partial
 lane: LANE-N
 phase: "Phase 2"
 blocked_by: []
@@ -14,6 +14,13 @@ related_adrs:
 ---
 
 # FLUX-037: Stdlib layout primitives — Stack / Grid / Spacer / SafeArea
+
+> **Status note (2026-08-29):** relabeled `done` → `partial`. A source grep of
+> `stdlib/` finds **zero** of these primitives, and neither host has an adapter
+> branch (`adapters/ui-swift` has only `ColumnAdapter`/`RowAdapter`/`Alignment`;
+> Android `LinearAdapters` covers Column/Row only). Only `flux-codegen-core`
+> template scaffolding references them. A Flux app cannot express or render
+> Stack/Grid/Spacer/SafeArea yet — stdlib declaration + host adapter + test missing.
 
 - **Lane:** LANE-N (Phase 2)
 - **Depends on:** none (PRD-N `ScrollView` slice is the template)
