@@ -110,8 +110,8 @@ fn test_instruction_len_includes_the_opcode_byte() {
 fn test_every_opcode_in_appendix_e_is_declared() {
     assert_eq!(
         Opcode::ALL.len(),
-        56,
-        "Appendix E §E.1 + ADR-0043 `TO_STRING` + ADR-0044 `AWAIT` define 56 opcodes; update together"
+        57,
+        "Appendix E §E.1 + ADR-0043 `TO_STRING` + ADR-0044 `AWAIT` + FLUX-053 `IS_NULL` define 57 opcodes; update together"
     );
 }
 

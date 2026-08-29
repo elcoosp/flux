@@ -70,6 +70,10 @@ pub enum ExprKind {
     Str(Vec<StrPart>),
     /// A list literal.
     List(Vec<Expr>),
+    /// The `Null` value literal (FLUX-053 / ADR-0051). The sole inhabitant of
+    /// every `Option[T]`; used by optional-chaining desugar and as a
+    /// user-writable literal for an absent value.
+    Null,
     /// A variable reference.
     Ident(Ident),
     /// The elided body marker `...` used by the Appendix B.3.8 example.

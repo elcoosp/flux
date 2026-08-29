@@ -84,10 +84,7 @@ fn first_opt_field(expr: &Expr) -> &Expr {
     }
 }
 
-fn first_opt_field_in_call<'a>(
-    callee: &'a Expr,
-    args: &'a [flux_parser::Arg],
-) -> Option<&'a Expr> {
+fn first_opt_field_in_call<'a>(callee: &'a Expr, args: &'a [flux_parser::Arg]) -> Option<&'a Expr> {
     if let Some(f) = first_opt_field_opt(callee) {
         return Some(f);
     }

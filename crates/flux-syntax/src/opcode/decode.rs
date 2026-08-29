@@ -75,6 +75,7 @@ impl Opcode {
             raw::GAS_CHECK => Self::GasCheck,
             raw::TO_STRING => Self::ToString,
             raw::AWAIT => Self::Await,
+            raw::IS_NULL => Self::IsNull,
             _ => return None,
         };
         Some(opcode)
@@ -142,6 +143,7 @@ impl Opcode {
             Self::MatchTag => width::REG_U32_I32,
             Self::CallCap => width::CALL_CAP,
             Self::Await => width::AWAIT,
+            Self::IsNull => width::REG_REG,
         }
     }
 
@@ -211,6 +213,7 @@ impl Opcode {
             Self::GasCheck => "GAS_CHECK",
             Self::ToString => "TO_STRING",
             Self::Await => "AWAIT",
+            Self::IsNull => "IS_NULL",
         }
     }
 }

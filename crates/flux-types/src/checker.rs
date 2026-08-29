@@ -200,6 +200,12 @@ impl Checker {
                 }
                 Ok(TcType::List(Box::new(element)))
             }
+            ExprKind::Null => {
+                // The `Null` literal (FLUX-053 / ADR-0051) inhabits every
+                // `Option[T]`; its element type is left as a fresh variable so it
+                // unifies with whatever `Option[...]` the context expects.
+                Ok(TcType::Option(Box::new(self.fresh_ty())))
+            }
             ExprKind::Ident(ident) => self.lookup_value(&ident.name, ident.span),
             ExprKind::Elided => Ok(TcType::Unit),
             ExprKind::Record { name, fields } => {
@@ -645,9 +651,13 @@ impl Checker {
                             ));
                         }
                         // A variant constructor produces a value of the *ADT*
-                        // type, not a bare `Variant` — so `let s: Shape =
-                        // Circle(5.0)` unifies. The ADT name is recovered from
-                        // the variant table.
+                        // type. For a non-generic ADT the outer type is opaque
+                        // (`Named(adt, [])`); for a generic ADT (e.g. `Result`)
+                        // the concrete payload types are recovered at `match`
+                        // time via `bind_pattern_ty`'s variant-field binding,
+                        // so we do not widen the constructor type here (that
+                        // would break multi-variant ADTs whose variants carry
+                        // differing field arities, e.g. `Shape`). FLUX-055.
                         let adt_name = self
                             .env
                             .variants

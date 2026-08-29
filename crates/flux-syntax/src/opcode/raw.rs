@@ -135,3 +135,13 @@ pub const TO_STRING: u8 = 0xD0;
 /// `Suspended` result instead of `Halt`. The executor arranges for `future_reg`'s
 /// value to be delivered back, then calls `resume` with that value to continue.
 pub const AWAIT: u8 = 0xE0;
+
+/// Test whether a register holds `Null` (FLUX-053 null-safe access).
+///
+/// Operands: `dst(u8), src(u8)`. Sets `dst` to `true` when `src` is the
+/// `Null` value, `false` otherwise. Optional chaining (`base?.field`) lowers to
+/// an `IS_NULL` test that short-circuits the field read. This is the one
+/// null-distinguishing primitive the VM was missing: `truthy` treats both
+/// `Null` and `Int(0)` as falsey, so it cannot discriminate a present `0` from
+/// an absent `Null`. Native Swift/Kotlin VMs mirror this opcode (ADR pending).
+pub const IS_NULL: u8 = 0xD1;
