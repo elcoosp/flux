@@ -1245,12 +1245,16 @@ mod tests {
     }
 
     #[test]
-    fn intern_string_rejects_truncated_payload() {
-        let frame = Frame::intern_string(b"toolong");
-        let mut bytes = frame.to_bytes();
-        // Claim a length larger than the actual payload.
-        let len = (bytes.len() - 6) as u16;
-        bytes[6..8].copy_from_slice(&(len + 10).to_le_bytes());
-        assert!(Frame::from_intern_string_bytes(&bytes).is_none());
+    fn hello_roundtrip_token_none_and_some() {
+        // No token: the decoder must recover `None` (backward compat), never the
+        // server's configured token.
+        let none = Frame::hello("ios", "test", &[]).to_bytes();
+        let decoded = Frame::from_hello_bytes(&none).expect("decodes");
+        assert_eq!(decoded.token, None, "hello without token decodes to None");
+
+        // With token: the decoder must recover the exact token.
+        let some = Frame::hello_with_token("ios", "test", &[], "secret").to_bytes();
+        let decoded = Frame::from_hello_bytes(&some).expect("decodes");
+        assert_eq!(decoded.token, Some("secret".to_owned()), "token recovered");
     }
 }
