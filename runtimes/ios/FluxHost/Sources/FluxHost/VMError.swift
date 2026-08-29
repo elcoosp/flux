@@ -58,8 +58,8 @@ public struct VmError: Error, Equatable {
     static func indexOutOfBounds(offset: Int) -> VmError { VmError(kind: .indexOutOfBounds, offset: offset) }
     static func nullDereference(offset: Int) -> VmError { VmError(kind: .nullDereference, offset: offset) }
     static func invalidDispatch(offset: Int) -> VmError { VmError(kind: .invalidDispatch, offset: offset) }
-    static func typeMismatch(offset: Int) -> VmError { VmError(kind: .typeMismatch, offset: offset) }
+    public static func typeMismatch(offset: Int) -> VmError { VmError(kind: .typeMismatch, offset: offset) }
     static func divByZero(offset: Int) -> VmError { VmError(kind: .divByZero, offset: offset) }
     static func memoryExhausted(offset: Int) -> VmError { VmError(kind: .memoryExhausted, offset: offset) }
-    static func capabilityDenied(offset: Int) -> VmError { VmError(kind: .capabilityDenied, offset: offset) }
+    public static func capabilityDenied(offset: Int) -> VmError { VmError(kind: .capabilityDenied, offset: offset) }
 }

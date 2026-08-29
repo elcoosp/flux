@@ -20,7 +20,7 @@ import FluxUIKit
 /// on the host: the host publishes any freshly-derived string via the async
 /// `AnyStringInterner` RPC, which returns a canonical id `< stringIdCanonicalCeiling`.
 /// The former high-range `synthetic_str_id` fallback is retired (brittleness 4c).
-public struct StringTable {
+public struct StringTable: Sendable {
     /// The id → string mapping.
     private var strings: [UInt32: String] = [:]
     /// The string → id reverse index (Perf #7 / R4). Lets `id(for:)` resolve a
@@ -44,7 +44,7 @@ public struct StringTable {
     }
 
     /// Resolves `id` to its string, or `nil` if unknown.
-    func lookup(_ id: UInt32) -> String? {
+    public func lookup(_ id: UInt32) -> String? {
         strings[id]
     }
 

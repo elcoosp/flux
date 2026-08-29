@@ -10,6 +10,7 @@
 
 import SwiftUI
 import FluxHost
+import UserNotifications
 
 /// The Flux dev-mode host application.
 @main
@@ -51,6 +52,12 @@ struct FluxRootView: View {
         table.intern(5, "Router")
         table.intern(6, "Screen")
         let registry = AdapterRegistry(table: table)
+        // FLUX-045: inject the real device-OS capability host so the six concrete
+        // caps (6..=11) perform genuine Apple-framework work (UNUserNotificationCenter /
+        // LAContext / BGTaskScheduler / FileManager / UIApplication / CMMotionManager)
+        // instead of the dev-safe echoes. The Foundation-only `FluxHost` core stays
+        // pure; the real bodies live in the app target's `IOSNativeCapabilityHost`.
+        CapabilityRegistry.realNativeHost = IOSNativeCapabilityHost(table: table)
         let runtime = FluxExecutor(graph: SignalGraph(), registry: registry)
         let connection = HostConnectionState()
         // Dev server endpoint. Resolution order:

@@ -266,7 +266,17 @@ public final class CapabilityRegistry: @unchecked Sendable {
     /// of the Swift 6 global-state isolation check (it is configured before any
     /// `CALL_CAP` dispatches — the same singleton pattern as `FluxExecutor`'s
     /// `permissionChecker`).
-    nonisolated(unsafe) public static var realNativeHost: (any NativeCapabilityHost)?
+    nonisolated(unsafe) public static var realNativeHost: (any NativeCapabilityHost)? {
+        didSet { _devInstance = nil }
+    }
+
+    /// Cached dev registry. Built once (lazily) and shared so stateful capabilities
+    /// (`Storage`, `Persist`, `FileSystem`) persist across repeated `CALL_CAP`
+    /// dispatches within a process — `makeDev` mints a fresh in-memory store on
+    /// every call, so a computed `dev` would give each call an isolated store.
+    /// Cleared whenever `realNativeHost` changes (see its `didSet`) so the app
+    /// shell's injected real-OS host takes effect on the next `dev` access.
+    nonisolated(unsafe) private static var _devInstance: CapabilityRegistry?
 
     /// The MLP dev registry: `Storage` backed by an in-memory store.
     ///
@@ -274,6 +284,9 @@ public final class CapabilityRegistry: @unchecked Sendable {
     /// serves real OS capability bodies; otherwise it falls back to the deterministic
     /// dev echoes (headless/test builds).
     public static var dev: CapabilityRegistry {
-        makeDev(nativeHost: realNativeHost ?? DevNativeCapabilityHost())
+        if let cached = _devInstance { return cached }
+        let registry = makeDev(nativeHost: realNativeHost ?? DevNativeCapabilityHost())
+        _devInstance = registry
+        return registry
     }
 }

@@ -12,7 +12,7 @@
 import Foundation
 
 /// The signal graph a handler reads from and writes to.
-protocol SignalStore {
+public protocol SignalStore {
     /// Returns the current value of `id`, or `nil` if unbound.
     func read(_ id: UInt32) -> FluxValue?
     /// Writes `value` into `id`.

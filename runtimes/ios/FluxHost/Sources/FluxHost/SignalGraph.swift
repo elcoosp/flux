@@ -27,7 +27,7 @@ struct Subscription: Hashable, Sendable {
 ///   should surface the pending branch (e.g. the `when ... is_loading` form) rather
 ///   than mutating the native view for the not-yet-resolved value.
 /// - `error`: the future resolved with a fault.
-enum CellState: Equatable, Sendable {
+public enum CellState: Equatable, Sendable {
     case ready
     case pending
     case error(message: String)
@@ -61,17 +61,17 @@ public struct SignalGraph: SignalStore {
     }
 
     /// Reads a signal's current value, or `nil` if it has never been written.
-    func read(_ id: UInt32) -> FluxValue? {
+    public func read(_ id: UInt32) -> FluxValue? {
         values[id]
     }
 
     /// Returns the reactive [CellState] of `id`, defaulting to `.ready`.
-    func cellState(_ id: UInt32) -> CellState {
+    public func cellState(_ id: UInt32) -> CellState {
         cellStates[id] ?? .ready
     }
 
     /// Marks `id` as `.pending` (an async-derived/resource cell went in flight).
-    mutating func markPending(_ id: UInt32) {
+    public mutating func markPending(_ id: UInt32) {
         cellStates[id] = .pending
     }
 
@@ -81,7 +81,7 @@ public struct SignalGraph: SignalStore {
     }
 
     /// Writes a value and notifies every observer of that signal.
-    mutating func write(_ id: UInt32, _ value: FluxValue) {
+    public mutating func write(_ id: UInt32, _ value: FluxValue) {
         let oldValue = values[id] ?? .null
         values[id] = value
         // A successful write resolves any pending/error cell back to `.ready`.
@@ -95,13 +95,13 @@ public struct SignalGraph: SignalStore {
 
     /// Allocates a fresh, unbound signal id for a new capability result cell (ADR-0045).
     /// Drawn from a high ceiling so it never collides with fixed ids like 97/99.
-    mutating func allocateCell() -> UInt32 {
+    public mutating func allocateCell() -> UInt32 {
         nextCell &+= 1
         return nextCell
     }
 
     /// Resolves `id` to `value`, marking it `.ready` (an async capability finished).
-    mutating func resolveCell(_ id: UInt32, _ value: FluxValue) {
+    public mutating func resolveCell(_ id: UInt32, _ value: FluxValue) {
         values[id] = value
         cellStates[id] = .ready
     }
@@ -129,7 +129,7 @@ public struct SignalGraph: SignalStore {
     }
 
     /// Every written signal as a sorted `(id, value)` list.
-    func snapshot() -> [(UInt32, FluxValue)] {
+    public func snapshot() -> [(UInt32, FluxValue)] {
         values.map { ($0.key, $0.value) }.sorted { $0.0 < $1.0 }
     }
 }
