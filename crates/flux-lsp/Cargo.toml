@@ -23,6 +23,9 @@ flux-parser.workspace = true
 flux-types.workspace = true
 flux-syntax.workspace = true
 flux-ir.workspace = true
+# `flux-codegen-core` exposes the ADR-0047 primitive registry (authoritative
+# prop-name source for FLUX-027 completion) — never a hand-maintained list.
+flux-codegen-core.workspace = true
 
 # `serde` renders `LspDiagnostic`s as JSON so the `flux lsp` CLI subcommand and
 # non-LSP consumers share the exact wire shape the language server emits
