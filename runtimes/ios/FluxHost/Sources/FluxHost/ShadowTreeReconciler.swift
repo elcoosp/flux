@@ -195,7 +195,7 @@ struct ShadowTreeReconciler {
         if let root = frame.root {
             nodeTable = frame.nodes
             currentRootId = root.id
-            reconcile(nodeId: root.id, nodes: frame.nodes, report: &report)
+            reconcile(nodeId: root.id, parentId: 0, nodes: frame.nodes, report: &report)
         } else if let rootId = currentRootId {
             // A Delta frame carries an EMPTY `nodes` map (only patches). Node ids
             // are not stable across edits in the current pipeline (they derive
@@ -240,7 +240,7 @@ struct ShadowTreeReconciler {
             built.removeAll()
             nodeTable = patchNodes
             currentRootId = newRootId
-            reconcile(nodeId: newRootId, nodes: patchNodes, report: &report)
+            reconcile(nodeId: newRootId, parentId: 0, nodes: patchNodes, report: &report)
         }
         for patch in frame.patches {
             applyPatch(patch, nodes: patchNodes, report: &report)
@@ -266,7 +266,7 @@ struct ShadowTreeReconciler {
     /// Reconciles the node `nodeId` (resolved from `nodes`) against the built
     /// set, recursing into its children, then handing the child views to the
     /// parent adapter.
-    private mutating func reconcile(nodeId: UInt32, nodes: [UInt32: ShadowNode], report: inout ReconcileReport) {
+    private mutating func reconcile(nodeId: UInt32, parentId: UInt32 = 0, nodes: [UInt32: ShadowNode], report: inout ReconcileReport) {
         guard let node = nodes[nodeId] else { return }
         // Materialise dynamic props (ADR-0027 T14): for a node with a prop thunk
         // this runs the thunk against the live signal graph; for static nodes it
@@ -321,7 +321,7 @@ struct ShadowTreeReconciler {
                         height: Double($0.frame.size.height),
                     )
                 }
-                fluxDevtoolsEmit(.viewMutation(nodeId: nodeId, nativeViewId: UInt64(nodeId), mutationKind: 0, frame: rect))
+                fluxDevtoolsEmit(.viewMutation(nodeId: nodeId, nativeViewId: UInt64(nodeId), parentId: parentId, mutationKind: 0, frame: rect))
                 #endif
             }
         } else {
@@ -351,7 +351,7 @@ struct ShadowTreeReconciler {
             // the live node graph. Geometry (frame) is unavailable until the view
             // is laid out, so it is sent on the first update instead.
             #if DEBUG
-            fluxDevtoolsEmit(.viewMutation(nodeId: nodeId, nativeViewId: UInt64(nodeId), mutationKind: 0, frame: nil))
+            fluxDevtoolsEmit(.viewMutation(nodeId: nodeId, nativeViewId: UInt64(nodeId), parentId: parentId, mutationKind: 0, frame: nil))
             #endif
             // Bind handlers once, at build time — re-binding on every frame
             // would stack UIControl actions (ButtonAdapter adds one per call).
@@ -391,7 +391,7 @@ struct ShadowTreeReconciler {
     @discardableResult
     mutating func reconcileDirty(rootId: UInt32, signalIds: Set<UInt32>) -> ReconcileReport {
         var report = ReconcileReport()
-        _ = reconcileDirty(nodeId: rootId, signalIds: signalIds, nodes: nodeTable, report: &report)
+        _ = reconcileDirty(nodeId: rootId, parentId: 0, signalIds: signalIds, nodes: nodeTable, report: &report)
         return report
     }
 
@@ -399,6 +399,7 @@ struct ShadowTreeReconciler {
     /// a dirty node, so ancestors know to re-attach their children.
     private mutating func reconcileDirty(
         nodeId: UInt32,
+        parentId: UInt32 = 0,
         signalIds: Set<UInt32>,
         nodes: [UInt32: ShadowNode],
         report: inout ReconcileReport
@@ -424,7 +425,7 @@ struct ShadowTreeReconciler {
                 childIds = items.map { $0.node }
             }
             for cid in childIds {
-                let childDirty = reconcileDirty(nodeId: cid, signalIds: signalIds, nodes: nodes, report: &report)
+                let childDirty = reconcileDirty(nodeId: cid, parentId: node.id, signalIds: signalIds, nodes: nodes, report: &report)
                 anyChildDirty = anyChildDirty || childDirty
                 if let v = built[cid]?.view { childViews.append(v) }
             }
@@ -453,7 +454,7 @@ struct ShadowTreeReconciler {
                         height: Double($0.frame.size.height),
                     )
                 }
-                fluxDevtoolsEmit(.viewMutation(nodeId: nodeId, nativeViewId: UInt64(nodeId), mutationKind: 0, frame: rect))
+                fluxDevtoolsEmit(.viewMutation(nodeId: nodeId, nativeViewId: UInt64(nodeId), parentId: parentId, mutationKind: 0, frame: rect))
                 #endif
             }
             // Re-parent children so a dirty descendant lands in this view. For a
@@ -504,7 +505,7 @@ struct ShadowTreeReconciler {
             }
             for cid in childIds {
                 guard activeChildId == nil || cid == activeChildId else { continue }
-                reconcile(nodeId: cid, nodes: nodes, report: &report)
+                reconcile(nodeId: cid, parentId: node.id, nodes: nodes, report: &report)
                 if let v = built[cid]?.view { views.append(v) }
             }
         }

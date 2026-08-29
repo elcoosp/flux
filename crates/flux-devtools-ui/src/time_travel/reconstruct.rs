@@ -15,6 +15,22 @@ pub type Registers = Box<[Value; 16]>;
 ///
 /// Produced by replaying telemetry events from a base snapshot (ADR-0042
 /// §2). It is the model the gpui views render when scrubbing the timeline.
+/// A native view node in the live component tree.
+///
+/// Carries enough to rebuild the parent/child hierarchy on the DevTools side:
+/// the node id, its parent's id, and the optional layout [`Rect`] (the host may
+/// know the node exists but be unable to measure geometry — see ADR-0048).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ViewFrame {
+    /// IR node backing the native view.
+    pub node_id: NodeId,
+    /// Parent IR node id (`0` for the tree root).
+    pub parent_id: NodeId,
+    /// Layout rectangle, or `None` when the host cannot measure it.
+    pub frame: Option<Rect>,
+}
+
+/// Reconstructed DevTools state for a single timeline position.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ReconstructedState {
     /// VM instruction pointer (bytecode offset), if known.
@@ -27,12 +43,12 @@ pub struct ReconstructedState {
     pub gas_remaining: Option<u32>,
     /// Signal cell values keyed by [`SignalId`].
     pub signals: Vec<(SignalId, Value)>,
-    /// Native view layout frames keyed by [`NodeId`]. The rect is `None` when
-    /// the host knows the node exists but cannot measure its geometry (the
-    /// host crate is Android-free and drives in-memory adapter views, so pixel
-    /// rects are only available in the platform shell — see ADR-0048). We still
-    /// record node presence so the component tree renders the live node graph.
-    pub view_frames: Vec<(NodeId, Option<Rect>)>,
+    /// Native view nodes in the live component tree. The rect is `None` when the
+    /// host knows the node exists but cannot measure its geometry (the host crate
+    /// is Android-free and drives in-memory adapter views, so pixel rects are
+    /// only available in the platform shell — see ADR-0048). We still record node
+    /// presence so the component tree renders the live node graph.
+    pub view_frames: Vec<ViewFrame>,
     /// Reactive dependency edges: for each written signal, the effect IDs that
     /// re-run when it changes (PRD-P user story 2 — "what reads" a signal). The
     /// signal-graph view renders these so a developer can see reactivity the way
@@ -103,19 +119,34 @@ pub fn reconstruct_state(
             }
             EnrichedTelemetryEvent::ViewMutation {
                 node_id,
+                parent_id,
                 frame,
                 mutation_kind,
                 ..
             } => {
                 if *mutation_kind == 1 {
                     // Remove (mutation_kind 1): drop the node if present.
-                    state.view_frames.retain(|(id, _)| *id != *node_id);
+                    state.view_frames.retain(|vf| vf.node_id != *node_id);
                 } else {
-                    // Create/update: record node presence. The rect is `None`
+                    // Create/update: record node presence (and its parent link so
+                    // the DevTools can rebuild the hierarchy). The rect is `None`
                     // when the host cannot measure geometry (the host crate is
                     // Android-free and drives in-memory adapter views); we still
                     // track the node so the component tree shows the live graph.
-                    upsert(&mut state.view_frames, *node_id, *frame);
+                    let entry = ViewFrame {
+                        node_id: *node_id,
+                        parent_id: *parent_id,
+                        frame: frame.clone(),
+                    };
+                    if let Some(existing) = state
+                        .view_frames
+                        .iter_mut()
+                        .find(|vf| vf.node_id == *node_id)
+                    {
+                        *existing = entry;
+                    } else {
+                        state.view_frames.push(entry);
+                    }
                 }
             }
             EnrichedTelemetryEvent::HandlerInvocation { is_start: true, .. } => {
@@ -184,6 +215,7 @@ mod tests {
         EnrichedTelemetryEvent::ViewMutation {
             node_id: NodeId::from(node),
             native_view_id: 0,
+            parent_id: NodeId::from(0u32),
             mutation_kind: 3,
             frame: Some(Rect {
                 x: 0.0,
@@ -301,6 +333,7 @@ mod tests {
         events.push(EnrichedTelemetryEvent::ViewMutation {
             node_id: NodeId::from(5u32),
             native_view_id: 0,
+            parent_id: NodeId::from(0u32),
             mutation_kind: 1, // Remove
             frame: None,
             source_span: None,
@@ -311,7 +344,7 @@ mod tests {
             state
                 .view_frames
                 .iter()
-                .all(|(id, _)| *id != NodeId::from(5u32))
+                .all(|vf| vf.node_id != NodeId::from(5u32))
         );
     }
 

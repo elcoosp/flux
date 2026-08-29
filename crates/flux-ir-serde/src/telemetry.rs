@@ -115,6 +115,9 @@ pub enum TelemetryEvent {
         node_id: NodeId,
         /// Platform-native view handle (opaque u64; resolved by the host only).
         native_view_id: u64,
+        /// Parent IR node id, so the DevTools can rebuild the component-tree
+        /// hierarchy. `0` only when the node is the tree root.
+        parent_id: NodeId,
         /// `0`=Add, `1`=Remove, `2`=Update, `3`=Layout.
         mutation_kind: u8,
         /// New layout frame when the mutation carries one.
@@ -181,12 +184,14 @@ impl TelemetryEvent {
             TelemetryEvent::ViewMutation {
                 node_id,
                 native_view_id,
+                parent_id,
                 mutation_kind,
                 frame,
             } => {
                 w.u8(EVENT_VIEW_MUTATION);
                 w.u32(*node_id);
                 w.u64(*native_view_id);
+                w.u32(*parent_id);
                 w.u8(*mutation_kind);
                 match frame {
                     Some(rect) => {
@@ -262,6 +267,7 @@ impl TelemetryEvent {
             EVENT_VIEW_MUTATION => {
                 let node_id = inner.u32("view_mutation.node")?;
                 let native_view_id = inner.u64("view_mutation.native")?;
+                let parent_id = inner.u32("view_mutation.parent")?;
                 let mutation_kind = inner.u8("view_mutation.kind")?;
                 let frame = match inner.u8("view_mutation.frame.present")? {
                     0 => None,
@@ -270,6 +276,7 @@ impl TelemetryEvent {
                 Ok(TelemetryEvent::ViewMutation {
                     node_id,
                     native_view_id,
+                    parent_id,
                     mutation_kind,
                     frame,
                 })
@@ -688,6 +695,8 @@ pub enum EnrichedTelemetryEvent {
         node_id: NodeId,
         /// Platform-native view handle.
         native_view_id: u64,
+        /// Parent IR node id (the DevTools rebuilds the tree from this).
+        parent_id: NodeId,
         /// `0`=Add, `1`=Remove, `2`=Update, `3`=Layout.
         mutation_kind: u8,
         /// New layout frame when the mutation carries one.
@@ -750,6 +759,7 @@ impl EnrichedTelemetryEvent {
             EnrichedTelemetryEvent::ViewMutation {
                 node_id,
                 native_view_id,
+                parent_id,
                 mutation_kind,
                 frame,
                 source_span,
@@ -757,6 +767,7 @@ impl EnrichedTelemetryEvent {
                 w.u8(EVENT_VIEW_MUTATION);
                 w.u32(*node_id);
                 w.u64(*native_view_id);
+                w.u32(*parent_id);
                 w.u8(*mutation_kind);
                 match frame {
                     Some(rect) => {
@@ -836,6 +847,7 @@ impl EnrichedTelemetryEvent {
             EVENT_VIEW_MUTATION => {
                 let node_id = inner.u32("view_mutation.node")?;
                 let native_view_id = inner.u64("view_mutation.native")?;
+                let parent_id = inner.u32("view_mutation.parent")?;
                 let mutation_kind = inner.u8("view_mutation.kind")?;
                 let frame = match inner.u8("view_mutation.frame.present")? {
                     0 => None,
@@ -845,6 +857,7 @@ impl EnrichedTelemetryEvent {
                 Ok(EnrichedTelemetryEvent::ViewMutation {
                     node_id,
                     native_view_id,
+                    parent_id,
                     mutation_kind,
                     frame,
                     source_span,
@@ -910,11 +923,13 @@ pub fn enrich_telemetry(event: TelemetryEvent) -> EnrichedTelemetryEvent {
         TelemetryEvent::ViewMutation {
             node_id,
             native_view_id,
+            parent_id,
             mutation_kind,
             frame,
         } => EnrichedTelemetryEvent::ViewMutation {
             node_id,
             native_view_id,
+            parent_id,
             mutation_kind,
             frame,
             source_span: None,

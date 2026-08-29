@@ -480,6 +480,7 @@ public class ShadowTree(
                         TelemetryEvent.ViewMutation(
                             nodeId = node.id,
                             nativeViewId = node.view.nodeId.toULong(),
+                            parentId = parents[patch.id] ?: 0u,
                             mutationKind = 0u.toUByte(),
                             frame = null,
                         ),
@@ -515,6 +516,7 @@ public class ShadowTree(
                         TelemetryEvent.ViewMutation(
                             nodeId = built.id,
                             nativeViewId = built.view.nodeId.toULong(),
+                            parentId = patch.parentId,
                             mutationKind = 0u.toUByte(),
                             frame = null,
                         ),
@@ -540,6 +542,7 @@ public class ShadowTree(
                         TelemetryEvent.ViewMutation(
                             nodeId = patch.id,
                             nativeViewId = node.view.nodeId.toULong(),
+                            parentId = parents[patch.id] ?: 0u,
                             mutationKind = 1u.toUByte(),
                             frame = null,
                         ),

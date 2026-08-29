@@ -7,4 +7,4 @@ mod reconstruct;
 
 pub use buffer::{DEFAULT_CAPACITY, TimelineBuffer};
 pub use log_buffer::{LogBuffer, LogEntry, LogLevel};
-pub use reconstruct::{ReconstructedState, Registers, reconstruct_state};
+pub use reconstruct::{ReconstructedState, Registers, ViewFrame, reconstruct_state};

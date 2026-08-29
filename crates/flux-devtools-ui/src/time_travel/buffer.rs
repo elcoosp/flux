@@ -99,6 +99,7 @@ mod tests {
         EnrichedTelemetryEvent::ViewMutation {
             node_id: NodeId::from(node),
             native_view_id: 0,
+            parent_id: NodeId::from(0u32),
             mutation_kind: 0,
             frame: Some(Rect {
                 x: 0.0,

@@ -85,6 +85,7 @@ public fun ShadowTree.reconcileDirty(
                 TelemetryEvent.ViewMutation(
                     nodeId = id,
                     nativeViewId = node.view.nodeId.toULong(),
+                    parentId = parents[id] ?: 0u,
                     mutationKind = 0u.toUByte(),
                     frame = null,
                 ),
