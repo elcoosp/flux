@@ -269,6 +269,18 @@ are intentionally omitted (automation noise, not user-facing change).
   `status: blocked`; unblock when PRD-J lands `flux-perf-harness` + `MetricRecord` (and FLUX-066
   on-device instrumentation).
 
+### PARTIAL — DevTools log viewer + network inspector (FLUX-060, LANE-P)
+
+- **Log viewer — DONE (verified):** pure `LogBuffer`/`LogEntry`/`LogLevel` model
+  (`time_travel/log_buffer.rs`, 4 tests), wired into `DevToolsState`
+  (`logs: RwLock<LogBuffer>` + `ingest_log`/`log_snapshot`, 1 test), gpui
+  `LogViewerView` mounted as the fifth `DevToolsRoot` pane. `cargo test -p
+  flux-devtools-ui --lib` → 23/23 green; fmt + clippy clean.
+- **Network inspector — BLOCKED:** no `TelemetryEvent::NetworkRequest` variant
+  exists and FLUX-047 (HTTP capability) is `todo`, so there is no real traffic to
+  inspect. No inspector code fabricated; unblock after FLUX-047 + a
+  `NetworkRequest` telemetry variant.
+
 ### CI — real Kotlin / Compose codegen check + rust-check unblock — DONE
 
 - Provision the Compose toolchain and run the real `kotlinc` codegen check without platform-37;

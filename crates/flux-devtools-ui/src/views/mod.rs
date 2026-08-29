@@ -2,11 +2,13 @@
 //! [`DevToolsState`] and is owned by the gpui root window.
 
 mod component_tree;
+mod log_viewer;
 mod signal_graph;
 mod timeline;
 mod vm_inspector;
 
 pub use component_tree::ComponentTreeView;
+pub use log_viewer::LogViewerView;
 pub use signal_graph::SignalGraphView;
 pub use timeline::TimelineView;
 pub use vm_inspector::VmInspectorView;

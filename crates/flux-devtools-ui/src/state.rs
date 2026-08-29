@@ -6,7 +6,7 @@ use parking_lot::RwLock;
 use flux_ir_serde::EnrichedTelemetryEvent;
 
 use crate::time_travel::{
-    LogBuffer, LogEntry, LogLevel, ReconstructedState, TimelineBuffer, reconstruct_state,
+    LogBuffer, LogEntry, ReconstructedState, TimelineBuffer, reconstruct_state,
 };
 
 /// Snapshot of the VM register/instruction view.
@@ -22,6 +22,34 @@ pub struct VmState {
     pub gas_remaining: Option<u32>,
     /// `.flux` source span of the current instruction, if resolvable.
     pub source_span: Option<flux_syntax::Span>,
+}
+
+/// Identity of the host device currently streaming telemetry, learned from the
+/// dev server's `HostAnnounce` frame (which the server derives from the host's
+/// `Hello` handshake). Lets the DevTools UI show *which* device is being
+/// inspected (e.g. an iOS Simulator vs an Android phone).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HostInfo {
+    /// Host platform, e.g. `"ios"` or `"android"`.
+    pub platform: String,
+    /// Device model string (e.g. `iPhone17,1` / `UIDevice.model`).
+    pub device: String,
+    /// Capabilities the host advertised at handshake (`(name, version, features)`).
+    pub capabilities: Vec<(String, u32, Vec<String>)>,
+}
+
+impl HostInfo {
+    /// A short, human-readable label for the host, e.g. `iOS · iPhone17,1`.
+    #[must_use]
+    pub fn label(&self) -> String {
+        let lowered = self.platform.to_ascii_lowercase();
+        let platform = match lowered.as_str() {
+            "ios" => "iOS",
+            "android" => "Android",
+            other => other,
+        };
+        format!("{platform} · {}", self.device)
+    }
 }
 
 /// The DevTools central state: the live timeline plus the reconstructed view.
@@ -43,6 +71,9 @@ pub struct DevToolsState {
     /// Retained structured log stream for the log viewer (FLUX-060). Bounded; the
     /// oldest record is evicted once at capacity, mirroring the timeline buffer.
     pub logs: RwLock<LogBuffer>,
+    /// The host currently streaming telemetry, if any. `None` until the first
+    /// `HostAnnounce` arrives (the dev server sends one per host connection).
+    pub host: RwLock<Option<HostInfo>>,
 }
 
 impl DevToolsState {
@@ -54,7 +85,19 @@ impl DevToolsState {
             live: RwLock::new(ReconstructedState::base()),
             is_paused: RwLock::new(false),
             logs: RwLock::new(LogBuffer::new(512)),
+            host: RwLock::new(None),
         }
+    }
+
+    /// Records the identity of the host now streaming telemetry.
+    pub fn set_host(&self, host: HostInfo) {
+        *self.host.write() = Some(host);
+    }
+
+    /// The current host identity, if known.
+    #[must_use]
+    pub fn host_info(&self) -> Option<HostInfo> {
+        self.host.read().clone()
     }
 
     /// Ingests one enriched telemetry event: updates the live reconstructed

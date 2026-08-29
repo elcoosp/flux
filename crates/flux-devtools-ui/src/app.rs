@@ -10,7 +10,9 @@ use gpui::{
 use gpui_platform::application;
 
 use crate::state::DevToolsState;
-use crate::views::{ComponentTreeView, SignalGraphView, TimelineView, VmInspectorView};
+use crate::views::{
+    ComponentTreeView, LogViewerView, SignalGraphView, TimelineView, VmInspectorView,
+};
 use crate::wire_client::{DEFAULT_DEVTOOLS_PORT, connect, run_ingest_loop};
 
 /// The root DevTools window, owning the shared [`DevToolsState`] and the four
@@ -24,6 +26,7 @@ struct DevToolsRoot {
     signals: gpui::Entity<SignalGraphView>,
     tree: gpui::Entity<ComponentTreeView>,
     timeline: gpui::Entity<TimelineView>,
+    logs: gpui::Entity<LogViewerView>,
 }
 
 impl DevToolsRoot {
@@ -41,6 +44,7 @@ impl DevToolsRoot {
             signals: cx.new(|_| SignalGraphView::new(state.clone())),
             tree: cx.new(|_| ComponentTreeView::new(state.clone())),
             timeline: cx.new(|_| TimelineView::new(state.clone())),
+            logs: cx.new(|_| LogViewerView::new(state.clone())),
         }
     }
 }
@@ -70,6 +74,7 @@ impl gpui::Render for DevToolsRoot {
             .child(self.signals.clone())
             .child(self.tree.clone())
             .child(self.timeline.clone())
+            .child(self.logs.clone())
     }
 }
 
