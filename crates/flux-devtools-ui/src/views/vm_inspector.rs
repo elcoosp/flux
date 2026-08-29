@@ -2,8 +2,9 @@
 
 use std::sync::Arc;
 
-use gpui::{Context, IntoElement, ParentElement, Render, Styled, Window};
+use gpui::{AnyElement, Context, IntoElement, Render, Window};
 
+use crate::row::{empty_row, into_any, kv_row, rows_column};
 use crate::state::{DevToolsState, VmState};
 
 /// Renders the live VM register bank and instruction pointer.
@@ -31,19 +32,16 @@ impl VmInspectorView {
         let gas = vm
             .gas_remaining
             .map_or_else(|| "?".into(), |g| g.to_string());
-        gpui::div()
-            .flex()
-            .flex_col()
-            .p_4()
-            .child(gpui::div().child(format!("IP: {offset}")))
-            .child(gpui::div().child(format!("Gas: {gas}")))
-            .children(vm.registers.iter().enumerate().map(|(i, val)| {
-                gpui::div()
-                    .flex()
-                    .justify_between()
-                    .child(gpui::div().child(format!("r{i}")))
-                    .child(gpui::div().child(format!("{val:?}")))
-            }))
+
+        let mut rows: Vec<AnyElement> =
+            vec![into_any(kv_row("IP", offset)), into_any(kv_row("Gas", gas))];
+        if vm.registers.is_empty() {
+            rows.push(into_any(empty_row("no registers yet")));
+        }
+        for (i, val) in vm.registers.iter().enumerate() {
+            rows.push(into_any(kv_row(format!("r{i}"), format!("{val:?}"))));
+        }
+        rows_column(rows)
     }
 }
 

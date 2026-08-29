@@ -8,7 +8,8 @@ use gpui::{
     Styled, Window, px,
 };
 use gpui_component::{
-    Root, Theme, TitleBar, badge::Badge, separator::Separator, status_bar::StatusBar,
+    Root, Theme, TitleBar, badge::Badge, group_box::GroupBox, separator::Separator,
+    status_bar::StatusBar,
 };
 
 use gpui_platform::application;
@@ -133,16 +134,21 @@ impl Render for DevToolsRoot {
                                 })),
                         )
                         .child(host_badge.unwrap_or_else(|| {
-                            gpui::div().flex().flex_row().items_center().child(
-                                gpui::div()
-                                    .text_xs()
-                                    .text_color(colors.muted_foreground)
-                                    .child("awaiting host…"),
-                            )
+                            gpui::div()
+                                .flex()
+                                .flex_row()
+                                .items_center()
+                                .pr(px(12.))
+                                .child(
+                                    gpui::div()
+                                        .text_xs()
+                                        .text_color(colors.muted_foreground)
+                                        .child("awaiting host…"),
+                                )
                         })),
                 ),
             )
-            // ── Body: four panes separated by dividers ──
+            // ── Body: four gpui-component GroupBox panes separated by dividers ──
             .child(
                 gpui::div()
                     .flex()
@@ -169,28 +175,15 @@ impl Render for DevToolsRoot {
     }
 }
 
-/// Wraps a pane view in a styled container with a header strip, so every panel
-/// reads as a distinct, labelled surface instead of bare text.
-fn pane<E: Render + 'static>(title: &'static str, view: Entity<E>, cx: &App) -> impl IntoElement {
-    let colors = cx.global::<Theme>();
-    gpui::div()
-        .flex()
-        .flex_col()
+/// Wraps a pane view in a gpui-component [`GroupBox`] (titled, bordered surface)
+/// whose body holds the view, so every panel reads as a distinct, polished
+/// surface instead of bare text.
+fn pane<E: Render + 'static>(title: &'static str, view: Entity<E>, _cx: &App) -> impl IntoElement {
+    GroupBox::new()
+        .title(title)
         .flex_1()
         .min_w(px(0.))
-        .bg(colors.background)
-        .child(
-            gpui::div()
-                .px(px(12.))
-                .py(px(4.))
-                .border_color(colors.border)
-                .border(px(1.))
-                .text_xs()
-                .font_weight(FontWeight::BOLD)
-                .text_color(colors.muted_foreground)
-                .child(title),
-        )
-        .child(gpui::div().flex_1().min_h(px(0.)).child(view))
+        .child(gpui::div().flex_col().min_h(px(0.)).child(view))
 }
 
 /// Launches the DevTools application.

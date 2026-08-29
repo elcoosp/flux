@@ -2,8 +2,9 @@
 
 use std::sync::Arc;
 
-use gpui::{Context, IntoElement, ParentElement, Render, Styled, Window};
+use gpui::{AnyElement, Context, IntoElement, Render, Window};
 
+use crate::row::{into_any, kv_row, rows_column};
 use crate::state::DevToolsState;
 
 /// Renders the time-travel timeline: a scrubber over the retained history.
@@ -31,12 +32,11 @@ impl TimelineView {
     pub fn render_pane(&self, _cx: &Context<'_, Self>) -> impl IntoElement {
         let len = self.timeline_len();
         let at = self.scrub_index.unwrap_or(len.saturating_sub(1));
-        gpui::div()
-            .flex()
-            .flex_col()
-            .p_4()
-            .child(gpui::div().child("Timeline".to_string()))
-            .child(gpui::div().child(format!("event {at} / {len}")))
+        let rows: Vec<AnyElement> = vec![
+            into_any(kv_row("events", len.to_string())),
+            into_any(kv_row("scrubbed", format!("event {at}"))),
+        ];
+        rows_column(rows)
     }
 }
 

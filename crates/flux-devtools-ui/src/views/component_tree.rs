@@ -2,11 +2,12 @@
 
 use std::sync::Arc;
 
-use gpui::{Context, IntoElement, ParentElement, Render, Styled, Window};
+use gpui::{AnyElement, Context, IntoElement, Render, Window};
 
 use flux_ir_serde::Rect;
 use flux_syntax::NodeId;
 
+use crate::row::{empty_row, into_any, kv_row, rows_column};
 use crate::state::DevToolsState;
 use crate::time_travel::ReconstructedState;
 
@@ -29,21 +30,23 @@ impl ComponentTreeView {
     /// Renders the view as a standalone pane.
     pub fn render_pane(&self, _cx: &Context<'_, Self>) -> impl IntoElement {
         let live = self.live();
-        gpui::div()
-            .flex()
-            .flex_col()
-            .p_4()
-            .child(gpui::div().child("Component Tree".to_string()))
-            .children(live.view_frames.iter().map(|(id, frame): &(NodeId, Rect)| {
-                gpui::div()
-                    .flex()
-                    .justify_between()
-                    .child(gpui::div().child(format!("node#{id}")))
-                    .child(gpui::div().child(format!(
-                        "{}×{} @ ({},{}",
-                        frame.width, frame.height, frame.x, frame.y
-                    )))
-            }))
+        let mut rows: Vec<AnyElement> = Vec::new();
+        if live.view_frames.is_empty() {
+            // Surface the empty state instead of rendering nothing — the host
+            // may not be streaming layout frames yet (or the protocol frame is
+            // not wired through). This is a UI/data diagnostic, not a crash.
+            rows.push(into_any(empty_row("no layout frames received yet")));
+        }
+        for (id, frame) in live.view_frames.iter() {
+            rows.push(into_any(kv_row(
+                format!("node#{id}"),
+                format!(
+                    "{}×{} @ ({}, {})",
+                    frame.width, frame.height, frame.x, frame.y
+                ),
+            )));
+        }
+        rows_column(rows)
     }
 }
 

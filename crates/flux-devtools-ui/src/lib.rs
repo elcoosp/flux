@@ -21,6 +21,7 @@ pub mod time_travel;
 pub mod wire_client;
 
 mod app;
+mod row;
 mod views;
 
 pub use state::{DevToolsState, VmState};
