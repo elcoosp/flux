@@ -99,6 +99,16 @@ are intentionally omitted (automation noise, not user-facing change).
   regression test `crates/flux-parity/tests/b3_lowering.rs` asserting all 10 B.3 examples
   lower cleanly, so the gap cannot silently reopen.
 
+### CI — mutation testing + toolchain matrix (FLUX-067) — DONE
+
+- Added `.github/workflows/mutation-testing.yml`: a `cargo-mutants` job over `flux-differ`
+  and `flux-vm-ref` (installed from crates.io, NOT a manifest dependency per the issue).
+  Informational (`continue-on-error: true`) until the surviving-mutant set is triaged, then
+  promoted to a hard gate.
+- Added `.github/workflows/compat-matrix.yml`: an Xcode min+max (iOS) and AGP x Kotlin
+  min+max (Android) matrix reusing the ios-check/android-check build steps, so version
+  drift is surfaced instead of assumed.
+
 ### CI — real Kotlin / Compose codegen check + rust-check unblock — DONE
 
 - Provision the Compose toolchain and run the real `kotlinc` codegen check without platform-37;

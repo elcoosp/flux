@@ -1,0 +1,61 @@
+name: mutation-testing
+
+# FLUX-067 (LANE-M, Phase 0 — CI hardening) — mutation testing on correctness-critical crates.
+#
+# Runs `cargo-mutants` over `flux-differ` and `flux-vm-ref`. These crates carry the
+# tree-diff and the reference VM interpreter — snapshot/unit tests alone will not catch
+# every regression class, so mutants that survive the existing suite are a real signal.
+#
+# `cargo-mutants` is a cargo *subcommand binary* (installed from crates.io), NOT a
+# workspace manifest dependency, so no Cargo.toml / MANIFEST_REQUESTS.md change is needed.
+#
+# Policy (per the issue): this job is INFORMATIONAL first — it never fails the merged
+# tree. Once the surviving-mutant set is triaged, flip `continue-on-error: false` to
+# promote it to a hard gate. We keep it non-blocking now so a transient mutant count does
+# not red the whole pipeline during the triage window.
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "crates/flux-differ/**"
+      - "crates/flux-vm-ref/**"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "crates/flux-differ/**"
+      - "crates/flux-vm-ref/**"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  mutants:
+    name: cargo-mutants (flux-differ, flux-vm-ref)
+    runs-on: ubuntu-latest
+    # Informational until the surviving-mutant set is triaged (FLUX-067 decision).
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-mutants
+        run: cargo +nightly install cargo-mutants --locked
+
+      - name: Run mutants on flux-differ
+        run: cargo +nightly mutants --package flux-differ --timeout-multiplier 3
+
+      - name: Run mutants on flux-vm-ref
+        run: cargo +nightly mutants --package flux-vm-ref --timeout-multiplier 3

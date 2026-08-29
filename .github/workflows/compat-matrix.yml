@@ -1,0 +1,144 @@
+name: compat-matrix
+
+# FLUX-067 (LANE-M, Phase 0 — CI hardening) — toolchain compatibility matrix.
+#
+# Declares and TESTS the min+max toolchain versions across the native hosts, instead of
+# assuming "latest works". Two matrices:
+#   * iOS: Xcode min + max (the issue's "min/max Xcode").
+#   * Android: AGP min + max x Kotlin min + max (the issue's "Android Gradle Plugin,
+#     Kotlin versions").
+#
+# The build/test steps mirror ios-check.yml / android-check.yml so a version bump only
+# touches the `matrix:` block, never the commands. Each cell is best-effort
+# (continue-on-error) until a version is confirmed provisionable on the runners — the
+# point of the matrix is to surface version drift, not to hard-red the tree on a runner
+# image that lacks a given Xcode/AGP/Kotlin.
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "runtimes/ios/**"
+      - "adapters/ui-swift/**"
+      - "runtimes/android/**"
+      - "adapters/ui-kotlin/**"
+      - "gradle/**"
+      - "settings.gradle.kts"
+      - "crates/flux-codegen-kotlin/**"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "runtimes/ios/**"
+      - "adapters/ui-swift/**"
+      - "runtimes/android/**"
+      - "adapters/ui-kotlin/**"
+      - "gradle/**"
+      - "settings.gradle.kts"
+      - "crates/flux-codegen-kotlin/**"
+
+permissions:
+  contents: read
+
+jobs:
+  ios-matrix:
+    name: iOS (Xcode ${{ matrix.xcode }})
+    runs-on: macos-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        # min + max Xcode versions per the issue. Bump the max when a new Xcode ships.
+        xcode: ["16.0", "26.0"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Select Xcode ${{ matrix.xcode }}
+        run: sudo xcode-select -s "/Applications/Xcode_${{ matrix.xcode }}.app"
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: runtimes/ios
+        run: xcodegen generate
+
+      - name: Resolve a simulator
+        id: sim
+        run: |
+          runtime_id=$(xcrun simctl list runtimes | grep -E 'iOS [0-9]' | tail -1 | awk '{print $NF}' | tr -d '()')
+          echo "runtime_id=$runtime_id" >> "$GITHUB_OUTPUT"
+          sim_id=$(xcrun simctl create "FluxCI" "iPhone 16" "$runtime_id")
+          echo "sim_id=$sim_id" >> "$GITHUB_OUTPUT"
+
+      - name: Build & test FluxApp
+        working-directory: runtimes/ios
+        run: xcodebuild test -scheme FluxApp -destination "id=${{ steps.sim.outputs.sim_id }}" -quiet
+
+      - name: Test ui-swift adapter (SPM)
+        working-directory: adapters/ui-swift
+        run: swift test
+
+      - name: Remove simulator
+        if: always() && steps.sim.outputs.sim_id != ''
+        run: xcrun simctl delete "${{ steps.sim.outputs.sim_id }}"
+
+  android-matrix:
+    name: Android (AGP ${{ matrix.agp }}, Kotlin ${{ matrix.kotlin }})
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        # min + max AGP x min + max Kotlin per the issue.
+        agp: ["8.7.0", "8.9.0"]
+        kotlin: ["2.0.21", "2.1.0"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Pin AGP + Kotlin in gradle/libs.versions.toml
+        # The matrix overrides the version pins so the build exercises min/max.
+        run: |
+          sed -i.bak -E "s/(agp = \")[^\"]+(\")/\1${{ matrix.agp }}\2/" gradle/libs.versions.toml
+          sed -i.bak -E "s/(kotlin = \")[^\"]+(\")/\1${{ matrix.kotlin }}\2/" gradle/libs.versions.toml
+
+      - name: Provision Compose toolchain from Google Maven
+        # Same classpath provisioning as android-check.yml (Compose BOM + Kotlin
+        # Compose compiler plugin) so the kotlinc codegen check runs without an
+        # Android platform.
+        run: |
+          set -uo pipefail
+          BOM_VER="2026.08.00"
+          GOOGLE="https://dl.google.com/dl/android/maven2"
+          MAVEN="https://repo1.maven.org/maven2"
+          WORK="$HOME/compose_prov"
+          mkdir -p "$WORK/aars" "$WORK/jars"
+          curl -fsSL "$GOOGLE/androidx/compose/compose-bom/$BOM_VER/compose-bom-$BOM_VER.pom" -o "$WORK/bom.pom"
+          curl -fsSL "$MAVEN/org/jetbrains/kotlin/kotlin-compose-compiler-plugin-embeddable/${{ matrix.kotlin }}/kotlin-compose-compiler-plugin-embeddable-${{ matrix.kotlin }}.jar" -o "$WORK/jars/compose-compiler.jar"
+          curl -fsSL "$MAVEN/org/jetbrains/kotlin/kotlin-compiler-embeddable/${{ matrix.kotlin }}/kotlin-compiler-embeddable-${{ matrix.kotlin }}.jar" -o "$WORK/jars/kotlin-compiler-embeddable.jar"
+          classpath="$WORK/jars/compose-compiler.jar:$WORK/jars/kotlin-compiler-embeddable.jar"
+          echo "ANDROID_COMPOSE_CLASSPATH=$classpath" >> "$GITHUB_ENV"
+          echo "ANDROID_COMPOSE_COMPILER=$WORK/jars/compose-compiler.jar" >> "$GITHUB_ENV"
+          echo "exported ANDROID_COMPOSE_CLASSPATH and ANDROID_COMPOSE_COMPILER"
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: kotlinc compile-check of generated Compose
+        continue-on-error: true
+        run: cargo test -p flux-codegen-kotlin generated_kotlin_parses -- --nocapture
+
+      - name: Run adapter & runtime unit tests
+        continue-on-error: true
+        run: ./gradlew :adapters:ui-kotlin:test :runtimes:android:app:test --no-daemon
