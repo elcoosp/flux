@@ -1,6 +1,6 @@
 ---
 id: FLUX-040
-status: partial
+status: todo
 lane: LANE-N
 phase: "Phase 2"
 blocked_by: []
@@ -14,6 +14,11 @@ related_adrs:
 ---
 
 # FLUX-040: Stdlib form primitives — Switch / Checkbox / Slider / Picker / DatePicker / TextArea
+
+> **Status note (2026-08-29):** relabeled `partial` → `todo`. A source grep of
+> `stdlib/` finds **zero** form primitives (`Switch`/`Checkbox`/`Slider`/`Picker`/
+> `DatePicker`/`TextArea`) — only the ADR-0047 contract intent exists. Nothing has
+> landed in the stdlib yet.
 
 - **Lane:** LANE-N (Phase 2)
 - **Depends on:** none (but pairs with FLUX-041 gestures + FLUX-044 a11y)
