@@ -18,10 +18,10 @@ views driven by a minimal VM and a reactive signal graph.
 
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
 ![Rust](https://img.shields.io/badge/rust-nightly%20%7C%20edition%202024-orange.svg)
-![Crates](https://img.shields.io/badge/workspace-15%20crates-9cf)
+![Crates](https://img.shields.io/badge/workspace-16%20crates-9cf)
 ![Tests](https://img.shields.io/badge/runner-cargo%20nextest-brightgreen.svg)
-![Source](https://img.shields.io/badge/rust%20LOC-42k-9cf)
-![ADRs](https://img.shields.io/badge/ADRs-30%20%28MADR%29-blueviolet.svg)
+![Source](https://img.shields.io/badge/rust%20LOC-46k-9cf)
+![ADRs](https://img.shields.io/badge/ADRs-37%20%28MADR%29-blueviolet.svg)
 ![Platforms](https://img.shields.io/badge/platforms-iOS%2016%2B%20%7C%20Android-purple.svg)
 ![Rust CI](https://github.com/elcoosp/flux/actions/workflows/rust-check.yml/badge.svg)
 ![iOS CI](https://github.com/elcoosp/flux/actions/workflows/ios-check.yml/badge.svg)
@@ -47,6 +47,8 @@ fork in the road, no "dev looks different from prod."
 
 ## Architecture
 
+### Pipeline overview
+
 ```
  .flux source
       │  flux-parser  (hand-written lexer + recursive-descent parser)
@@ -54,19 +56,73 @@ fork in the road, no "dev looks different from prod."
   flux-syntax  ──►  flux-types  (type check)
       │                    │
       ▼                    ▼
-  flux-ir   (Reactive Tree IR, arena-allocated, stable u32 node ids)
+  flux-ir   (Reactive Tree IR: arena-allocated, stable u32 node ids, codegen-ready)
       │
       ▼  flux-differ  (structural diff → minimal edit script)
-  flux-ir-serde  (binary MessagePack patch, blake3 content-addressed)
+  flux-ir-serde  (binary MessagePack patch; blake3 content-addressed interning)
       │
-      ├──► dev:  flux-vm-ref  (register VM)  ──► host app (native shadow tree)
-      └──► rel:  flux-codegen-swift / flux-codegen-kotlin  (native codegen)
+      ├──► dev:  flux-vm-ref (register VM, test oracle)  ──► host app (native shadow tree)
+      └──► rel:  flux-codegen-core ─► flux-codegen-swift / flux-codegen-kotlin (native codegen)
 ```
 
-The wire protocol (Appendix D), VM ISA (Appendix E), and adapter contracts
-(Appendix F) are normative and versioned. Node IDs are `blake3` hashes of
-`(parent_id, tag, span, key)` — **stable across edits** so state is preserved
-through hot-swap.
+The three normative, versioned contracts are the **wire protocol** (Appendix D of
+`docs/spec/mlp-appendices.md`), the **VM ISA** (Appendix E), and the **adapter
+contracts** (Appendix F). The `flux-devtools-ui` crate (a gpui desktop app,
+ADR-0041) renders live DevTools telemetry over the same wire.
+
+### Node identity — FNV-1a-32, not blake3
+
+Node IDs are **FNV-1a-32** hashes computed by `flux_syntax::compute_node_id`
+(`crates/flux-syntax/src/ids.rs`). The input is the 25-byte buffer
+`(parent_id: u32, tag: u8, span.file_id: u32, span.start: u32, span.end: u32,
+key: u64)` — **never sequential**. Two tag families keep their IDs disjoint:
+
+- `ExprTag` (high bit clear, `0..=127`) for expression nodes.
+- `DeclTag` (high bit set, `0x80`, `128..=255`) for declaration nodes.
+
+A node lowered under the wrong family silently matches nothing, which is why the
+codegen node-ID bridge (`flux-codegen-*/bridge.rs`) threads the exact same family
+tag. IDs are **stable across edits where structure doesn't change**, so hot-swap
+preserves component state. `blake3` is used elsewhere in the toolchain — for
+content-addressing on the wire and prop/closure hashes in `flux-ir-serde` and
+`flux-ir` — but it is not the node-ID hash.
+
+### Prop indexing
+
+Prop indices are FNV-1a-32 of the prop *name* masked to `u16`
+(`flux_ir::lower::prop_index_for_name`). Host kits derive them identically
+(`PropsIndex.propIndexForName` on Android); indices are **never hardcoded** —
+a hardcoded index desyncs from the server and renders silently blank UI.
+
+### The reactive core and the shadow tree
+
+- **`flux-ir`** owns the in-memory lowered shape: the packed `IRArena`, the
+  `ClosureIR` bytecode table, and the `InstanceRegistry` that lets the host
+  preserve state across hot swaps (Appendix C §C.1, FLUX-004).
+- **`flux-vm-ref`** is the *reference* VM — the behavioral oracle for the ISA in
+  Appendix E. It decodes Appendix E bytecode and interprets it, and both the
+  production runtimes (Swift `FluxBytecodeVM`, Kotlin `FluxBytecodeVM`) and
+  `flux-vm-ref` itself are validated against the golden ISA vectors under
+  `/tests/isa-vectors/`. It is intentionally dependency-light and is **not** the
+  VM that ships in a host app.
+- The **capability system** is the extension point (`CALL_CAP` in the ISA): a
+  `CapabilityRegistry` maps `(capId, methodId) → impl`, threaded into the VM.
+  `CALL_CAP` returns a **result-cell signal id** that is `Ready` / `Pending` /
+  `Error` (ADR-0044); synchronous capabilities settle the cell before returning,
+  async capabilities leave it `Pending` and an injected `AsyncResolver` settles
+  it (ADR-0045). Capability ids are derived deterministically on server and both
+  hosts.
+- The **shadow tree** is not a tree of raw native views. Each `ShadowNode` holds
+  its materialized props in a platform observable. On Android, props live in a
+  Compose `MutableState` injected via `propsStateFactory` (a plain `var` is
+  invisible to snapshot tracking); on iOS the tree is observed natively. Dev
+  renders through the same declarative components the release codegen emits
+  (§0.2 of `AGENTS.md`) — there is no separate imperative dev tier on Android;
+  the iOS dev tier is still imperative (UIKit) and convergence is gated on
+  measurement (ADR-0048).
+- **Keyed reconciliation** matches children by `nodeId`; an existing node is
+  reordered, never recreated, which preserves scroll position, text, and screen
+  state across diffs and router push/pop.
 
 ---
 
@@ -74,32 +130,33 @@ through hot-swap.
 
 ```
 flux/
-├── crates/                       # Rust workspace (15 crates)
-│   ├── flux-syntax/              # Shared type vocabulary (ids, value, ty, node, patch)
+├── crates/                       # Rust workspace (16 crates)
+│   ├── flux-syntax/              # Span, NodeId, FNV-1a node-id hashing, value/ty/node/patch vocab
 │   ├── flux-parser/              # Hand-written lexer + recursive-descent parser
 │   ├── flux-types/               # Type checker
-│   ├── flux-ir/                  # Reactive Tree IR + arena
-│   ├── flux-ir-serde/            # Binary patch (de)serialization
+│   ├── flux-ir/                  # Reactive Tree IR: arena, ClosureIR, InstanceRegistry, lowering
+│   ├── flux-ir-serde/            # Binary patch (de)serialization (MessagePack, blake3 interning)
 │   ├── flux-differ/              # Structural tree differ
-│   ├── flux-vm-ref/              # Reference register-based VM
-│   ├── flux-devserver/           # Hot-reload pipeline + WebSocket server
-│   ├── flux-codegen-swift/       # SwiftUI codegen
-│   ├── flux-codegen-kotlin/      # Jetpack Compose codegen
-│   ├── flux-codegen-core/        # Shared data-driven emitter (Backend trait)
+│   ├── flux-vm-ref/              # Reference register-based VM (test oracle, not the shipping VM)
+│   ├── flux-devserver/           # Hot-reload pipeline + WebSocket + HTTP asset server
+│   ├── flux-codegen-swift/       # SwiftUI codegen (node-ID bridge)
+│   ├── flux-codegen-kotlin/      # Jetpack Compose codegen (node-ID bridge)
+│   ├── flux-codegen-core/        # Shared data-driven emitter (Backend trait, primitive registry)
 │   ├── flux-cli/                 # `flux` CLI binary
-│   ├── flux-parity/              # Dev VM == release codegen parity tests
-│   ├── flux-perf-harness/        # Render-perf benchmark harness + emit CLI
+│   ├── flux-parity/              # Dev VM == release codegen parity harness + trace diffing
+│   ├── flux-lsp/                 # Language server (async-lsp), FLUX-024/FLUX-029
+│   ├── flux-perf-harness/        # Render-perf benchmark harness (PRD-J, ADR-0048)
 │   └── flux-devtools-ui/         # gpui DevTools desktop (ADR-0041)
 ├── runtimes/                     # Host apps (Swift / Kotlin)
-│   ├── ios/                      # 43 Swift files
-│   └── android/                  # 62 Kotlin files
-├── adapters/                     # Platform adapter implementations
+│   ├── ios/                      # 47 Swift files (XcodeGen manifest, iOS 16.0 / Swift 6.0)
+│   └── android/                  # 65 Kotlin files (host = pure-JVM reactive core, app = shell)
+├── adapters/                     # Platform adapter implementations (contract version 1)
 │   ├── ui-swift/
 │   └── ui-kotlin/
 ├── stdlib/                       # 13 .flux standard-library components
 ├── docs/
 │   ├── spec/                     # mlp-spec.md + mlp-appendices.md (A–G)
-│   └── adr/                      # 30 Architecture Decision Records (MADR)
+│   └── adr/                      # 37 Architecture Decision Records (MADR), highest ADR-0057
 ├── tests/                        # Integration + parity + ISA vectors
 └── website/                      # Astro documentation site
 ```
@@ -148,18 +205,30 @@ flux dev --root ./my-app
 The server watches `.flux` files, lowers + diffs on every save, and streams
 binary patches to the connected host app over `ws://`. Use `--ws-host 0.0.0.0`
 to expose the server on the LAN so physical devices and simulators can reach it.
+Optionally pass `--token <secret>` to require hosts to present a matching pairing
+token during the `Hello` handshake (Appendix D §D.12.1) when exposed on a LAN.
 
 ### Host apps
 
-- **iOS:** open `runtimes/ios` in Xcode, run on a simulator or device (iOS 16+).
-- **Android:** `./gradlew :runtimes:android:build` (or `:test`).
+- **iOS:** open `runtimes/ios` in Xcode (regenerate with `xcodegen generate`), run
+  on a simulator or device (iOS 16+). The frozen `project.yml` sets
+  `SWIFT_VERSION: "6.0"` and `SWIFT_STRICT_CONCURRENCY: complete`.
+- **Android:** `./gradlew :runtimes:android:build` (or `:test`). The reactive core
+  in `runtimes/android/host` is pure-JVM and has no Android dependency, so its
+  suite runs without an emulator.
 
-### Other CLI commands
+### CLI commands
 
-`flux` also provides `fmt` (canonically format `.flux` sources), `doc` (emit the
-stdlib JSON schema), `doctor` (diagnose the local toolchain), `lsp` (LSP-style
-diagnostics for a `.flux` file), and `add` (install a community `.flux`
-component). See `flux --help` for the full surface.
+`flux` exposes the following subcommands (see `flux --help` for the full surface):
+
+| Command | Purpose |
+|---|---|
+| `flux init <name>` | Scaffold a new Flux project at `<name>/`. |
+| `flux dev [--root] [--ws-host] [--ws-port] [--http-port] [--token]` | Start the hot-reload dev server (WS `:7331`, HTTP `:7332` by default). |
+| `flux build --platform ios\|android [--root]` | Codegen the project to `platforms/<platform>/Generated/`. Detects `xcodebuild`/`gradle` but does not invoke them. |
+| `flux lsp <file> [--types]` | Emit parse + type-check diagnostics for a `.flux` file as JSON (FLUX-025). |
+| `flux doc` | Emit a JSON schema of the stdlib API to stdout. |
+| `flux doctor` | Environment health check: toolchain, stdlib parse, wire protocol version, best-effort connected devices/simulators. |
 
 ---
 
@@ -188,12 +257,11 @@ This repo follows a strict TDD + quality standard (see `AGENTS.md`):
 
 ## Continuous integration
 
-GitHub Actions guard `main` (12 workflows under `.github/workflows`):
+GitHub Actions guard `main` (13 workflows under `.github/workflows`):
 
 | Workflow | Purpose |
 |---|---|
 | `rust-check.yml` | `cargo fmt` / `clippy` / `nextest` on every push |
-| `fmt-check.yml` | Dedicated formatting gate |
 | `ios-check.yml` | Swift build + test of the iOS host |
 | `android-check.yml` | Kotlin build + test of the Android host |
 | `merge-guard.yml` | Blocks shared-index commit hazards on parallel `main` |
@@ -203,7 +271,9 @@ GitHub Actions guard `main` (12 workflows under `.github/workflows`):
 | `perf-harness.yml` | Runs the `flux-perf-harness` render-perf suite |
 | `wire-fuzz.yml` | Fuzzes the wire-protocol (de)serialization |
 | `compat-matrix.yml` | Cross-version compatibility matrix |
+| `mutation-testing.yml` | Mutation testing / compat matrix |
 | `artifact-publish.yml` | Publishes release artifacts |
+| `vscode-check.yml` | Builds/checks the VS Code extension |
 
 ---
 
@@ -213,7 +283,7 @@ GitHub Actions guard `main` (12 workflows under `.github/workflows`):
   [`docs/spec/mlp-appendices.md`](docs/spec/mlp-appendices.md) (grammar, IR
   schema, wire protocol, VM ISA, adapter contracts, glossary — Appendices A–G).
 - **Agent manual:** [`AGENTS.md`](AGENTS.md) — the law of the land for contributors.
-- **Decisions:** [`docs/adr/`](docs/adr/) — 30 MADR records.
+- **Decisions:** [`docs/adr/`](docs/adr/) — 37 MADR records (highest ADR-0057).
 - **Docs site:** [`website/`](website/) — Astro source (`pnpm install && pnpm dev`).
 
 ---
@@ -234,14 +304,11 @@ are no branches and no pull requests (see `AGENTS.md` §4). To contribute:
 
 ## License
 
-Licensed under **Apache-2.0**. See `Cargo.toml` (`workspace.package.license`).
-
-> Note: a top-level `LICENSE` file is not yet present in the repo — only the
-> `Cargo.toml` declaration. Add `LICENSE` before publishing to comply with the
-> declared license.
+Licensed under **Apache-2.0** (see the top-level `LICENSE` file and
+`workspace.package.license` in `Cargo.toml`).
 
 ---
 
 <p align="center">
-  <sub>Flux — write once, render native. 473 commits · 15 crates · 30 ADRs · built on <code>main</code>.</sub>
+  <sub>Flux — write once, render native. 566 commits · 16 crates · 37 ADRs · built on <code>main</code>.</sub>
 </p>
