@@ -27,17 +27,17 @@ class FluxValuePropsTest {
                 PropsIndex.TEXT_TEXT to FluxValue.Str("hello"),
                 PropsIndex.TEXT_COLOR to FluxColor(1.0, 0.0, 0.0, 1.0).toRecord(),
                 PropsIndex.BUTTON_ENABLED to FluxValue.Bool(false),
-                PropsIndex.BUTTON_ON_CLICK to FluxValue.HandlerRef(42u),
+                PropsIndex.BUTTON_ON_PRESS to FluxValue.HandlerRef(42u),
             )
         assertEquals("hello", props.getString(PropsIndex.TEXT_TEXT))
         assertEquals(FluxColor(1.0, 0.0, 0.0, 1.0), props.getColor(PropsIndex.TEXT_COLOR))
         assertEquals(false, props.getBool(PropsIndex.BUTTON_ENABLED, true))
-        assertEquals(42u, props.getHandler(PropsIndex.BUTTON_ON_CLICK))
+        assertEquals(42u, props.getHandler(PropsIndex.BUTTON_ON_PRESS))
     }
 
     @Test
     fun `missing handler returns reserved zero`() {
-        assertEquals(0u, Props.EMPTY.getHandler(PropsIndex.BUTTON_ON_CLICK))
+        assertEquals(0u, Props.EMPTY.getHandler(PropsIndex.BUTTON_ON_PRESS))
     }
 
     @Test

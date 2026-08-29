@@ -12,23 +12,23 @@ class ImageAdapterTest {
         adapter.update(
             view,
             propsOf(
-                PropsIndex.IMAGE_SRC to FluxValue.Str("assets/logo.png"),
-                PropsIndex.IMAGE_CONTENT_MODE to FluxValue.Str("fit"),
+                PropsIndex.IMAGE_SOURCE to FluxValue.Str("assets/logo.png"),
+                PropsIndex.IMAGE_RESIZE_MODE to FluxValue.Str("fit"),
             ),
         )
         assertEquals("assets/logo.png", view.getProperty(ImageAdapter.PROP_SRC))
         assertEquals(true, view.getProperty(ImageAdapter.PROP_HAS_SRC))
-        assertEquals("fit", view.getProperty(ImageAdapter.PROP_CONTENT_MODE))
+        assertEquals("fit", view.getProperty(ImageAdapter.PROP_RESIZE_MODE))
     }
 
     @Test
     fun `image adapter defaults content mode to fill`() {
         val adapter = ImageAdapter.create()
         val view = adapter.create(11u)
-        adapter.update(view, stringProps(PropsIndex.IMAGE_SRC, "assets/logo.png"))
+        adapter.update(view, stringProps(PropsIndex.IMAGE_SOURCE, "assets/logo.png"))
         assertEquals(
-            ImageAdapter.DEFAULT_CONTENT_MODE,
-            view.getProperty(ImageAdapter.PROP_CONTENT_MODE),
+            ImageAdapter.DEFAULT_RESIZE_MODE,
+            view.getProperty(ImageAdapter.PROP_RESIZE_MODE),
         )
     }
 
@@ -39,7 +39,7 @@ class ImageAdapterTest {
         adapter.update(
             view,
             propsOf(
-                PropsIndex.IMAGE_SRC to FluxValue.Str("assets/logo.png"),
+                PropsIndex.IMAGE_SOURCE to FluxValue.Str("assets/logo.png"),
                 PropsIndex.IMAGE_WIDTH to FluxValue.Float(120.0),
                 PropsIndex.IMAGE_HEIGHT to FluxValue.Float(40.0),
             ),
@@ -54,7 +54,7 @@ class ImageAdapterTest {
         val view = adapter.create(13u)
         // First set a real source, then simulate the source being removed: the
         // adapter must clear it so the host shows its placeholder (BR-003).
-        adapter.update(view, stringProps(PropsIndex.IMAGE_SRC, "assets/logo.png"))
+        adapter.update(view, stringProps(PropsIndex.IMAGE_SOURCE, "assets/logo.png"))
         assertEquals("assets/logo.png", view.getProperty(ImageAdapter.PROP_SRC))
 
         adapter.update(view, Props.EMPTY)
@@ -66,7 +66,7 @@ class ImageAdapterTest {
     fun `destroy clears source to break retain cycle`() {
         val adapter = ImageAdapter.create()
         val view = adapter.create(14u)
-        adapter.update(view, stringProps(PropsIndex.IMAGE_SRC, "assets/logo.png"))
+        adapter.update(view, stringProps(PropsIndex.IMAGE_SOURCE, "assets/logo.png"))
         adapter.destroy(view)
         assertNull(view.getProperty(ImageAdapter.PROP_SRC))
         assertEquals(false, view.getProperty(ImageAdapter.PROP_HAS_SRC))
