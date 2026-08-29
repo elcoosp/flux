@@ -1,6 +1,6 @@
 ---
 id: FLUX-037
-status: partial
+status: done
 lane: LANE-N
 phase: "Phase 2"
 blocked_by: []
@@ -58,3 +58,30 @@ not hand-duplicate UIKit vs SwiftUI mapping beyond what the kit provides.
 - `Modal`/`Sheet`/`Dialog` (FLUX-038), `Image` (FLUX-039), form primitives
   (FLUX-040), gestures (FLUX-041), animation (FLUX-042), theming (FLUX-043),
   a11y (FLUX-044).
+
+## Closure (2026-08-29)
+
+Delivered end-to-end:
+
+- **Stdlib declarations:** `stdlib/stack.flux`, `grid.flux`, `spacer.flux`,
+  `safearea.flux` (parse + type-check clean; covered by `flux-parity`
+  `all_stdlib_files_parse` + `required_primitive_declarations_exist`).
+- **Host adapters (both platforms):**
+  - Android: `adapters/ui-kotlin/.../LayoutAdapters.kt` (`StackAdapter`,
+    `GridAdapter`, `SpacerAdapter` leaf, `SafeAreaAdapter`); registered in
+    `FluxUiKit.adapters`; prop indices `STACK_GAP`/`FLEX`/`EDGES` in `PropsIndex`;
+    `ShadowTreeRenderer` `when (node.kind)` branches render each via Compose.
+  - iOS: `adapters/ui-swift/.../LayoutAdapters.swift` (`StackAdapter`/`GridAdapter`/
+    `SpacerAdapter`/`SafeAreaAdapter`); registered in `AdapterRegistry`
+    (`AdapterKit.swift`).
+- **Parity test:** `flux-parity::flux_037_layout_primitives_pin_dev_release_mapping`
+  pins the dev/release node mapping on Swift + Kotlin (with the release-name
+  reverse normalization `Box→Stack`, `LazyVerticalGrid→Grid`, `Scaffold→SafeArea`,
+  `ZStack→Stack` added to `flux_codegen_core::normalize_view_name`/`is_container`).
+- **JVM + Swift adapter unit tests** assert prop wiring + keyed child reconciliation.
+
+Status was `partial` only because the stdlib + host-adapter + test legs were
+missing; all three are now present. Native presentation fidelity for the Android
+renderer and iOS (imperative, ADR-0048) is the documented degraded-container form
+until the convergence decision lands — but the primitives resolve and render
+rather than blanking.

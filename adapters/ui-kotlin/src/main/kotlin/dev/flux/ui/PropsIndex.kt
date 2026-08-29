@@ -47,6 +47,19 @@ public object PropsIndex {
     public val STACK_GAP: UShort = propIndexForName("gap")
     public val STACK_ALIGNMENT: UShort = propIndexForName("alignment")
 
+    // FLUX-037 layout primitives
+    public val GRID_COLUMNS: UShort = propIndexForName("columns")
+    public val SPACER_FLEX: UShort = propIndexForName("flex")
+    public val SAFEAREA_EDGES: UShort = propIndexForName("edges")
+
+    // FLUX-038 overlay containers (`Modal` / `Sheet` / `Dialog`)
+    public val OVERLAY_ON_DISMISS: UShort = propIndexForName("onDismiss")
+
+    // FLUX-042 signal-graph animation wrapper (`Animate`)
+    public val ANIMATE_SIGNAL: UShort = propIndexForName("signal")
+    public val ANIMATE_CURVE: UShort = propIndexForName("curve")
+    public val ANIMATE_DURATION: UShort = propIndexForName("duration")
+
     // TextInput (F.5)
     public val TEXT_INPUT_TEXT: UShort = propIndexForName("text")
     public val TEXT_INPUT_ON_CHANGE_TEXT: UShort = propIndexForName("onChangeText")

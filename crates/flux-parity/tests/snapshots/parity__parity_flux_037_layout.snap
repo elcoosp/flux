@@ -1,0 +1,234 @@
+---
+source: crates/flux-parity/tests/parity.rs
+expression: serialized
+---
+verdict: equivalent
+
+ dev    == [
+    Component {
+        name: "LayoutShowcase",
+        children: [
+            Primitive {
+                name: "Column",
+                props: [],
+                children: [
+                    Primitive {
+                        name: "Stack",
+                        props: [],
+                        children: [
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                        ],
+                    },
+                    Primitive {
+                        name: "Grid",
+                        props: [],
+                        children: [
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                        ],
+                    },
+                    Primitive {
+                        name: "SafeArea",
+                        props: [],
+                        children: [
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                        ],
+                    },
+                    Primitive {
+                        name: "Spacer",
+                        props: [],
+                        children: [],
+                    },
+                    Primitive {
+                        name: "Text",
+                        props: [],
+                        children: [],
+                    },
+                ],
+            },
+        ],
+    },
+]
+swift  == [
+    Component {
+        name: "LayoutShowcase",
+        children: [
+            Primitive {
+                name: "Column",
+                props: [],
+                children: [
+                    Primitive {
+                        name: "Stack",
+                        props: [],
+                        children: [
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                        ],
+                    },
+                    Primitive {
+                        name: "Grid",
+                        props: [],
+                        children: [
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                        ],
+                    },
+                    Primitive {
+                        name: "SafeArea",
+                        props: [],
+                        children: [
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                        ],
+                    },
+                    Primitive {
+                        name: "Spacer",
+                        props: [],
+                        children: [],
+                    },
+                    Primitive {
+                        name: "Text",
+                        props: [],
+                        children: [],
+                    },
+                ],
+            },
+        ],
+    },
+]
+kotlin == [
+    Component {
+        name: "LayoutShowcase",
+        children: [
+            Primitive {
+                name: "Column",
+                props: [],
+                children: [
+                    Primitive {
+                        name: "Stack",
+                        props: [],
+                        children: [
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                        ],
+                    },
+                    Primitive {
+                        name: "Grid",
+                        props: [],
+                        children: [
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                        ],
+                    },
+                    Primitive {
+                        name: "SafeArea",
+                        props: [],
+                        children: [
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                        ],
+                    },
+                    Primitive {
+                        name: "Spacer",
+                        props: [],
+                        children: [],
+                    },
+                    Primitive {
+                        name: "Text",
+                        props: [],
+                        children: [],
+                    },
+                ],
+            },
+        ],
+    },
+]

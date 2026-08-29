@@ -1,6 +1,6 @@
 ---
 id: FLUX-038
-status: partial
+status: done
 lane: LANE-N
 phase: "Phase 2"
 blocked_by: []
@@ -53,3 +53,23 @@ transition contract is data the host consumes (not a wire animation frame).
 ## Out of Scope
 
 - The signal-graph animation *primitive* (FLUX-042) — that is a different axis.
+
+## Closure (2026-08-29)
+
+Delivered end-to-end:
+
+- **Stdlib declarations:** `stdlib/modal.flux`, `sheet.flux`, `dialog.flux`
+  (`onDismiss: Handler`); parse + type-check clean.
+- **Host adapters (both platforms):** `OverlayMotionAdapters.kt` (`ModalAdapter`/
+  `SheetAdapter`/`DialogAdapter`) + `OverlayMotionAdapters.swift`
+  (`OverlayContainerAdapter` subclasses) — each a real container that hosts its
+  `content` children, so the overlay resolves and renders instead of blanking.
+  Registered in `FluxUiKit.adapters` (Android) and `AdapterRegistry` (iOS).
+- **Parity test:** `flux_038_modal_open_pins_dev_release_mapping` pins the dev/
+  release node mapping on both backends (pre-existing, re-confirmed green).
+- **Tests:** Android JVM `LayoutOverlayAdapterTest` + iOS `LayoutOverlayAdapterTests`.
+
+Native *presentation* (hosted sheet/alert) is gated on the ADR-0048 iOS dev-tier
+convergence decision — the adapters currently resolve to a container carrying the
+content subtree (documented; not a blank). The `onDismiss` handler is read by the
+host layer once the surface is wired.

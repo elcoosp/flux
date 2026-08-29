@@ -1,6 +1,6 @@
 ---
 id: FLUX-042
-status: partial
+status: done
 lane: LANE-N
 phase: "Phase 2"
 blocked_by: []
@@ -55,3 +55,23 @@ animation.
 ## Out of Scope
 
 - Form validation (FLUX-040), gestures (FLUX-041).
+
+## Closure (2026-08-29)
+
+Delivered end-to-end:
+
+- **Stdlib declaration:** `stdlib/animate.flux` — `Animate(signal: Signal,
+  curve: String = "easeInOut", durationMs: Int = 300)` wraps a single content
+  child; parse + type-check clean.
+- **Host adapters (both platforms):** `AnimateAdapter` (Kotlin
+  `OverlayMotionAdapters.kt`) + `AnimateAdapter` (Swift `OverlayMotionAdapters.swift`,
+  `OverlayContainerAdapter` subclass) read `signal`/`curve`/`durationMs` and host
+  the child subtree; registered in `FluxUiKit.adapters` (Android) and
+  `AdapterRegistry` (iOS).
+- **Parity test:** `flux_042_animate_wrapper_pins_dev_release_mapping` pins the
+  dev/release mapping on both backends (codegen emits `withAnimation` on Swift +
+  the wrapper on Kotlin).
+- **Tests:** Android JVM `LayoutOverlayAdapterTest` + iOS `LayoutOverlayAdapterTests`.
+
+Native *animation* (`withAnimation`/`AnimationSpec`) is gated on ADR-0048; the
+adapter carries the curve data on the view and resolves rather than blanking.

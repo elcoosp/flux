@@ -1,0 +1,75 @@
+---
+source: crates/flux-parity/tests/parity.rs
+expression: serialized
+---
+verdict: equivalent
+
+ dev    == [
+    Component {
+        name: "AnimatedCard",
+        children: [
+            Primitive {
+                name: "Column",
+                props: [],
+                children: [
+                    Primitive {
+                        name: "Button",
+                        props: [],
+                        children: [],
+                    },
+                    Primitive {
+                        name: "Animate",
+                        props: [],
+                        children: [],
+                    },
+                ],
+            },
+        ],
+    },
+]
+swift  == [
+    Component {
+        name: "AnimatedCard",
+        children: [
+            Primitive {
+                name: "Column",
+                props: [],
+                children: [
+                    Primitive {
+                        name: "Button",
+                        props: [],
+                        children: [],
+                    },
+                    Primitive {
+                        name: "Animate",
+                        props: [],
+                        children: [],
+                    },
+                ],
+            },
+        ],
+    },
+]
+kotlin == [
+    Component {
+        name: "AnimatedCard",
+        children: [
+            Primitive {
+                name: "Column",
+                props: [],
+                children: [
+                    Primitive {
+                        name: "Button",
+                        props: [],
+                        children: [],
+                    },
+                    Primitive {
+                        name: "Animate",
+                        props: [],
+                        children: [],
+                    },
+                ],
+            },
+        ],
+    },
+]

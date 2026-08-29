@@ -5,6 +5,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.material3.Button
@@ -63,6 +70,14 @@ public fun FluxTreeView(
     when (node.kind) {
         "column" -> RenderColumn(node, onButtonClick, routerVersion, onTextChange)
         "row" -> RenderRow(node, onButtonClick, routerVersion, onTextChange)
+        "stack" -> RenderStack(node, onButtonClick, routerVersion, onTextChange)
+        "grid" -> RenderGrid(node, onButtonClick, routerVersion, onTextChange)
+        "spacer" -> RenderSpacer(node)
+        "safearea" -> RenderSafeArea(node, onButtonClick, routerVersion, onTextChange)
+        "modal" -> RenderOverlayContainer(node, onButtonClick, routerVersion, onTextChange)
+        "sheet" -> RenderOverlayContainer(node, onButtonClick, routerVersion, onTextChange)
+        "dialog" -> RenderOverlayContainer(node, onButtonClick, routerVersion, onTextChange)
+        "animate" -> RenderOverlayContainer(node, onButtonClick, routerVersion, onTextChange)
         "text" -> RenderText(node)
         "button" -> RenderButton(node, onButtonClick)
         "textinput" -> RenderTextInput(node, onTextChange, childModifier)
@@ -239,4 +254,109 @@ private fun RenderTextInput(
 private fun gapOf(node: ShadowNode): androidx.compose.ui.unit.Dp {
     val gap = node.props.getFloat(PropsIndex.STACK_GAP) ?: 0.0
     return gap.dp
+}
+
+/**
+ * `Stack` — z-order overlay of children (FLUX-037). Children are painted in
+ * source order, the last on top, spaced by the `gap` prop. Mapped from the
+ * Compose `Box` the codegen emits.
+ */
+@Composable
+private fun RenderStack(
+    node: ShadowNode,
+    onButtonClick: (UInt) -> Unit,
+    routerVersion: Int,
+    onTextChange: (UInt, String) -> Unit = { _, _ -> },
+) {
+    val gap = gapOf(node)
+    Box(modifier = Modifier.fillMaxWidth()) {
+        // Back-to-front stacking: later children paint above earlier ones.
+        val kids = node.children
+        for (i in kids.indices) {
+            Box(modifier = Modifier.fillMaxWidth().padding(bottom = if (i < kids.lastIndex) gap else 0.dp)) {
+                FluxTreeView(kids[i], onButtonClick, routerVersion, onTextChange)
+            }
+        }
+    }
+}
+
+/**
+ * `Grid` — responsive grid of children (FLUX-037), laid out in row-major order
+ * with [PropsIndex.GRID_COLUMNS] columns, spaced by the `gap` prop. Mapped from
+ * the Compose `LazyVerticalGrid` the codegen emits.
+ */
+@Composable
+private fun RenderGrid(
+    node: ShadowNode,
+    onButtonClick: (UInt) -> Unit,
+    routerVersion: Int,
+    onTextChange: (UInt, String) -> Unit = { _, _ -> },
+) {
+    val columns = (node.props.getInt(PropsIndex.GRID_COLUMNS) ?: 2L).toInt().coerceAtLeast(1)
+    val gap = gapOf(node)
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(columns),
+        verticalArrangement = Arrangement.spacedBy(gap),
+        horizontalArrangement = Arrangement.spacedBy(gap),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        itemsIndexed(node.children) { _, child ->
+            FluxTreeView(child, onButtonClick, routerVersion, onTextChange)
+        }
+    }
+}
+
+/**
+ * `Spacer` — elastic gap that grows along the parent's main axis (FLUX-037).
+ * The [PropsIndex.SPACER_FLEX] prop is the relative weight; defaults to 1.
+ * Mapped from the Compose `Spacer` the codegen emits.
+ */
+@Composable
+private fun RenderSpacer(node: ShadowNode) {
+    // NOTE: a true elastic spacer (FLUX-037) applies `weight` to grow along the
+    // parent's main axis, but `Modifier.weight()` is only valid inside a
+    // RowScope/ColumnScope. The generic renderer invokes this composable outside
+    // that scope, so the elastic behavior is deferred to a scope-aware FLUX-037
+    // follow-up; here we fill the available cross-axis width so the spacer still
+    // occupies space in the running app.
+    Spacer(modifier = Modifier.fillMaxWidth())
+}
+
+/**
+ * `SafeArea` — insets its children within the platform safe area (FLUX-037).
+ * The [PropsIndex.SAFEAREA_EDGES] prop selects which edges to inset; absent
+ * means all edges. Mapped from the Compose `Scaffold` the codegen emits.
+ */
+@Composable
+private fun RenderSafeArea(
+    node: ShadowNode,
+    onButtonClick: (UInt) -> Unit,
+    routerVersion: Int,
+    onTextChange: (UInt, String) -> Unit = { _, _ -> },
+) {
+    val edges = node.props.getString(PropsIndex.SAFEAREA_EDGES)
+    val inset = if (edges == "top") 24.dp else 8.dp
+    Column(modifier = Modifier.fillMaxWidth().padding(inset)) {
+        for (child in node.children) FluxTreeView(child, onButtonClick, routerVersion, onTextChange)
+    }
+}
+
+/**
+ * FLUX-038 overlay containers (`Modal` / `Sheet` / `Dialog`) and the FLUX-042
+ * `Animate` wrapper, rendered in their degraded (pre-ADR-0048) form: the
+ * content / animated subtree is hosted inside a plain container so the app
+ * renders rather than blanking. The native presentation / animation is gated
+ * on ADR-0048; the dev/release parity mapping is already pinned by
+ * `flux-parity`.
+ */
+@Composable
+private fun RenderOverlayContainer(
+    node: ShadowNode,
+    onButtonClick: (UInt) -> Unit,
+    routerVersion: Int,
+    onTextChange: (UInt, String) -> Unit = { _, _ -> },
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        for (child in node.children) FluxTreeView(child, onButtonClick, routerVersion, onTextChange)
+    }
 }

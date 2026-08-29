@@ -269,6 +269,17 @@ pub fn normalize_view_name(name: &str) -> String {
         "withAnimation" => "Animate",
         // FLUX-043: the native theme extension surface names reduce to `Theme`.
         "MaterialTheme" | "FluxTheme" => "Theme",
+        // FLUX-037: the release backends emit native container names that the
+        // dev-path source does not use. Folding them back to the common Flux
+        // surface spelling keeps dev/release node names equal AND lets
+        // `is_container` recognise them as containers on every path:
+        //   Stack  → SwiftUI `ZStack` / Compose `Box`
+        //   Grid   → Compose `LazyVerticalGrid`
+        //   SafeArea → Compose `Scaffold`
+        "ZStack" => "Stack",
+        "Box" => "Stack",
+        "LazyVerticalGrid" => "Grid",
+        "Scaffold" => "SafeArea",
         other => other,
     }
     .to_owned()
@@ -292,6 +303,8 @@ pub(crate) fn is_container(name: &str) -> bool {
             | "HStack"
             | "ZStack"
             | "Stack"
+            | "Grid"
+            | "SafeArea"
             | "Provider"
             | "Modal"
             | "Sheet"

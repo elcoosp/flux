@@ -20,17 +20,27 @@ public object FluxUiKit {
 
     /** The 9 declarative adapters, keyed by their IR node-kind tag, as factories. */
     public val adapters: Map<String, FluxAdapterFactory> =
-        mapOf(
-            TextAdapter.KIND to FluxAdapterFactory(TextAdapter::create),
-            ButtonAdapter.KIND to FluxAdapterFactory(ButtonAdapter::create),
-            ColumnAdapter.KIND to FluxAdapterFactory(ColumnAdapter::create),
-            RowAdapter.KIND to FluxAdapterFactory(RowAdapter::create),
-            TextInputAdapter.KIND to FluxAdapterFactory(TextInputAdapter::create),
-            ScreenAdapter.KIND to FluxAdapterFactory(ScreenAdapter::create),
-            RouterAdapter.KIND to FluxAdapterFactory(RouterAdapter::create),
-            ImageAdapter.KIND to FluxAdapterFactory(ImageAdapter::create),
-            ContainerAdapter.KIND to FluxAdapterFactory(ContainerAdapter::create),
-        )
+     mapOf(
+         TextAdapter.KIND to FluxAdapterFactory(TextAdapter::create),
+         ButtonAdapter.KIND to FluxAdapterFactory(ButtonAdapter::create),
+         ColumnAdapter.KIND to FluxAdapterFactory(ColumnAdapter::create),
+         RowAdapter.KIND to FluxAdapterFactory(RowAdapter::create),
+         TextInputAdapter.KIND to FluxAdapterFactory(TextInputAdapter::create),
+         ScreenAdapter.KIND to FluxAdapterFactory(ScreenAdapter::create),
+         RouterAdapter.KIND to FluxAdapterFactory(RouterAdapter::create),
+         ImageAdapter.KIND to FluxAdapterFactory(ImageAdapter::create),
+         ContainerAdapter.KIND to FluxAdapterFactory(ContainerAdapter::create),
+         // FLUX-037 layout primitives.
+         StackAdapter.KIND to FluxAdapterFactory(StackAdapter::create),
+         GridAdapter.KIND to FluxAdapterFactory(GridAdapter::create),
+         SpacerAdapter.KIND to FluxAdapterFactory(SpacerAdapter::create),
+         SafeAreaAdapter.KIND to FluxAdapterFactory(SafeAreaAdapter::create),
+         // FLUX-038 overlay containers + FLUX-042 animation wrapper.
+         ModalAdapter.KIND to FluxAdapterFactory(ModalAdapter::create),
+         SheetAdapter.KIND to FluxAdapterFactory(SheetAdapter::create),
+         DialogAdapter.KIND to FluxAdapterFactory(DialogAdapter::create),
+         AnimateAdapter.KIND to FluxAdapterFactory(AnimateAdapter::create),
+     )
 
     /** Returns the factory registered for [kind], or `null`. */
     public fun factoryFor(kind: String): FluxAdapterFactory? = adapters[kind]

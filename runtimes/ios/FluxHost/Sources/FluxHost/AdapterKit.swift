@@ -373,6 +373,17 @@ public struct AdapterRegistry {
             "Image": { AnyFluxAdapter(ImageAdapter(executor: $0)) },
             "Router": { AnyFluxAdapter(RouterAdapter(executor: $0)) },
             "Screen": { AnyFluxAdapter(ScreenAdapter(executor: $0)) },
+            // FLUX-037 layout primitives.
+            "Stack": { AnyFluxAdapter(StackAdapter(executor: $0)) },
+            "Grid": { AnyFluxAdapter(GridAdapter(executor: $0)) },
+            "Spacer": { AnyFluxAdapter(SpacerAdapter(executor: $0)) },
+            "SafeArea": { AnyFluxAdapter(SafeAreaAdapter(executor: $0)) },
+            // FLUX-038 overlay containers + FLUX-042 animation wrapper (degraded
+            // container form; native presentation/animation gated on ADR-0048).
+            "Modal": { AnyFluxAdapter(ModalAdapter(executor: $0)) },
+            "Sheet": { AnyFluxAdapter(SheetAdapter(executor: $0)) },
+            "Dialog": { AnyFluxAdapter(DialogAdapter(executor: $0)) },
+            "Animate": { AnyFluxAdapter(AnimateAdapter(executor: $0)) },
         ]
         self.table = table
     }

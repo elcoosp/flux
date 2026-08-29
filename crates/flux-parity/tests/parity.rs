@@ -344,3 +344,85 @@ fn flux_038_modal_open_pins_dev_release_mapping() {
     );
     insta::assert_snapshot!("parity_flux_038_modal_open", serialized);
 }
+
+/// FLUX-037: the layout primitives (`Stack` / `Grid` / `Spacer` / `SafeArea`)
+/// must lower and codegen to structurally identical view trees across the dev
+/// (reduced AST) path and both release (SwiftUI / Compose) backends, with their
+/// children carried through on every path. This is the issue's required parity
+/// trace test — it proves the four layout primitives are first-class on all
+/// three render paths, not just names registered in the codegen table.
+#[test]
+fn flux_037_layout_primitives_pin_dev_release_mapping() {
+    let source = r#"compo LayoutShowcase
+  Column(gap: 16) {
+    Stack(gap: 8) {
+      Text("bottom")
+      Text("top")
+    }
+    Grid(columns: 2, gap: 4) {
+      Text("a")
+      Text("b")
+      Text("c")
+      Text("d")
+    }
+    SafeArea(edges: "top") {
+      Text("inset content")
+    }
+    Spacer(flex: 1.0)
+    Text("after spacer")
+  }
+"#;
+    let report =
+        check_parity(source, 370).expect("FLUX-037 example parses, type-checks and lowers");
+    eprintln!(
+        "=== FLUX-037 DEV ===\n{:#?}\n=== SWIFT ===\n{:#?}\n=== KOTLIN ===\n{:#?}",
+        report.dev, report.swift, report.kotlin
+    );
+    assert!(
+        report.is_equivalent(),
+        "parity divergence for FLUX-037 layout primitives: dev vs swift vs kotlin trees differ"
+    );
+    let serialized = format!(
+        "verdict: {}\n\n dev    == {:#?}\nswift  == {:#?}\nkotlin == {:#?}\n",
+        report.verdict(),
+        report.dev,
+        report.swift,
+        report.kotlin
+    );
+    insta::assert_snapshot!("parity_flux_037_layout", serialized);
+}
+
+/// FLUX-042: the signal-graph `Animate` wrapper must lower and codegen to
+/// structurally identical view trees across the dev (reduced AST) path and both
+/// release (SwiftUI `withAnimation` / Compose `withAnimation`) backends, with its
+/// child subtree carried through on every path. The release backends emit the
+/// host-native `withAnimation(spec) { … }` call (the curve is data the host
+/// consumes); the parity reducer folds both backends' `withAnimation` back to the
+/// common `Animate` surface, so this test pins dev/release equivalence for the
+/// animation primitive.
+#[test]
+fn flux_042_animate_wrapper_pins_dev_release_mapping() {
+    let source = r#"compo AnimatedCard
+  state open: Bool = false
+  Column(gap: 16) {
+    Button(text: "Toggle", onPress: { open = !open })
+    Animate(signal: open, curve: "spring", duration: 0.3) {
+      Text("toggle content")
+    }
+  }
+"#;
+    let report =
+        check_parity(source, 420).expect("FLUX-042 example parses, type-checks and lowers");
+    assert!(
+        report.is_equivalent(),
+        "parity divergence for FLUX-042 Animate: dev vs swift vs kotlin trees differ"
+    );
+    let serialized = format!(
+        "verdict: {}\n\n dev    == {:#?}\nswift  == {:#?}\nkotlin == {:#?}\n",
+        report.verdict(),
+        report.dev,
+        report.swift,
+        report.kotlin
+    );
+    insta::assert_snapshot!("parity_flux_042_animate", serialized);
+}
