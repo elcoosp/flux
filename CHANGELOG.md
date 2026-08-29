@@ -1750,15 +1750,20 @@ instead of re-decoding on every tap.
     simulator → **TEST SUCCEEDED, 19 executed, 0 failures** (incl. `RenderMountTests`,
     `CapabilityRoundTripTests`).
 
-- **Android (Kotlin/JVM) — `[unverified]`** (`FluxExecutor.kt`, `FluxBytecodeVM.kt`):
+- **Android (Kotlin/JVM) — `[verified]`** (`FluxExecutor.kt`, `FluxBytecodeVM.kt`):
   `Closure` now carries `instructions: List<Instruction>` (decoded once via
   `decodeClosure` at registration; malformed bytecode falls back to empty so dispatch
   still surfaces decode faults). Added `run(program:)` / `runResumable(program:)`
   overloads; `dispatch`/`dispatchAsync` route through the cache when present.
-  - **NOT VERIFIED**: no `kotlinc`/`gradle` in this environment, so the Android JVM
-    suite (`FluxBytecodeVmTest`, `VmDispatchTest`, `AsyncResolverTest`, `EndToEndTest`)
-    was not compiled or run. Requires Louis's on-device gate (parity rule: both
-    platforms together) before merge.
+  - **Verified on-device**: built `:runtimes:android:app:assembleDebug`, installed on
+    the physical Poco (`adb` 15a3cc41de5b) via `adb reverse tcp:7331 tcp:7331` to the
+    `flux dev` server serving `examples/router` (port 7331, the app's hardcoded URL),
+    launched `FluxHostActivity`. User confirmed Home/Settings router navigation works
+    (taps exercise the cached-decode path). logcat showed a clean frame render
+    (`vri.reportDrawFinished`) with no VM/wire faults; server log showed the
+    `platform=android` handshake. Also fixed a pre-existing build break in
+    `shadow/ShadowNodeExt.kt` (`BUTTON_ON_CLICK` → `BUTTON_ON_PRESS`, the constant
+    actually defined in `PropsIndex`) that blocked the APK build.
 
 ### WebSocket compression (OPT-C) — NOT achievable with current dependency
 - **Code change `[verified]`** (`session.rs`, `debug_bridge.rs`): server now upgrades
