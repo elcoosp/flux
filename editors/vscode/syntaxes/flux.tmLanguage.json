@@ -1,0 +1,51 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Flux",
+  "scopeName": "source.flux",
+  "patterns": [
+    {
+      "include": "#comment"
+    },
+    {
+      "include": "#string"
+    },
+    {
+      "include": "#boolean"
+    },
+    {
+      "include": "#keyword"
+    },
+    {
+      "include": "#number"
+    }
+  ],
+  "repository": {
+    "comment": {
+      "name": "comment.line.double-slash.flux",
+      "match": "//.*$"
+    },
+    "string": {
+      "name": "string.quoted.double.flux",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.flux",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "boolean": {
+      "name": "constant.language.boolean.flux",
+      "match": "\\b(?:true|false)\\b"
+    },
+    "keyword": {
+      "name": "keyword.control.flux",
+      "match": "\\b(?:compo|component|fn|let|if|else|when|otherwise|match|use|import|type|trait|capability|state|derived|effect|onMount|onCleanup|batch|untrack|resource|await|createRef|provide|useContext)\\b"
+    },
+    "number": {
+      "name": "constant.numeric.flux",
+      "match": "\\b-?\\d+(\\.\\d+)?\\b"
+    }
+  }
+}

@@ -1,0 +1,58 @@
+name: vscode-check
+
+# FLUX-026 — VS Code extension quality gate.
+# The extension is a thin client over `flux-lsp` (FLUX-024). Its TextMate
+# grammar is GENERATED from `flux-parser`'s keyword map, so this workflow
+# asserts the round-trip (every lexer keyword is present in the grammar) and
+# runs the standard TypeScript checks.
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "editors/vscode/**"
+      - "crates/flux-parser/src/lexer.rs"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "editors/vscode/**"
+      - "crates/flux-parser/src/lexer.rs"
+
+permissions:
+  contents: read
+
+jobs:
+  vscode:
+    name: grammar-check, tsc, eslint, package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+
+      - name: Install dependencies
+        working-directory: editors/vscode
+        run: npm ci
+
+      - name: Grammar round-trip check
+        # Fails if the generated grammar is out of sync with the lexer.
+        working-directory: editors/vscode
+        run: npm run check-grammar
+
+      - name: Type-check
+        working-directory: editors/vscode
+        run: npm run compile
+
+      - name: Lint
+        working-directory: editors/vscode
+        run: npm run lint
+
+      - name: Package extension
+        working-directory: editors/vscode
+        run: npx @vscode/vsce package --allow-missing-repository

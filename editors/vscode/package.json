@@ -1,0 +1,100 @@
+{
+  "name": "flux",
+  "displayName": "Flux",
+  "description": "Flux language support for VS Code: syntax highlighting, LSP diagnostics, hot-reload status and 'Run on device'.",
+  "version": "0.1.0",
+  "publisher": "flux-lang",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Formatters"
+  ],
+  "keywords": [
+    "flux",
+    "ui",
+    "lsp",
+    "hot-reload"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/elcoosp/flux"
+  },
+  "license": "Apache-2.0",
+  "activationEvents": [
+    "onLanguage:flux"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "flux",
+        "aliases": [
+          "Flux",
+          "flux"
+        ],
+        "extensions": [
+          ".flux"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "flux",
+        "scopeName": "source.flux",
+        "path": "./syntaxes/flux.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "flux.runOnDevice",
+        "title": "Flux: Run on device",
+        "category": "Flux"
+      },
+      {
+        "command": "flux.showHotReloadStatus",
+        "title": "Flux: Show hot-reload status",
+        "category": "Flux"
+      }
+    ],
+    "configuration": {
+      "title": "Flux",
+      "properties": {
+        "flux.lspServerPath": {
+          "type": "string",
+          "default": "flux-lsp",
+          "description": "Path or command used to launch the Flux language server (stdio). Defaults to `flux-lsp` on PATH; set to an absolute path if built locally (e.g. target/debug/flux-lsp)."
+        },
+        "flux.devServerTelemetryPort": {
+          "type": "number",
+          "default": 7333,
+          "description": "Dev server telemetry WebSocket port used for the hot-reload status bar (spec §4.1)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./ --outDir ./dist",
+    "watch": "tsc -watch -p ./ --outDir ./dist",
+    "generate-grammar": "node ./src/generate-grammar.mjs",
+    "check-grammar": "node ./scripts/check-grammar.mjs",
+    "lint": "eslint src --ext .ts"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/vscode": "^1.85.0",
+    "@types/ws": "^8.5.12",
+    "@typescript-eslint/eslint-plugin": "^7.16.0",
+    "@typescript-eslint/parser": "^7.16.0",
+    "eslint": "^8.57.0",
+    "typescript": "^5.5.0"
+  }
+}

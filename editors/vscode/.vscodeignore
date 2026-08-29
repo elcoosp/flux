@@ -1,0 +1,12 @@
+.vscode/**
+.vscode-test/**
+src/**
+out/**
+node_modules/**
+.gitignore
+**/tsconfig.json
+**/.eslintrc.json
+scripts/**
+**/*.map
+**/*.ts
+generate-grammar.mjs
