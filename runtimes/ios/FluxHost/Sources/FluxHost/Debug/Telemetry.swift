@@ -171,17 +171,39 @@ public enum DebugCommand {
 /// 10-event threshold) so instrumentation never blocks the VM or UI thread
 /// (spec §3.3).
 public final class TelemetryBridge: VMTelemetrySink {
+    /// Flush once this many events accumulate in the batch.
+    private static let batchSize = 10
+    /// Maximum time an event waits in the batch before a flush is forced.
+    private static let batchInterval: TimeInterval = 0.016
     private let queue = DispatchQueue(label: "dev.flux.telemetry")
     private var pending: [TelemetryEvent] = []
+    /// A pending 16 ms flush timer; cancelled when a threshold flush fires first.
+    private var flushTimer: DispatchWorkItem?
 
-    /// Appends an event to the batch, flushing when the threshold is reached.
+    /// Appends an event to the batch and flushes (a) once `batchSize` events
+    /// accumulate or (b) after `batchInterval` elapses, whichever comes first.
+    /// Batching keeps instrumentation off the VM/UI hot path even when `vmStep`
+    /// emits one event per instruction (spec §3.3). A single `signalWrite` (e.g.
+    /// one counter tap) still drains within 16 ms, so the live path stays
+    /// observable. (Restores the batching that the per-event `flush()` DIAGNOSIS
+    /// temporarily disabled.)
     public func emit(_ event: TelemetryEvent) {
         queue.async {
             self.pending.append(event)
-            // DIAGNOSIS: flush on every event so telemetry flows even with a
-            // single tap (counter emits one signalWrite per tap). Restore the
-            // 10-event batching + 16ms timer after verifying the live path.
-            self.flush()
+            if self.pending.count >= TelemetryBridge.batchSize {
+                self.flushTimer?.cancel()
+                self.flushTimer = nil
+                self.flush()
+                return
+            }
+            if self.flushTimer == nil {
+                let item = DispatchWorkItem { [weak self] in
+                    self?.flushTimer = nil
+                    self?.flush()
+                }
+                self.flushTimer = item
+                self.queue.asyncAfter(deadline: .now() + TelemetryBridge.batchInterval, execute: item)
+            }
         }
     }
 
@@ -198,7 +220,6 @@ public final class TelemetryBridge: VMTelemetrySink {
         for event in batch {
             event.encode(into: &frame)
         }
-        NSLog("[FluxRT][telemetry] flush fired: %d events, %d bytes", batch.count, frame.count)
         // The concrete send is performed by the host transport, which retains
         // this bridge and observes `pending` via `takePending()`.
         onFlush?(frame)
@@ -260,7 +281,6 @@ public func fluxDevtoolsConnect(send: @escaping (Data) -> Void) {
     let bridge = TelemetryBridge()
     fluxDevtoolsSetSink(bridge)
     bridge.onFlush = { frame in
-        os_log(.fault, "RTFLUXTELE ONFLUSH %{public}d bytes", frame.count)
         send(frame)
     }
 }
@@ -272,18 +292,7 @@ public func fluxDevtoolsSetSink(_ sink: (any VMTelemetrySink)?) {
 
 /// Emits a telemetry event if a DevTools sink is attached.
 public func fluxDevtoolsEmit(_ event: TelemetryEvent) {
-    os_log(.fault, "RTFLUXTELE EMIT sink=%{public}s tag=%{public}s", fluxDevtoolsSink != nil ? "yes" : "no", eventTag(event))
     fluxDevtoolsSink?.emit(event)
-}
-
-/// Returns a stable tag string for an event (debug logging only).
-private func eventTag(_ event: TelemetryEvent) -> String {
-    switch event {
-    case .vmStep: return "vmStep"
-    case .signalWrite: return "signalWrite"
-    case .viewMutation: return "viewMutation"
-    case .handlerInvocation: return "handlerInvocation"
-    }
 }
 
 /// Encodes a `FluxValue` into `data` per Appendix D §D.5.
