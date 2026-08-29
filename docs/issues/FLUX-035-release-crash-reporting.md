@@ -1,6 +1,6 @@
 ---
 id: FLUX-035
-status: partial
+status: done
 lane: LANE-R
 phase: "Phase 8"
 labels:
