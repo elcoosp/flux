@@ -706,7 +706,7 @@ mod tests {
         let mut server = FluxLsp::new();
         let uri: Url = "file:///edit.flux".parse().expect("uri");
         // Seed via didOpen.
-        server.did_open(DidOpenTextDocumentParams {
+        let _ = server.did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: uri.clone(),
                 language_id: "flux".to_owned(),
@@ -725,7 +725,7 @@ mod tests {
                 character: 8,
             },
         };
-        server.did_change(DidChangeTextDocumentParams {
+        let _ = server.did_change(DidChangeTextDocumentParams {
             text_document: VersionedTextDocumentIdentifier {
                 uri: uri.clone(),
                 version: 2,
