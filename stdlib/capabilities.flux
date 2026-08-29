@@ -93,3 +93,30 @@ capability Sensors {
   // requires: .sensors — reading device motion / ambient sensors (CMMotionManager / SensorManager).
   fn read(kind: String) -> Option[Data]
 }
+
+// --- FLUX-048: WebView escape-hatch capability (the release valve) ---
+// Maps to WKWebView (iOS) / WebView (Android). `load` sets the `src` (a URL or
+// html string); `evaluate` runs JS in the page; `sendMessage` posts to the
+// host↔web message bridge. Always permitted (it is app-authored content), but
+// the host must serve only app-controlled `src` and sandbox the view (FLUX-049
+// threat model).
+capability WebView {
+  // requires: .none — embedding web content is always permitted; the risk is
+  // contained by sandboxing, not an OS grant prompt.
+  fn load(src: String) -> Unit
+  fn evaluate(script: String) -> Option[Data]
+  fn sendMessage(message: Data) -> Unit
+}
+
+// --- FLUX-046: native-module escape hatch (wrap any native SDK) ---
+// The user-facing path to bind an SDK the framework does not ship. A wrapper is
+// a capability whose id is derived deterministically
+// (`derive_capability_id(name)`) so server + both hosts agree (AGENTS.md §3.4);
+// the host allow-lists which module names resolve (LANE-I), so a malicious
+// `.flux` patch cannot invoke an undeclared module — there is no open
+// `CALL_NATIVE`. `invoke` calls a method on the wrapped module with positional args.
+capability NativeModule {
+  // requires: .native — every escape-hatch invoke needs the host's native-module
+  // grant; a module the app did not register is denied (red banner, no crash).
+  fn invoke(name: String, method: String, args: Data) -> Option[Data]
+}

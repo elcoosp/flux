@@ -207,6 +207,39 @@ pub const CAPABILITY_IDL: &[CapabilityIdl] = &[
             id: 1,
         }],
     },
+    // --- FLUX-048: WebView escape-hatch capability (release valve: embed web). ---
+    // `load` (12,1) sets the webview `src` (a URL or html); `evaluate` (12,2)
+    // runs JS in the page; `sendMessage` (12,3) posts to the host↔web bridge.
+    CapabilityIdl {
+        name: "WebView",
+        id: 12,
+        methods: &[
+            MethodIdl {
+                name: "load",
+                id: 1,
+            },
+            MethodIdl {
+                name: "evaluate",
+                id: 2,
+            },
+            MethodIdl {
+                name: "sendMessage",
+                id: 3,
+            },
+        ],
+    },
+    // --- FLUX-046: native-module escape hatch (wrap any native SDK). ---
+    // The host allow-lists which module names resolve (LANE-I); an undeclared
+    // module is denied at the gate like any capability. `invoke` (13,1) calls a
+    // method on the wrapped native module with positional args.
+    CapabilityIdl {
+        name: "NativeModule",
+        id: 13,
+        methods: &[MethodIdl {
+            name: "invoke",
+            id: 1,
+        }],
+    },
 ];
 
 /// The OS-level permission a capability method requires before `CALL_CAP`
@@ -250,14 +283,22 @@ pub enum PermissionKind {
     /// Scheduling background work (iOS `BGTaskScheduler`; Android `WorkManager` /
     /// `JobScheduler`).
     Background,
-    /// Reading/writing the app's sandboxed file system (NSFileManager /
+    /// Reading/writing the app's sandboxed file system (NSFileManager /\
     /// `java.io.File`).
     FileSystem,
-    /// Opening external URLs / universal links (always permitted).
-    NoneLink,
     /// Reading device motion / ambient sensors (iOS `CMMotionManager`; Android
     /// `SensorManager`).
     Sensors,
+    /// Native web content (WKWebView / Android WebView). The escape-hatch
+    /// release valve: a `.flux` app may always embed web content, so the host
+    /// never prompts — but the threat model (FLUX-049 / ADR-0054) requires the
+    /// `src`/`route` to be app-controlled and the webview sandboxed.
+    WebView,
+    /// User-authored native-module escape hatch (FLUX-046): wraps an arbitrary
+    /// native SDK as a capability. Always gated by `.native` so a malicious
+    /// `.flux` patch cannot invoke an undeclared module — the host must
+    /// explicitly allow-list it (LANE-I allow-list, not an open `CALL_NATIVE`).
+    NativeModule,
 }
 
 impl PermissionKind {
@@ -275,8 +316,9 @@ impl PermissionKind {
             Self::Biometric => ".biometric",
             Self::Background => ".background",
             Self::FileSystem => ".filesystem",
-            Self::NoneLink => ".none",
             Self::Sensors => ".sensors",
+            Self::WebView => ".none",
+            Self::NativeModule => ".native",
         }
     }
 
@@ -298,6 +340,7 @@ impl PermissionKind {
             ".background" => Some(Self::Background),
             ".filesystem" => Some(Self::FileSystem),
             ".sensors" => Some(Self::Sensors),
+            ".native" => Some(Self::NativeModule),
             _ => None,
         }
     }
@@ -358,8 +401,51 @@ pub fn required_permission(cap_id: u32, method_id: u16) -> Option<PermissionKind
         (10, _) => Some(PermissionKind::None),
         // Sensors: device motion / ambient sensors.
         (11, _) => Some(PermissionKind::Sensors),
+        // WebView: native web content is always permitted (escape valve) — no OS
+        // grant prompt; the risk is contained by sandboxing (FLUX-049 threat model).
+        (12, _) => Some(PermissionKind::None),
+        // NativeModule: user escape-hatch wrapper — always gated by `.native`
+        // so only host-allow-listed modules resolve (no open CALL_NATIVE).
+        (13, _) => Some(PermissionKind::NativeModule),
         _ => None,
     }
+}
+
+/// The capability-id band reserved for user-authored escape-hatch wrappers
+/// (FLUX-046). Framework capabilities occupy 1..=11 (stable, hand-assigned);
+/// any `derive_capability_id` result lands in `[USER_CAP_BASE, USER_CAP_BASE +
+/// 0x0FFF]` so a user module can never collide with a framework id.
+pub const USER_CAP_BASE: u32 = 0x1000;
+
+/// Deterministic capability id for a user-authored native-module wrapper
+/// (FLUX-046).
+///
+/// Mirrors the framework's "ids are derived, never hand-assigned" rule
+/// (AGENTS.md §3.4): a wrapper's `cap_id` is `FNV-1a(name)` masked into the
+/// reserved [`USER_CAP_BASE`] band, so the server and both hosts agree on the
+/// exact `(cap_id, method_id)` bytes that travel on the wire. A `.flux` source
+/// and the host registry must compute the same id.
+#[must_use]
+pub fn derive_capability_id(name: &str) -> u32 {
+    let mut hash: u32 = 0x811c_9dc5;
+    for b in name.as_bytes() {
+        hash ^= u32::from(*b);
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    USER_CAP_BASE + (hash & 0x0FFF)
+}
+
+/// Deterministic method id for a user-authored native-module wrapper method
+/// (FLUX-046). Same FNV-1a scheme as [`derive_capability_id`], masked into the
+/// same reserved band so user method ids never collide with framework ids.
+#[must_use]
+pub fn derive_method_id(name: &str) -> u16 {
+    let mut hash: u32 = 0x811c_9dc5;
+    for b in name.as_bytes() {
+        hash ^= u32::from(*b);
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    (USER_CAP_BASE + (hash & 0x0FFF)) as u16
 }
 
 /// Whether a host's advertised capabilities cover a required
@@ -554,6 +640,38 @@ mod tests {
         assert!(matches!(err, FluxError::Capability(_)));
     }
 
+    // FLUX-046: a user-authored escape-hatch wrapper must derive a stable,
+    // non-framework-colliding capability id — the server and both hosts compute
+    // the same bytes for the same module name.
+    #[test]
+    fn derive_capability_id_is_deterministic_and_in_user_band() {
+        let a = derive_capability_id("StripePayments");
+        let b = derive_capability_id("StripePayments");
+        assert_eq!(a, b, "must be deterministic for the same name");
+        assert!(
+            (USER_CAP_BASE..USER_CAP_BASE + 0x1000).contains(&a),
+            "must land in the reserved user band, not the framework ids 1..=13"
+        );
+        let method = derive_method_id("chargeCard");
+        assert!(
+            (USER_CAP_BASE..USER_CAP_BASE + 0x1000).contains(&(u32::from(method))),
+            "derived method id must stay in the user band"
+        );
+    }
+
+    #[test]
+    fn webview_and_native_permission_gate() {
+        // WebView is always permitted; NativeModule is gated by the `.native`
+        // grant and must be denied without it (the escape hatch is never open).
+        let denied = StubChecker { granted: false };
+        assert!(
+            gate_call(&denied, 12, 1).is_ok(),
+            "WebView is always permitted"
+        );
+        let err = gate_call(&denied, 13, 1).expect_err("NativeModule requires the .native grant");
+        assert!(matches!(err, FluxError::Capability(_)));
+    }
+
     /// FLUX-045: the six concrete native capabilities (Push, Biometric,
     /// Background, FileSystem, DeepLink, Sensors) must be present in the manifest
     /// with stable ids 6..=11 and the permission each resolves through the gate.
@@ -566,6 +684,8 @@ mod tests {
             ("FileSystem", 9, PermissionKind::FileSystem),
             ("DeepLink", 10, PermissionKind::None),
             ("Sensors", 11, PermissionKind::Sensors),
+            ("WebView", 12, PermissionKind::None),
+            ("NativeModule", 13, PermissionKind::NativeModule),
         ];
         for (name, id, perm) in expected {
             let resolved = CapabilityIdl::id_for(name)
