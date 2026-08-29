@@ -1971,6 +1971,7 @@ dependencies = [
  "flux-ir",
  "flux-ir-serde",
  "flux-parser",
+ "flux-types",
  "futures-util",
  "serde",
  "serde_json",

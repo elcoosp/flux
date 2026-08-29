@@ -31,11 +31,12 @@ rows, which merge cleanly.
 
 | crate | dependency | version | reason |
 | --- | --- | --- | --- |
-| flux-cli | flux-types | path | FLUX-025: extend `flux lsp <file>` to run type-checking (PRD-O deferred "flux lsp type-checking (needs a flux-types dependency)"). Reuse existing workspace path dep. |
 
-> Applied on FLUX-024: the `flux-lsp` member crate, the `async-lsp` (`^0.2`) and
-> `lsp-types` (`^0.97`) workspace deps, and the `flux-lsp` path dep were wired
-> directly into `Cargo.toml` (the steward script cannot create a new crate, only
-> append to an existing one), and the crate scaffold + tests were committed.
-> Rows for those three are removed; this file retains only the still-open
-> `flux-cli`/`flux-types` request.
+> All pending requests applied. The `flux-lsp` member crate, the `async-lsp`
+> (`^0.2`) and `lsp-types` (`^0.97`) workspace deps, and the `flux-cli` →
+> `flux-types` path dep (FLUX-024 / FLUX-025) were wired directly into
+> `Cargo.toml` (the steward script cannot create a new crate, only append to an
+> existing one, and it emits `dep = "version"` literals rather than the
+> `*.workspace = true` form the workspace convention requires). This file is
+> left with no open rows; the next weekly steward run will simply report
+> "no pending requests".

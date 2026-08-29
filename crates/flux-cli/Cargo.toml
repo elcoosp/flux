@@ -19,6 +19,7 @@ flux-codegen-swift.workspace = true
 flux-codegen-kotlin.workspace = true
 flux-ir.workspace = true
 flux-parser.workspace = true
+flux-types.workspace = true
 clap.workspace = true
 anyhow.workspace = true
 tokio.workspace = true
