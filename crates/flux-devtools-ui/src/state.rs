@@ -2,6 +2,7 @@
 //! testable. The gpui views read from this through a `parking_lot::RwLock`.
 
 use parking_lot::RwLock;
+use std::collections::BTreeMap;
 
 use flux_ir_serde::EnrichedTelemetryEvent;
 
@@ -52,6 +53,101 @@ impl HostInfo {
     }
 }
 
+/// A stable key identifying one connected host within the DevTools session map.
+///
+/// Derived from the `HostAnnounce` identity (platform + device): a given
+/// physical device announces the same key on every reconnect, so its session
+/// survives reconnects. When the wire protocol gains a stable per-host id
+/// (ADR-0039 extension), that id should take precedence here.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct HostKey {
+    /// Lowercased platform, e.g. `ios` / `android`.
+    pub platform: String,
+    /// Device model string.
+    pub device: String,
+}
+
+impl HostKey {
+    /// Builds a key from a [`HostInfo`], normalizing the platform to lowercase.
+    #[must_use]
+    pub fn from_host(host: &HostInfo) -> Self {
+        Self {
+            platform: host.platform.to_ascii_lowercase(),
+            device: host.device.clone(),
+        }
+    }
+
+    /// The synthetic key used before any host has announced (single-connection
+    /// legacy mode). Keeps the public `timeline_len`/`vm_state` API stable when
+    /// no `HostAnnounce` has arrived yet.
+    #[must_use]
+    pub fn anonymous() -> Self {
+        Self {
+            platform: String::new(),
+            device: String::new(),
+        }
+    }
+}
+
+/// One host's reconstructed DevTools session: its own live state plus its own
+/// retained timeline (so two simultaneous hosts can be scrubbed independently).
+#[derive(Clone, Debug)]
+pub struct DeviceSession {
+    /// The host identity this session belongs to.
+    pub host: HostInfo,
+    /// Reconstructed state at the live (newest) timeline index.
+    pub live: ReconstructedState,
+    /// Retained telemetry history for this host (ADR-0042).
+    pub timeline: TimelineBuffer,
+}
+
+impl DeviceSession {
+    /// Creates an empty session for `host`.
+    #[must_use]
+    pub fn new(host: HostInfo) -> Self {
+        Self {
+            host,
+            live: ReconstructedState::base(),
+            timeline: TimelineBuffer::new(crate::time_travel::DEFAULT_CAPACITY),
+        }
+    }
+
+    /// Ingests one enriched telemetry event into this session.
+    pub fn handle_telemetry(&mut self, event: &EnrichedTelemetryEvent) {
+        self.live = reconstruct_state(&self.live, std::slice::from_ref(event));
+        self.timeline.push(event.clone());
+    }
+
+    /// Reconstructs the full state at timeline `index` by replaying from base.
+    #[must_use]
+    pub fn state_at(&self, index: usize) -> Option<ReconstructedState> {
+        let mut state = ReconstructedState::base();
+        for i in 0..=index {
+            let event = self.timeline.snapshot_at(i)?;
+            state = reconstruct_state(&state, std::slice::from_ref(event));
+        }
+        Some(state)
+    }
+
+    /// Number of retained timeline events for this host.
+    #[must_use]
+    pub fn timeline_len(&self) -> usize {
+        self.timeline.len()
+    }
+
+    /// A view of this session's live VM state (cheap clone for rendering).
+    #[must_use]
+    pub fn vm_state(&self) -> VmState {
+        VmState {
+            bytecode_offset: self.live.bytecode_offset,
+            opcode: self.live.opcode,
+            registers: self.live.registers.clone(),
+            gas_remaining: self.live.gas_remaining,
+            source_span: None,
+        }
+    }
+}
+
 /// The DevTools central state: the live timeline plus the reconstructed view.
 ///
 /// The gpui app layer (`run_app`) owns this behind a shared lock; views read it on
@@ -62,7 +158,10 @@ impl HostInfo {
 // intentional (the state is shared via `Arc`/entities, not printed).
 #[allow(missing_debug_implementations)]
 pub struct DevToolsState {
-    /// Retained telemetry history (ADR-0042).
+    /// Retained telemetry history (ADR-0042). Kept as the active session's mirror
+    /// so the legacy single-host [`timeline_len`](Self::timeline_len) /
+    /// [`vm_state`](Self::vm_state) / [`state_at`](Self::state_at) API stays
+    /// stable; per-host history lives in [`sessions`](Self::sessions).
     pub timeline: RwLock<TimelineBuffer>,
     /// Reconstructed state at the live (newest) timeline index.
     pub live: RwLock<ReconstructedState>,
@@ -74,6 +173,13 @@ pub struct DevToolsState {
     /// The host currently streaming telemetry, if any. `None` until the first
     /// `HostAnnounce` arrives (the dev server sends one per host connection).
     pub host: RwLock<Option<HostInfo>>,
+    /// Per-host reconstructed sessions, keyed by [`HostKey`] (FLUX-061). Lets
+    /// DevTools connect to more than one host at once and scrub each independently.
+    pub sessions: RwLock<BTreeMap<HostKey, DeviceSession>>,
+    /// The host whose telemetry the [`handle_telemetry`](Self::handle_telemetry)
+    /// calls currently route to (the most recent `HostAnnounce` on this
+    /// connection). `None` until a host announces, then the anonymous key.
+    pub active: RwLock<Option<HostKey>>,
 }
 
 impl DevToolsState {
@@ -86,28 +192,89 @@ impl DevToolsState {
             is_paused: RwLock::new(false),
             logs: RwLock::new(LogBuffer::new(512)),
             host: RwLock::new(None),
+            sessions: RwLock::new(BTreeMap::new()),
+            active: RwLock::new(None),
         }
     }
 
     /// Records the identity of the host now streaming telemetry.
+    ///
+    /// Inserts/updates this host's [`DeviceSession`] in the multi-device map
+    /// (FLUX-061) and marks it the active session that subsequent
+    /// [`handle_telemetry`](Self::handle_telemetry) calls route to.
     pub fn set_host(&self, host: HostInfo) {
+        let key = HostKey::from_host(&host);
+        {
+            let mut sessions = self.sessions.write();
+            sessions
+                .entry(key.clone())
+                .or_insert_with(|| DeviceSession::new(host.clone()));
+        }
         *self.host.write() = Some(host);
+        *self.active.write() = Some(key);
+    }
+
+    /// The key of the host that incoming telemetry currently routes to, or the
+    /// [`anonymous`](HostKey::anonymous) key when no host has announced.
+    #[must_use]
+    pub fn active_host_key(&self) -> HostKey {
+        self.active
+            .read()
+            .clone()
+            .unwrap_or_else(HostKey::anonymous)
+    }
+
+    /// The keys of all known host sessions (FLUX-061 multi-device).
+    #[must_use]
+    pub fn session_keys(&self) -> Vec<HostKey> {
+        self.sessions.read().keys().cloned().collect()
+    }
+
+    /// Number of distinct host sessions currently held (FLUX-061).
+    #[must_use]
+    pub fn session_count(&self) -> usize {
+        self.sessions.read().len()
+    }
+
+    /// A snapshot of one host session's reconstructed state (FLUX-061), if the
+    /// key is known.
+    #[must_use]
+    pub fn session_state(&self, key: &HostKey) -> Option<DeviceSession> {
+        self.sessions.read().get(key).cloned()
+    }
+
+    /// Ingests one enriched telemetry event into the active host session.
+    ///
+    /// The event is also mirrored into the legacy single-host [`timeline`]/[`live`]
+    /// fields so the original public API keeps working; true per-event
+    /// attribution across *simultaneously* streaming hosts requires the wire
+    /// protocol to tag each event with its source host (ADR-0039 extension) —
+    /// until then, events route to whatever host announced most recently.
+    pub fn handle_telemetry(&self, event: EnrichedTelemetryEvent) {
+        let key = self.active_host_key();
+        {
+            let mut sessions = self.sessions.write();
+            let session = sessions.entry(key.clone()).or_insert_with(|| {
+                DeviceSession::new(HostInfo {
+                    platform: key.platform.clone(),
+                    device: key.device.clone(),
+                    capabilities: Vec::new(),
+                })
+            });
+            session.handle_telemetry(&event);
+        }
+        // Mirror into the legacy single-host fields for backward-compatible reads.
+        {
+            let mut live = self.live.write();
+            *live = reconstruct_state(&live, std::slice::from_ref(&event));
+        }
+        self.timeline.write().push(event);
     }
 
     /// The current host identity, if known.
     #[must_use]
     pub fn host_info(&self) -> Option<HostInfo> {
         self.host.read().clone()
-    }
-
-    /// Ingests one enriched telemetry event: updates the live reconstructed
-    /// state and appends to the timeline.
-    pub fn handle_telemetry(&self, event: EnrichedTelemetryEvent) {
-        {
-            let mut live = self.live.write();
-            *live = reconstruct_state(&live, std::slice::from_ref(&event));
-        }
-        self.timeline.write().push(event);
     }
 
     /// Reconstructs the full state at timeline `index` by replaying from the
@@ -170,6 +337,7 @@ impl Default for DevToolsState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::time_travel::LogLevel;
     use flux_ir_serde::EnrichedTelemetryEvent;
     use flux_syntax::Value;
 
@@ -219,5 +387,61 @@ mod tests {
         assert_eq!(logs[0].target, "flux-devserver");
         assert_eq!(logs[1].level, LogLevel::Error);
         assert_eq!(logs[1].render(), "E flux-host: boom");
+    }
+
+    #[test]
+    fn two_hosts_make_two_sessions() {
+        // No source discriminator exists on the wire yet (ADR-0039 extension),
+        // so events route to the most-recently-announced host. Announcing A,
+        // feeding A-events, then announcing B and feeding B-events must yield
+        // two independent sessions with their own timelines.
+        let state = DevToolsState::new();
+        state.set_host(HostInfo {
+            platform: "ios".into(),
+            device: "iPhone17,1".into(),
+            capabilities: Vec::new(),
+        });
+        state.handle_telemetry(step(4));
+        state.handle_telemetry(step(8));
+
+        state.set_host(HostInfo {
+            platform: "android".into(),
+            device: "Pixel 8".into(),
+            capabilities: Vec::new(),
+        });
+        state.handle_telemetry(step(20));
+
+        assert_eq!(state.session_count(), 2);
+        let keys = state.session_keys();
+        assert!(keys.contains(&HostKey::from_host(&HostInfo {
+            platform: "ios".into(),
+            device: "iPhone17,1".into(),
+            capabilities: Vec::new(),
+        })));
+        assert!(keys.contains(&HostKey::from_host(&HostInfo {
+            platform: "android".into(),
+            device: "Pixel 8".into(),
+            capabilities: Vec::new(),
+        })));
+
+        let ios_key = HostKey::from_host(&HostInfo {
+            platform: "ios".into(),
+            device: "iPhone17,1".into(),
+            capabilities: Vec::new(),
+        });
+        let ios = state.session_state(&ios_key).expect("ios session present");
+        assert_eq!(ios.timeline_len(), 2);
+        assert_eq!(ios.vm_state().bytecode_offset, Some(8));
+
+        let android_key = HostKey::from_host(&HostInfo {
+            platform: "android".into(),
+            device: "Pixel 8".into(),
+            capabilities: Vec::new(),
+        });
+        let android = state
+            .session_state(&android_key)
+            .expect("android session present");
+        assert_eq!(android.timeline_len(), 1);
+        assert_eq!(android.vm_state().bytecode_offset, Some(20));
     }
 }

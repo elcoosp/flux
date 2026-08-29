@@ -281,6 +281,24 @@ are intentionally omitted (automation noise, not user-facing change).
   inspect. No inspector code fabricated; unblock after FLUX-047 + a
   `NetworkRequest` telemetry variant.
 
+### PARTIAL — DevTools multi-device connect (FLUX-061, LANE-P)
+
+- **Multi-device session model — DONE (verified):** `DevToolsState` gained a per-host
+  `sessions: RwLock<BTreeMap<HostKey, DeviceSession>>` map + `active` routing key.
+  `set_host` inserts/updates a session keyed by the `HostAnnounce` identity and marks
+  it active; `handle_telemetry` routes into the active session (own `ReconstructedState`
+  + `TimelineBuffer`) while mirroring into the legacy single-host fields so
+  `timeline_len`/`vm_state`/`state_at` stay stable. Accessors: `session_keys`,
+  `session_count`, `session_state`, `active_host_key`. Test `two_hosts_make_two_sessions`
+  proves two distinct hosts yield two independent sessions. `cargo test -p
+  flux-devtools-ui --lib` → 24/24 green; fmt + clippy clean. No server change needed.
+- **Per-event attribution — BLOCKED (protocol gap):** the issue's "keyed by the
+  `EnrichedTelemetryEvent` source" is not satisfiable today — neither
+  `EnrichedTelemetryEvent` nor the telemetry frames carry a host/source discriminator
+  (verified in `flux-ir-serde/src/telemetry.rs`), and `:7333` broadcasts one merged
+  stream. True per-event attribution needs an ADR-0039 wire extension (host id on
+  `HostAnnounce` + per-event source tag); the session container is ready to consume it.
+
 ### CI — real Kotlin / Compose codegen check + rust-check unblock — DONE
 
 - Provision the Compose toolchain and run the real `kotlinc` codegen check without platform-37;
