@@ -34,7 +34,7 @@ final class ImageAdapterTests: XCTestCase {
     @MainActor func testUpdateAppliesContentMode() {
         let adapter = ImageAdapter()
         let view = adapter.create()
-        adapter.update(view, from: Props(), to: Props([3: .str("fit")]))
+        adapter.update(view, from: Props(), to: Props([Props.propIndex(for: "resizeMode"): .str("fit")]))
         XCTAssertEqual(view.contentMode, .scaleAspectFit)
     }
 

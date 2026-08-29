@@ -39,7 +39,7 @@ public object PropsIndex {
 
     // Button (F.2)
     public val BUTTON_TEXT: UShort = propIndexForName("text")
-    public val BUTTON_ON_CLICK: UShort = propIndexForName("onClick")
+    public val BUTTON_ON_PRESS: UShort = propIndexForName("onPress")
     public val BUTTON_ENABLED: UShort = propIndexForName("enabled")
     public val BUTTON_COLOR: UShort = propIndexForName("color")
 
@@ -47,14 +47,14 @@ public object PropsIndex {
     public val STACK_GAP: UShort = propIndexForName("gap")
     public val STACK_ALIGNMENT: UShort = propIndexForName("alignment")
 
-    // TextField (F.5)
-    public val TEXT_FIELD_TEXT: UShort = propIndexForName("text")
-    public val TEXT_FIELD_ON_CHANGE: UShort = propIndexForName("onChange")
-    public val TEXT_FIELD_PLACEHOLDER: UShort = propIndexForName("placeholder")
-    public val TEXT_FIELD_REF: UShort = propIndexForName("ref")
-    public val TEXT_FIELD_ENABLED: UShort = propIndexForName("enabled")
-    public val TEXT_FIELD_SECURE: UShort = propIndexForName("secure")
-    public val TEXT_FIELD_KEYBOARD: UShort = propIndexForName("keyboard")
+    // TextInput (F.5)
+    public val TEXT_INPUT_TEXT: UShort = propIndexForName("text")
+    public val TEXT_INPUT_ON_CHANGE_TEXT: UShort = propIndexForName("onChangeText")
+    public val TEXT_INPUT_PLACEHOLDER: UShort = propIndexForName("placeholder")
+    public val TEXT_INPUT_REF: UShort = propIndexForName("ref")
+    public val TEXT_INPUT_ENABLED: UShort = propIndexForName("enabled")
+    public val TEXT_INPUT_SECURE_TEXT_ENTRY: UShort = propIndexForName("secureTextEntry")
+    public val TEXT_INPUT_KEYBOARD_TYPE: UShort = propIndexForName("keyboardType")
 
     // Font sub-record
     public val FONT_SIZE: UShort = propIndexForName("size")
@@ -68,8 +68,8 @@ public object PropsIndex {
     public val COLOR_ALPHA: UShort = propIndexForName("alpha")
 
     // Image (F.8)
-    public val IMAGE_SRC: UShort = propIndexForName("src")
+    public val IMAGE_SOURCE: UShort = propIndexForName("source")
     public val IMAGE_WIDTH: UShort = propIndexForName("width")
     public val IMAGE_HEIGHT: UShort = propIndexForName("height")
-    public val IMAGE_CONTENT_MODE: UShort = propIndexForName("contentMode")
+    public val IMAGE_RESIZE_MODE: UShort = propIndexForName("resizeMode")
 }

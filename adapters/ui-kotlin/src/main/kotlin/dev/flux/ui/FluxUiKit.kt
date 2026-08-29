@@ -25,7 +25,7 @@ public object FluxUiKit {
             ButtonAdapter.KIND to FluxAdapterFactory(ButtonAdapter::create),
             ColumnAdapter.KIND to FluxAdapterFactory(ColumnAdapter::create),
             RowAdapter.KIND to FluxAdapterFactory(RowAdapter::create),
-            TextFieldAdapter.KIND to FluxAdapterFactory(TextFieldAdapter::create),
+            TextInputAdapter.KIND to FluxAdapterFactory(TextInputAdapter::create),
             ScreenAdapter.KIND to FluxAdapterFactory(ScreenAdapter::create),
             RouterAdapter.KIND to FluxAdapterFactory(RouterAdapter::create),
             ImageAdapter.KIND to FluxAdapterFactory(ImageAdapter::create),

@@ -8,7 +8,7 @@ final class ColumnRowAdapterTests: XCTestCase {
     @MainActor func testColumnSetsSpacingFromGap() {
         let adapter = ColumnAdapter()
         let stack = adapter.create()
-        let props = Props([0: .float(12)])
+        let props = Props([Props.propIndex(for: "gap"): .float(12)])
         adapter.update(stack, from: Props(), to: props)
         XCTAssertEqual(stack.spacing, 12)
     }

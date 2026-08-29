@@ -14,7 +14,7 @@ import UIKit
 /// - `size: Option[Float]`
 /// - `color: Option[Color]`
 /// - `alignment: Option[Alignment]`
-/// - `max_lines: Option[Int]`
+/// - `maxLines: Option[Int]`
 /// - `overflow: Option[Overflow]`
 public final class TextAdapter: FluxAdapter {
     public typealias View = UILabel
@@ -35,7 +35,7 @@ public final class TextAdapter: FluxAdapter {
         if let align = new.getRecord(named: "alignment").flatMap(FluxAlignment.init(record:)) {
             view.textAlignment = align.textAlignment
         }
-        if let maxLines = new.getInt(named: "max_lines") { view.numberOfLines = Int(maxLines) }
+        if let maxLines = new.getInt(named: "maxLines") { view.numberOfLines = Int(maxLines) }
     }
 
     public func setChildren(_ children: [AnyObject], on view: UILabel) {
@@ -49,9 +49,11 @@ public final class TextAdapter: FluxAdapter {
     public func destroy(_ view: UILabel) {}
 
     private func applyFont(to view: UILabel, props: Props) {
-        if let font = props.getFont(1) {
-            view.font = font.uiFont
-        } else if let size = props.getFloat(2) {
+        // `Font` is a positional record: `Font(family, size, weight, style)` —
+        // size is field 1. Read the `font` prop by name (FNV-derived index) and
+        // the size by its positional record field (AGENTS.md §3.2).
+        if let font = props.getRecord(named: "font") {
+            let size = font.getFloat(1) ?? 14
             view.font = UIFont.systemFont(ofSize: CGFloat(size))
         } else if view.font == nil {
             view.font = UIFont.systemFont(ofSize: 14)

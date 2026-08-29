@@ -9,11 +9,11 @@ import UIKit
 /// Props are read by name; the index is the FNV-1a-32 digest of the name
 /// masked to `u16` (`Props.propIndex`), derived identically on server and
 /// client (AGENTS.md §3.2) — never a hardcoded positional index. Fields:
-/// - `src: String` (required) — asset path relative to the project root,
+/// - `source: String` (required) — asset path relative to the project root,
 ///   e.g. `"assets/logo.png"`.
 /// - `width: Option[Float]`
 /// - `height: Option[Float]`
-/// - `contentMode: Option[String]` — `"fill"` (default), `"fit"`, `"stretch"`.
+/// - `resizeMode: Option[String]` — `"fill"` (default), `"fit"`, `"stretch"`.
 ///
 /// In dev the bitmap is fetched over HTTP from the dev server's asset route
 /// (`http://localhost:7332/assets/<src>`). Load failures (missing asset,
@@ -55,14 +55,14 @@ public final class ImageAdapter: FluxAdapter {
     }
 
     public func update(_ view: UIImageView, from old: Props, to new: Props) {
-        if let width = new.getFloat(1), let height = new.getFloat(2) {
+        if let width = new.getFloat(named: "width"), let height = new.getFloat(named: "height") {
             view.frame.size = CGSize(width: CGFloat(width), height: CGFloat(height))
         }
-        if let mode = new.getString(3) {
+        if let mode = new.getString(named: "resizeMode") {
             view.contentMode = Self.contentMode(for: mode)
         }
-        guard let src = new.getString(0), !src.isEmpty else {
-            // Missing/empty `src` is treated as a load failure up front: show
+        guard let src = new.getString(named: "source"), !src.isEmpty else {
+            // Missing/empty `source` is treated as a load failure up front: show
             // the placeholder and clear any pending request. This is the
             // graceful-degrade path for BR-003.
             loadTask?.cancel()

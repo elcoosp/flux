@@ -10,7 +10,7 @@ import UIKit
 /// masked to `u16` (`Props.propIndex`), derived identically on server and
 /// client (AGENTS.md §3.2) — never a hardcoded positional index. Fields:
 /// - `text: String` (required)
-/// - `onClick: Handler` (required)
+/// - `onPress: Handler` (required)
 /// - `enabled: Bool = true`
 /// - `color: Option[Color]`
 ///

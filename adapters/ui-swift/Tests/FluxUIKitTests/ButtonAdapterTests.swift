@@ -8,7 +8,10 @@ final class ButtonAdapterTests: XCTestCase {
     @MainActor func testUpdateSetsTitleAndEnabled() {
         let adapter = ButtonAdapter()
         let button = adapter.create()
-        let props = Props([0: .str("Tap"), 2: .bool(false)])
+        let props = Props([
+            Props.propIndex(for: "text"): .str("Tap"),
+            Props.propIndex(for: "enabled"): .bool(false),
+        ])
         adapter.update(button, from: Props(), to: props)
         XCTAssertEqual(button.title(for: .normal), "Tap")
         XCTAssertFalse(button.isEnabled)

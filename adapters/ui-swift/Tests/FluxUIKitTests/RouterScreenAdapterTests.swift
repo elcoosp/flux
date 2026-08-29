@@ -16,13 +16,13 @@ final class RouterScreenAdapterTests: XCTestCase {
         let home = UIViewController()
         home.title = "home"
         adapter.setChildren([home], on: nav)
-        XCTAssertEqual(nav.viewControllers, [home])
+        XCTAssertEqual(nav.nav.viewControllers, [home])
 
         let detail = UIViewController()
         adapter.setChildren([home, detail], on: nav)
-        XCTAssertEqual(nav.viewControllers, [home, detail])
+        XCTAssertEqual(nav.nav.viewControllers, [home, detail])
         // `home` must be the same instance — its state is preserved.
-        XCTAssertTrue(nav.viewControllers.first === home)
+        XCTAssertTrue(nav.nav.viewControllers.first === home)
     }
 
     @MainActor func testRouterPopRemovesLeavingScreen() {
@@ -32,7 +32,7 @@ final class RouterScreenAdapterTests: XCTestCase {
         let detail = UIViewController()
         adapter.setChildren([home, detail], on: nav)
         adapter.setChildren([home], on: nav)
-        XCTAssertEqual(nav.viewControllers, [home])
+        XCTAssertEqual(nav.nav.viewControllers, [home])
         XCTAssertNil(detail.parent)
     }
 

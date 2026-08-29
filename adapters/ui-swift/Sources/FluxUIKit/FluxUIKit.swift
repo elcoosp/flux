@@ -4,7 +4,7 @@
 //  The kit's public surface is the contract the dev runtime (FLUX-006)
 //  consumes: `FluxValue`, `Props`, `FluxColor`/`FluxFount`/`FluxAlignment`,
 //  `FluxEvent`, `FluxExecutor`, and the `FluxAdapter` protocol, plus the nine
-//  declarative adapters (Text, Button, Column, Row, TextField, Image, Container,
+/// the nine declarative adapters (Text, Button, Column, Row, TextInput, Image, Container,
 //  Router, Screen).
 
 /// The adapter contract version this kit implements (Appendix F).

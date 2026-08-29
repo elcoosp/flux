@@ -20,10 +20,10 @@ import kotlin.collections.List as KList
  * Props are read by name; the index is the FNV-1a-32 digest of the name masked
  * to `u16` ([PropsIndex.propIndexForName]), derived identically on server and
  * client (AGENTS.md §3.2) — never a hardcoded positional index. Fields:
- * - `src: String` (required) — asset path relative to the project root.
+ * - `source: String` (required) — asset path relative to the project root.
  * - `width: Option[Float]`
  * - `height: Option[Float]`
- * - `contentMode: Option[String]` — `"fill"` (default), `"fit"`, `"stretch"`.
+ * - `resizeMode: Option[String]` — `"fill"` (default), `"fit"`, `"stretch"`.
  */
 public class ImageAdapter private constructor() : FluxAdapter<FluxNativeView> {
     override val kind: String = KIND
@@ -34,9 +34,9 @@ public class ImageAdapter private constructor() : FluxAdapter<FluxNativeView> {
         view: FluxNativeView,
         props: Props,
     ) {
-        val src = props.getString(PropsIndex.IMAGE_SRC)
+        val src = props.getString(PropsIndex.IMAGE_SOURCE)
         if (src.isNullOrEmpty()) {
-            // A missing/empty `src` is a load failure: clear the source so the
+            // A missing/empty `source` is a load failure: clear the source so the
             // host shows its placeholder rather than a stale bitmap (BR-003).
             if (view.getProperty(PROP_SRC) != null) view.setProperty(PROP_SRC, null)
             if (view.getProperty(PROP_HAS_SRC) != false) view.setProperty(PROP_HAS_SRC, false)
@@ -51,8 +51,8 @@ public class ImageAdapter private constructor() : FluxAdapter<FluxNativeView> {
         val height = props.getFloat(PropsIndex.IMAGE_HEIGHT)
         if (view.getProperty(PROP_HEIGHT) != height) view.setProperty(PROP_HEIGHT, height)
 
-        val mode = props.getString(PropsIndex.IMAGE_CONTENT_MODE) ?: DEFAULT_CONTENT_MODE
-        if (view.getProperty(PROP_CONTENT_MODE) != mode) view.setProperty(PROP_CONTENT_MODE, mode)
+        val mode = props.getString(PropsIndex.IMAGE_RESIZE_MODE) ?: DEFAULT_RESIZE_MODE
+        if (view.getProperty(PROP_RESIZE_MODE) != mode) view.setProperty(PROP_RESIZE_MODE, mode)
     }
 
     override fun setChildren(
@@ -84,11 +84,11 @@ public class ImageAdapter private constructor() : FluxAdapter<FluxNativeView> {
         /** Builds a fresh [ImageAdapter] for one IR node (FLUX-007). */
         fun create(): FluxAdapter<FluxNativeView> = ImageAdapter()
 
-        const val PROP_SRC = "imageSrc"
-        const val PROP_HAS_SRC = "hasImageSrc"
+        const val PROP_SRC = "imageSource"
+        const val PROP_HAS_SRC = "hasImageSource"
         const val PROP_WIDTH = "imageWidth"
         const val PROP_HEIGHT = "imageHeight"
-        const val PROP_CONTENT_MODE = "imageContentMode"
-        const val DEFAULT_CONTENT_MODE = "fill"
+        const val PROP_RESIZE_MODE = "imageResizeMode"
+        const val DEFAULT_RESIZE_MODE = "fill"
     }
 }

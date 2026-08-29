@@ -14,9 +14,9 @@ final class TextAdapterTests: XCTestCase {
         let adapter = TextAdapter()
         let label = adapter.create()
         let props = Props([
-            0: .str("Hi"),
-            3: .record(Props([0: .float(1), 1: .float(0), 2: .float(0)])), // red
-            1: .record(Props([0: .float(18)])), // font size 18
+            Props.propIndex(for: "text"): .str("Hi"),
+            Props.propIndex(for: "color"): .record(Props([0: .float(1), 1: .float(0), 2: .float(0)])), // red
+            Props.propIndex(for: "font"): .record(Props([1: .float(18)])), // Font(family, size, ...): size is field 1
         ])
         adapter.update(label, from: Props(), to: props)
         XCTAssertEqual(label.text, "Hi")
