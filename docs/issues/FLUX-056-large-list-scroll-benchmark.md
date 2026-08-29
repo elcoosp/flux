@@ -1,12 +1,12 @@
 ---
 id: FLUX-056
-status: todo
-lane: LANE-H
-phase: "Phase 5"
+status: blocked
 blocked_by:
   - PRD-N
   - PRD-J
   - PRD-M
+lane: LANE-H
+phase: "Phase 5"
 labels:
   - perf
   - benchmark
@@ -16,6 +16,17 @@ related_adrs:
 ---
 
 # FLUX-056: Large-list scroll benchmark (depends on ScrollView + perf harness)
+
+> **BLOCKED (verified 2026-08-29):** Neither dependency exists in the tree yet.
+> - `flux-perf-harness` (PRD-J) is not present as a crate (`crates/` has no
+>   perf-harness; no `MetricRecord` schema to reuse).
+> - `ScrollView` / a virtualized `List` primitive (PRD-N) is not a Flux primitive:
+>   the stdlib is 8 primitives with "no scrollable list", and `ForEach` is
+>   explicitly non-virtualized in MLP ("no virtualization in MLP").
+> A 1k/10k-item *virtualized scroll* benchmark cannot be authored without a
+> `ScrollView` to feed; authoring one against a non-virtualized `ForEach` would
+> measure diff/reconcile latency, not scroll — that is not this issue. Marked
+> blocked; unblock when PRD-J (harness) and PRD-N (ScrollView) land.
 
 - **Lane:** LANE-H (Phase 5)
 - **Depends on:** PRD-N (`ScrollView`), PRD-J (perf harness), PRD-M (CI hardening)

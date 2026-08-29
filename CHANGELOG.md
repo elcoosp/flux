@@ -109,6 +109,15 @@ are intentionally omitted (automation noise, not user-facing change).
   min+max (Android) matrix reusing the ios-check/android-check build steps, so version
   drift is surfaced instead of assumed.
 
+### BLOCKED — large-list scroll benchmark (FLUX-056)
+
+- Cannot land: both dependencies are absent from the tree. `flux-perf-harness` (PRD-J)
+  is not a crate, and `ScrollView` / virtualized `List` (PRD-N) is not a Flux primitive
+  (stdlib is 8 primitives, "no scrollable list"; `ForEach` is non-virtualized in MLP). A
+  1k/10k virtualized-scroll benchmark needs a `ScrollView` to feed; authored against a
+  non-virtualized `ForEach` it would measure diff/reconcile, not scroll. Issue marked
+  `status: blocked`; unblock when PRD-J + PRD-N land.
+
 ### CI — real Kotlin / Compose codegen check + rust-check unblock — DONE
 
 - Provision the Compose toolchain and run the real `kotlinc` codegen check without platform-37;
