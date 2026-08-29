@@ -5,7 +5,9 @@ use parking_lot::RwLock;
 
 use flux_ir_serde::EnrichedTelemetryEvent;
 
-use crate::time_travel::{ReconstructedState, TimelineBuffer, reconstruct_state};
+use crate::time_travel::{
+    LogBuffer, LogEntry, LogLevel, ReconstructedState, TimelineBuffer, reconstruct_state,
+};
 
 /// Snapshot of the VM register/instruction view.
 #[derive(Clone, Debug, PartialEq)]
@@ -38,6 +40,9 @@ pub struct DevToolsState {
     pub live: RwLock<ReconstructedState>,
     /// Whether the host VM is paused.
     pub is_paused: RwLock<bool>,
+    /// Retained structured log stream for the log viewer (FLUX-060). Bounded; the
+    /// oldest record is evicted once at capacity, mirroring the timeline buffer.
+    pub logs: RwLock<LogBuffer>,
 }
 
 impl DevToolsState {
@@ -48,6 +53,7 @@ impl DevToolsState {
             timeline: RwLock::new(TimelineBuffer::new(crate::time_travel::DEFAULT_CAPACITY)),
             live: RwLock::new(ReconstructedState::base()),
             is_paused: RwLock::new(false),
+            logs: RwLock::new(LogBuffer::new(512)),
         }
     }
 
@@ -95,6 +101,21 @@ impl DevToolsState {
             source_span: None,
         }
     }
+
+    /// Appends a structured log record to the retained log buffer (FLUX-060).
+    ///
+    /// The dev server already emits `tracing` output (AGENTS.md §3.12); a
+    /// subscriber forwards records here. This is the single ingest point so the
+    /// log viewer reads a consistent, bounded buffer.
+    pub fn ingest_log(&self, entry: LogEntry) {
+        self.logs.write().push(entry);
+    }
+
+    /// A snapshot of the retained log records (oldest first).
+    #[must_use]
+    pub fn log_snapshot(&self) -> Vec<LogEntry> {
+        self.logs.read().snapshot()
+    }
 }
 
 impl Default for DevToolsState {
@@ -139,5 +160,21 @@ mod tests {
         let at_one = state.state_at(1).expect("index 1 present");
         assert_eq!(at_one.bytecode_offset, Some(8));
         assert!(state.state_at(2).is_none());
+    }
+
+    #[test]
+    fn ingest_log_appends_to_retained_buffer() {
+        let state = DevToolsState::new();
+        state.ingest_log(LogEntry::new(
+            LogLevel::Info,
+            "flux-devserver",
+            "listening on :7331",
+        ));
+        state.ingest_log(LogEntry::new(LogLevel::Error, "flux-host", "boom"));
+        let logs = state.log_snapshot();
+        assert_eq!(logs.len(), 2);
+        assert_eq!(logs[0].target, "flux-devserver");
+        assert_eq!(logs[1].level, LogLevel::Error);
+        assert_eq!(logs[1].render(), "E flux-host: boom");
     }
 }

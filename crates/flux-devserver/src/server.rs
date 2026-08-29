@@ -20,6 +20,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
 
 use crate::config::ServerConfig;
+use crate::debug_bridge::DevToolsRouter;
 use crate::dispatch::NodeSignalDeps;
 use crate::error::DevServerError;
 use crate::pipeline::Pipeline;
@@ -35,15 +36,23 @@ pub(crate) struct Shared {
     /// Pairs host `AwaitSuspend` reports with capability completions and emits
     /// `Resume` frames (roadmap Phase 2).
     pub(crate) async_bridge: Mutex<crate::AsyncBridge>,
+    /// Routes host telemetry (over the patch channel) to subscribed DevTools
+    /// clients. Shared between the host accept loop and `serve_devtools` so a
+    /// single router fans events out to every connected DevTools app.
+    pub(crate) devtools_router: std::sync::Arc<parking_lot::Mutex<DevToolsRouter>>,
     clients: Mutex<Vec<UnboundedSender<Vec<u8>>>>,
     shutdown: AtomicBool,
 }
 
 impl Shared {
-    fn new(pipeline: Pipeline) -> Self {
+    fn new(
+        pipeline: Pipeline,
+        devtools_router: std::sync::Arc<parking_lot::Mutex<DevToolsRouter>>,
+    ) -> Self {
         Self {
             pipeline: Mutex::new(pipeline),
             async_bridge: Mutex::new(crate::AsyncBridge::new()),
+            devtools_router,
             clients: Mutex::new(Vec::new()),
             shutdown: AtomicBool::new(false),
         }
@@ -99,7 +108,20 @@ impl DevServer {
         for (path, source) in collect_flux_sources(config.root()) {
             pipeline.set_source(&path, source);
         }
-        let shared = Arc::new(Shared::new(pipeline));
+        // Build the shared DevTools router up front (from the freshly assembled
+        // pipeline's source map) so both the host patch-channel accept loop and
+        // the `:7333` DevTools endpoint fan telemetry out through one router.
+        // This lets the iOS host send telemetry over the existing `:7331`
+        // WebSocket (the only port the Simulator forwards) instead of opening a
+        // separate device→:7333 socket that the Simulator cannot reach.
+        let (host_command_tx, mut host_command_rx) =
+            tokio::sync::mpsc::unbounded_channel::<DebugCommand>();
+        let source_map = pipeline.devtools_source_map();
+        let devtools_router = std::sync::Arc::new(parking_lot::Mutex::new(DevToolsRouter::new(
+            source_map,
+            host_command_tx.clone(),
+        )));
+        let shared = Arc::new(Shared::new(pipeline, devtools_router));
         initial_compile(&shared);
 
         let watcher = Watcher::spawn(&config, Arc::clone(&shared))?;
@@ -107,27 +129,23 @@ impl DevServer {
         let http_task = crate::assets::spawn(http_listener, config.root().to_path_buf());
 
         // DevTools WebSocket endpoint (`:7333`, spec §4.1): enriches host
-        // telemetry with source spans and relays `DebugCommand`s. The host
-        // command channel is drained here; forwarding onto the live host
-        // session is owned by the host-session agent (§4.3).
-        let devtools_addr = std::net::SocketAddr::from((
-            [127, 0, 0, 1],
-            crate::debug_bridge::DEFAULT_DEVTOOLS_PORT,
-        ));
-        let (host_command_tx, mut host_command_rx) =
-            tokio::sync::mpsc::unbounded_channel::<DebugCommand>();
-        let source_map = shared.pipeline.lock().devtools_source_map();
+        // telemetry with source spans and relays `DebugCommand`s. Shares the
+        // router created above with the host accept loop.
+        let devtools_addr =
+            std::net::SocketAddr::from(([0, 0, 0, 0], crate::debug_bridge::DEFAULT_DEVTOOLS_PORT));
         let devtools_drain = tokio::spawn(async move {
             while host_command_rx.recv().await.is_some() {
-                tracing::debug!("devtools command received (host forwarding pending)");
+                // DevTools commands are currently observed but not forwarded to
+                // the live host session (forwarding is owned by the host-session
+                // agent, §4.3). Drain so the channel never blocks the sender.
             }
         });
-        let devtools_task = tokio::spawn(async move {
-            if let Err(e) =
-                crate::debug_bridge::serve_devtools(devtools_addr, source_map, host_command_tx)
-                    .await
-            {
-                tracing::warn!(error = %e, "devtools endpoint stopped");
+        let devtools_task = tokio::spawn({
+            let router = std::sync::Arc::clone(&shared.devtools_router);
+            async move {
+                if let Err(e) = crate::debug_bridge::serve_devtools(devtools_addr, router).await {
+                    tracing::warn!(error = %e, "devtools endpoint stopped");
+                }
             }
         });
 

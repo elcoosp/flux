@@ -15,6 +15,7 @@
 
 import Foundation
 import UIKit
+import os
 import FluxHost
 
 /// The live WebSocket transport backed by `URLSessionWebSocketTask`.
@@ -43,6 +44,7 @@ public final class FluxWebSocketTransport: FluxTransport {
     public func connect() {
         // Idempotent: a live or already-opening socket is not replaced.
         guard socket == nil else { return }
+        Self.appendLog("CONNECT called url=\(url.absoluteString)")
         transition(to: .connecting)
         let task = session.webSocketTask(with: url)
         socket = task
@@ -68,9 +70,26 @@ public final class FluxWebSocketTransport: FluxTransport {
     }
 
     public func send(_ bytes: Data) {
+        let kind = bytes.count > 5 ? String(format: "0x%02x", bytes[5]) : "?"
+        Self.appendLog("SEND len=\(bytes.count) kind=\(kind)")
         socket?.send(.data(bytes)) { [weak self] error in
             guard let self, error != nil else { return }
             Task { @MainActor in self.handleDrop() }
+        }
+    }
+
+    /// Append-only diagnostic log inside the app container (on the Mac
+    /// filesystem), readable via `simctl get_app_container .../Documents`.
+    private static func appendLog(_ line: String) {
+        guard let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        let f = dir.appendingPathComponent("flux_host.log")
+        let stamped = "\(Date().timeIntervalSince1970) \(line)\n"
+        if let fh = try? FileHandle(forWritingTo: f) {
+            fh.seekToEndOfFile()
+            fh.write(stamped.data(using: .utf8)!)
+            try? fh.close()
+        } else {
+            try? stamped.data(using: .utf8)?.write(to: f)
         }
     }
 

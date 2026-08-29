@@ -95,6 +95,7 @@ struct FluxRootView: View {
             }
         }
         .task {
+            let _ = try? "TASK_RAN \(Date())\n".write(to: URL(fileURLWithPath: NSTemporaryDirectory() + "flux_task.log"), atomically: true, encoding: .utf8)
             // Open the socket and bind status → banner. Frames decode on the
             // main actor (FluxExecutor is @MainActor) and drive the tree; the dev
             // server pushes a fresh Init frame on each (re)connect, so a
@@ -104,6 +105,12 @@ struct FluxRootView: View {
                 executor.handleFrame(data)
             }
             transport.connect()
+            // Open the host → DevTools channel so the Flux DevTools desktop app
+            // can observe the live VM/signal flow (PRD-P). Telemetry rides the
+            // existing `:7331` patch-channel WebSocket (the only port the iOS
+            // Simulator forwards from the device), so no separate device→:7333
+            // socket is needed. `transport.send` drops frames when offline.
+            fluxDevtoolsConnect(send: { transport.send($0) })
         }
         .onDisappear {
             transport.close()

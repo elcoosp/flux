@@ -19,9 +19,8 @@
 //  │ drops every trace call site and leaves zero dead telemetry code linked.  │
 //  └───────────────────────────────────────────────────────────────────────┘
 
-#if DEBUG
-
 import Foundation
+import os.log
 
 /// A native view layout rectangle (device points). Mirrors the wire `Rect`.
 public struct Rect: Sendable, Equatable {
@@ -179,9 +178,10 @@ public final class TelemetryBridge: VMTelemetrySink {
     public func emit(_ event: TelemetryEvent) {
         queue.async {
             self.pending.append(event)
-            if self.pending.count >= 10 {
-                self.flush()
-            }
+            // DIAGNOSIS: flush on every event so telemetry flows even with a
+            // single tap (counter emits one signalWrite per tap). Restore the
+            // 10-event batching + 16ms timer after verifying the live path.
+            self.flush()
         }
     }
 
@@ -198,6 +198,7 @@ public final class TelemetryBridge: VMTelemetrySink {
         for event in batch {
             event.encode(into: &frame)
         }
+        NSLog("[FluxRT][telemetry] flush fired: %d events, %d bytes", batch.count, frame.count)
         // The concrete send is performed by the host transport, which retains
         // this bridge and observes `pending` via `takePending()`.
         onFlush?(frame)
@@ -227,49 +228,41 @@ public final class TelemetryBridge: VMTelemetrySink {
 /// state rule does not apply.
 nonisolated(unsafe) public var fluxDevtoolsSink: (any VMTelemetrySink)?
 
-/// Best-effort WebSocket connection from the host to the dev server's `:7333`
-/// DevTools endpoint. Telemetry frames are sent here; the server enriches them
-/// with source spans and broadcasts to connected DevTools clients. Sends are
-/// dropped if the endpoint is unavailable, so a missing dev server never
-/// affects the running app (spec §3 Key Principle 1).
-final class DevToolsSocket {
-    private let session: URLSession
-    private var task: URLSessionWebSocketTask?
-
-    init() {
-        session = URLSession(configuration: .default)
-    }
-
-    func connect(host: String = "127.0.0.1", port: UInt16 = 7333) {
-        guard let url = URL(string: "ws://\(host):\(port)/devtools") else { return }
-        let task = session.webSocketTask(with: url)
-        self.task = task
-        task.resume()
-    }
-
-    func send(_ data: Data) {
-        task?.send(.data(data)) { _ in }
-    }
-
-    func close() {
-        task?.cancel(with: .goingAway, reason: nil)
-        task = nil
+/// Safe append-only diagnostic logger to the app's Documents directory.
+/// The simulator's container lives on the Mac filesystem, so this is the
+/// reliable way to observe package-target (FluxHost) behaviour from the host.
+func fluxTrace(_ line: String) {
+    let fm = FileManager.default
+    guard let dir = fm.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+    let f = dir.appendingPathComponent("flux_tele.log")
+    let stamped = "\(Date()) \(line)\n"
+    if let fh = try? FileHandle(forWritingTo: f) {
+        fh.seekToEndOfFile()
+        fh.write(stamped.data(using: .utf8)!)
+        try? fh.close()
+    } else {
+        try? stamped.data(using: .utf8)?.write(to: f)
     }
 }
 
-nonisolated(unsafe) private var devtoolsSocket: DevToolsSocket?
-
-/// Opens the host → DevTools `:7333` channel and installs the telemetry sink so
-/// emitted VM/signal events flow to the dev server. Call once at host startup
-/// (DEBUG builds only). Safe to call when no dev server is running: the socket
-/// retries are not attempted, but sends before connect complete are dropped.
-public func fluxDevtoolsConnect(host: String = "127.0.0.1", port: UInt16 = 7333) {
-    let socket = DevToolsSocket()
-    socket.connect(host: host, port: port)
-    devtoolsSocket = socket
+/// Opens the host → DevTools channel and installs the telemetry sink so
+/// emitted VM/signal events flow to the dev server. Telemetry is sent over the
+/// existing host patch-channel WebSocket (`send`, supplied by the app — it is
+/// the same `FluxTransport.send` the host already uses for dispatch events).
+/// Routing to connected DevTools apps happens server-side (the dev server fans
+/// `Telemetry` `0x10` frames received on `:7331` out to every DevTools
+/// subscriber). This avoids a separate device→:7333 socket, which the iOS
+/// Simulator cannot reach (it only forwards the `:7331` loopback port).
+///
+/// Safe to call when no dev server is running: `send` simply drops frames.
+public func fluxDevtoolsConnect(send: @escaping (Data) -> Void) {
+    os_log(.fault, "RTFLUXTELE CONNECT_CALLED")
     let bridge = TelemetryBridge()
     fluxDevtoolsSetSink(bridge)
-    bridge.onFlush = { devtoolsSocket?.send($0) }
+    bridge.onFlush = { frame in
+        os_log(.fault, "RTFLUXTELE ONFLUSH %{public}d bytes", frame.count)
+        send(frame)
+    }
 }
 
 /// Attaches (or clears) the DevTools telemetry sink.
@@ -277,9 +270,20 @@ public func fluxDevtoolsSetSink(_ sink: (any VMTelemetrySink)?) {
     fluxDevtoolsSink = sink
 }
 
-/// Emits a telemetry event if a DevTools sink is attached (DEBUG builds only).
+/// Emits a telemetry event if a DevTools sink is attached.
 public func fluxDevtoolsEmit(_ event: TelemetryEvent) {
+    os_log(.fault, "RTFLUXTELE EMIT sink=%{public}s tag=%{public}s", fluxDevtoolsSink != nil ? "yes" : "no", eventTag(event))
     fluxDevtoolsSink?.emit(event)
+}
+
+/// Returns a stable tag string for an event (debug logging only).
+private func eventTag(_ event: TelemetryEvent) -> String {
+    switch event {
+    case .vmStep: return "vmStep"
+    case .signalWrite: return "signalWrite"
+    case .viewMutation: return "viewMutation"
+    case .handlerInvocation: return "handlerInvocation"
+    }
 }
 
 /// Encodes a `FluxValue` into `data` per Appendix D §D.5.
@@ -318,5 +322,3 @@ extension FixedWidthInteger {
         withUnsafeBytes(of: self.littleEndian) { Array($0) }
     }
 }
-
-#endif
