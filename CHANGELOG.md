@@ -211,6 +211,15 @@ are intentionally omitted (automation noise, not user-facing change).
   non-virtualized `ForEach` it would measure diff/reconcile, not scroll. Issue marked
   `status: blocked`; unblock when PRD-J + PRD-N land.
 
+### BLOCKED — timeline / flamegraph (FLUX-059)
+
+- Cannot land: the dependency `MetricRecord` (PRD-J) is absent from the tree. `flux-perf-harness`
+  is not a crate, and `MetricRecord` is referenced only in docs/README — never defined as a Rust
+  type in `crates/`. The `timeline` view (`views/timeline.rs`) exists but renders only a scrubber
+  counter; there is no perf-metric event variant to feed a flamegraph. Issue marked
+  `status: blocked`; unblock when PRD-J lands `flux-perf-harness` + `MetricRecord` (and FLUX-066
+  on-device instrumentation).
+
 ### CI — real Kotlin / Compose codegen check + rust-check unblock — DONE
 
 - Provision the Compose toolchain and run the real `kotlinc` codegen check without platform-37;

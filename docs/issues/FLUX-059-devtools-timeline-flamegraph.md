@@ -1,6 +1,6 @@
 ---
 id: FLUX-059
-status: todo
+status: blocked
 lane: LANE-P
 phase: "Phase 4"
 blocked_by:
@@ -19,7 +19,25 @@ related_adrs:
 - **Depends on:** PRD-J (`MetricRecord` schema) — DevTools and CI share one source
   of truth
 - **Source:** `CHANGELOG.md` §PRD-P deferred (user stories 3 & 8)
-- **Related ADRs:** ADR-0040
+- **Related ADRs:** ADR-0040 (host instrumentation)
+
+## Status (2026-08-29) — BLOCKED
+
+`status: blocked`. The `timeline` view exists (`crates/flux-devtools-ui/src/views/timeline.rs`)
+but renders only a scrubber counter (`event {at} / {len}`); it does **not** render a
+flamegraph because the data it must consume — PRD-J's `MetricRecord` stream — does not
+exist in the tree:
+
+- `flux-perf-harness` (PRD-J) is **not a crate**; there is no `crates/flux-perf-harness`.
+- `MetricRecord` (the patch-dispatch latency / VM-instruction timing / dirty-reconcile
+  size record) is referenced only in docs/README, never defined as a Rust type anywhere
+  in `crates/`. `rg MetricRecord|struct MetricRecord` returns only doc/README mentions.
+- `timeline_len`/`ReconstructedState` carry telemetry events, but no *perf metric* event
+  variant exists to feed a flamegraph.
+
+So there is no schema to ingest and nothing to render against. The issue's `blocked_by:
+PRD-J` is accurate. Unblock when PRD-J lands `flux-perf-harness` + `MetricRecord` (and its
+host instrumentation, FLUX-066 on-device). Recording honestly; not fabricated.
 
 ## Problem Statement
 
