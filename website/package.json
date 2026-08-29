@@ -12,6 +12,8 @@
     "check": "astro check",
     "check:i18n": "tsx scripts/check-i18n-drift.ts",
     "test:i18n": "tsx scripts/check-i18n-drift.test.ts",
+    "check:coverage": "tsx scripts/check-docs-coverage.ts",
+    "test:coverage": "tsx scripts/check-docs-coverage.test.ts",
     "make:fixtures": "tsx scripts/make-fixtures.ts"
   },
   "dependencies": {
