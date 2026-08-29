@@ -77,3 +77,18 @@ Android (`CrashReporter.kt`) remains unverified here: no `gradle`/`kotlinc` in
 this environment, and the Android host is in-flight parallel-owned. So the issue
 moves from `blocked` to `partial` — iOS done/verified, Android pending the
 native toolchain + parallel tree.
+
+## Status update (2026-08-29, Android verified)
+
+**Android native crash reporter authored + BUILD-VERIFIED** via
+`./gradlew :runtimes:android:app:compileDebugKotlin` (BUILD SUCCESSFUL). New
+files in `runtimes/android/app/src/main/kotlin/dev/flux/app/`:
+- `FluxError.kt` — Android mirror of PRD-K `FluxError` + `SourceSpan` (shared
+  with FLUX-028).
+- `CrashReporter.kt` — release-only `CrashReporter` object that maps a crash
+  into the PRD-K `FluxError` shape and installs a
+  `Thread.setDefaultUncaughtExceptionHandler`. The handler registration is a
+  one-line shell call at `FluxHostActivity` launch (RELEASE-TODO noted in-file).
+
+Both iOS and Android halves are now done/verified; issue is complete at the
+native-host level (real OS wiring flagged RELEASE-TODO on both platforms).

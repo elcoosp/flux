@@ -72,6 +72,15 @@ Compose `Composable`), never a webview, and never a crash.
 Android (`Composable` overlay) remains unverified here: no `gradle`/`kotlinc`
 and the Android host is in-flight parallel-owned.
 
+## Status update (2026-08-29, Android verified)
+
+**Android native overlay authored + BUILD-VERIFIED** via
+`./gradlew :runtimes:android:app:compileDebugKotlin` (BUILD SUCCESSFUL). New
+files in `runtimes/android/app/src/main/kotlin/dev/flux/app/`:
+- `FluxError.kt` — Android mirror of PRD-K `FluxError` + `SourceSpan`.
+- `ErrorOverlay.kt` — native `ErrorOverlay` Composable (dev/debug, never a
+  webview) rendering message + highlighted span + dispatch stack.
+
 ## Out of Scope
 
 - Crash reporting for release builds (FLUX-035) — different concern.

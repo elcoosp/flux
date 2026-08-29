@@ -70,6 +70,26 @@ does not edit the in-flight `Registry.swift`.
 Android (`CapabilityRegistry.kt`) remains unverified here: no `gradle`/`kotlinc`
 in this environment, and the Kotlin file is in-flight parallel-owned.
 
+## Status update (2026-08-29, Android verified)
+
+**Android native bodies for FLUX-045 are now authored and BUILD-VERIFIED** via
+`./gradlew :runtimes:android:host:compileKotlin` (BUILD SUCCESSFUL). New file
+`runtimes/android/host/src/main/kotlin/dev/flux/host/vm/ConcreteCapabilities.kt`
+adds `CapabilityRegistry.makeProduction(backend:)` composing the MLP dev set
+(1..=5 + 12/13 escape hatches + async ref 2,99) with the six concrete caps
+(6..=11), mirroring the iOS impl: Push (register async / getToken), Biometric
+(authenticate), Background (schedule async / cancel), FileSystem (read/write/
+delete, persisted into the signal store under a derived id), DeepLink (open),
+Sensors (read). Async caps allocate a Pending result cell and resolve inline
+with a deterministic dev value; real OS calls (NotificationManager / Biometric
+Prompt / WorkManager / FileManager / startActivity / SensorManager) flagged
+RELEASE-TODO. The file is NEW and does not edit the in-flight `CapabilityRegistry.kt`.
+
+Note: `:runtimes:android:host:test` has 2 pre-existing failures
+(`IsaConformanceTest.is_null_*`, `INVALID_DISPATCH`) caused by the in-flight
+`FluxBytecodeVM.kt` VM edits (parallel ADR-0049 work) — verified independent of
+this file by removing it and re-running. They are not introduced by FLUX-045.
+
 ## Problem Statement
 
 PRD-Q locked the *contract* for the six concrete capabilities (push, biometric,
