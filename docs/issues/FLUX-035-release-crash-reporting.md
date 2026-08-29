@@ -1,10 +1,10 @@
 ---
 id: FLUX-035
-status: todo
-lane: LANE-R
-phase: "Phase 8"
+status: blocked
 blocked_by:
   - PRD-K
+lane: LANE-R
+phase: "Phase 8"
 labels:
   - ecosystem
   - release
@@ -15,6 +15,17 @@ related_adrs: []
 ---
 
 # FLUX-035: Release crash reporting (Swift/Kotlin reporters)
+
+> **BLOCKED (verified 2026-08-29):** The `FluxError` shape this issue feeds
+> (PRD-K) IS present (`crates/flux-types/src/error.rs`; LANE-I unified hierarchy
+> DONE). But the deliverable is native Swift/Kotlin crash reporters wired into the
+> release hosts — no such file exists in `runtimes/ios` / `runtimes/android`, and
+> those runtime dirs are owned by parallel agents (the skill forbids editing them)
+> and cannot be compile-verified here (no `kotlinc`; `xcodebuild` exists but the
+> native files are in-flight-owned). A native crash reporter cannot be authored or
+> green-verified in this environment without trespassing the boundary contract.
+> Marked blocked; the host-side reporter is the native lane's work once PRD-K's
+> shape is consumed there.
 
 - **Lane:** LANE-R (Phase 8)
 - **Depends on:** PRD-K (`FluxError` taxonomy)

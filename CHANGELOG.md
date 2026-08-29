@@ -124,6 +124,14 @@ are intentionally omitted (automation noise, not user-facing change).
   `docs/embed-flux.md` "Embed Flux in an existing app" guide. These require editing/verifying
   parallel-owned native files and are out of this crate's scope.
 
+### BLOCKED — release crash reporting (FLUX-035)
+
+- Cannot land solo: the deliverable is native Swift/Kotlin crash reporters in the release
+  hosts (`runtimes/ios`, `runtimes/android`), which are parallel-owned runtime dirs the
+  boundary contract forbids editing, and cannot be compile-verified here (no `kotlinc`).
+  The `FluxError` shape it feeds IS present (PRD-K / LANE-I done), so the only remaining
+  work is the native-lane host integration. Issue marked `status: blocked`; not fabricated.
+
 ### BLOCKED — large-list scroll benchmark (FLUX-056)
 
 - Cannot land: both dependencies are absent from the tree. `flux-perf-harness` (PRD-J)
