@@ -23,13 +23,18 @@
 
 use std::ops::ControlFlow;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::Duration;
 
 use async_lsp::lsp_types;
 use async_lsp::{
-    LanguageServer, MainLoop,
+    ClientSocket, LanguageServer, MainLoop,
     lsp_types::{
-        Diagnostic, DiagnosticSeverity, DidOpenTextDocumentParams, InitializeParams,
-        InitializeResult, InitializedParams, Range, SemanticTokensParams, SemanticTokensResult,
+        CompletionOptions, CompletionParams, CompletionResponse, Diagnostic, DiagnosticSeverity,
+        DidChangeTextDocumentParams, DidOpenTextDocumentParams, GotoDefinitionParams,
+        GotoDefinitionResponse, Hover, HoverParams, InitializeParams, InitializeResult,
+        InitializedParams, PublishDiagnosticsParams, SemanticTokensParams, SemanticTokensResult,
         ServerCapabilities, ServerInfo, TextDocumentItem, TextDocumentSyncCapability,
         TextDocumentSyncKind, Url,
     },
@@ -37,11 +42,12 @@ use async_lsp::{
     stdio::{PipeStdin, PipeStdout},
 };
 
+mod completion;
+mod goto_def;
+mod hover;
 mod semantic_tokens;
+mod util;
 
-/// One LSP-shaped diagnostic, reusing the shape `flux-cli`'s `mod lsp` emits
-/// (`line`/`character`/`length`/`severity`/`message`/`source`) so the CLI JSON
-/// and the LSP `Diagnostic` never diverge.
 /// One LSP-shaped diagnostic, reusing the shape `flux-cli`'s `mod lsp` emits
 /// (`line`/`character`/`length`/`severity`/`message`/`source`) so the CLI JSON
 /// and the LSP `Diagnostic` never diverge.
@@ -68,20 +74,125 @@ pub struct LspDiagnostic {
 /// State for the Flux language server: an in-memory document cache keyed by URI.
 ///
 /// Per PRD-O the server is per-open-document; cross-file project analysis is a
-/// later concern (FLUX-029 extends this with incremental `didChange`).
+/// later concern (FLUX-029 extends this with incremental `didChange`). The
+/// optional `client` socket is used to publish `window/publishDiagnostics` after
+/// an incremental edit is debounced (see [`Self::did_change`]).
 #[derive(Debug, Default)]
 pub struct FluxLsp {
     /// Open documents keyed by their `file://` URI string.
     documents: std::sync::Mutex<std::collections::HashMap<Url, String>>,
+    /// The editor client socket, if the server was started with one (stdio
+    /// transport via [`run_stdio`]). `None` in unit tests that construct the
+    /// server directly — publishing becomes a no-op.
+    client: Option<ClientSocket>,
+    /// Monotonic per-URI version counter used to cancel stale debounced
+    /// re-analyses: a newer `didChange` for the same URI supersedes an older
+    /// pending one.
+    versions: std::sync::Mutex<std::collections::HashMap<Url, Arc<AtomicU32>>>,
 }
 
 impl FluxLsp {
-    /// Creates a new, empty server state.
+    /// Creates a new, empty server state (no editor client — publishing is a
+    /// no-op). Used by unit tests and non-LSP consumers.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Creates a server bound to an editor `client` socket so it can push
+    /// `window/publishDiagnostics` after debounced incremental re-analysis.
+    #[must_use]
+    pub fn with_client(client: ClientSocket) -> Self {
+        Self {
+            client: Some(client),
+            ..Self::default()
+        }
+    }
+
+    /// Debounced re-analysis delay after an incremental edit (FLUX-029).
+    ///
+    /// 50 ms matches the dev-server's watch-debounce (`ServerConfig`) so the
+    /// editor and the hot-reload loop re-compile on the same cadence.
+    const DEBOUNCE_MS: u64 = 50;
+
+    /// Updates the in-memory document cache for `uri` and schedules a debounced
+    /// re-analysis that publishes `window/publishDiagnostics` to the editor.
+    ///
+    /// Applied incrementally (the LSP client sends `TextDocumentContentChangeEvent`s
+    /// with `range`), so this is the FLUX-029 incremental path: only the cached
+    /// text is mutated, and the heavy `parse -> type_check` runs once per burst
+    /// of keystrokes, not per keystroke.
+    fn did_change(
+        &mut self,
+        params: DidChangeTextDocumentParams,
+    ) -> ControlFlow<async_lsp::Result<()>> {
+        let uri = params.text_document.uri.clone();
+        let version = params.text_document.version;
+        // Fold the incremental content changes into the cached document.
+        let mut docs = self.documents.lock().expect("documents mutex poisoned");
+        let text = docs.entry(uri.clone()).or_default();
+        for change in params.content_changes {
+            match change.range {
+                // Incremental: apply the edit at the given range.
+                Some(range) => {
+                    if let Some(updated) = crate::util::apply_range_edit(text, range, &change.text)
+                    {
+                        *text = updated;
+                    } else {
+                        // Fall back to full replace if the range can't be mapped
+                        // (defensive — should not happen with a conformant client).
+                        *text = change.text;
+                    }
+                }
+                // Full document sync: the client sent the entire new text.
+                None => *text = change.text,
+            }
+        }
+        drop(docs);
+
+        // Record this version and schedule a debounced publish tied to it.
+        let mut versions = self.versions.lock().expect("versions mutex poisoned");
+        let counter = versions
+            .entry(uri.clone())
+            .or_insert_with(|| Arc::new(AtomicU32::new(0)));
+        let my_version = counter.fetch_add(1, Ordering::SeqCst) + 1;
+        let counter = Arc::clone(counter);
+        drop(versions);
+
+        if let Some(client) = self.client.clone() {
+            let uri_for_task = uri.clone();
+            let path = std::path::PathBuf::from(uri.path());
+            let text = self
+                .documents
+                .lock()
+                .expect("documents mutex poisoned")
+                .get(&uri)
+                .cloned()
+                .unwrap_or_default();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(FluxLsp::DEBOUNCE_MS)).await;
+                // A newer edit superseded this one — skip the stale publish.
+                if counter.load(Ordering::SeqCst) != my_version {
+                    return;
+                }
+                let server = FluxLsp::new();
+                let diags = server.diagnostics_with_types(&path, &text, true);
+                let lsp_diags: Vec<Diagnostic> =
+                    diags.iter().map(FluxLsp::to_lsp_diagnostic).collect();
+                let _ = client.notify::<lsp_types::notification::PublishDiagnostics>(
+                    PublishDiagnosticsParams {
+                        uri: uri_for_task,
+                        diagnostics: lsp_diags,
+                        version: Some(version),
+                    },
+                );
+            });
+        }
+        ControlFlow::Continue(())
+    }
+}
+
+impl FluxLsp {
     /// Computes parse-only compiler diagnostics for `text`, mapping
     /// `flux-parser` parse errors into [`LspDiagnostic`]s.
     ///
@@ -117,7 +228,7 @@ impl FluxLsp {
             character: d.character.saturating_sub(1) + d.length,
         };
         Diagnostic {
-            range: Range { start, end },
+            range: lsp_types::Range { start, end },
             severity: Some(DiagnosticSeverity::ERROR),
             source: Some(d.source.clone()),
             message: d.message.clone(),
@@ -212,7 +323,7 @@ impl LanguageServer for FluxLsp {
             Ok(InitializeResult {
                 capabilities: ServerCapabilities {
                     text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                        TextDocumentSyncKind::FULL,
+                        TextDocumentSyncKind::INCREMENTAL,
                     )),
                     semantic_tokens_provider: Some(
                         async_lsp::lsp_types::SemanticTokensServerCapabilities::SemanticTokensOptions(
@@ -224,6 +335,17 @@ impl LanguageServer for FluxLsp {
                             },
                         ),
                     ),
+                    // FLUX-027: advertise the three new providers.
+                    hover_provider: Some(async_lsp::lsp_types::HoverProviderCapability::Simple(true)),
+                    definition_provider: Some(async_lsp::lsp_types::OneOf::Left(true)),
+                    completion_provider: Some(CompletionOptions {
+                        trigger_characters: Some(vec![
+                            ".".to_owned(),
+                            "(".to_owned(),
+                            ":".to_owned(),
+                        ]),
+                        ..Default::default()
+                    }),
                     ..Default::default()
                 },
                 server_info: Some(ServerInfo {
@@ -257,6 +379,10 @@ impl LanguageServer for FluxLsp {
         ControlFlow::Continue(())
     }
 
+    fn did_change(&mut self, params: DidChangeTextDocumentParams) -> Self::NotifyResult {
+        self.did_change(params)
+    }
+
     fn semantic_tokens_full(
         &mut self,
         params: SemanticTokensParams,
@@ -286,6 +412,85 @@ impl LanguageServer for FluxLsp {
             )))
         })
     }
+
+    fn definition(
+        &mut self,
+        params: GotoDefinitionParams,
+    ) -> futures::future::BoxFuture<
+        'static,
+        Result<Option<GotoDefinitionResponse>, async_lsp::ResponseError>,
+    > {
+        let uri = params.text_document_position_params.text_document.uri;
+        let pos = params.text_document_position_params.position;
+        let text = self
+            .documents
+            .lock()
+            .expect("documents mutex poisoned")
+            .get(&uri)
+            .cloned()
+            .unwrap_or_default();
+        Box::pin(async move {
+            let Some(cursor) = util::position_to_offset(&text, pos.line, pos.character) else {
+                return Ok(None);
+            };
+            let Some(ast) = flux_parser::parse(&text, 0, uri.path()).ok() else {
+                return Ok(None);
+            };
+            let Some(span) = goto_def::DefIndex::build(&ast).resolve(&text, cursor) else {
+                return Ok(None);
+            };
+            let range = util::span_to_range(&text, span);
+            Ok(Some(GotoDefinitionResponse::Scalar(
+                async_lsp::lsp_types::Location { uri, range },
+            )))
+        })
+    }
+
+    fn hover(
+        &mut self,
+        params: HoverParams,
+    ) -> futures::future::BoxFuture<'static, Result<Option<Hover>, async_lsp::ResponseError>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let pos = params.text_document_position_params.position;
+        let text = self
+            .documents
+            .lock()
+            .expect("documents mutex poisoned")
+            .get(&uri)
+            .cloned()
+            .unwrap_or_default();
+        Box::pin(async move {
+            let Some(cursor) = util::position_to_offset(&text, pos.line, pos.character) else {
+                return Ok(None);
+            };
+            let Ok(ast) = flux_parser::parse(&text, 0, uri.path()) else {
+                return Ok(None);
+            };
+            let Ok(typed) = flux_types::type_check(&ast) else {
+                return Ok(None);
+            };
+            Ok(hover::hover_at(&ast, &typed, &text, cursor))
+        })
+    }
+
+    fn completion(
+        &mut self,
+        params: CompletionParams,
+    ) -> futures::future::BoxFuture<
+        'static,
+        Result<Option<CompletionResponse>, async_lsp::ResponseError>,
+    > {
+        let uri = params.text_document_position.text_document.uri;
+        let pos = params.text_document_position.position;
+        let text = self
+            .documents
+            .lock()
+            .expect("documents mutex poisoned")
+            .get(&uri)
+            .cloned()
+            .unwrap_or_default();
+        Box::pin(async move { Ok(completion::completions_at(&text, pos)) })
+    }
 }
 
 /// Runs the `flux-lsp` server over a tokio stdio transport (stdin/stdout).
@@ -298,8 +503,8 @@ impl LanguageServer for FluxLsp {
 /// Propagates any error from the `async-lsp` main loop (transport EOF, malformed
 /// JSON-RPC, …).
 pub async fn run_stdio() -> async_lsp::Result<()> {
-    let router = Router::from_language_server(FluxLsp::new());
-    let (main_loop, _client_socket) = MainLoop::new_server(|_client| router);
+    let (main_loop, _client_socket) =
+        MainLoop::new_server(|client| Router::from_language_server(FluxLsp::with_client(client)));
     let stdin = PipeStdin::lock_tokio()?;
     let stdout = PipeStdout::lock_tokio()?;
     main_loop.run_buffered(stdin, stdout).await
@@ -406,5 +611,138 @@ mod tests {
         );
         let back: Vec<LspDiagnostic> = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(back, diags);
+    }
+
+    // FLUX-027 integration smoke test: the `definition` handler resolves a usage
+    // to its declaration span using the pure provider, over the real
+    // `LanguageServer` trait path.
+    #[tokio::test]
+    async fn definition_resolves_usage_to_declaration_span() {
+        use async_lsp::lsp_types::{Position, TextDocumentPositionParams};
+
+        let mut server = FluxLsp::new();
+        let uri: Url = "file:///counter.flux".parse().expect("uri");
+        let text = "compo Counter\n  Button(text: \"tap\")\n  Counter()\n".to_owned();
+        let _ = server.did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "flux".to_owned(),
+                version: 1,
+                text: text.clone(),
+            },
+        });
+
+        // Cursor on the `Counter()` usage (line 2, column 2).
+        let resp = server
+            .definition(GotoDefinitionParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: async_lsp::lsp_types::TextDocumentIdentifier {
+                        uri: uri.clone(),
+                    },
+                    position: Position {
+                        line: 2,
+                        character: 2,
+                    },
+                },
+                work_done_progress_params: Default::default(),
+                partial_result_params: Default::default(),
+            })
+            .await
+            .expect("definition ok");
+        let GotoDefinitionResponse::Scalar(loc) = resp.expect("some definition") else {
+            panic!("expected scalar location");
+        };
+        // Declaration `Counter` starts at byte 6 (0-based) → line 0, col 6.
+        assert_eq!(loc.range.start.line, 0);
+        assert_eq!(loc.range.start.character, 6);
+    }
+
+    #[test]
+    fn apply_range_edit_inserts_within_line() {
+        // Insert " world" at the end of line 0 ("compo Ok" -> "compo Ok world").
+        let range = async_lsp::lsp_types::Range {
+            start: async_lsp::lsp_types::Position {
+                line: 0,
+                character: 8,
+            },
+            end: async_lsp::lsp_types::Position {
+                line: 0,
+                character: 8,
+            },
+        };
+        let out =
+            crate::util::apply_range_edit("compo Ok\n", range, " world").expect("edit applies");
+        assert_eq!(out, "compo Ok world\n");
+    }
+
+    #[test]
+    fn apply_range_edit_replaces_span_across_lines() {
+        // Replace "Ok\n  Text" (lines 0-1) with "Bad\n  Button".
+        let range = async_lsp::lsp_types::Range {
+            start: async_lsp::lsp_types::Position {
+                line: 0,
+                character: 6,
+            },
+            end: async_lsp::lsp_types::Position {
+                line: 1,
+                character: 6,
+            },
+        };
+        let out = crate::util::apply_range_edit(
+            "compo Ok\n  Text(text: \"hi\")\n",
+            range,
+            "Bad\n  Button",
+        )
+        .expect("edit applies");
+        assert_eq!(out, "compo Bad\n  Button(text: \"hi\")\n");
+    }
+
+    #[test]
+    fn did_change_folds_incremental_edit_into_document_cache() {
+        use async_lsp::lsp_types::{
+            DidChangeTextDocumentParams, TextDocumentContentChangeEvent,
+            VersionedTextDocumentIdentifier,
+        };
+        let mut server = FluxLsp::new();
+        let uri: Url = "file:///edit.flux".parse().expect("uri");
+        // Seed via didOpen.
+        server.did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "flux".to_owned(),
+                version: 1,
+                text: "compo Ok\n  Text(text: \"hi\")\n".to_owned(),
+            },
+        });
+        // Incremental edit: change `Ok` -> `Bad` at line 0, col 6..8.
+        let range = async_lsp::lsp_types::Range {
+            start: async_lsp::lsp_types::Position {
+                line: 0,
+                character: 6,
+            },
+            end: async_lsp::lsp_types::Position {
+                line: 0,
+                character: 8,
+            },
+        };
+        server.did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: uri.clone(),
+                version: 2,
+            },
+            content_changes: vec![TextDocumentContentChangeEvent {
+                range: Some(range),
+                range_length: None,
+                text: "Bad".to_owned(),
+            }],
+        });
+        let cached = server
+            .documents
+            .lock()
+            .expect("documents mutex poisoned")
+            .get(&uri)
+            .cloned()
+            .expect("document cached");
+        assert_eq!(cached, "compo Bad\n  Text(text: \"hi\")\n");
     }
 }
