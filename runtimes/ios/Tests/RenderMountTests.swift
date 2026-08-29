@@ -39,7 +39,7 @@ private func mountNode(
 
 /// Builds a counter-shaped full `FluxFrame` and the executor it feeds.
 @MainActor
-private func counterExecutor() async -> FluxExecutor {
+private func counterExecutor() async -> FluxHost.FluxExecutor {
     let text = mountNode(10, componentId: 0, props: [Prop(index: 0, value: .str(7))])
     let button = mountNode(11, componentId: 1, props: [Prop(index: 0, value: .str(8))])
     let column = mountNode(20, componentId: 2, children: [.node(10), .node(11)])
@@ -117,7 +117,7 @@ final class RenderMountTests: XCTestCase {
     /// [initialRoute] is non-nil, signal 97 (the `Router.navigate` target,
     /// ADR-0045) is pre-seeded so the router presents that screen from the start.
     @MainActor
-    private func routerExecutor(initialRoute: String? = nil) -> FluxExecutor {
+    private func routerExecutor(initialRoute: String? = nil) -> FluxHost.FluxExecutor {
         let routeIndex: UInt16 = fnv1aRouteIndex()
         let home = mountNode(
             10, componentId: 6, kind: .screen,
