@@ -32,11 +32,17 @@ public final class ScreenAdapter: FluxAdapter {
         for child in views {
             child.translatesAutoresizingMaskIntoConstraints = false
             view.view.addSubview(child)
+            // Fill width, hug height, low-priority bottom (see ContainerAdapter):
+            // keeps the screen's content top-anchored instead of stretching
+            // full-height and pushing its children to the bottom.
+            child.setContentHuggingPriority(.required, for: .vertical)
+            let bottom = child.bottomAnchor.constraint(equalTo: view.view.bottomAnchor)
+            bottom.priority = .defaultLow
             NSLayoutConstraint.activate([
                 child.leadingAnchor.constraint(equalTo: view.view.leadingAnchor),
                 child.trailingAnchor.constraint(equalTo: view.view.trailingAnchor),
                 child.topAnchor.constraint(equalTo: view.view.topAnchor),
-                child.bottomAnchor.constraint(equalTo: view.view.bottomAnchor),
+                bottom,
             ])
         }
     }

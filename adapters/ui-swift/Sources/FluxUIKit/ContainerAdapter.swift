@@ -36,11 +36,21 @@ public final class ContainerAdapter: FluxAdapter {
         view.subviews.forEach { $0.removeFromSuperview() }
         for v in views {
             view.addSubview(v)
+            // Fill WIDTH (mirrors Android's `fillMaxWidth`) but HUG the content
+            // HEIGHT so the child stays top-anchored instead of being stretched to
+            // the container's full height. The bottom edge is pinned at LOW
+            // priority: the high-priority top pin + the child's required vertical
+            // hugging keep the child packed at the top. Pinning bottom at required
+            // would fight the hug and UIKit would resolve the ambiguity by pushing
+            // the content to the bottom (the "big gap, content at the bottom" bug).
+            v.setContentHuggingPriority(.required, for: .vertical)
+            let bottom = v.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            bottom.priority = .defaultLow
             NSLayoutConstraint.activate([
                 v.leadingAnchor.constraint(equalTo: view.leadingAnchor),
                 v.trailingAnchor.constraint(equalTo: view.trailingAnchor),
                 v.topAnchor.constraint(equalTo: view.topAnchor),
-                v.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+                bottom,
             ])
         }
     }
