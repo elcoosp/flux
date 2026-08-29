@@ -59,4 +59,26 @@ public interface FluxNativeView {
 
     /** Reads the last value set for [property], or `null`. */
     fun getProperty(property: String): Any?
+
+    /**
+     * Applies FLUX-044 accessibility props (`label`, `role`, `focusOrder`) to
+     * the native view's accessibility element.
+     *
+     * These props are host-render-only (no wire field); the dev server never
+     * sends them as a distinct field, so they are resolved by name from the
+     * same FNV-1a index space the server uses for every prop (AGENTS.md §3.2).
+     * Missing props are no-ops (degrade to default, never throw — §3.5).
+     */
+    fun applyAccessibility(props: Props) {
+        props.getString(PropsIndex.A11Y_LABEL)?.let { setProperty(PROP_ACCESSIBILITY_LABEL, it) }
+        props.getString(PropsIndex.A11Y_ROLE)?.let { setProperty(PROP_ACCESSIBILITY_ROLE, it) }
+        props.getString(PropsIndex.A11Y_FOCUS_ORDER)?.let { setProperty(PROP_ACCESSIBILITY_FOCUS_ORDER, it) }
+    }
+
+    /** Accessibility element property keys written by [applyAccessibility]. */
+    companion object {
+        const val PROP_ACCESSIBILITY_LABEL: String = "accessibilityLabel"
+        const val PROP_ACCESSIBILITY_ROLE: String = "accessibilityRole"
+        const val PROP_ACCESSIBILITY_FOCUS_ORDER: String = "accessibilityFocusOrder"
+    }
 }

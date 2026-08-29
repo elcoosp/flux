@@ -36,6 +36,8 @@ public final class TextAdapter: FluxAdapter {
             view.textAlignment = align.textAlignment
         }
         if let maxLines = new.getInt(named: "maxLines") { view.numberOfLines = Int(maxLines) }
+        // FLUX-044: surface host-render-only a11y props onto the label.
+        applyAccessibility(new, to: view)
     }
 
     public func setChildren(_ children: [AnyObject], on view: UILabel) {

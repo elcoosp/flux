@@ -47,6 +47,9 @@ public class TextAdapter private constructor() : FluxAdapter<FluxNativeView> {
             val v = maxLines.toInt()
             if (view.getProperty(PROP_MAX_LINES) != v) view.setProperty(PROP_MAX_LINES, v)
         }
+
+        // FLUX-044: surface host-render-only a11y props to the native view.
+        view.applyAccessibility(props)
     }
 
     override fun setChildren(

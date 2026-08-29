@@ -68,3 +68,40 @@ final class HandlerTarget: NSObject {
         }
     }
 }
+
+/// Surfaces FLUX-044 accessibility props (`label`, `role`, `focusOrder`) onto a
+/// UIKit view's accessibility element.
+///
+/// These props are host-render-only (no wire field); the dev server never sends
+/// them as a distinct field, so they are resolved by name from the same FNV-1a
+/// index space the server uses for every prop (AGENTS.md §3.2). Missing props
+/// are no-ops (degrade to default, never throw — §3.5).
+@MainActor
+func applyAccessibility(_ props: Props, to view: UIView) {
+    if let label = props.getAccessibilityLabel() {
+        view.accessibilityLabel = label
+    }
+    if let role = props.getAccessibilityRole() {
+        // UIKit exposes a fixed set of `UIAccessibilityTraits`; unknown roles
+        // fall back to the generic `.none` trait rather than throwing.
+        view.accessibilityTraits = UIAccessibilityTraits.fromFluxRole(role)
+    }
+    if let order = props.getAccessibilityFocusOrder() {
+        view.accessibilityHint = "focusOrder:\(order)"
+    }
+}
+
+extension UIAccessibilityTraits {
+    /// Maps a Flux `role` string to the closest UIKit accessibility trait.
+    static func fromFluxRole(_ role: String) -> UIAccessibilityTraits {
+        switch role.lowercased() {
+        case "button": return .button
+        case "link": return .link
+        case "header", "title": return .header
+        case "image": return .image
+        case "search": return .searchField
+        case "text", "textfield": return .staticText
+        default: return .none
+        }
+    }
+}

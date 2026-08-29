@@ -33,6 +33,9 @@ public class ButtonAdapter private constructor() : FluxAdapter<FluxNativeView> {
         props.getColor(PropsIndex.BUTTON_COLOR)?.let { color ->
             if (view.getProperty(PROP_COLOR) != color) view.setProperty(PROP_COLOR, color)
         }
+
+        // FLUX-044: surface host-render-only a11y props to the native view.
+        view.applyAccessibility(props)
     }
 
     override fun setChildren(

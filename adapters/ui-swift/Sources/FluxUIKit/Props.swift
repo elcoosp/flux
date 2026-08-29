@@ -110,6 +110,15 @@ public struct Props: Sendable, Hashable {
     /// Resolve a font prop by name.
     public func getFont(named name: String) -> FluxFount? { getFont(Self.propIndex(for: name)) }
 
+    /// Resolve the FLUX-044 accessibility label prop (`label`) by name.
+    public func getAccessibilityLabel() -> String? { getString(named: "label") }
+
+    /// Resolve the FLUX-044 accessibility role prop (`role`) by name.
+    public func getAccessibilityRole() -> String? { getString(named: "role") }
+
+    /// Resolve the FLUX-044 focus-order prop (`focusOrder`) by name.
+    public func getAccessibilityFocusOrder() -> String? { getString(named: "focusOrder") }
+
     public static func == (lhs: Props, rhs: Props) -> Bool { lhs.fields == rhs.fields }
 
     public func hash(into hasher: inout Hasher) { hasher.combine(digest) }

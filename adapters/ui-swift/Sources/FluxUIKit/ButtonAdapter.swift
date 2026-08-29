@@ -32,6 +32,8 @@ public final class ButtonAdapter: FluxAdapter {
         view.setTitle(title, for: .normal)
         view.isEnabled = new.getBool(named: "enabled") ?? true
         if let color = new.getColor(named: "color") { view.setTitleColor(color.uiColor, for: .normal) }
+        // FLUX-044: surface host-render-only a11y props onto the button.
+        applyAccessibility(new, to: view)
     }
 
     public func setChildren(_ children: [AnyObject], on view: UIButton) {}
