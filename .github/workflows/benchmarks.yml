@@ -17,7 +17,7 @@ jobs:
     # Remove the `if` to gate on every PR.
     if: github.event_name != 'pull_request'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -42,7 +42,7 @@ jobs:
 
       - name: Run benchmarks and save baseline
         run: |
-          cargo bench -- --save-baseline current
+          cargo bench -- --baseline current
           # Compact to a portable archive for artifact upload.
           tar -cf criterion-current.tar.zst -I zstd --exclude='*.csv' --exclude='*.json' target/criterion
 
