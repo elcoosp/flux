@@ -159,6 +159,28 @@ fn area(shape: Shape) -> Float {
             err.message
         );
     }
+
+    #[test]
+    fn optional_chaining_over_option_is_well_typed() {
+        // `user` is `Option[User]`; `user?.name` must type-check. `User` is an
+        // opaque single-variant type here, so the checker permissively widens
+        // the accessed field to `Option[fresh]` — still well-typed.
+        check_ok(
+            "type User = User(String)\n\ncompo Profile\n  state user: Option[User] = None\n  Text(user?.name)\n\n",
+        );
+    }
+
+    #[test]
+    fn optional_chaining_requires_option_base() {
+        // `n` is `Int` (non-nullable); `n?.foo` is a type error because `?.`
+        // only applies to `Option` bases.
+        let err = check_err("compo Bad\n  state n: Int = 0\n  Text(n?.foo)\n\n");
+        assert!(
+            err.message.contains("Option"),
+            "expected an Option-base error, got: {}",
+            err.message
+        );
+    }
 }
 
 mod instantiations {

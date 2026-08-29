@@ -55,6 +55,26 @@ pub(crate) fn prelude(supply: &mut Supply) -> Env {
             props: Vec::new(),
         }),
     );
+    // `None` / `Some(..)` are the `Option` value constructors (stdlib
+    // prelude, §18.3). Bind them so `Option`-valued state can be initialised
+    // and pattern-matched in source.
+    {
+        let none_var = supply.fresh();
+        let none_ty = TcType::Option(Box::new(TcType::Var(none_var)));
+        env.insert("None".to_owned(), Binding::Poly(Scheme {
+            vars: vec![none_var],
+            ty: none_ty,
+        }));
+        let some_var = supply.fresh();
+        let some_ty = TcType::Fn(
+            vec![TcType::Var(some_var)],
+            Box::new(TcType::Option(Box::new(TcType::Var(some_var)))),
+        );
+        env.insert("Some".to_owned(), Binding::Poly(Scheme {
+            vars: vec![some_var],
+            ty: some_ty,
+        }));
+    }
     env.insert(
         "Map".to_owned(),
         Binding::Ctor(CtorKind::Component {

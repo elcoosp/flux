@@ -97,6 +97,15 @@ pub enum ExprKind {
         /// Field name.
         field: Ident,
     },
+    /// Null-safe field access, e.g. `user?.name` (FLUX-053 / ADR-0051).
+    /// Yields `Option[T]` when the base is `Option[...]`; short-circuits to
+    /// `Null` when the base is `Null`.
+    OptField {
+        /// Receiver expression, whose type must be `Option[...]`.
+        base: Box<Expr>,
+        /// Field name.
+        field: Ident,
+    },
     /// A call, optionally with a trailing block (`Column(gap: 8) { … }`).
     Call {
         /// Callee expression.

@@ -116,6 +116,8 @@ pub(crate) enum TokenKind {
     FatArrow,
     /// `.` — a field or member access.
     Dot,
+    /// `?.` — optional (null-safe) member access (FLUX-053 / ADR-0051).
+    QuestionDot,
     /// `->` — a function return-type arrow.
     Arrow,
     /// `@` — an annotation marker.
@@ -369,7 +371,9 @@ impl<'s> Lexer<'s> {
             '.' if self.peek_at(1) == Some('.') && self.peek_at(2) == Some('.') => {
                 self.take(TokenKind::Ellipsis, 3)
             }
+            '.' if self.peek_at(1) == Some('?') => self.take(TokenKind::QuestionDot, 2),
             '.' => self.take(TokenKind::Dot, 1),
+            '?' if self.peek_at(1) == Some('.') => self.take(TokenKind::QuestionDot, 2),
             '=' if self.peek_at(1) == Some('>') => self.take(TokenKind::FatArrow, 2),
             '=' if self.peek_at(1) == Some('=') => self.take(TokenKind::EqEq, 2),
             '=' => self.take(TokenKind::Eq, 1),
@@ -582,5 +586,29 @@ impl<'s> Lexer<'s> {
     /// Start byte of the current line (used as a zero-width span anchor).
     fn line_start(&self) -> usize {
         self.src[..self.cur_byte()].rfind('\n').map_or(0, |i| i + 1)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lexes_optional_access() {
+        let toks = lex("user?.name", 1).expect("lex");
+        let kinds: Vec<&str> = toks
+            .iter()
+            .map(|t| match t.kind {
+                TokenKind::Ident => "ident",
+                TokenKind::QuestionDot => "?.",
+                TokenKind::Dot => ".",
+                TokenKind::Eof => "eof",
+                _ => "other",
+            })
+            .collect();
+        assert!(
+            kinds.contains(&"?."),
+            "expected a QuestionDot token in {kinds:?}"
+        );
     }
 }

@@ -938,6 +938,17 @@ impl<'s> Parser<'s> {
                         span: expr.span,
                     };
                 }
+                TokenKind::QuestionDot => {
+                    self.eat(TokenKind::QuestionDot)?;
+                    let field = self.ident()?;
+                    expr = Expr {
+                        kind: ExprKind::OptField {
+                            base: Box::new(expr.clone()),
+                            field,
+                        },
+                        span: expr.span,
+                    };
+                }
                 TokenKind::LParen => {
                     let args = self.call_args()?;
                     let end = self.last_end();
@@ -1986,6 +1997,10 @@ fn shift_kind(kind: ExprKind, delta: u32) -> ExprKind {
             rhs: Box::new(shift_spans(*rhs, delta)),
         },
         ExprKind::Field { base, field } => ExprKind::Field {
+            base: Box::new(shift_spans(*base, delta)),
+            field: shift_ident(field, delta),
+        },
+        ExprKind::OptField { base, field } => ExprKind::OptField {
             base: Box::new(shift_spans(*base, delta)),
             field: shift_ident(field, delta),
         },
