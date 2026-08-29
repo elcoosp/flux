@@ -5,7 +5,7 @@
 // scalar types (Int, Float, Bool, String, Unit), the collection types
 // (List, Map, Option), the stdlib traits (Numeric, Eq, Show — see
 // traits.flux), the adapter components (Text, Button, Column, Row,
-// TextField, Router, Screen — see the corresponding files), and the
+// TextInput, Router, Screen — see the corresponding files), and the
 // auxiliary value types declared in this file are all in scope without an
 // explicit import.
 //
@@ -31,13 +31,13 @@ type Alignment =
   | Bottom
   | Fill
 
-// Text overflow behavior when content exceeds `max_lines`.
+// Text overflow behavior when content exceeds `maxLines`.
 type Overflow =
   | Clip
   | Ellipsis
   | Visible
 
-// Software keyboard flavor requested by a `TextField`.
+// Software keyboard flavor requested by a `TextInput`.
 type KeyboardType =
   | Default
   | Email
@@ -52,7 +52,7 @@ type ContentMode =
   | Center
 
 // Opaque platform reference to a native view, produced by `createRef`.
-// `T` is the referenced view kind (e.g. `Ref[TextField]`).
+// `T` is the referenced view kind (e.g. `Ref[TextInput]`).
 type Ref[T] = Ref(T)
 
 // An interactive callback bound to a host handler id. The wrapped function

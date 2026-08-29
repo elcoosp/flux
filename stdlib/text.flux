@@ -6,7 +6,7 @@
 //   size        Option[Float]   defaults to None when omitted
 //   color       Option[Color]   defaults to None when omitted
 //   alignment   Option[Alignment] defaults to None when omitted
-//   max_lines   Option[Int]     defaults to None when omitted
+//   maxLines    Option[Int]     defaults to None when omitted
 //   overflow    Option[Overflow]  defaults to None when omitted
 //
 // The `= None` defaults encode Appendix F.1's "optional" props. `prop_decl`
@@ -24,7 +24,7 @@ compo Text(
   size: Option[Float] = None,
   color: Option[Color] = None,
   alignment: Option[Alignment] = None,
-  max_lines: Option[Int] = None,
+  maxLines: Option[Int] = None,
   overflow: Option[Overflow] = None,
 )
   // Adapter leaf — native rendering defined by Appendix F.1.

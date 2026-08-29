@@ -2,35 +2,37 @@
 //
 // Capabilities expose vetted platform APIs to the VM. The VM has no
 // `CALL_NATIVE`; the only mechanism for platform calls is `CALL_CAP` with a
-// capability id (mlp-spec §24). These declarations are declarations only —
-// the bodies are bound per-platform (dev mode runs in-memory stand-ins;
-// release mode calls native directly, per §24.2/§24.3). No method bodies are
+// capability id (mlp-spec §24). These declarations are declarations only — the
+// bodies are bound per-platform (dev mode runs in-memory stand-ins; release
+// mode calls native directly, per §24.2/§24.3). No method bodies are
 // provided here.
 //
-// `Data` is the opaque binary payload type shared with these capabilities;
-// it is declared in prelude.flux and is in scope via the implicit prelude.
+// `Data` is the opaque binary payload type shared with these capabilities; it
+// is declared in prelude.flux and is in scope via the implicit prelude.
 //
 // IDs are stable and match the native `CapabilityRegistry` tables (cap 1 =
 // Camera, cap 2 = Storage, cap 3 = Router, cap 4 = Clipboard, cap 5 =
-// Geolocation). Sync vs async is a binding detail: sync methods return
+// Geolocation). Sync vs async is a binding detail declared by `fn` vs
+// `async fn` in this IDL (NOT a method-name suffix): sync methods return
 // immediately; async methods (most platform calls — camera, permissions,
 // network) resolve through the VM's await machinery (ADR-0044 / ADR-0045) and
-// return a `Result` on failure.
+// return a `Result` on failure. Method names mirror the Expo Modules verb
+// surface (e.g. `takePicture`, `setString`) so RN/Expo developers feel at home.
 
 capability Camera {
-  // requires: .camera — every Camera method (take/startPreview/stopPreview) needs
-  // the OS camera grant; a denied grant returns a `Capability` error, never a crash.
-  fn take() -> Data
+  // requires: .camera — every Camera method needs the OS camera grant; a denied
+  // grant returns a `Capability` error, never a crash.
+  fn takePicture() -> Data
   fn startPreview() -> Unit
   fn stopPreview() -> Unit
 }
 
 capability Storage {
-  // requires: .storage — every Storage method (set/get/delete) needs the OS
-  // storage grant; a denied grant returns a `Capability` error, never a crash.
-  fn set(key: String, value: Data) -> Unit
-  fn get(key: String) -> Option[Data]
-  fn delete(key: String) -> Unit
+  // requires: .storage — every Storage method needs the OS storage grant; a
+  // denied grant returns a `Capability` error, never a crash.
+  fn setItem(key: String, value: Data) -> Unit
+  fn getItem(key: String) -> Option[Data]
+  fn removeItem(key: String) -> Unit
 }
 
 capability Router {
@@ -39,29 +41,30 @@ capability Router {
 }
 
 capability Clipboard {
-  // requires: .clipboard — every Clipboard method (set/get) needs the OS
-  // pasteboard grant; a denied grant returns a `Capability` error, never a crash.
-  fn set(value: Data) -> Unit
-  fn get() -> Option[Data]
+  // requires: .clipboard — every Clipboard method needs the OS pasteboard
+  // grant; a denied grant returns a `Capability` error, never a crash.
+  fn setString(value: Data) -> Unit
+  fn getString() -> Option[Data]
 }
 
 capability Geolocation {
   // requires: .location — `get` needs the OS location grant; a denied grant
   // returns a `Capability` error, never a crash.
-  fn get() -> Option[Data]
+  fn getCurrentPosition() -> Option[Data]
 }
 
 // --- FLUX-045: six concrete native capabilities (PRD-Q deferred set) ---
 // IDs continue the stable sequence (cap 6..=11) and must match
 // `CAPABILITY_IDL` in crates/flux-types/src/capabilities.rs. The bodies are
 // bound per-platform in the native `CapabilityRegistry` (runtimes/android/host
-// + runtimes/ios); dev mode runs in-memory stand-ins.
+// + runtimes/ios); dev mode runs in-memory stand-ins. Method names mirror the
+// Expo Modules surface.
 
 capability Push {
   // requires: .notification — posting local/remote notifications needs the OS
   // notification grant; resolves async via the VM's await machinery (ADR-0045).
-  fn register() -> Unit
-  fn notify(payload: Data) -> Unit
+  fn registerForNotifications() -> Unit
+  fn scheduleNotification(payload: Data) -> Unit
 }
 
 capability Biometric {
@@ -76,14 +79,14 @@ capability Background {
 
 capability FileSystem {
   // requires: .filesystem — read/write/delete the app's sandboxed file system.
-  fn read(path: String) -> Option[Data]
-  fn write(path: String, value: Data) -> Unit
+  fn readAsString(path: String) -> Option[Data]
+  fn writeAsString(path: String, value: Data) -> Unit
   fn delete(path: String) -> Unit
 }
 
 capability DeepLink {
   // requires: .none — opening external URLs / universal links is always permitted.
-  fn open(url: String) -> Unit
+  fn openURL(url: String) -> Unit
 }
 
 capability Sensors {

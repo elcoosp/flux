@@ -2,7 +2,7 @@
 //
 // Props follow the Appendix F.2 contract exactly:
 //   text      String   required
-//   onClick   Handler  required — fired on tap
+//   onPress   Handler  required — fired on tap (RN `Button` verb)
 //   enabled   Bool     defaults to true when omitted
 //   color     Option[Color] defaults to None when omitted
 //
@@ -16,7 +16,7 @@
 
 compo Button(
   text: String,
-  onClick: Handler,
+  onPress: Handler,
   enabled: Bool = true,
   color: Option[Color] = None,
 )

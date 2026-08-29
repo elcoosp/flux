@@ -14,16 +14,16 @@
 compo App
     Column gap: 8.0
         // Root navigation container; the visible screen is driven by signal 97.
-        Router initial: "home"
+        Router initialRouteName: "home"
             Screen route: "home"
                 Column gap: 16.0
                     Text text: "Home"
-                    Button text: "Go to Settings", onClick: || {
+                    Button text: "Go to Settings", onPress: || {
                         Router.navigate("settings")
                     }
             Screen route: "settings"
                 Column gap: 16.0
                     Text text: "Settings"
-                    Button text: "Go to Home", onClick: || {
+                    Button text: "Go to Home", onPress: || {
                         Router.navigate("home")
                     }
