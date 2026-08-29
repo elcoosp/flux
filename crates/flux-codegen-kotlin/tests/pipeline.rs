@@ -438,3 +438,18 @@ fn flux_037_layout_primitives_codegen() {
         "SafeArea missing Scaffold mapping:\n{out}"
     );
 }
+
+#[test]
+fn flux_039_image_primitive_codegen() {
+    // FLUX-039: `Image(src)` must lower to the native image binding on the
+    // Kotlin backend. Caching is a host-side concern (Coil/URLCache); the
+    // primitive only carries the `src` prop.
+    let src = r#"compo Pic
+  Image(url: "assets/logo.png")
+"#;
+    let out = codegen_example("image_primitive", src);
+    assert!(
+        out.contains("painterResource("),
+        "Image missing painterResource mapping:\n{out}"
+    );
+}

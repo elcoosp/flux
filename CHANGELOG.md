@@ -111,6 +111,16 @@ are intentionally omitted (automation noise, not user-facing change).
   view bodies (UIKit/SwiftUI + Compose) read these registry names; their render mapping is the
   same contract the other primitives use.
 
+### Stdlib — Image primitive (FLUX-039) — PARTIAL
+
+- The `Image` primitive is already registered in the ADR-0047 registry (`url` primary prop,
+  Kotlin `Image(painterResource(...))` / Swift `Image(uiImage: UIImage(named:))`) and seeded in
+  the prelude; a Kotlin codegen trace test now pins that `Image(src)` lowers to the native image
+  binding (`crates/flux-codegen-kotlin/tests/pipeline.rs`).
+- REMAINING (host-side, native lane): the actual local/remote cache (Coil on Android,
+  `URLCache` on iOS) is a host concern that lives in `runtimes/android/host` + `runtimes/ios`
+  and is out of this crate's scope; not compile-verified here.
+
 ### IR — B.3 handler-lowering gap closed (FLUX-063) — DONE
 
 - The 6 B.3 examples the issue flagged (b32, b33, b35, b36, b38, b310) with
