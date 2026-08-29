@@ -160,6 +160,56 @@ impl Backend for Swift {
         spec.swift_view
     }
 
+    fn animation_spec(curve: &str) -> String {
+        // FLUX-042: map the Flux curve name onto a SwiftUI `Animation` value.
+        // Named curves reduce to the standard `Animation.*` spellings; unknown
+        // curves fall back to `.default` so the generated source always compiles.
+        let trimmed = curve.trim().trim_matches('"');
+        let spec = match trimmed {
+            "spring" => "Animation.spring()",
+            "easeIn" => "Animation.easeIn",
+            "easeOut" => "Animation.easeOut",
+            "easeInOut" => "Animation.easeInOut",
+            "linear" => "Animation.linear",
+            "bouncy" => "Animation.bouncy",
+            "smooth" => "Animation.smooth",
+            other => {
+                // A custom spec string (e.g. `Animation.spring(response: …)`) is
+                // passed through verbatim; a bare token defaults to `.default`.
+                if other.is_empty() {
+                    "Animation.default"
+                } else {
+                    other
+                }
+            }
+        };
+        format!("withAnimation({spec})")
+    }
+
+    fn theme_extension(tokens: &[flux_codegen_core::primitives::DesignToken]) -> String {
+        // FLUX-043: a Swift `enum FluxTheme` exposing every token as a static
+        // computed value, so components reference `FluxTheme.colorPrimary` by
+        // name. Colors use the SwiftUI `Color` literal; spacing/typography use
+        // the raw point/`CGFloat` value (no `.sp`/`.dp` unit in Swift).
+        let mut out = String::from("enum FluxTheme {\n");
+        // Build the cases from the table.
+        let cases: Vec<String> = tokens
+            .iter()
+            .map(|t| {
+                let value = match t.group {
+                    flux_codegen_core::primitives::TokenGroup::Color => format!("static let {} = {}", t.name, t.swift),
+                    _ => format!("static let {}: CGFloat = {}", t.name, t.swift),
+                };
+                value
+            })
+            .collect();
+        for case in cases {
+            out.push_str(&format!("    {case}\n"));
+        }
+        out.push_str("}\n");
+        out
+    }
+
     fn component_body_indent() -> usize {
         // `struct Name: View {` at 0, props/`@State` at 4, `var body:` at 4,
         // then body children at 2 spaces (level 2).

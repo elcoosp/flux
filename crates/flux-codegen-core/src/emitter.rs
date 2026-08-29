@@ -79,6 +79,11 @@ impl<'a, B: Backend> Emitter<'a, B> {
     /// lowered `Component` node, in packing order.
     pub fn emit_program(&mut self) {
         self.emit_sum_types();
+        // FLUX-043: emit the native design-token theme extension once, before
+        // the components, so every component can reference tokens by name
+        // (e.g. `FluxTheme.colorPrimary`) instead of per-component literals.
+        self.push_raw(&B::theme_extension(crate::primitives::theme_tokens()));
+        self.push_raw("\n");
         let ids: Vec<NodeId> = self.lowered.arena.all_ids().collect();
         let mut first = true;
         for id in ids {
@@ -478,6 +483,20 @@ impl<'a, B: Backend> Emitter<'a, B> {
                 // catch-all so the committed parity snapshots stay valid; richer
                 // native shaping is future work once their dev-model semantics land.
                 self.line(indent, &format!("{name}()"));
+            }
+            PrimitiveKind::Animate => {
+                // FLUX-042: wrap the child subtree in the host-native
+                // `withAnimation(spec) { … }` call. The curve is data the host
+                // consumes; the signal is read off the `signal` prop.
+                let curve = props
+                    .get("curve")
+                    .or_else(|| props.get("signal"))
+                    .map(String::as_str)
+                    .unwrap_or("");
+                let spec = B::animation_spec(curve);
+                self.line(indent, &format!("{spec} {{"));
+                self.emit_trailing_or_children(trailing.as_deref(), id, indent + B::CHILD_STEP);
+                self.line(indent, "}");
             }
             PrimitiveKind::Router | PrimitiveKind::Screen => {
                 // `Router`/`Screen` lower as `Primitive` nodes (not dedicated

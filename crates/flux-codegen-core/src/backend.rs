@@ -159,6 +159,23 @@ pub trait Backend {
     #[must_use]
     fn native_name(spec: &PrimitiveSpec) -> &'static str;
 
+    /// Renders the animation-curve spec literal for an `Animate` wrapper
+    /// (FLUX-042). `curve` is the `Animate` node's `curve` prop value rendered
+    /// as a Flux expression (e.g. `"easeInOut"` / `"spring"`); the backend maps
+    /// it onto the host-native curve spelling. SwiftUI: `withAnimation(.easeInOut)`
+    /// / `.spring()`; Compose: `withAnimation(...)`. The signal the animation
+    /// drives is data the host consumes; this returns only the spec that wraps
+    /// the child subtree.
+    #[must_use]
+    fn animation_spec(curve: &str) -> String;
+
+    /// Emits the native design-token theme extension (FLUX-043) covering every
+    /// token in `tokens`. The extension is a top-level declaration the generated
+    /// module ships once so components reference tokens by name rather than
+    /// per-component literals. Returns the full native source for the extension.
+    #[must_use]
+    fn theme_extension(tokens: &[crate::primitives::DesignToken]) -> String;
+
     // ----- Component / sum-type header hooks (write into the emitter) -----
 
     /// The indentation level at which a component body's children are emitted.

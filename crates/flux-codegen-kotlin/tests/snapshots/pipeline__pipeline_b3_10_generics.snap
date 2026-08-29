@@ -2,6 +2,17 @@
 source: crates/flux-codegen-kotlin/tests/pipeline.rs
 expression: "codegen_example(name, src)"
 ---
+object FluxTheme {
+    val colorPrimary = Color(0xFF6750A4)
+    val colorSecondary = Color(0xFF625B71)
+    val colorSurface = Color(0xFFFEF7FF)
+    val spaceSm = 4.dp
+    val spaceMd = 8.dp
+    val spaceLg = 16.dp
+    val textBody = 17.sp
+    val textTitle = 28.sp
+}
+
 @Composable fun List(
      items: List<T>
 ) {

@@ -163,6 +163,52 @@ impl Backend for Kotlin {
         spec.kotlin_view
     }
 
+    fn animation_spec(curve: &str) -> String {
+        // FLUX-042: map the Flux curve name onto a Compose `AnimationSpec`.
+        // Named curves reduce to the standard spellings; unknown curves fall
+        // back to `tween()` so the generated source always compiles.
+        let trimmed = curve.trim().trim_matches('"');
+        let spec = match trimmed {
+            "spring" => "spring()",
+            "easeIn" => "tween(easing = FastOutLinearInEasing)",
+            "easeOut" => "tween(easing = LinearOutSlowInEasing)",
+            "easeInOut" => "tween(easing = FastOutSlowInEasing)",
+            "linear" => "tween(easing = LinearEasing)",
+            other => {
+                if other.is_empty() {
+                    "tween()"
+                } else {
+                    other
+                }
+            }
+        };
+        format!("withAnimation({spec})")
+    }
+
+    fn theme_extension(tokens: &[flux_codegen_core::primitives::DesignToken]) -> String {
+        // FLUX-043: a Kotlin `object FluxTheme` exposing every token as a
+        // property, so components reference `FluxTheme.colorPrimary` by name.
+        // Colors use the Compose `Color(...)` literal; spacing uses `.dp`;
+        // typography uses `.sp`.
+        let mut out = String::from("object FluxTheme {\n");
+        for tok in tokens {
+            let value = match tok.group {
+                flux_codegen_core::primitives::TokenGroup::Color => {
+                    format!("    val {} = {}\n", tok.name, tok.kotlin)
+                }
+                flux_codegen_core::primitives::TokenGroup::Spacing => {
+                    format!("    val {} = {}\n", tok.name, tok.kotlin)
+                }
+                flux_codegen_core::primitives::TokenGroup::Typography => {
+                    format!("    val {} = {}\n", tok.name, tok.kotlin)
+                }
+            };
+            out.push_str(&value);
+        }
+        out.push_str("}\n");
+        out
+    }
+
     fn component_body_indent() -> usize {
         // `@Composable fun Name(` then `) {` then `var …`/`body` at level 1.
         1

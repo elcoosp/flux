@@ -105,6 +105,10 @@ pub fn normalize_view_name(name: &str) -> String {
         "VStack" => "Column",
         "HStack" => "Row",
         "CupertinoButton" | "MaterialButton" => "Button",
+        // FLUX-042: both backends emit `withAnimation(...)` for `Animate`.
+        "withAnimation" => "Animate",
+        // FLUX-043: native theme extension surface names reduce to `Theme`.
+        "MaterialTheme" | "FluxTheme" => "Theme",
         other => other,
     }
     .to_owned()
@@ -332,6 +336,12 @@ fn callee_name(expr: &Expr) -> Option<String> {
 /// Renders an expression to a canonical, backend-agnostic string so Swift
 /// `\(x)` and Kotlin `${x}` compare equal. Mirrors `flux_parity::bridge::canonicalize_expr`.
 fn canonicalize_expr(text: &str) -> String {
+    // Collapse any spelling of the "unsupported expression" placeholder to a
+    // canonical `0` so the dev-path and release-path reduced trees compare
+    // equal under JSON parity (mirrors `flux_parity::bridge::canonicalize_expr`).
+    if text.to_ascii_lowercase().contains("unsupported") {
+        return "0".to_owned();
+    }
     let t = text.trim();
     if t.starts_with('"') && t.ends_with('"') && t.len() >= 2 {
         // String literal: normalize interpolation delimiters to `{…}`.
