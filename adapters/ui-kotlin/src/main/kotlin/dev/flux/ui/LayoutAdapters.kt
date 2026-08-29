@@ -3,15 +3,13 @@ package dev.flux.ui
 import java.lang.ref.WeakReference
 import kotlin.collections.List as KList
 
-/**
- * Declarative adapters for the FLUX-037 layout primitives (`Stack`, `Grid`,
- * `Spacer`, `SafeArea`), unified tier (AGENTS.md §3.5).
- *
- * Each maps a Flux layout node to a platform-neutral [FluxNativeView] carrying
- * the props the host renderer consumes. Children are reconciled by stable node
- * id (keyed reconciliation, §3.5) so reorders preserve child state. Each node
- * gets its own adapter instance via [create] (FLUX-007).
- */
+// Declarative adapters for the FLUX-037 layout primitives (`Stack`, `Grid`,
+// `Spacer`, `SafeArea`), unified tier (AGENTS.md §3.5).
+//
+// Each maps a Flux layout node to a platform-neutral FluxNativeView carrying
+// the props the host renderer consumes. Children are reconciled by stable node
+// id (keyed reconciliation, §3.5) so reorders preserve child state. Each node
+// gets its own adapter instance via create (FLUX-007).
 
 /** `Stack` — z-order overlay of children (SwiftUI `ZStack` / Compose `Box`). */
 public class StackAdapter private constructor() : FluxAdapter<FluxNativeView> {

@@ -3,21 +3,19 @@ package dev.flux.ui
 import java.lang.ref.WeakReference
 import kotlin.collections.List as KList
 
-/**
- * Declarative adapters for the FLUX-038 overlay containers (`Modal` / `Sheet` /
- * `Dialog`) and the FLUX-042 signal-graph animation wrapper (`Animate`),
- * unified tier (AGENTS.md §3.5).
- *
- * Each hosts its `content` / animated subtree as children and binds any
- * `onDismiss` handler. The native *presentation* (a hosted sheet / alert /
- * dialog) and the native *animation* (`withAnimation`) are gated on the ADR-0048
- * iOS dev-tier convergence decision — until then these adapters degrade to a
- * plain container carrying the children, so a Flux app can author and render the
- * primitives today without a blank screen (the dev/release parity mapping is
- * already pinned by `flux-parity`).
- *
- * Each node gets its own adapter instance via [create] (FLUX-007).
- */
+// Declarative adapters for the FLUX-038 overlay containers (`Modal` / `Sheet` /
+// `Dialog`) and the FLUX-042 signal-graph animation wrapper (`Animate`),
+// unified tier (AGENTS.md §3.5).
+//
+// Each hosts its `content` / animated subtree as children and binds any
+// `onDismiss` handler. The native *presentation* (a hosted sheet / alert /
+// dialog) and the native *animation* (`withAnimation`) are gated on the ADR-0048
+// iOS dev-tier convergence decision — until then these adapters degrade to a
+// plain container carrying the children, so a Flux app can author and render the
+// primitives today without a blank screen (the dev/release parity mapping is
+// already pinned by `flux-parity`).
+//
+// Each node gets its own adapter instance via create (FLUX-007).
 
 /** `Modal` — centered modal over a scrim (Compose `Dialog`). */
 public class ModalAdapter private constructor() : FluxAdapter<FluxNativeView> {

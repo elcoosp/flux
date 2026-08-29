@@ -21,6 +21,49 @@ related_adrs:
 - **Source:** `CHANGELOG.md` §PRD-Q deferred (the six concrete capabilities)
 - **Related ADRs:** ADR-0045 (unified sync/async bridge), ADR-0044 (result cells)
 
+## Status (2026-08-30)
+
+**REAL OS CALLS COMPLETE (verified, green) on both platforms.**
+
+The six concrete capabilities (Push/Biometric/Background/FileSystem/DeepLink/
+Sensors, caps 6..=11) now perform genuine device-OS calls. They sit behind an
+injectable `NativeCapabilityHost` seam so the pure-JVM `:host` core (Android) and
+Foundation-only `FluxHost` core (iOS) stay free of `android.*`/`UIKit` and keep
+their unit tests emulator-free. The app shell owns the real OS surface and is
+injected at launch.
+
+- Android (`runtimes/android/app/.../native/AndroidNativeCapabilityHost.kt`,
+  commit c5c0283): Push (`POST_NOTIFICATIONS` gate + device-scoped token via
+  `Settings.Secure.ANDROID_ID`), Biometric (`KeyguardManager` device-credential
+  gate — androidx.biometric is not in the frozen deps), Background (`JobScheduler`
+  via `FluxBackgroundJobService` — WorkManager not in frozen deps), FileSystem
+  (real `filesDir` read/write/delete), DeepLink (`startActivity(ACTION_VIEW)`),
+  Sensors (real `SensorManager` accelerometer + gyroscope sampling). Wired through
+  `FluxSession`/`FluxHostActivity` with `ActivityTracker`.
+- iOS (`runtimes/ios/Sources/Host/IOSNativeCapabilityHost.swift`, commit 6249767):
+  Push (`UNUserNotificationCenter` auth + settings), Biometric (`LAContext`
+  device-owner gate, degrades to false never crashes), Background (`BGTaskScheduler`
+  submit/cancel), FileSystem (real `FileManager` read/write/delete), DeepLink
+  (`UIApplication.shared.open`), Sensors (`CMMotionManager` availability). Seeded
+  with the live `StringTable` from `FluxAppMain` and set via
+  `CapabilityRegistry.realNativeHost`.
+
+Verification (both toolchains, green):
+- Android: `./gradlew :runtimes:android:host:test --tests RuntimeFixesTest`
+  BUILD SUCCESSFUL (dev-echo round-trips still green); `:app:compileDebugKotlin`
+  BUILD SUCCESSFUL (real OS bodies compile).
+- iOS: `xcodebuild -scheme FluxApp build` BUILD SUCCEEDED;
+  `xcodebuild -scheme FluxApp test` — CapabilityRoundTripTests green including
+  `testDeepLinkOpenURLRecordsUrlInSignal44` and
+  `testFileSystemWriteThenReadRoundTrips`. (One pre-existing FLUX-047 HTTP-resolver
+  assertion mismatch in `testHttpGetJsonResolvesToRecordViaResolver` is unrelated
+  to FLUX-045.)
+
+The dev/test registry keeps deterministic echoes (`DevNativeCapabilityHost`) so
+headless tests stay green; the app shell swaps in the real host at launch. This
+closes the earlier "RELEASE-TODO: real OS calls belong in the app shell" note —
+they now live there.
+
 ## Status (2026-08-29)
 
 **Manifest + handshake wiring COMPLETE (verifiable, green):**
