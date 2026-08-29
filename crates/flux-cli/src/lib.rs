@@ -21,6 +21,7 @@
 mod build;
 mod dev;
 mod doc;
+mod doctor;
 mod init;
 mod lsp;
 mod sources;
@@ -80,6 +81,14 @@ pub enum Command {
         /// HTTP asset-server bind port.
         #[arg(long, default_value_t = flux_devserver::DEFAULT_HTTP_PORT)]
         http_port: u16,
+
+        /// Require hosts to present this pairing token during the `Hello` handshake
+        /// (Appendix D §D.12.1). Set this when exposing the server on a LAN with
+        /// `--ws-host 0.0.0.0` so only hosts holding the same token can push
+        /// bytecode. Leave unset for an open localhost dev loop. The host reads its
+        /// token from `FLUX_DEV_TOKEN` or `[dev] token` in `flux.toml`.
+        #[arg(long)]
+        token: Option<String>,
     },
 
     /// Codegen the project for a native platform.
@@ -105,6 +114,10 @@ pub enum Command {
 
     /// Emit a JSON schema of the stdlib API to stdout.
     Doc,
+
+    /// Run an environment health check: toolchain, stdlib parse, wire protocol
+    /// version, and (best-effort) connected devices/simulators (roadmap §5).
+    Doctor,
 }
 
 /// A native build target.
@@ -150,9 +163,11 @@ pub async fn run(command: Command) -> anyhow::Result<()> {
             ws_host,
             ws_port,
             http_port,
-        } => dev::run(&root, &ws_host, ws_port, http_port).await,
+            token,
+        } => dev::run(&root, &ws_host, ws_port, http_port, token).await,
         Command::Build { platform, root } => build::run(platform, &root),
         Command::Lsp { file, types } => lsp::run(&file, types),
         Command::Doc => doc::run(),
+        Command::Doctor => doctor::run(),
     }
 }

@@ -196,6 +196,32 @@ async fn handle_hello(bytes: &[u8], shared: &Arc<Shared>) -> Option<Vec<u8>> {
         let shared = Arc::clone(shared);
         return blocking(move || shared.pipeline.lock().error_frame(&malformed_hello())).await;
     };
+    // Validate the pairing token (Appendix D §D.12.1, `flux dev --token`). When the
+    // server requires a token, the host must present the exact same one; a missing
+    // or mismatched token is rejected before any capability/compile work runs. An
+    // unconfigured server (no token) accepts any host, preserving the open
+    // localhost dev loop.
+    if let Some(expected) = shared.auth_token.as_deref() {
+        match hello.token.as_deref() {
+            Some(presented) if presented == expected => {}
+            _ => {
+                let diagnostic = Diagnostic::new(
+                    "handshake rejected: pairing token missing or incorrect — \
+                     start the dev server with the same `--token` you configured \
+                     the host with (or remove `--token` for an open localhost session)"
+                        .to_owned(),
+                    None,
+                );
+                tracing::warn!(
+                    platform = %hello.platform,
+                    device = %hello.device,
+                    "host handshake rejected: pairing token mismatch"
+                );
+                let shared = Arc::clone(shared);
+                return blocking(move || shared.pipeline.lock().error_frame(&diagnostic)).await;
+            }
+        }
+    }
     // Validate the host advertises every capability the compiled tree
     // CALL_CAPs (spec §D.12.1 / §24.4). A missing method surfaces as a clear
     // `Error` frame here, not as a silent VM fault at the first call.

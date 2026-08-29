@@ -35,6 +35,12 @@ pub struct ServerConfig {
     debounce: Duration,
     coalesce: Duration,
     profile: bool,
+    /// Optional pairing token required of every host handshake (Appendix D
+    /// §D.12.1, `flux dev --token`). When `None` (default) the server accepts any
+    /// host, preserving the frictionless localhost dev loop; set it to require a
+    /// matching token before the server replies with `Init` (protects a
+    /// `--ws-host 0.0.0.0` LAN exposure from unauthenticated bytecode pushes).
+    auth_token: Option<String>,
 }
 
 impl ServerConfig {
@@ -62,7 +68,24 @@ impl ServerConfig {
             debounce: DEFAULT_DEBOUNCE,
             coalesce: DEFAULT_COALESCE,
             profile: false,
+            auth_token: None,
         }
+    }
+
+    /// Requires every host handshake to present this pairing token (Appendix D
+    /// §D.12.1). A host whose `Hello` carries a different or absent token is
+    /// rejected with an `Error` frame. Leave unset for the default open localhost
+    /// dev loop.
+    #[must_use]
+    pub fn with_auth_token(mut self, token: impl Into<String>) -> Self {
+        self.auth_token = Some(token.into());
+        self
+    }
+
+    /// The pairing token the server requires of hosts, if any.
+    #[must_use]
+    pub fn auth_token(&self) -> Option<&str> {
+        self.auth_token.as_deref()
     }
 
     /// Overrides the WebSocket bind address (port `0` picks a free port).

@@ -313,6 +313,10 @@ pub struct HelloFrame {
     pub device: String,
     /// `(capability, version, features)` triples advertised by the host.
     pub capabilities: Vec<(String, u32, Vec<String>)>,
+    /// Optional pairing token. When the server is started with a token, the host
+    /// must present the same one or the handshake is rejected (Appendix D §D.12.1,
+    /// `flux dev --token`). Absent on the wire means "no token presented".
+    pub token: Option<String>,
 }
 
 impl Frame {
@@ -329,6 +333,26 @@ impl Frame {
             platform: platform.to_owned(),
             device: device.to_owned(),
             capabilities: capabilities.to_vec(),
+            token: None,
+        }
+    }
+
+    /// Builds a `Hello` handshake frame carrying a pairing `token` (Appendix D
+    /// §D.12.1, `flux dev --token`).
+    #[must_use]
+    pub fn hello_with_token(
+        platform: &str,
+        device: &str,
+        capabilities: &[(String, u32, Vec<String>)],
+        token: &str,
+    ) -> HelloFrame {
+        HelloFrame {
+            version: PROTOCOL_VERSION,
+            kind: FrameKind::Hello,
+            platform: platform.to_owned(),
+            device: device.to_owned(),
+            capabilities: capabilities.to_vec(),
+            token: Some(token.to_owned()),
         }
     }
 
@@ -361,12 +385,26 @@ impl Frame {
             }
             capabilities.push((name, ver, feats));
         }
+        // The pairing token (u16 len + utf8) is the final field. It is optional on
+        // the wire: an absent/short buffer means "no token presented", which keeps
+        // the handshake backward-compatible with hosts built before this field
+        // existed. Only the server's configured token policy turns absence into a
+        // rejection (Appendix D §D.12.1).
+        let token = if pos + 2 <= payload.len() {
+            match decode_str(payload, &mut pos) {
+                Ok(t) if !t.is_empty() => Some(t),
+                _ => None,
+            }
+        } else {
+            None
+        };
         Some(HelloFrame {
             version,
             kind,
             platform,
             device,
             capabilities,
+            token,
         })
     }
 }
@@ -388,6 +426,14 @@ impl HelloFrame {
             for f in feats {
                 encode_str(&mut w, f);
             }
+        }
+        // Pairing token (u16 len + utf8). Encoded last so older decoders that
+        // stop reading after the capabilities still parse this frame; an empty
+        // token is written as a zero-length string (treated as "no token").
+        if let Some(token) = &self.token {
+            encode_str(&mut w, token);
+        } else {
+            w.u16(0);
         }
         w.into_vec()
     }

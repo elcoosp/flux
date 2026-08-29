@@ -22,11 +22,15 @@ pub(crate) async fn run(
     ws_host: &str,
     ws_port: u16,
     http_port: u16,
+    token: Option<String>,
 ) -> anyhow::Result<()> {
-    let config = ServerConfig::new(root)
+    let mut config = ServerConfig::new(root)
         .with_ws_host(ws_host)
         .with_ws_port(ws_port)
         .with_http_port(http_port);
+    if let Some(token) = token {
+        config = config.with_auth_token(token);
+    }
     let server = DevServer::start(config)
         .await
         .context("starting the flux dev server")?;

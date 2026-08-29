@@ -42,12 +42,17 @@ pub(crate) struct Shared {
     pub(crate) devtools_router: std::sync::Arc<parking_lot::Mutex<DevToolsRouter>>,
     clients: Mutex<Vec<UnboundedSender<Vec<u8>>>>,
     shutdown: AtomicBool,
+    /// Optional pairing token every host handshake must present (Appendix D
+    /// §D.12.1, `flux dev --token`). `None` = accept any host (default open
+    /// localhost loop).
+    auth_token: Option<String>,
 }
 
 impl Shared {
     fn new(
         pipeline: Pipeline,
         devtools_router: std::sync::Arc<parking_lot::Mutex<DevToolsRouter>>,
+        auth_token: Option<String>,
     ) -> Self {
         Self {
             pipeline: Mutex::new(pipeline),
@@ -55,6 +60,7 @@ impl Shared {
             devtools_router,
             clients: Mutex::new(Vec::new()),
             shutdown: AtomicBool::new(false),
+            auth_token,
         }
     }
 
@@ -121,7 +127,11 @@ impl DevServer {
             source_map,
             host_command_tx.clone(),
         )));
-        let shared = Arc::new(Shared::new(pipeline, devtools_router));
+        let shared = Arc::new(Shared::new(
+            pipeline,
+            devtools_router,
+            config.auth_token().map(str::to_owned),
+        ));
         initial_compile(&shared);
 
         let watcher = Watcher::spawn(&config, Arc::clone(&shared))?;
