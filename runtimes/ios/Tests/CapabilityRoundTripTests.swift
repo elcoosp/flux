@@ -125,4 +125,108 @@ final class CapabilityRoundTripTests: XCTestCase {
         XCTAssertEqual(getCell, 92, "Geolocation.get returns its result-cell id")
         XCTAssertEqual(signals.read(92), .null, "Geolocation.get is null on the dev host")
     }
+
+    // MARK: - FLUX-049: permission gate
+
+    /// A `CALL_CAP` to a capability whose required OS permission is denied must
+    /// fault as `capabilityDenied` (surfaced as a red banner), never panic.
+    /// Drives a real `CALL_CAP` through the VM with a deny-all checker.
+    func testDeniedPermissionFaultsCallCapAsCapabilityDenied() throws {
+        var signals: any SignalStore = InMemorySignals()
+        // CALL_CAP r1, (1,1), args=r0 ; HALT — Camera.takePicture requires .camera.
+        let bytecode: [UInt8] = [
+            0x90, // CALL_CAP
+            1,    // result reg r1
+            1, 0, 0, 0, // capId = 1
+            1, 0, // methodId = 1
+            0,    // args reg r0
+            0x00, // HALT
+        ]
+        var caught: VmError?
+        do {
+            _ = try FluxBytecodeVM.run(
+                bytecode,
+                signals: &signals,
+                payload: .null,
+                capRegistry: .dev,
+                permissions: DenyAllPermissionChecker()
+            )
+            XCTFail("denied cap must fail, never succeed")
+        } catch let err as VmError {
+            caught = err
+        }
+        XCTAssertEqual(caught?.kind, .capabilityDenied, "denied cap must surface capabilityDenied")
+    }
+
+    /// The gate is fail-closed: an unknown capability id (no permission entry)
+    /// is denied the same way, not silently resolved.
+    func testUnknownCapabilityIdIsDeniedNotResolved() throws {
+        var signals: any SignalStore = InMemorySignals()
+        // CALL_CAP r1, (99,1) — capability 99 is not in the host's table.
+        let bytecode: [UInt8] = [
+            0x90,
+            1,
+            99, 0, 0, 0, // capId = 99
+            1, 0,
+            0,
+            0x00,
+        ]
+        var caught: VmError?
+        do {
+            _ = try FluxBytecodeVM.run(
+                bytecode,
+                signals: &signals,
+                payload: .null,
+                capRegistry: .dev,
+                permissions: AllowAllPermissionChecker()
+            )
+            XCTFail("unknown cap must fail")
+        } catch let err as VmError {
+            caught = err
+        }
+        XCTAssertEqual(caught?.kind, .capabilityDenied, "unknown cap id is denied (fail-closed)")
+    }
+
+    /// A granted permission resolves the call normally (no gate fault).
+    func testGrantedPermissionResolvesCallCapNormally() throws {
+        var signals: any SignalStore = InMemorySignals()
+        // Router.navigate (3,1) requires PermissionKind.none -> always granted.
+        let bytecode: [UInt8] = [
+            0x90,
+            1,
+            3, 0, 0, 0, // capId = 3
+            1, 0,
+            0,
+            0x00,
+        ]
+        // Must not throw — granted cap resolves normally.
+        _ = try FluxBytecodeVM.run(
+            bytecode,
+            signals: &signals,
+            payload: .null,
+            capRegistry: .dev,
+            permissions: AllowAllPermissionChecker()
+        )
+    }
+
+    // MARK: - FLUX-048 / FLUX-046: escape-valve capabilities
+
+    /// WebView (cap 12) records `src` in signal 82 and needs no OS permission.
+    func testWebViewLoadRecordsSrcInSignal82() throws {
+        var signals: any SignalStore = InMemorySignals()
+        let srcId: UInt32 = 240
+        let cell = try CapabilityRegistry.dev.lookup(12, 1)!(12, 1, .record([(0, .int(Int64(srcId)))]), &signals)
+        XCTAssertEqual(cell, 82, "WebView.load returns its result-cell id")
+        XCTAssertEqual(signals.read(82), .record([(0, .int(Int64(srcId)))]), "WebView.load records the requested src into signal 82")
+    }
+
+    /// NativeModule (cap 13) records the requested SDK call in signal 83 and is
+    /// gated by `.native`.
+    func testNativeModuleInvokeRecordsRequestInSignal83() throws {
+        var signals: any SignalStore = InMemorySignals()
+        let nameId: UInt32 = 241
+        let cell = try CapabilityRegistry.dev.lookup(13, 1)!(13, 1, .record([(0, .int(Int64(nameId)))]), &signals)
+        XCTAssertEqual(cell, 83, "NativeModule.invoke returns its result-cell id")
+        XCTAssertEqual(signals.read(83), .record([(0, .int(Int64(nameId)))]), "NativeModule.invoke records the requested SDK call into signal 83")
+    }
 }

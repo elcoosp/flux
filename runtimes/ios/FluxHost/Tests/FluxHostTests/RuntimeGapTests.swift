@@ -571,4 +571,38 @@ final class CapabilityRoundTripTests: XCTestCase {
         _ = third.lookup(2, 2)!(2, 2, key, &thirdSignals)
         XCTAssertEqual(thirdSignals.read(95), .null, "Storage.delete must clear the persisted value")
     }
+
+    // MARK: - FLUX-050 / ADR-0056: fail-closed protocol version handshake
+
+    /// A frame whose version byte the host does not implement must be rejected
+    /// with `WireError.unsupportedVersion` — never mis-decoded into a tree.
+    /// (Drives the real `FrameDeserializer`.)
+    func testRejectsProtocolVersionMismatchFailClosed() {
+        // magic(4) | version(1)=2 (unsupported) | kind(1)=0x02 (Init) | seq(4)=0
+        // plus a minimal-but-valid-looking tail. The version gate fires before
+        // any tree decoding, so the rest of the buffer need not be well-formed.
+        var bytes: [UInt8] = []
+        bytes += [0x58, 0x55, 0x5C, 0x46] // FLUX magic (LE)
+        bytes += [0x02] // unsupported version
+        bytes += [0x02] // frame kind = Init
+        bytes += [0x00, 0x00, 0x00, 0x00] // seq = 0
+        bytes += [0x00, 0x00, 0x00, 0x00] // root node id
+        bytes += [0x01] // root kind = Primitive
+        bytes += [0x00, 0x00, 0x00, 0x00] // root component id
+        bytes += [0x00, 0x00] // root prop count
+        bytes += [0x00, 0x00] // root child count
+        bytes += [0x00, 0x00] // root handler count
+        bytes += [0x00, 0x00, 0x00, 0x00] // root span
+
+        do {
+            _ = try FrameDeserializer.decode(bytes)
+            XCTFail("expected WireError.unsupportedVersion for version mismatch")
+        } catch let err as WireError {
+            guard case .unsupportedVersion = err else {
+                XCTFail("version mismatch must surface as .unsupportedVersion, got \(err)")
+            }
+        } catch {
+            XCTFail("version mismatch must surface as WireError, got \(error)")
+        }
+    }
 }
