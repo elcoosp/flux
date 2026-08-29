@@ -33,6 +33,7 @@ struct ByteReader {
     /// Number of bytes still available to read.
     var remaining: Int { max(0, data.count - offset) }
 
+    /// Reads `count` raw bytes (allocates a new array — used only by `bytes`/`utf8`).
     private mutating func take(_ count: Int) throws -> [UInt8] {
         let end = offset + count
         guard end <= data.count else {
@@ -43,28 +44,44 @@ struct ByteReader {
         return slice
     }
 
+    /// Reads one byte without allocating a heap array — the hot path for every
+    /// integer read. A frame decode formerly allocated a fresh `[UInt8]` per
+    /// integer via `take`; reading through the buffer subscript instead removes
+    /// thousands of tiny allocations on a large frame (review: ByteReader.take).
+    private mutating func readByte() throws -> UInt8 {
+        guard offset < data.count else {
+            throw WireError.unexpectedEnd(offset: offset, needed: 1, available: remaining)
+        }
+        let b = data[offset]
+        offset &+= 1
+        return b
+    }
+
     /// Reads a single unsigned byte.
     mutating func u8() throws -> UInt8 {
-        try take(1)[0]
+        try readByte()
     }
 
     /// Reads a little-endian `UInt16` from exactly two bytes.
     mutating func u16() throws -> UInt16 {
-        let b = try take(2)
-        return UInt16(b[0]) | (UInt16(b[1]) << 8)
+        let lo = UInt16(try readByte())
+        let hi = UInt16(try readByte())
+        return lo | (hi << 8)
     }
 
     /// Reads a little-endian `UInt32` from exactly four bytes.
     mutating func u32() throws -> UInt32 {
-        let b = try take(4)
-        return UInt32(b[0]) | (UInt32(b[1]) << 8) | (UInt32(b[2]) << 16) | (UInt32(b[3]) << 24)
+        let b0 = UInt32(try readByte())
+        let b1 = UInt32(try readByte())
+        let b2 = UInt32(try readByte())
+        let b3 = UInt32(try readByte())
+        return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)
     }
 
     /// Reads a little-endian `UInt64` from exactly eight bytes.
     mutating func u64() throws -> UInt64 {
-        let b = try take(8)
         var value: UInt64 = 0
-        for i in 0..<8 { value |= UInt64(b[i]) << (8 * i) }
+        for i in 0..<8 { value |= UInt64(try readByte()) << (8 * i) }
         return value
     }
 
