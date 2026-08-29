@@ -13,6 +13,7 @@ import dev.flux.host.vm.FluxBytecodeVM
 import dev.flux.host.vm.FluxValue
 import dev.flux.host.vm.InMemorySignals
 import dev.flux.host.vm.TableStringResolver
+import dev.flux.host.vm.PermissionChecker
 import dev.flux.host.vm.VmErrorKind
 import dev.flux.host.vm.VmResult
 import dev.flux.host.wire.ClosureRef
@@ -1005,6 +1006,177 @@ fun `positional screen route at index 0 never swaps on navigate`() =
         )
     }
 
+/**
+ * FLUX-049 — permission gate. A `CALL_CAP` to a capability whose required OS
+ * permission is denied must fault as `CAPABILITY_DENIED` (surfaced as a red
+ * banner), never panic into native code and never silently no-op.
+ *
+ * This drives a real `CALL_CAP` through [FluxBytecodeVM] with a deny-all
+ * checker, so it exercises the gate the round-trip `lookup(...).call(...)` tests
+ * bypass.
+ */
+@Test
+fun `denied OS permission faults CALL_CAP as CAPABILITY_DENIED not panic`() =
+    runTest {
+        val signals = SignalGraph()
+        val denyAll =
+            PermissionChecker { _ -> false }
+
+        // CALL_CAP r1, (1,1), args=r0 ; HALT — Camera.takePicture requires .camera.
+        val bytecode =
+            byteArrayOf(
+                0x90.toByte(), // CALL_CAP
+                1, // result reg r1
+                1, 0, 0, 0, // capId = 1
+                1, 0, // methodId = 1
+                0, // args reg r0
+                0x00, // HALT
+            )
+
+        val result =
+            FluxBytecodeVM.run(
+                bytecode,
+                signals,
+                dev.flux.host.vm.FluxValue.NullVal,
+                capabilities = CapabilityRegistry.DEV,
+                permissions = denyAll,
+            )
+
+        assertTrue(result is VmResult.Failure, "denied cap must fail, never succeed")
+        assertEquals(
+            VmErrorKind.CAPABILITY_DENIED,
+            (result as VmResult.Failure).kind,
+            "denied cap must surface CAPABILITY_DENIED",
+        )
+    }
+
+/**
+ * FLUX-049 — the gate is fail-closed: an unknown capability id (no permission
+ * entry) is treated as denied and faults the same way, not silently resolved.
+ */
+@Test
+fun `unknown capability id is denied not resolved`() =
+    runTest {
+        val signals = SignalGraph()
+        val allowAll =
+            PermissionChecker { _ -> true }
+
+        // CALL_CAP r1, (99,1) — capability 99 is not in the host's table.
+        val bytecode =
+            byteArrayOf(
+                0x90.toByte(), // CALL_CAP
+                1, // result reg r1
+                99, 0, 0, 0, // capId = 99
+                1, 0, // methodId = 1
+                0, // args reg r0
+                0x00, // HALT
+            )
+
+        val result =
+            FluxBytecodeVM.run(
+                bytecode,
+                signals,
+                dev.flux.host.vm.FluxValue.NullVal,
+                capabilities = CapabilityRegistry.DEV,
+                permissions = allowAll,
+            )
+
+        assertTrue(result is VmResult.Failure, "unknown cap must fail")
+        // requiredPermission(99,_) == null -> gate denies before dispatch.
+        assertEquals(
+            VmErrorKind.CAPABILITY_DENIED,
+            (result as VmResult.Failure).kind,
+            "unknown cap id is denied (fail-closed)",
+        )
+    }
+
+/**
+ * FLUX-049 — a granted permission resolves the call normally (no gate fault).
+ * Confirms the gate only intercepts denied/unknown caps, not happy path.
+ */
+@Test
+fun `granted permission resolves CALL_CAP normally`() =
+    runTest {
+        val signals = SignalGraph()
+        val allowAll =
+            PermissionChecker { _ -> true }
+
+        // Router.navigate (3,1) requires PermissionKind.None -> always granted.
+        val bytecode =
+            byteArrayOf(
+                0x90.toByte(), // CALL_CAP
+                1, // result reg r1
+                3, 0, 0, 0, // capId = 3
+                1, 0, // methodId = 1
+                0, // args reg r0
+                0x00, // HALT
+            )
+
+        val result =
+            FluxBytecodeVM.run(
+                bytecode,
+                signals,
+                dev.flux.host.vm.FluxValue.NullVal,
+                capabilities = CapabilityRegistry.DEV,
+                permissions = allowAll,
+            )
+
+        assertTrue(result is VmResult.Success, "granted cap must succeed")
+    }
+
+/**
+ * FLUX-048 — WebView (cap 12) registry entry records `src` in signal 82 and
+ * needs no OS permission. Round-trip asserts the cell id + the side effect.
+ */
+@Test
+fun `webview load records src in signal 82`() {
+    val signals = SignalGraph()
+    val srcId = 240u
+    val args =
+        dev.flux.host.vm.FluxValue.RecordVal(
+            listOf(
+                dev.flux.host.vm.FluxValue.Field(
+                    0u.toUShort(),
+                    dev.flux.host.vm.FluxValue.IntVal(srcId.toLong()),
+                ),
+            ),
+        )
+    val cellId = CapabilityRegistry.DEV.lookup(12u, 1u.toUShort())!!.call(args, signals)
+    assertEquals(82u, cellId, "WebView.load returns its result-cell id")
+    assertEquals(
+        dev.flux.host.vm.FluxValue.IntVal(srcId.toLong()),
+        signals.read(82u),
+        "WebView.load records the requested src into signal 82",
+    )
+}
+
+/**
+ * FLUX-046 — NativeModule (cap 13) registry entry records the requested
+ * (name, method) in signal 83 and is gated by `.native`. Round-trip asserts the
+ * cell id + the side effect (the host binding performs the real SDK call).
+ */
+@Test
+fun `nativeModule invoke records request in signal 83`() {
+    val signals = SignalGraph()
+    val nameId = 241u
+    val args =
+        dev.flux.host.vm.FluxValue.RecordVal(
+            listOf(
+                dev.flux.host.vm.FluxValue.Field(
+                    0u.toUShort(),
+                    dev.flux.host.vm.FluxValue.IntVal(nameId.toLong()),
+                ),
+            ),
+        )
+    val cellId = CapabilityRegistry.DEV.lookup(13u, 1u.toUShort())!!.call(args, signals)
+    assertEquals(83u, cellId, "NativeModule.invoke returns its result-cell id")
+    assertEquals(
+        dev.flux.host.vm.FluxValue.IntVal(nameId.toLong()),
+        signals.read(83u),
+        "NativeModule.invoke records the requested SDK call into signal 83",
+    )
+}
+
 /** FNV-1a (32-bit) hash of "route", matching the wire's `prop_index_for_name`. */
 private fun fnv1aRoutePropIndex(): UShort {
     var h: UInt = 0x811c9dc5u
@@ -1013,4 +1185,5 @@ private fun fnv1aRoutePropIndex(): UShort {
     }
     return h.toUShort()
 }
+
 }

@@ -79,6 +79,32 @@ class FrameDeserializerTest {
     }
 
     @Test
+    fun `rejects a protocol-version mismatch fail-closed`() {
+        // FLUX-050 / ADR-0056: a frame whose version byte the host does not
+        // implement must be rejected with WireError, never mis-decoded.
+        val bytes =
+            FrameBuilder()
+                .apply {
+                    magic()
+                    version(1)
+                    seq(0)
+                    flags(fullTree = true)
+                    patchCount(0)
+                    handlerCount(0)
+                    stringCount(0)
+                    node(id = 1u, kind = 1u, component = 100u, props = emptyList(), childIds = emptyList())
+                }.build()
+        // Flip the version byte (header offset 4) to an unsupported value.
+        bytes[4] = 2
+        val err = runCatching { FrameDeserializer.deserialize(bytes) }
+        assertTrue(err.isFailure, "expected WireError for protocol version mismatch")
+        val ex = err.exceptionOrNull()
+        if (ex !is WireError) {
+            throw AssertionError("version mismatch must surface as WireError, got ${ex?.javaClass?.name}: ${ex?.message}", ex)
+        }
+    }
+
+    @Test
     fun `decodes a value list and record`() {
         val r =
             ByteReader(
