@@ -1,6 +1,6 @@
 ---
 id: FLUX-072
-status: todo
+status: partial
 lane: LANE-L
 phase: "Phase 1"
 blocked_by:
@@ -19,7 +19,14 @@ related_adrs:
   - ADR-0047
 ---
 
-# FLUX-072: Concise data-driven app surface (lists, records, two-way bindings, parameterized components)
+# FLUX-072: Concise data-driven app surface
+
+> **Status note (2026-08-29):** relabeled `todo` → `partial`. An uncommitted WIP
+> (18 files) is actively implementing this: list VM ops (`ListInsert`/`ListRemove`/
+> `ListClear`) merged into `flux-ir`/`flux-vm-ref`; `ForEach` now lowers a real
+> `Child::Splice` carrying `(key, child_id)` pairs (was empty); `$`-binding wired
+> through the type checker. Not yet merged to `main`. Backlog items `$` two-way
+> binding, parameterized `compo` typed props, and `Toggle`/`Spacer weight:` remain. (lists, records, two-way bindings, parameterized components)
 
 - **Lane:** LANE-L (language maturity)
 - **Depends on:** FLUX-051 (ForEach/iteration), FLUX-052 (slot/children), FLUX-054 (prop typing), FLUX-040 (form primitives)
