@@ -228,6 +228,50 @@ pub const CAPABILITY_IDL: &[CapabilityIdl] = &[
             },
         ],
     },
+    // --- FLUX-047: HTTP fetch/JSON + structured persistence capabilities. ---
+    // `Http` performs async network requests (resolves through the VM's await
+    // machinery, ADR-0044/0045); `Persist` is structured, queryable local
+    // persistence beyond key-value `Storage` (a thin queryable store).
+    CapabilityIdl {
+        name: "Http",
+        id: 14,
+        methods: &[
+            MethodIdl {
+                name: "fetch",
+                id: 1,
+            },
+            MethodIdl {
+                name: "getJson",
+                id: 2,
+            },
+            MethodIdl {
+                name: "postJson",
+                id: 3,
+            },
+        ],
+    },
+    CapabilityIdl {
+        name: "Persist",
+        id: 15,
+        methods: &[
+            MethodIdl {
+                name: "put",
+                id: 1,
+            },
+            MethodIdl {
+                name: "get",
+                id: 2,
+            },
+            MethodIdl {
+                name: "query",
+                id: 3,
+            },
+            MethodIdl {
+                name: "delete",
+                id: 4,
+            },
+        ],
+    },
     // --- FLUX-046: native-module escape hatch (wrap any native SDK). ---
     // The host allow-lists which module names resolve (LANE-I); an undeclared
     // module is denied at the gate like any capability. `invoke` (13,1) calls a
@@ -294,6 +338,10 @@ pub enum PermissionKind {
     /// never prompts — but the threat model (FLUX-049 / ADR-0054) requires the
     /// `src`/`route` to be app-controlled and the webview sandboxed.
     WebView,
+    /// Network access for outbound HTTP requests (iOS `NSUrlRequest` /
+    /// `URLSession`; Android `INTERNET`). Required by the `Http` capability
+    /// (FLUX-047).
+    Network,
     /// User-authored native-module escape hatch (FLUX-046): wraps an arbitrary
     /// native SDK as a capability. Always gated by `.native` so a malicious
     /// `.flux` patch cannot invoke an undeclared module — the host must
@@ -318,6 +366,7 @@ impl PermissionKind {
             Self::FileSystem => ".filesystem",
             Self::Sensors => ".sensors",
             Self::WebView => ".none",
+            Self::Network => ".network",
             Self::NativeModule => ".native",
         }
     }
@@ -340,6 +389,7 @@ impl PermissionKind {
             ".background" => Some(Self::Background),
             ".filesystem" => Some(Self::FileSystem),
             ".sensors" => Some(Self::Sensors),
+            ".network" => Some(Self::Network),
             ".native" => Some(Self::NativeModule),
             _ => None,
         }
@@ -407,6 +457,11 @@ pub fn required_permission(cap_id: u32, method_id: u16) -> Option<PermissionKind
         // NativeModule: user escape-hatch wrapper — always gated by `.native`
         // so only host-allow-listed modules resolve (no open CALL_NATIVE).
         (13, _) => Some(PermissionKind::NativeModule),
+        // Http: outbound network requests need the network grant (FLUX-047).
+        (14, _) => Some(PermissionKind::Network),
+        // Persist: structured local persistence reuses the storage grant
+        // (FLUX-047) — sandboxed app data, same OS gate as key-value Storage.
+        (15, _) => Some(PermissionKind::Storage),
         _ => None,
     }
 }

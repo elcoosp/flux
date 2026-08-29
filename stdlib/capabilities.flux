@@ -120,3 +120,29 @@ capability NativeModule {
   // grant; a module the app did not register is denied (red banner, no crash).
   fn invoke(name: String, method: String, args: Data) -> Option[Data]
 }
+
+// --- FLUX-047: HTTP fetch/JSON + structured persistence (the data layer) ---
+// `Http` performs outbound network requests (async; resolves through the VM's
+// await machinery, ADR-0044/0045 — a denied/empty grant returns a `Capability`
+// error, never a crash). `Persist` is structured, queryable local persistence
+// beyond key-value `Storage` (a thin record store keyed by id + optionally
+// queryable by field). Host bodies (`URLSession` / `OkHttp`; `UserDefaults` /
+// `Room`-style store) land in `runtimes/*/host` (parallel-owned), mirroring the
+// other capabilities; this file is the single-source declaration.
+capability Http {
+  // requires: .network — outbound requests need the network grant.
+  // (async: resolved through the VM's await machinery, ADR-0044/0045 — a denied
+  // grant returns a `Capability` error, never a crash.)
+  fn fetch(url: String, options: Data) -> Data
+  fn getJson(url: String) -> Data
+  fn postJson(url: String, body: Data) -> Data
+}
+
+capability Persist {
+  // requires: .storage — structured local persistence reuses the storage grant
+  // (sandboxed app data, same OS gate as key-value Storage).
+  fn put(key: String, value: Data) -> Unit
+  fn get(key: String) -> Option[Data]
+  fn query(where: String) -> List[Data]
+  fn delete(key: String) -> Unit
+}
