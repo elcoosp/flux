@@ -68,3 +68,8 @@ pub use debug_bridge::{DEFAULT_DEVTOOLS_PORT, DevToolsRouter, SourceMap, enrich,
 pub use error::{DevServerError, Diagnostic};
 pub use pipeline::{Compiled, PhaseTimings, Pipeline};
 pub use server::{DevServer, RunningServer};
+
+/// The wire-protocol version (`flux_ir_serde::PROTOCOL_VERSION`), re-exported so
+/// downstream binaries (e.g. `flux doctor`) can report it without taking a direct
+/// dependency on the serialization crate (AGENTS.md §1.3 keeps manifests frozen).
+pub use flux_ir_serde::PROTOCOL_VERSION;
