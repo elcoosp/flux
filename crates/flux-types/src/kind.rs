@@ -313,9 +313,9 @@ impl fmt::Display for TcType {
 /// `docs/adr/ir-node-id-bridge.md`) so the type checker and the IR produce
 /// identical IDs for identical source constructs — this is what lets FLUX-018
 /// lowering look up inferred types by `NodeId`. The contract (AGENTS.md §3.2)
-/// specifies `blake3::hash(&(parent_id, kind, span, key))`; the canonical
-/// implementation is exactly that (BLAKE3 over the canonical little-endian
-/// layout, truncated to 32 bits).
+/// specifies FNV-1a-32 over `(parent_id, kind, span, key)`; the canonical
+/// implementation is exactly that (FNV-1a-32 over the canonical little-endian
+/// layout, yielding a `u32`).
 #[must_use]
 pub(crate) fn compute_node_id(
     parent: NodeId,

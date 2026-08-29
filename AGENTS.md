@@ -194,7 +194,7 @@ Approved dependencies (do not remove or replace without an ADR):
 | Rust | `notify` | File watching |
 | Rust | `axum` | HTTP asset server |
 | Rust | `rmp-serde` | MessagePack wire serialization |
-| Rust | `blake3` | Content addressing / node IDs |
+| Rust | `blake3` | Content addressing (wire interning / prop+closure hashes) |
 | Rust | `clap`, `tracing`, `tracing-subscriber` | CLI, logging |
 | Rust | `serde` / `serde_derive`, `thiserror`, `anyhow` (CLI only) | Serde, errors |
 | Rust | `criterion`, `insta`, `proptest`, `cargo-nextest` | Bench, snapshots, props, runner |
@@ -295,7 +295,7 @@ New dependencies require an ADR (§1.3 vetting first).
 
 ### 3.2 Node IDs and Prop Indices (both load-bearing)
 
-**Node IDs** are `u32` blake3 hashes from
+**Node IDs** are `u32` FNV-1a-32 hashes (FLUX-071) from
 `flux_syntax::compute_node_id(parent_id, tag, span, key)` — **never
 sequential**. Tags matter: expressions lower under `ExprTag`, declarations
 under `DeclTag`. Both wrap a `NodeKind` wire discriminant (`Component` = 0 …

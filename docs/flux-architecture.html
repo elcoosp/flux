@@ -367,7 +367,7 @@ const NODES = {
     fns:[["fn","emit_minimal_updates(written,arena,index)","1 Patch::Update per node in dirty"],["fn","DependencyIndex::rebuild","Signal→Node + Node→Signal maps"],["fn","DispatchReport::to_bytes","fixed 14-byte 0x06 frame"]],
     notes:["Degrades to coarse frame when index inactive (no signal_deps).","wrote signal nobody reads → empties dirty set → ships nothing (noop budget).","Patch::Update is state-preserving so instances survive."]},
   differ:{title:"flux-differ · keyed diff", loc:"crates/flux-differ/src/diff.rs:20 diff()", tags:["Rust","FLUX-014"],
-    summary:"Computes the minimal Patch stream transforming old into new. Keyed on stable NodeIds (blake3 of span+tag+parent). Identical-hash nodes emit no Update; handler-only changes emit a state-preserving Handler patch (hot reload).",
+    summary:"Computes the minimal Patch stream transforming old into new. Keyed on stable NodeIds (FNV-1a-32 of span+tag+parent). Identical-hash nodes emit no Update; handler-only changes emit a state-preserving Handler patch (hot reload).",
     fns:[["fn","diff(old,new)->Vec<Patch>","Update/Reorder/Replace/Remove/Insert/Handler"],["fn","props_equal","O(1) u64 hash compare + belt-and-braces field check"],["fn","handlers_equal","byte-identical closure compare (FLUX-019)"]],
     notes:["Reorder emitted instead of remove+insert when child set unchanged.","Node kind/component_id mismatch → Replace.","Prop hash short-circuits deserialization of cold blobs."]},
   irserde:{title:"flux-ir-serde · wire frames", loc:"crates/flux-ir-serde/src/frame.rs:413 init()", tags:["Rust","Appendix D"],

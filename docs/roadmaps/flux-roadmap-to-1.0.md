@@ -17,7 +17,7 @@ Before planning forward, here's what the dump shows, stripped of aspiration:
   *same* IR (`flux-codegen-core`, ADR-0047). No competitor (RN, Flutter, KMP
   Compose Multiplatform) ships a real "same IR, two backends" story — this is
   Flux's moat if it survives contact with real apps.
-- Content-addressed `NodeId` (blake3 of parent/kind/span/key) giving
+- Content-addressed `NodeId` (FNV-1a-32 of parent/kind/span/key) giving
   state-preserving hot patches (`Patch::Reattach`, ADR-0027) is a genuinely
   better hot-reload primitive than Metro's JS-eval or Flutter's full-widget
   rebuild.

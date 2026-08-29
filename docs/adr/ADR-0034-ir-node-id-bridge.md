@@ -38,6 +38,14 @@ which is its own concern.
 > A follow-up orchestrator edit should align the §3.2 wording with the canonical
 > implementation. **The implementation in `flux-syntax` is normative; prose
 > follows it.**
+>
+> **FLUX-071 update:** the digest is now **FNV-1a-32**, not blake3. The field
+> set and fold order are unchanged (parent, kind_tag, file_id, start, end, key);
+> only the primitive swapped from a cryptographic hash to the same deterministic,
+> dependency-free FNV-1a-32 used for wire prop indices. This is a perf
+> optimization (see FLUX-071) with no wire/contract change — every toolchain
+> member derives IDs through the single `flux_syntax::compute_node_id`, so they
+> stay in sync by construction.
 
 ## Decision
 
@@ -50,19 +58,17 @@ which is its own concern.
        span: Span,
        key: Option<Key>,
    ) -> NodeId {
-       let mut h = blake3::Hasher::new();
-       h.update(&parent.to_le_bytes());
-       h.update(&[kind_tag]);
-       h.update(&span.file_id.to_le_bytes());
-       h.update(&span.start.to_le_bytes());
-       h.update(&span.end.to_le_bytes());
+       let mut buf = [0u8; 21];
+       buf[0..4].copy_from_slice(&parent.to_le_bytes());
+       buf[4] = kind_tag;
+       buf[5..9].copy_from_slice(&span.file_id.to_le_bytes());
+       buf[9..13].copy_from_slice(&span.start.to_le_bytes());
+       buf[13..17].copy_from_slice(&span.end.to_le_bytes());
        match key {
-           Some(k) => h.update(&k.to_le_bytes()),
-           None => h.update(&[0xFF; 8]),
+           Some(k) => buf[17..25].copy_from_slice(&k.to_le_bytes()),
+           None => buf[17..25].copy_from_slice(&[0xFF; 8]),
        };
-       let mut d = [0u8; 4];
-       d.copy_from_slice(&h.finalize().as_bytes()[..4]);
-       u32::from_le_bytes(d)
+       fnv1a32(&buf)
    }
    ```
 
@@ -84,7 +90,8 @@ which is its own concern.
 - **Good:** one algorithm, one field set; lowering can key types by `NodeId`
   safely; removes the dead `types-node-id-hashing.md` FNV scheme.
 - **Good:** `flux-types` no longer carries an `blake3`-free hash fork; both
-  crates share the same digest as the wire protocol and prop hashes.
+  crates share the same digest as the wire protocol and prop hashes. The digest
+  itself is FNV-1a-32 (FLUX-071), matching the prop-index convention.
 - **Bad (acceptable):** `flux-types` gains a dependency on `flux-syntax`'s
   `compute_node_id` — but `flux-types` already depends on `flux-syntax`, so
   this adds nothing new to the manifest (R2-safe).
