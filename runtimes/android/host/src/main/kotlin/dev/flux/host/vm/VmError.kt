@@ -28,6 +28,10 @@ public enum class VmErrorKind {
 
     /** Integer division or remainder by zero (ADR-0023). */
     DIV_BY_ZERO,
+
+    /** A `CALL_CAP` was gated but the required OS permission was not granted
+     * (FLUX-049). Surfaced as a red banner, never a crash into native code. */
+    CAPABILITY_DENIED,
 }
 
 /**

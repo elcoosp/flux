@@ -14,6 +14,8 @@ import dev.flux.host.vm.FluxValue
 import dev.flux.host.vm.Instruction
 import dev.flux.host.vm.StringResolver
 import dev.flux.host.vm.TableStringResolver
+import dev.flux.host.vm.PermissionChecker
+import dev.flux.host.vm.AllowAllPermissionChecker
 import dev.flux.host.vm.VmErrorKind
 import dev.flux.host.vm.VmResult
 import dev.flux.host.wire.FluxFrame
@@ -160,6 +162,11 @@ public class FluxExecutor(
      * drive real navigation; the unit-test oracle uses [CapabilityRegistry.default]
      * or a custom registry instead. */
     private val capabilities: CapabilityRegistry = CapabilityRegistry.DEV,
+    /** The OS-permission gate for `CALL_CAP` (FLUX-049). Defaults to
+     * [AllowAllPermissionChecker]; the production host injects a real checker
+     * (`ContextCompat.checkSelfPermission`) so a denied grant surfaces as a red
+     * banner rather than a crash. */
+    private val permissions: PermissionChecker = AllowAllPermissionChecker,
 ) : KitExecutor {
     /** Invoked on the reactive dispatcher after a successful frame application. */
     public var onTreeChanged: (() -> Unit)? = null
@@ -302,6 +309,7 @@ public class FluxExecutor(
                     payload,
                     stringResolver,
                     capabilities,
+                    permissions,
                 )
             } else {
                 FluxBytecodeVM.run(
@@ -310,6 +318,7 @@ public class FluxExecutor(
                     payload,
                     stringResolver,
                     capabilities,
+                    permissions,
                 )
             }
         when (result) {
@@ -365,6 +374,7 @@ public class FluxExecutor(
                     payload,
                     stringResolver,
                     capabilities,
+                    permissions,
                 )
             } else {
                 FluxBytecodeVM.runResumable(
@@ -373,6 +383,7 @@ public class FluxExecutor(
                     payload,
                     stringResolver,
                     capabilities,
+                    permissions,
                 )
             }
         // Settle every `AWAIT` in turn; the loop terminates at `HALT`. Binding `step`
@@ -425,6 +436,7 @@ public class FluxExecutor(
                             resolved,
                             stringResolver,
                             capabilities,
+                            permissions,
                         )
                 }
             }

@@ -77,6 +77,7 @@ public object FluxBytecodeVM {
         payload: FluxValue,
         strings: StringResolver = DecimalStringResolver,
         capabilities: CapabilityRegistry = CapabilityRegistry.default(),
+        permissions: PermissionChecker = AllowAllPermissionChecker,
     ): VmResult {
         val program =
             try {
@@ -89,7 +90,7 @@ public object FluxBytecodeVM {
         regs[0] = payload
         regs[15] = FluxValue.IntVal(ENTRY_GAS.toLong())
 
-        return when (val tail = execTail(program, offsets, signals, 0, regs, ENTRY_GAS, strings, capabilities)) {
+        return when (val tail = execTail(program, offsets, signals, 0, regs, ENTRY_GAS, strings, capabilities, permissions)) {
             is RunResult.Halt -> VmResult.Success(tail.outcome)
             is RunResult.Suspended ->
                 VmResult.Failure(VmErrorKind.INVALID_DISPATCH, tail.state.resumeIndex.toUInt())
@@ -107,6 +108,7 @@ public object FluxBytecodeVM {
         payload: FluxValue,
         strings: StringResolver = DecimalStringResolver,
         capabilities: CapabilityRegistry = CapabilityRegistry.default(),
+        permissions: PermissionChecker = AllowAllPermissionChecker,
     ): RunResult {
         val program =
             try {
@@ -118,7 +120,7 @@ public object FluxBytecodeVM {
         val regs = Array<FluxValue>(16) { FluxValue.NullVal }
         regs[0] = payload
         regs[15] = FluxValue.IntVal(ENTRY_GAS.toLong())
-        return execTail(program, offsets, signals, 0, regs, ENTRY_GAS, strings, capabilities)
+        return execTail(program, offsets, signals, 0, regs, ENTRY_GAS, strings, capabilities, permissions)
     }
 
     /**
@@ -133,12 +135,13 @@ public object FluxBytecodeVM {
         payload: FluxValue,
         strings: StringResolver = DecimalStringResolver,
         capabilities: CapabilityRegistry = CapabilityRegistry.default(),
+        permissions: PermissionChecker = AllowAllPermissionChecker,
     ): RunResult {
         val offsets: List<UInt> = program.map { it.offset }
         val regs = Array<FluxValue>(16) { FluxValue.NullVal }
         regs[0] = payload
         regs[15] = FluxValue.IntVal(ENTRY_GAS.toLong())
-        return execTail(program, offsets, signals, 0, regs, ENTRY_GAS, strings, capabilities)
+        return execTail(program, offsets, signals, 0, regs, ENTRY_GAS, strings, capabilities, permissions)
     }
 
     /**
@@ -154,6 +157,7 @@ public object FluxBytecodeVM {
         payload: FluxValue,
         strings: StringResolver = DecimalStringResolver,
         capabilities: CapabilityRegistry = CapabilityRegistry.default(),
+        permissions: PermissionChecker = AllowAllPermissionChecker,
     ): VmResult {
         val offsets: List<UInt> = program.map { it.offset }
         val regs = Array<FluxValue>(16) { FluxValue.NullVal }
@@ -161,7 +165,7 @@ public object FluxBytecodeVM {
         regs[15] = FluxValue.IntVal(ENTRY_GAS.toLong())
         return when (
             val tail = execTail(
-                program, offsets, signals, 0, regs, ENTRY_GAS, strings, capabilities
+                program, offsets, signals, 0, regs, ENTRY_GAS, strings, capabilities, permissions
             )
         ) {
             is RunResult.Halt -> VmResult.Success(tail.outcome)
@@ -182,6 +186,7 @@ public object FluxBytecodeVM {
         value: FluxValue,
         strings: StringResolver = DecimalStringResolver,
         capabilities: CapabilityRegistry = CapabilityRegistry.default(),
+        permissions: PermissionChecker = AllowAllPermissionChecker,
     ): RunResult {
         for ((id, v) in state.signals) {
             signals.write(id, v)
@@ -195,7 +200,7 @@ public object FluxBytecodeVM {
         val offsets: List<UInt> = program.map { it.offset }
         val regs = state.registers.copyOf()
         regs[0] = value
-        return execTail(program, offsets, signals, state.resumeIndex, regs, state.gasRemaining, strings, capabilities)
+        return execTail(program, offsets, signals, state.resumeIndex, regs, state.gasRemaining, strings, capabilities, permissions)
     }
 
     /**
@@ -214,6 +219,7 @@ public object FluxBytecodeVM {
         initialGas: UInt,
         strings: StringResolver,
         capabilities: CapabilityRegistry,
+        permissions: PermissionChecker,
     ): RunResult {
         val regs = initialRegs.copyOf()
         var gas: UInt = initialGas
@@ -241,6 +247,7 @@ public object FluxBytecodeVM {
                         ipIndex + 1,
                         strings,
                         capabilities,
+                        permissions,
                         allocated,
                     )
                 } catch (e: VmError) {

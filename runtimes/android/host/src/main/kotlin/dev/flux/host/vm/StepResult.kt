@@ -61,6 +61,7 @@ internal fun executeInstruction(
     nextIndex: Int,
     strings: StringResolver,
     capabilities: CapabilityRegistry,
+    permissions: PermissionChecker,
     allocated: FluxBytecodeVM.AllocationCounter,
 ): StepResult {
     val op = instr.opcode
@@ -280,6 +281,15 @@ internal fun executeInstruction(
             val capId = instr.u32(1).toUInt()
             val methodId = instr.u16(5).toUShort()
             val argsReg = instr.u8(7)
+            // Permission gate (FLUX-049): a `CALL_CAP` is only resolved when the
+            // host has granted the OS permission the capability requires. An
+            // unknown capability (required_permission == null) or a denied grant
+            // faults as `CAPABILITY_DENIED` — surfaced as a red banner, never a
+            // crash into native code, and never a silent no-op.
+            val required = requiredPermission(capId, methodId.toUInt())
+            if (required == null || !permissions.isGranted(required)) {
+                throw VmError(VmErrorKind.CAPABILITY_DENIED, instr.offset)
+            }
             // Data-driven capability dispatch (G4): route through the injected
             // registry instead of a hardcoded `(1,1)` test. An unregistered
             // `(capId, methodId)` is a `TYPE_MISMATCH` fault, matching the
