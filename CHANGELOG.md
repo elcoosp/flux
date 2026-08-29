@@ -299,6 +299,18 @@ are intentionally omitted (automation noise, not user-facing change).
   stream. True per-event attribution needs an ADR-0039 wire extension (host id on
   `HostAnnounce` + per-event source tag); the session container is ready to consume it.
 
+### BLOCKED — iOS render-tier convergence decision (FLUX-065)
+
+- Cannot run ADR-0048 Phase 0/1: the render-perf harness (FLUX-066) does not exist
+  and is itself blocked on PRD-J (`flux-perf-harness`), which is absent from the
+  tree (same root blocker as FLUX-056/059). There is still no render-perf test on
+  either platform, so the §3.10 "< 3 ms" budget is unverified everywhere and the
+  UIKit-vs-SwiftUI tradeoff is unmeasured. The convergence question is therefore
+  not decidable from this repo yet. No prose papered over the gap — AGENTS.md §0.2
+  and ADR-0048 already describe the divergence accurately. Issue marked
+  `status: blocked`; unblock when PRD-J + FLUX-066 land the harness and the two
+  tiers are measured.
+
 ### CI — real Kotlin / Compose codegen check + rust-check unblock — DONE
 
 - Provision the Compose toolchain and run the real `kotlinc` codegen check without platform-37;
