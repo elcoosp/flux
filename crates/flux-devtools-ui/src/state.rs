@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use flux_ir_serde::EnrichedTelemetryEvent;
 
 use crate::time_travel::{
-    LogBuffer, LogEntry, ReconstructedState, TimelineBuffer, reconstruct_state,
+    LogBuffer, LogEntry, ReconstructedState, TimelineBuffer, ViewFrame, reconstruct_state,
 };
 
 /// Snapshot of the VM register/instruction view.
@@ -269,6 +269,12 @@ impl DevToolsState {
             *live = reconstruct_state(&live, std::slice::from_ref(&event));
         }
         self.timeline.write().push(event);
+    }
+
+    /// Appends a reconstructed view frame to the live component tree directly
+    /// (used by tests and any caller that already holds a [`ViewFrame`]).
+    pub fn push_view_frame(&self, frame: ViewFrame) {
+        self.live.write().view_frames.push(frame);
     }
 
     /// The current host identity, if known.

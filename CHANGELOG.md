@@ -73,6 +73,22 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **DevTools reconstructor** records node presence on every `ViewMutation` (frame
   optional) instead of requiring `Some(rect)`; the Component Tree renders
   `node present · geometry pending` when the host cannot measure geometry.
+- **`parent_id` wire field (follow-up).** `ViewMutation` now carries `parent_id`
+  (raw + enriched encode/decode in `flux-ir-serde`), so the DevTools can rebuild
+  the parent/child hierarchy instead of a flat list. Both hosts emit it
+  (`ShadowTreeReconciler.reconcile` threads `parentId`; Android emits
+  `parents[id] ?? 0`). The DevTools `ComponentTreeView` resolves parent links and
+  renders an indented tree (chevrons mark branches) rather than a text wall.
+- **Snapshot-on-connect (follow-up).** The host replays its current shadow tree
+  when DevTools attaches: iOS `ShadowTreeReconciler.emitSnapshot()` walks
+  `nodeTable` from the root and re-emits `ViewMutation(add)` for every built node,
+  fired at the end of `apply()` and on `fluxDevtoolsConnect`. This removes the
+  timing dependency — the tree populates immediately on DevTools connect instead of
+  only after the next mount/tap.
+- **Instant repaint (follow-up).** `DevToolsRoot::render` now re-arms an animation
+  frame whenever a host is connected, so freshly ingested telemetry (VM steps,
+  signals, layout frames) is reflected immediately — including while the DevTools
+  window is in the background — instead of only after a refocus.
 
 The entries below land the work committed since the changelog was last updated
 (`a8c86d0`, 2026-08-27). The `[skip ci]` merge-guard directory-recording commits
