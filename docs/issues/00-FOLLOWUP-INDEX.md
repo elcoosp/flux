@@ -70,7 +70,7 @@ issue, and the LSP work (PRD-O's deferred server) is promoted into its own
 | CHANGELOG deferred (§PRD-T) | Issue |
 |---|---|
 | large-list scroll benchmark (needs `ScrollView`) | FLUX-056 |
-| RN/Flutter published comparison (external apps) | FLUX-057 |
+| RN/Flutter published comparison — web-research only (no external apps built in repo) | FLUX-057 `partial` |
 
 ## DevTools (PRD-P deferred)
 
