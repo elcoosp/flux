@@ -1,6 +1,6 @@
 ---
 id: FLUX-045
-status: partial
+status: resolved
 lane: LANE-C
 phase: "Phase 6"
 blocked_by:
@@ -89,6 +89,39 @@ Note: `:runtimes:android:host:test` has 2 pre-existing failures
 (`IsaConformanceTest.is_null_*`, `INVALID_DISPATCH`) caused by the in-flight
 `FluxBytecodeVM.kt` VM edits (parallel ADR-0049 work) — verified independent of
 this file by removing it and re-running. They are not introduced by FLUX-045.
+
+## Status update (2026-08-29, RESOLVED)
+
+**Concrete capabilities are now wired into the live host registry — not just advertised.**
+
+Previously the six concrete caps (6..=11) existed only in unused `makeProduction()`
+factories (`ConcreteCapabilities.{kt,swift}`) while the live host ran
+`CapabilityRegistry.DEV` / `Registry.makeDev` (Android `FluxExecutor.kt`,
+iOS `Registry.swift`), which contained only caps 1..=5 + 12/13. The dev
+handshake advertised 6..=11 in `HelloFrame`, but a `CALL_CAP` to e.g.
+`DeepLink.openURL` (cap 10) faulted as `TYPE_MISMATCH` — the caps were
+**advertised-but-unreachable dead code**.
+
+Fix: merged the six concrete cap bodies into `CapabilityRegistry.makeDev`
+(Android) and `CapabilityRegistry.makeDev` (iOS) directly, and deleted the
+redundant `ConcreteCapabilities.{kt,swift}` files. The dev host now serves
+Push / Biometric / Background / FileSystem / DeepLink / Sensors from the same
+registry the VM actually dispatches against, so `CALL_CAP` reaches them and the
+handshake is truthful.
+
+Verification (both toolchains, green):
+- Android: `./gradlew :runtimes:android:host:test --tests RuntimeFixesTest`
+  — build SUCCESSFUL; new `deeplink openURL records url in signal 44 via DEV`
+  and `filesystem write then read round-trips via DEV` pass.
+- iOS: `xcodebuild -scheme FluxApp -destination 'id=27088715-…' test` — all
+  suites pass (CapabilityRoundTripTests 15 tests, 0 failures); new
+  `testDeepLinkOpenURLRecordsUrlInSignal44` and
+  `testFileSystemWriteThenReadRoundTrips` pass.
+
+The bodies remain dev-safe deterministic echoes (RELEASE-TODO flags retained);
+real OS calls (UNUserNotificationCenter / LAContext / BGTaskScheduler /
+FileManager / UIApplication / CMMotionManager on iOS, NotificationManager /
+BiometricPrompt / WorkManager / etc. on Android) still belong in the app shell.
 
 ## Problem Statement
 

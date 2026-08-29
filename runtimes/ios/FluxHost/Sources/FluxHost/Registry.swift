@@ -85,6 +85,12 @@ final class CapabilityRegistry: @unchecked Sendable {
     /// - `Router`  (cap 3): `navigate` (3,1).
     /// - `Clipboard` (cap 4): `setString` (4,1), `getString` (4,2).
     /// - `Geolocation` (cap 5): `getCurrentPosition` (5,1).
+    /// - `Push` (cap 6): `registerForNotifications` (6,1) [async], `scheduleNotification` (6,2).
+    /// - `Biometric` (cap 7): `authenticate` (7,1).
+    /// - `Background` (cap 8): `schedule` (8,1) [async], cancel (8,2).
+    /// - `FileSystem` (cap 9): `readAsString` (9,1), `writeAsString` (9,2), `delete` (9,3).
+    /// - `DeepLink` (cap 10): `openURL` (10,1).
+    /// - `Sensors` (cap 11): `read` (11,1).
     ///
     /// `Storage` is backed by the injected `StorageBackend` (dev/test:
     /// in-memory; app shell: `UserDefaults`) — see Task 1 (LANE-C). `Camera.takePicture`
@@ -215,8 +221,101 @@ final class CapabilityRegistry: @unchecked Sendable {
                 signals.markPending(id)
                 return id
             }),
-        ], store: store)
+        ] + Self.concreteCapabilityEntries(), store: store)
     }
+
+    /// FLUX-045 — the six concrete native capabilities (PRD-Q deferred set), ids
+    /// 6..=11, returned as `(capId, methodId, impl)` triples. Kept separate from
+    /// `makeDev` so the registry body stays under Swift's expression type-check
+    /// budget while still being composed into the live dev registry.
+    ///
+    /// The bodies are dev-safe deterministic echoes (no real OS providers in the
+    /// dev host). Real native calls (UNUserNotificationCenter / LAContext /
+    /// BGTaskScheduler / FileManager / UIApplication / CMMotionManager) are a
+    /// release-mode concern and belong in the app shell (RELEASE-TODO).
+    private static func concreteCapabilityEntries() -> [(UInt32, UInt16, CapabilityImpl)] {
+        [
+            // Push.register (6,1) [async]: allocate a Pending cell, resolve inline
+            // with a simulated device-token id (signal 42).
+            (6, 1, { _, _, _, signals in
+                let id = signals.allocateCell()
+                signals.markPending(id)
+                signals.resolveCell(id, .str(42))
+                return id
+            }),
+            // Push.getToken (6,2): surface the last simulated token (signal 42) or null.
+            (6, 2, { _, _, _, signals in
+                let id = signals.allocateCell()
+                signals.write(id, signals.read(42) ?? .null)
+                return id
+            }),
+            // Biometric.authenticate (7,1): dev assumes granted; a denied grant MUST
+            // yield a typed VmError (CAPABILITY_DENIED), never a crash.
+            (7, 1, { _, _, _, signals in
+                let id = signals.allocateCell()
+                signals.write(id, .bool(true))
+                return id
+            }),
+            // Background.schedule (8,1) [async]: allocate a Pending cell, resolve
+            // inline with a simulated task id (signal 43).
+            (8, 1, { _, _, _, signals in
+                let id = signals.allocateCell()
+                signals.markPending(id)
+                signals.resolveCell(id, .str(43))
+                return id
+            }),
+            // Background.cancel (8,2): dev-safe echo.
+            (8, 2, { _, _, _, signals in
+                let id = signals.allocateCell()
+                signals.write(id, .bool(true))
+                return id
+            }),
+            // FileSystem.read (9,1): contents persisted under a derived signal id.
+            (9, 1, { _, _, arg, signals in
+                guard case let .record(fields) = arg, !fields.isEmpty else { throw VmError.typeMismatch(offset: 0) }
+                guard case let .str(pathID) = fields[0].value else { throw VmError.typeMismatch(offset: 0) }
+                let id = signals.allocateCell()
+                signals.write(id, signals.read(fileSignalID(pathID)) ?? .null)
+                return id
+            }),
+            // FileSystem.write (9,2): persist into the signal store.
+            (9, 2, { _, _, arg, signals in
+                guard case let .record(fields) = arg, fields.count >= 2 else { throw VmError.typeMismatch(offset: 0) }
+                guard case let .str(pathID) = fields[0].value else { throw VmError.typeMismatch(offset: 0) }
+                let data = fields[1].value
+                signals.write(fileSignalID(pathID), data)
+                let id = signals.allocateCell()
+                signals.write(id, data)
+                return id
+            }),
+            // FileSystem.delete (9,3): clear the persisted value.
+            (9, 3, { _, _, arg, signals in
+                guard case let .record(fields) = arg, !fields.isEmpty else { throw VmError.typeMismatch(offset: 0) }
+                guard case let .str(pathID) = fields[0].value else { throw VmError.typeMismatch(offset: 0) }
+                signals.write(fileSignalID(pathID), .null)
+                let id = signals.allocateCell()
+                signals.write(id, .null)
+                return id
+            }),
+            // DeepLink.openURL (10,1): record the target url (signal 44) for the reconciler.
+            (10, 1, { _, _, arg, signals in
+                signals.write(44, arg)
+                return 44
+            }),
+            // Sensors.read (11,1): dev returns an empty record.
+            (11, 1, { _, _, _, signals in
+                let id = signals.allocateCell()
+                signals.write(id, .record([]))
+                return id
+            }),
+        ]
+    }
+
+    /// FileSystem contents are persisted into the signal store under a deterministic
+    /// high signal id derived from the interned path id. The 900_000 offset keeps
+    /// these ids below the cell allocator's 1_000_000 ceiling (see `InMemorySignals`)
+    /// so they never collide with result cells.
+    private static func fileSignalID(_ pathID: UInt32) -> UInt32 { 900_000 &+ pathID }
 
     /// The MLP dev registry: `Storage` backed by an in-memory store.
     ///

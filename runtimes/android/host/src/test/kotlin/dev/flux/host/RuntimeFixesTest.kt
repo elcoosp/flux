@@ -1177,6 +1177,63 @@ fun `nativeModule invoke records request in signal 83`() {
     )
 }
 
+/**
+ * FLUX-045 — DeepLink.openURL (cap 10) records the requested url into signal 44
+ * through the live [CapabilityRegistry.DEV] registry (the six concrete caps must
+ * be reachable from CALL_CAP, not only advertised in the HelloFrame handshake).
+ */
+@Test
+fun `deeplink openURL records url in signal 44 via DEV`() {
+    val signals = SignalGraph()
+    val urlId = 245u
+    val args =
+        dev.flux.host.vm.FluxValue.RecordVal(
+            listOf(
+                dev.flux.host.vm.FluxValue.Field(
+                    0u.toUShort(),
+                    dev.flux.host.vm.FluxValue.StrVal(urlId),
+                ),
+            ),
+        )
+    val cellId = CapabilityRegistry.DEV.lookup(10u, 1u.toUShort())!!.call(args, signals)
+    assertEquals(44u, cellId, "DeepLink.openURL returns its result-cell id")
+    assertEquals(
+        args,
+        signals.read(44u),
+        "DeepLink.openURL records the requested url (as a StrVal field) into signal 44",
+    )
+}
+
+/**
+ * FLUX-045 — FileSystem.write then read (caps 9,2 / 9,1) round-trips through the
+ * live [CapabilityRegistry.DEV] registry; contents persist under a derived signal id.
+ */
+@Test
+fun `filesystem write then read round-trips via DEV`() {
+    val signals = SignalGraph()
+    val pathId = 246u
+    val value = dev.flux.host.vm.FluxValue.StrVal(999u)
+    val writeArgs =
+        dev.flux.host.vm.FluxValue.RecordVal(
+            listOf(
+                dev.flux.host.vm.FluxValue.Field(0u.toUShort(), dev.flux.host.vm.FluxValue.StrVal(pathId)),
+                dev.flux.host.vm.FluxValue.Field(1u.toUShort(), value),
+            ),
+        )
+    val writeCell = CapabilityRegistry.DEV.lookup(9u, 2u.toUShort())!!.call(writeArgs, signals)
+    assertEquals(value, signals.read(writeCell), "FileSystem.write echoes the written value through its result cell")
+    assertEquals(value, signals.read(900_000u + pathId), "FileSystem.write persists the value under the derived signal id")
+
+    val readArgs =
+        dev.flux.host.vm.FluxValue.RecordVal(
+            listOf(
+                dev.flux.host.vm.FluxValue.Field(0u.toUShort(), dev.flux.host.vm.FluxValue.StrVal(pathId)),
+            ),
+        )
+    val readCell = CapabilityRegistry.DEV.lookup(9u, 1u.toUShort())!!.call(readArgs, signals)
+    assertEquals(value, signals.read(readCell), "FileSystem.read returns the written value")
+}
+
 /** FNV-1a (32-bit) hash of "route", matching the wire's `prop_index_for_name`. */
 private fun fnv1aRoutePropIndex(): UShort {
     var h: UInt = 0x811c9dc5u

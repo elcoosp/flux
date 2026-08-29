@@ -229,4 +229,32 @@ final class CapabilityRoundTripTests: XCTestCase {
         XCTAssertEqual(cell, 83, "NativeModule.invoke returns its result-cell id")
         XCTAssertEqual(signals.read(83), .record([(0, .int(Int64(nameId)))]), "NativeModule.invoke records the requested SDK call into signal 83")
     }
+
+    // MARK: - FLUX-045: six concrete native capabilities
+
+    /// DeepLink.openURL (cap 10) records the requested url into signal 44 through
+    /// the live `CapabilityRegistry.dev` registry (the concrete caps must be
+    /// reachable from CALL_CAP, not only advertised in the HelloFrame handshake).
+    func testDeepLinkOpenURLRecordsUrlInSignal44() throws {
+        var signals: any SignalStore = InMemorySignals()
+        let urlId: UInt32 = 245
+        let args: FluxHost.FluxValue = .record([(UInt16(0), .str(urlId))])
+        let cell = try CapabilityRegistry.dev.lookup(10, 1)!(10, 1, args, &signals)
+        XCTAssertEqual(cell, 44, "DeepLink.openURL returns its result-cell id")
+        XCTAssertEqual(signals.read(44), args, "DeepLink.openURL records the requested url into signal 44")
+    }
+
+    /// FileSystem.write then read (caps 9,2 / 9,1) round-trips through the live
+    /// `CapabilityRegistry.dev` registry; contents persist under a derived signal id.
+    func testFileSystemWriteThenReadRoundTrips() throws {
+        var signals: any SignalStore = InMemorySignals()
+        let pathId: UInt32 = 246
+        let value: FluxHost.FluxValue = .str(999)
+        let writeCell = try CapabilityRegistry.dev.lookup(9, 2)!(9, 2, FluxHost.FluxValue.record([(UInt16(0), .str(pathId)), (UInt16(1), value)]), &signals)
+        XCTAssertEqual(signals.read(writeCell), value, "FileSystem.write echoes the written value through its result cell")
+        XCTAssertEqual(signals.read(UInt32(900_000) + pathId), value, "FileSystem.write persists the value under the derived signal id")
+
+        let readCell = try CapabilityRegistry.dev.lookup(9, 1)!(9, 1, FluxHost.FluxValue.record([(UInt16(0), .str(pathId))]), &signals)
+        XCTAssertEqual(signals.read(readCell), value, "FileSystem.read returns the written value")
+    }
 }
