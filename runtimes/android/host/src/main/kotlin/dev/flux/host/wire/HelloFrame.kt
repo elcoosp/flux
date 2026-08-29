@@ -8,20 +8,27 @@ package dev.flux.host.wire
  * ```
  * MAGIC(u32 LE = 0x465C5558) | version(u8 = 1) | kind(u8 = 0x01)
  *   | platform(u16 len + utf8) | device(u16 len + utf8)
- *   | cap_count(u16) [cap triples…]
+ *   | cap_count(u16) [cap triples…] | token(u16 len + utf8)
  * ```
  *
  * Sending this on socket open is what lets the server answer with the full tree;
  * without it the connection hangs at "connecting" forever (the server only
- * fans out `Init` after a valid `Hello`).
+ * fans out `Init` after a valid `Hello`). The trailing `token` field is optional
+ * on the wire: an empty token is written as a zero-length string and means "no
+ * token presented" (the server only requires a match when started with
+ * `--token`).
  *
  * @property platform host platform string, e.g. `"android"`.
  * @property device device model string, e.g. `"Pixel 5"`.
+ * @property token optional pairing token; the server rejects the handshake
+ *   unless it was started with the same `--token`. Pass `null` for an open
+ *   localhost session.
  * @return the wire bytes of the `Hello` frame.
  */
 public fun helloFrameBytes(
     platform: String,
     device: String,
+    token: String? = null,
 ): ByteArray {
     val out = ArrayList<Byte>()
     // MAGIC "FLUX" little-endian (u32 = 0x465C5558): 0x58 0x55 0x5C 0x46.
@@ -47,6 +54,9 @@ public fun helloFrameBytes(
         out.add(((features.size ushr 8) and 0xFF).toByte())
         for (feature in features) writeStr(out, feature)
     }
+    // Pairing token (u16 len + utf8), appended last for backward compatibility.
+    // An absent token is written as a zero-length string.
+    writeStr(out, token ?: "")
     return out.toByteArray()
 }
 

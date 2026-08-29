@@ -95,10 +95,13 @@ extension HelloFrame {
 public enum HelloFrame {
     /// Builds the wire bytes of a `Hello` handshake frame.
     /// - Parameters:
-    ///   - platform: host platform string, e.g. "ios".
-    ///   - device: device model string, e.g. "iPhone 17 Pro".
+    ///   - platform: host platform string, e.g. `"ios"`.
+    ///   - device: device model string, e.g. `"iPhone 17 Pro"`.
+    ///   - token: optional pairing token (Appendix D §D.12.1). When set, the dev
+    ///     server rejects the handshake unless it was started with the same
+    ///     `--token`. Pass `nil` for an open localhost session.
     /// - Returns: the frame bytes to send over the WebSocket.
-    public static func bytes(platform: String, device: String) -> Data {
+    public static func bytes(platform: String, device: String, token: String? = nil) -> Data {
         var data = Data()
         // MAGIC "FLUX" little-endian (u32 = 0x465C5558): 0x58 0x55 0x5C 0x46.
         data.append(0x58)
@@ -129,6 +132,10 @@ public enum HelloFrame {
             data.append(UInt8((features.count >> 8) & 0xFF))
             for feature in features { data.fluxAppendString(feature) }
         }
+        // Pairing token (u16 len + utf8), appended last so older servers that stop
+        // reading after the capabilities still parse this frame. An absent token is
+        // written as a zero-length string.
+        data.fluxAppendString(token ?? "")
         return data
     }
 }

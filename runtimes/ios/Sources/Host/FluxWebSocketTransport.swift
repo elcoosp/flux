@@ -52,8 +52,14 @@ public final class FluxWebSocketTransport: FluxTransport {
         // Appendix D §D.12.1: the server only replies with `Init` after a
         // `Hello` handshake. `URLSessionWebSocketTask` queues the message until
         // the upgrade completes, so sending here is safe and fires the handshake
-        // as soon as the socket opens.
-        let hello = HelloFrame.bytes(platform: "ios", device: UIDevice.current.model)
+        // as soon as the socket opens. A pairing token from `FLUX_DEV_TOKEN` is
+        // appended when the dev server was started with `--token`.
+        let devToken = ProcessInfo.processInfo.environment["FLUX_DEV_TOKEN"]
+        let hello = HelloFrame.bytes(
+            platform: "ios",
+            device: UIDevice.current.model,
+            token: devToken
+        )
         task.send(.data(hello)) { [weak self] error in
             if let error {
                 #if DEBUG

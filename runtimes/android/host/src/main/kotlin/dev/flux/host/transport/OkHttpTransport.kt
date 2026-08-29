@@ -52,7 +52,10 @@ public class OkHttpTransport(
                         // Appendix D §D.12.1: the server only replies with `Init`
                         // after a `Hello` handshake. Send it immediately on open so
                         // the full tree is pushed and the host leaves "connecting".
-                        val hello = helloFrameBytes("android", "android")
+                        // A pairing token from `FLUX_DEV_TOKEN` is appended when the
+                        // dev server was started with `--token`.
+                        val devToken = System.getenv("FLUX_DEV_TOKEN")
+                        val hello = helloFrameBytes("android", "android", devToken)
                         socket?.send(okio.ByteString.of(*hello))
                     }
 
