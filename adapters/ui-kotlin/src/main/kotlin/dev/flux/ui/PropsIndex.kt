@@ -19,7 +19,7 @@ public object PropsIndex {
      * Zero-extends each byte (matching Rust's `u32::from(u8)`) so the host and
      * server compute identical indices for the same name.
      */
-    private fun propIndexForName(name: String): UShort {
+    public fun propIndexForName(name: String): UShort {
         var hash: UInt = 0x811c_9dc5u
         for (byte in name.encodeToByteArray()) {
             hash = hash xor byte.toUByte().toUInt()
@@ -72,4 +72,10 @@ public object PropsIndex {
     public val IMAGE_WIDTH: UShort = propIndexForName("width")
     public val IMAGE_HEIGHT: UShort = propIndexForName("height")
     public val IMAGE_RESIZE_MODE: UShort = propIndexForName("resizeMode")
+
+    // Accessibility (FLUX-044) — host-render-only, no wire field. Resolved by
+    // name so they stay in lockstep with the dev server's FNV-1a prop indices.
+    public val A11Y_LABEL: UShort = propIndexForName("label")
+    public val A11Y_ROLE: UShort = propIndexForName("role")
+    public val A11Y_FOCUS_ORDER: UShort = propIndexForName("focusOrder")
 }
