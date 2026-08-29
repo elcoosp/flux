@@ -225,6 +225,17 @@ impl Writer {
         Self { buf: Vec::new() }
     }
 
+    /// Builds a `Writer` around a caller-owned buffer, clearing it first.
+    ///
+    /// The dev server encodes a frame on every hot-reload edit; reusing one
+    /// scratch `Vec<u8>` across frames (instead of `new()`'s fresh allocation
+    /// each call) keeps that hot path allocation-free after warm-up. The buffer
+    /// is `clear()`ed (capacity preserved), not dropped.
+    pub(crate) fn from_vec(mut buf: Vec<u8>) -> Self {
+        buf.clear();
+        Self { buf }
+    }
+
     pub(crate) fn u8(&mut self, value: u8) {
         self.buf.push(value);
     }

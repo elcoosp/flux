@@ -619,7 +619,18 @@ impl InitFrame {
     /// Encodes the `Init` frame per Appendix D §D.1 + §D.12.2 + §D.12 handler section.
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut w = Writer::new();
+        let mut buf = Vec::new();
+        self.encode_into(&mut buf);
+        buf
+    }
+
+    /// Encodes this frame, appending to `buf` (which is cleared first).
+    ///
+    /// The dev server emits an `Init` when a host (re)connects; reusing one
+    /// scratch buffer avoids a fresh heap allocation per connection (OPT-B),
+    /// and keeps `to_bytes` semantically identical for callers/tests.
+    pub fn encode_into(&self, buf: &mut Vec<u8>) {
+        let mut w = Writer::from_vec(std::mem::take(buf));
         write_magic_version(&mut w);
         w.u8(self.kind.type_byte());
         w.u32(self.seq);
@@ -674,7 +685,7 @@ impl InitFrame {
         } else {
             w.u8(0);
         }
-        w.into_vec()
+        *buf = w.into_vec();
     }
 }
 
@@ -786,7 +797,19 @@ impl DeltaFrame {
     /// Encodes the `Delta` frame per Appendix D §D.1 + §D.2/§D.9 + §D.12 handler section.
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut w = Writer::new();
+        let mut buf = Vec::new();
+        self.encode_into(&mut buf);
+        buf
+    }
+
+    /// Encodes this frame, appending to `buf` (which is cleared first).
+    ///
+    /// The dev server emits a `Delta` on every hot-reload edit; reusing one
+    /// scratch buffer across frames avoids a fresh heap allocation per edit
+    /// (OPT-B). `buf` keeps its capacity between calls, so after warm-up the
+    /// hot path performs no allocation at all.
+    pub fn encode_into(&self, buf: &mut Vec<u8>) {
+        let mut w = Writer::from_vec(std::mem::take(buf));
         write_magic_version(&mut w);
         w.u8(self.kind.type_byte());
         w.u32(self.seq);
@@ -806,7 +829,7 @@ impl DeltaFrame {
         if self.flags & FLAG_NODE_HAS_SIGNAL_DEPS != 0 {
             encode_signal_meta_section(&mut w, &self.signal_meta);
         }
-        w.into_vec()
+        *buf = w.into_vec();
     }
 }
 

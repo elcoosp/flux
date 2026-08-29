@@ -118,6 +118,10 @@ pub struct Pipeline {
     /// perturb the ids the tree itself was serialised with. Ids reported to the
     /// host are dense within the module's own reserved region.
     host_strings: HostStrings,
+    /// Reusable scratch buffer for frame encoding (OPT-B). Held across compiles
+    /// so the per-edit `Delta`/`Init` hot path performs no fresh allocation
+    /// after warm-up — the encoder clears and refills it in place.
+    scratch: Vec<u8>,
 }
 
 impl Pipeline {
@@ -136,6 +140,7 @@ impl Pipeline {
             index: DependencyIndex::default(),
             signal_deps: None,
             host_strings: HostStrings::default(),
+            scratch: Vec::new(),
         }
     }
 
@@ -634,7 +639,11 @@ impl Pipeline {
         );
         self.seq = self.seq.wrapping_add(1);
         frame.seq = self.seq;
-        frame.to_bytes()
+        // Reuse the scratch buffer (OPT-B) so the per-connection Init path is
+        // allocation-free after warm-up; a reconnecting host always receives the
+        // full string table (ids are per-compile positional, not content-stable).
+        frame.encode_into(&mut self.scratch);
+        self.scratch.clone()
     }
 
     /// Builds the `Delta` frame bytes for `patches` (spec §D.1).
@@ -644,6 +653,13 @@ impl Pipeline {
         patches: &[Patch],
         closures: &[flux_ir::ClosureIR],
     ) -> Vec<u8> {
+        // The full arena string table is shipped on every Delta. String ids are
+        // assigned densely *per compile* (flux_syntax::StringTable interns in
+        // first-insertion order, not content-derived), so an edit that shifts
+        // the table reassigns every id. A host that merges deltas into the table
+        // it already holds would otherwise bind a stale id→text pair and render
+        // wrong text. Shipping the whole table keeps the id→text mapping correct;
+        // the scratch buffer (OPT-B) keeps this allocation-free after warm-up.
         let strings: Vec<(flux_syntax::StringId, String)> = arena
             .string_table()
             .iter()
@@ -658,7 +674,9 @@ impl Pipeline {
             flux_ir_serde::FLAG_HAS_STRING_DELTA | flux_ir_serde::FLAG_NODE_HAS_SIGNAL_DEPS
         };
         self.seq = self.seq.wrapping_add(1);
-        Frame::delta(self.seq, flags, patches, &strings, closures, &signal_meta).to_bytes()
+        let frame = Frame::delta(self.seq, flags, patches, &strings, closures, &signal_meta);
+        frame.encode_into(&mut self.scratch);
+        self.scratch.clone()
     }
 
     /// Rebuilds the `Init` frame from the retained good tree, for a
@@ -918,6 +936,51 @@ mod tests {
         assert_eq!(
             int_entries, 1,
             "the same instantiation in two files is one specialisation"
+        );
+    }
+
+    #[test]
+    fn delta_ships_full_string_table_for_positional_ids() {
+        // Correctness guard (not a micro-opt): `flux_syntax::StringTable` interns
+        // ids densely in first-insertion order *per compile*, so an edit that
+        // shifts the table reassigns every id. A host applies a Delta by mapping
+        // string ids to text, so the Delta must carry the FULL table — not a
+        // partial delta — or the host would bind a stale id→text pair and render
+        // wrong text. (A tempting "ship only new strings" optimization is unsafe
+        // precisely because the ids are not content-stable across compiles.)
+        use flux_ir_serde::Frame;
+
+        let mut pipeline = Pipeline::new("/tmp/project", false);
+        pipeline.set_source(
+            Path::new("/tmp/project/main.flux"),
+            "compo Hello\n  Button(text: \"first\")\n".to_owned(),
+        );
+        let init = match pipeline.compile().expect("compiles") {
+            Compiled::Init(bytes) => bytes,
+            other => panic!("first compile is an Init, got {other:?}"),
+        };
+        let init_frame = Frame::from_init_bytes(&init).expect("decodes as Init");
+        let init_string_count = init_frame.string_table.len();
+        assert!(
+            init_string_count >= 1,
+            "Init carries the full string table (the \"first\" literal)"
+        );
+
+        // Edit the literal. The resulting Delta must still carry the complete
+        // table so the new id→text bindings are correct on the host.
+        pipeline.set_source(
+            Path::new("/tmp/project/main.flux"),
+            "compo Hello\n  Button(text: \"second\")\n".to_owned(),
+        );
+        let delta = match pipeline.compile().expect("recompiles") {
+            Compiled::Delta(bytes) => bytes,
+            other => panic!("changed tree ships a Delta, got {other:?}"),
+        };
+        let delta_frame = Frame::from_delta_bytes(&delta).expect("decodes as Delta");
+        assert_eq!(
+            delta_frame.strings.len(),
+            init_string_count,
+            "Delta ships the full table (positional ids are per-compile, not content-stable)"
         );
     }
 }
