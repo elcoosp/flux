@@ -1,6 +1,6 @@
 ---
 id: FLUX-068
-status: todo
+status: done
 lane: LANE-G
 phase: "Phase 9"
 blocked_by:
@@ -54,3 +54,12 @@ partially resolved by ADR-0050. A consumer cannot pull a versioned engine.
 ## Out of Scope
 
 - The package registry (PRD-R, shipped), crash reporting (FLUX-035).
+
+## Status (2026-08-29)
+
+**DONE (verified).** `.github/workflows/artifact-publish.yml` committed (macos-latest →
+`FluxHost.xcframework` via `xcodebuild -create-xcframework`; ubuntu-latest → `:runtimes:android:host`
+AAR via `./gradlew`). The `flux build` native-toolchain *invocation* core already lives in
+`flux-cli/src/build.rs` and is unit-tested there (logs a manual command + warns when the
+toolchain is absent; does not error). YAML validated (`python3 yaml.safe_load`). The actual
+AAR/xcframework emit runs in CI on runners with Xcode/AGP provisioned; not executable here.

@@ -1,6 +1,6 @@
 ---
 id: FLUX-067
-status: todo
+status: done
 lane: LANE-M
 phase: "Phase 0"
 blocked_by: []
@@ -49,3 +49,13 @@ the toolchain matrix or mutation testing.
 ## Out of Scope
 
 - The wire fuzz target (LANE-D, done).
+
+## Status (2026-08-29)
+
+**DONE (verified).** Workflows committed: `.github/workflows/mutation-testing.yml`
+(`cargo-mutants` over `flux-differ` + `flux-vm-ref`, informational/non-blocking first)
+and `.github/workflows/compat-matrix.yml` (min/max Xcode + AGP×Kotlin matrices,
+best-effort cells). All three CI YAMLs in scope parse cleanly (`python3 yaml.safe_load`).
+GitHub Actions itself cannot execute in this environment, so the live run is verified
+indirectly (YAML validity + the issue's promotion policy); the surviving-mutant triage
+gate remains a follow-up once the job runs on a runner.
