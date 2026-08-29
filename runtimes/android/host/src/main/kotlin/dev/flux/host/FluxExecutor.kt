@@ -14,6 +14,12 @@ import dev.flux.host.vm.FluxValue
 import dev.flux.host.vm.Instruction
 import dev.flux.host.vm.StringResolver
 import dev.flux.host.vm.TableStringResolver
+import dev.flux.host.vm.HttpRequestStore
+import dev.flux.host.vm.HttpTransport
+import dev.flux.host.vm.makeHttpResolver
+import dev.flux.host.vm.NativeCapabilityHost
+import dev.flux.host.vm.DevNativeCapabilityHost
+import dev.flux.host.transport.HttpOkHttpTransport
 import dev.flux.host.vm.PermissionChecker
 import dev.flux.host.vm.AllowAllPermissionChecker
 import dev.flux.host.vm.VmErrorKind
@@ -157,11 +163,17 @@ public class FluxExecutor(
     private val transport: FluxTransport,
     private val vmScope: CoroutineScope = CoroutineScope(SupervisorJob() + kotlinx.coroutines.Dispatchers.Default),
     private val reactiveDispatcher: ReactiveDispatcher = ReactiveDispatcher.main(),
-    /** The `(capId, methodId) → impl` table for `CALL_CAP`. Defaults to the dev
+    /** The injectable seam for real device-OS capability bodies (FLUX-045). The
+     * pure-JVM `:host` core supplies no real OS calls; the app shell passes
+     * [AndroidNativeCapabilityHost] here. Defaults to [DevNativeCapabilityHost]
+     * (dev echoes) so headless unit tests need no emulator. */
+    private val nativeHost: NativeCapabilityHost = DevNativeCapabilityHost(),
+    /** The `(capId, methodId) → impl` table for `CALL_CAP`. Built from the dev
      * capability set (which includes `Router.navigate` (3,1)) so the live host can
      * drive real navigation; the unit-test oracle uses [CapabilityRegistry.default]
-     * or a custom registry instead. */
-    private val capabilities: CapabilityRegistry = CapabilityRegistry.DEV,
+     * or a custom registry instead. The [nativeHost] is threaded in so the FLUX-045
+     * concrete caps (6..=11) perform real OS calls when a real host is supplied. */
+    private val capabilities: CapabilityRegistry = CapabilityRegistry.makeDev(nativeHost = nativeHost),
     /** The OS-permission gate for `CALL_CAP` (FLUX-049). Defaults to
      * [AllowAllPermissionChecker]; the production host injects a real checker
      * (`ContextCompat.checkSelfPermission`) so a denied grant surfaces as a red
@@ -201,15 +213,21 @@ public class FluxExecutor(
     private var stringIndex: StringInterning = StringInterning.empty()
 
     /**
-     * The async-future resolver for `await` (ADR-0044). Defaults to the synchronous
-     * pass-through (a future handle is its own settled value); a live host swaps in a
-     * real resolver (network/timer/capability). [PassthroughAsyncResolver] is the named
-     * default for external reuse.
+     * The shared pending-`Http`-request store (FLUX-047); consulted by the
+     * default async resolver so a fetched cell resolves through the network.
+     */
+    private val httpRequests: HttpRequestStore = HttpRequestStore()
+
+    /** The production `Http` transport (FLUX-047); `HttpOkHttpTransport`. */
+    private val httpTransport: HttpTransport = HttpOkHttpTransport()
+
+    /**
+     * The async-future resolver for `await` (ADR-0044). Defaults to a resolver
+     * that settles parked `Http` cells (cap 14) through the real network using
+     * the live string resolver; non-`Http` futures pass through untouched.
      */
     public var asyncResolver: AsyncResolver =
-        object : AsyncResolver {
-            override suspend fun resolve(future: dev.flux.host.vm.FluxValue): dev.flux.host.vm.FluxValue = future
-        }
+        makeHttpResolver(httpRequests, httpTransport, stringResolver)
 
     /** The scope all stateful work runs on ([reactiveDispatcher]); built from it. */
     private val reactiveScope: CoroutineScope = CoroutineScope(SupervisorJob() + reactiveDispatcher.dispatcher)

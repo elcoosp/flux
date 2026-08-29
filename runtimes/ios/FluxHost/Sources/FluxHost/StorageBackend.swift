@@ -22,6 +22,9 @@ protocol StorageBackend: Sendable {
     func put(_ key: UInt32, _ value: FluxValue?)
     /// Reads the value for `key`, or `nil` if absent.
     func get(_ key: UInt32) -> FluxValue?
+
+    /// Enumerates every stored entry (FLUX-047 `Persist.query`).
+    func entries() -> [UInt32: FluxValue]
 }
 
 /// In-memory backend: the MLP dev/test default.
@@ -36,6 +39,8 @@ final class InMemoryStorageBackend: @unchecked Sendable, StorageBackend {
     }
 
     func get(_ key: UInt32) -> FluxValue? { storage[key] }
+
+    func entries() -> [UInt32: FluxValue] { storage }
 }
 
 /// `UserDefaults`-backed backend: real persistence for dev/release builds.
@@ -82,5 +87,18 @@ final class UserDefaultsStorageBackend: @unchecked Sendable, StorageBackend {
     func get(_ key: UInt32) -> FluxValue? {
         guard let data = defaults.data(forKey: self.key(key)) else { return nil }
         return try? FluxValueJSON.decode(data)
+    }
+
+    func entries() -> [UInt32: FluxValue] {
+        let dict = defaults.dictionaryRepresentation()
+        var result: [UInt32: FluxValue] = [:]
+        for (k, v) in dict {
+            guard k.hasPrefix(prefix),
+                  let id = UInt32(k.dropFirst(prefix.count)),
+                  let data = v as? Data,
+                  let value = try? FluxValueJSON.decode(data) else { continue }
+            result[id] = value
+        }
+        return result
     }
 }

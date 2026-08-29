@@ -34,6 +34,9 @@ public interface StorageBackend {
 
     /** Reads the value for [key], or `null` if absent. */
     public fun get(key: UInt): FluxValue?
+
+    /** Enumerates every stored entry (FLUX-047 `Persist.query`). */
+    public fun entries(): Map<UInt, FluxValue>
 }
 
 /** In-memory backend: the MLP dev/test default (values live for the store's lifetime). */
@@ -48,6 +51,8 @@ public class InMemoryStorageBackend : StorageBackend {
     }
 
     override fun get(key: UInt): FluxValue? = storage[key]
+
+    override fun entries(): Map<UInt, FluxValue> = LinkedHashMap(storage)
 }
 
 /**
@@ -90,6 +95,17 @@ public class FileStorageBackend(
         MessagePack.newDefaultUnpacker(f.inputStream()).use { unpacker ->
             return unpacker.fluxUnpack()
         }
+    }
+
+    override fun entries(): Map<UInt, FluxValue> {
+        val result = LinkedHashMap<UInt, FluxValue>()
+        dir.listFiles { _, name -> name.startsWith("flux.storage.") && name.endsWith(".mp") }?.forEach { f ->
+            val key = f.name.removePrefix("flux.storage.").removeSuffix(".mp").toUIntOrNull() ?: return@forEach
+            MessagePack.newDefaultUnpacker(f.inputStream()).use { unpacker ->
+                result[key] = unpacker.fluxUnpack()
+            }
+        }
+        return result
     }
 }
 

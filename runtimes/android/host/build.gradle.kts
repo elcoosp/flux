@@ -30,6 +30,7 @@ dependencies {
     // Wire client (dev mode) and MessagePack frame decoding (Appendix D).
     implementation(libs.okhttp)
     implementation(libs.msgpack.core)
+    implementation(libs.orgjson)
     implementation(libs.kotlinx.coroutines.core)
 
     testImplementation(libs.junit.jupiter)

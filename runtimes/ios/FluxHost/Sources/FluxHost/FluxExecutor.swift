@@ -161,6 +161,11 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
     /// checker (`AuthorizationStatus`) so a denied grant surfaces as a red banner
     /// rather than a crash.
     public var permissionChecker: PermissionChecker = AllowAllPermissionChecker()
+    /// The shared pending-`Http`-request store (FLUX-047); consulted by the
+    /// default async resolver so a fetched cell resolves through the network.
+    private let httpRequests = HttpRequestStore()
+    /// The production `Http` transport (FLUX-047); `URLSessionHttpTransport`.
+    private let httpTransport: HttpTransport = URLSessionHttpTransport()
     /// Handler id → (closure descriptor + bytecode blob + pre-decoded instruction
     /// stream). The decoded `[Instruction]` is produced once at registration (R3)
     /// and reused on every dispatch, so the per-tap hot path never re-decodes. A
@@ -206,6 +211,21 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
         self.currentRootId = nil
         self.lastError = nil
         self.reconciler.setExecutor(self)
+        // FLUX-047: the default async resolver settles parked `Http` cells (cap 14)
+        // through the real network using the live string table; non-Http futures
+        // fall through to the pass-through (the cell id itself is settled).
+        // The resolver is always invoked on the main actor (inside
+        // `runHandlerAsync`), so reading the per-frame `table` via
+        // `MainActor.assumeIsolated` is safe and yields the *current* table
+        // (capturing it by value at init would hand the resolver a stale, empty
+        // table and silently break URL/body id resolution on the live app).
+        self.asyncResolver = HttpAsyncResolver(
+            store: httpRequests,
+            transport: httpTransport,
+            tableProvider: { [weak self] in
+                MainActor.assumeIsolated { self?.table ?? StringTable() }
+            }
+        )
         // When DevTools connects, replay the current shadow tree so its component
         // tree populates immediately (FLUX-039: snapshot-on-connect).
         fluxDevtoolsOnConnect = { [weak self] in

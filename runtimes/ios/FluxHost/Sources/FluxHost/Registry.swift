@@ -53,7 +53,7 @@ typealias CapabilityStore = InMemoryStorageBackend
 /// passed per call, or the injected `store`), so it is safe to share across
 /// actors. Swift's concurrency checker cannot prove a closure holding an
 /// `inout` parameter is `Sendable`, hence the explicit opt-out.
-final class CapabilityRegistry: @unchecked Sendable {
+public final class CapabilityRegistry: @unchecked Sendable {
     /// The backing `(capId, methodId)` → impl table.
     private let table: [(capId: UInt32, methodId: UInt16, impl: CapabilityImpl)]
 
@@ -106,7 +106,10 @@ final class CapabilityRegistry: @unchecked Sendable {
     /// - Parameter backend: the `Storage` persistence backend; defaults to an
     ///   in-memory store (dev/test). Pass `UserDefaultsStorageBackend` for a
     ///   persist-to-disk registry.
-    static func makeDev(backend: any StorageBackend = InMemoryStorageBackend()) -> CapabilityRegistry {
+    static func makeDev(
+        backend: any StorageBackend = InMemoryStorageBackend(),
+        nativeHost: any NativeCapabilityHost = DevNativeCapabilityHost()
+    ) -> CapabilityRegistry {
         let store = backend
         return CapabilityRegistry(entries: [
             (1, 1, { _, _, arg, signals in
@@ -221,94 +224,31 @@ final class CapabilityRegistry: @unchecked Sendable {
                 signals.markPending(id)
                 return id
             }),
-        ] + Self.concreteCapabilityEntries(), store: store)
+        ] + Self.concreteCapabilityEntries(nativeHost: nativeHost), store: store)
     }
 
     /// FLUX-045 — the six concrete native capabilities (PRD-Q deferred set), ids
-    /// 6..=11, returned as `(capId, methodId, impl)` triples. Kept separate from
-    /// `makeDev` so the registry body stays under Swift's expression type-check
-    /// budget while still being composed into the live dev registry.
-    ///
-    /// The bodies are dev-safe deterministic echoes (no real OS providers in the
-    /// dev host). Real native calls (UNUserNotificationCenter / LAContext /
-    /// BGTaskScheduler / FileManager / UIApplication / CMMotionManager) are a
-    /// release-mode concern and belong in the app shell (RELEASE-TODO).
-    private static func concreteCapabilityEntries() -> [(UInt32, UInt16, CapabilityImpl)] {
-        [
-            // Push.register (6,1) [async]: allocate a Pending cell, resolve inline
-            // with a simulated device-token id (signal 42).
-            (6, 1, { _, _, _, signals in
-                let id = signals.allocateCell()
-                signals.markPending(id)
-                signals.resolveCell(id, .str(42))
-                return id
-            }),
-            // Push.getToken (6,2): surface the last simulated token (signal 42) or null.
-            (6, 2, { _, _, _, signals in
-                let id = signals.allocateCell()
-                signals.write(id, signals.read(42) ?? .null)
-                return id
-            }),
-            // Biometric.authenticate (7,1): dev assumes granted; a denied grant MUST
-            // yield a typed VmError (CAPABILITY_DENIED), never a crash.
-            (7, 1, { _, _, _, signals in
-                let id = signals.allocateCell()
-                signals.write(id, .bool(true))
-                return id
-            }),
-            // Background.schedule (8,1) [async]: allocate a Pending cell, resolve
-            // inline with a simulated task id (signal 43).
-            (8, 1, { _, _, _, signals in
-                let id = signals.allocateCell()
-                signals.markPending(id)
-                signals.resolveCell(id, .str(43))
-                return id
-            }),
-            // Background.cancel (8,2): dev-safe echo.
-            (8, 2, { _, _, _, signals in
-                let id = signals.allocateCell()
-                signals.write(id, .bool(true))
-                return id
-            }),
-            // FileSystem.read (9,1): contents persisted under a derived signal id.
-            (9, 1, { _, _, arg, signals in
-                guard case let .record(fields) = arg, !fields.isEmpty else { throw VmError.typeMismatch(offset: 0) }
-                guard case let .str(pathID) = fields[0].value else { throw VmError.typeMismatch(offset: 0) }
-                let id = signals.allocateCell()
-                signals.write(id, signals.read(fileSignalID(pathID)) ?? .null)
-                return id
-            }),
-            // FileSystem.write (9,2): persist into the signal store.
-            (9, 2, { _, _, arg, signals in
-                guard case let .record(fields) = arg, fields.count >= 2 else { throw VmError.typeMismatch(offset: 0) }
-                guard case let .str(pathID) = fields[0].value else { throw VmError.typeMismatch(offset: 0) }
-                let data = fields[1].value
-                signals.write(fileSignalID(pathID), data)
-                let id = signals.allocateCell()
-                signals.write(id, data)
-                return id
-            }),
-            // FileSystem.delete (9,3): clear the persisted value.
-            (9, 3, { _, _, arg, signals in
-                guard case let .record(fields) = arg, !fields.isEmpty else { throw VmError.typeMismatch(offset: 0) }
-                guard case let .str(pathID) = fields[0].value else { throw VmError.typeMismatch(offset: 0) }
-                signals.write(fileSignalID(pathID), .null)
-                let id = signals.allocateCell()
-                signals.write(id, .null)
-                return id
-            }),
-            // DeepLink.openURL (10,1): record the target url (signal 44) for the reconciler.
-            (10, 1, { _, _, arg, signals in
-                signals.write(44, arg)
-                return 44
-            }),
-            // Sensors.read (11,1): dev returns an empty record.
-            (11, 1, { _, _, _, signals in
-                let id = signals.allocateCell()
-                signals.write(id, .record([]))
-                return id
-            }),
-        ]
+    /// 6..=11, returned as `(capId, methodId, impl)` triples. Each delegates to the
+    /// injected `NativeCapabilityHost` (defaults to `DevNativeCapabilityHost` for
+    /// dev/test; the app shell supplies `IOSNativeCapabilityHost` with real OS
+    /// calls). This keeps the Foundation-only `FluxHost` core free of UIKit
+    /// imports while the real device frameworks live in the app target.
+    private static func concreteCapabilityEntries(
+        nativeHost: any NativeCapabilityHost
+    ) -> [(UInt32, UInt16, CapabilityImpl)] {
+        var entries: [(UInt32, UInt16, CapabilityImpl)] = []
+        for cap in 6...11 {
+            for method in 1...3 {
+                entries.append((UInt32(cap), UInt16(method), { capId, methodId, arg, signals in
+                    try nativeHost.call(capId, methodId, arg, &signals)
+                }))
+            }
+        }
+        entries.append(contentsOf: Self.httpPersistEntries(
+            store: HttpRequestStore(),
+            transport: URLSessionHttpTransport()
+        ))
+        return entries
     }
 
     /// FileSystem contents are persisted into the signal store under a deterministic
@@ -317,9 +257,23 @@ final class CapabilityRegistry: @unchecked Sendable {
     /// so they never collide with result cells.
     private static func fileSignalID(_ pathID: UInt32) -> UInt32 { 900_000 &+ pathID }
 
+    /// The injectable real-OS capability host. The Foundation-only `FluxHost` core
+    /// defaults to `DevNativeCapabilityHost` (deterministic echoes); the app shell
+    /// sets this to `IOSNativeCapabilityHost` at launch so the six concrete caps
+    /// (6..=11) perform genuine device work. `nil` → dev echoes.
+    ///
+    /// Set once at app launch, read-only thereafter; `nonisolated(unsafe)` opts out
+    /// of the Swift 6 global-state isolation check (it is configured before any
+    /// `CALL_CAP` dispatches — the same singleton pattern as `FluxExecutor`'s
+    /// `permissionChecker`).
+    nonisolated(unsafe) public static var realNativeHost: (any NativeCapabilityHost)?
+
     /// The MLP dev registry: `Storage` backed by an in-memory store.
     ///
-    /// Kept for source compatibility; new call sites should prefer
-    /// `makeDev(backend:)` so the app shell can pass a persistent backend.
-    static let dev: CapabilityRegistry = makeDev()
+    /// Consults `realNativeHost`, so a host configured with `IOSNativeCapabilityHost`
+    /// serves real OS capability bodies; otherwise it falls back to the deterministic
+    /// dev echoes (headless/test builds).
+    public static var dev: CapabilityRegistry {
+        makeDev(nativeHost: realNativeHost ?? DevNativeCapabilityHost())
+    }
 }

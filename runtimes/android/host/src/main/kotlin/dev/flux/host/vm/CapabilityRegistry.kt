@@ -3,7 +3,9 @@ package dev.flux.host.vm
 import dev.flux.host.vm.FluxValue.NullVal
 import dev.flux.host.vm.FluxValue.RecordVal
 import dev.flux.host.vm.FluxValue.StrVal
+import dev.flux.host.vm.HttpRequestStore
 import dev.flux.host.vm.VmErrorKind.TYPE_MISMATCH
+import dev.flux.host.transport.HttpOkHttpTransport
 
 /**
  * A host capability implementation invoked by the `CALL_CAP` opcode (Appendix E §E.1),
@@ -123,7 +125,10 @@ public class CapabilityRegistry(
          *   in-memory store (dev/test). Pass [FileStorageBackend] for a
          *   persist-to-disk registry.
          */
-        public fun makeDev(backend: StorageBackend = InMemoryStorageBackend()): CapabilityRegistry {
+        public fun makeDev(
+            backend: StorageBackend = InMemoryStorageBackend(),
+            nativeHost: NativeCapabilityHost = DevNativeCapabilityHost(),
+        ): CapabilityRegistry {
             val store = backend
             return CapabilityRegistry(
                 LinkedHashMap<CapabilityKey, CapabilityImpl>().apply {
@@ -262,88 +267,17 @@ public class CapabilityRegistry(
                         id
                     }
                     // --- FLUX-045: six concrete native capabilities (PRD-Q deferred set) ---
-                    // ids 6..=11; dev-safe deterministic echoes (no real OS providers in the
-                    // dev host). Real native calls (NotificationManager / BiometricPrompt /
-                    // WorkManager / FileManager / startActivity / SensorManager) are a
-                    // release-mode concern and belong in the app shell (RELEASE-TODO).
-                    // Push.register (6,1) [async]: allocate a Pending cell, resolve inline
-                    // with a simulated device-token id (signal 42).
-                    put(6u, 1u.toUShort()) { _args, signals ->
-                        val id = signals.allocateCell()
-                        signals.markPending(id)
-                        signals.resolveCell(id, FluxValue.StrVal(42u))
-                        id
-                    }
-                    // Push.getToken (6,2): surface the last simulated token (signal 42) or null.
-                    put(6u, 2u.toUShort()) { _args, signals ->
-                        val id = signals.allocateCell()
-                        signals.write(id, signals.read(42u) ?: FluxValue.NullVal)
-                        id
-                    }
-                    // Biometric.authenticate (7,1): dev assumes granted; a denied grant MUST
-                    // yield a typed VmError (CAPABILITY_DENIED), never a crash.
-                    put(7u, 1u.toUShort()) { _args, signals ->
-                        val id = signals.allocateCell()
-                        signals.write(id, FluxValue.BoolVal(true))
-                        id
-                    }
-                    // Background.schedule (8,1) [async]: allocate a Pending cell, resolve inline
-                    // with a simulated task id (signal 43).
-                    put(8u, 1u.toUShort()) { _args, signals ->
-                        val id = signals.allocateCell()
-                        signals.markPending(id)
-                        signals.resolveCell(id, FluxValue.StrVal(43u))
-                        id
-                    }
-                    // Background.cancel (8,2): dev-safe echo.
-                    put(8u, 2u.toUShort()) { _args, signals ->
-                        val id = signals.allocateCell()
-                        signals.write(id, FluxValue.BoolVal(true))
-                        id
-                    }
-                    // FileSystem.read (9,1): contents persisted under a derived signal id.
-                    put(9u, 1u.toUShort()) { args, signals ->
-                        val pathId =
-                            (args as? FluxValue.RecordVal)?.fields?.firstOrNull()?.value?.let { first ->
-                                if (first is FluxValue.StrVal) first.id else null
-                            } ?: throw VmError(TYPE_MISMATCH, 0u)
-                        val id = signals.allocateCell()
-                        signals.write(id, signals.read(fileSignalId(pathId)) ?: FluxValue.NullVal)
-                        id
-                    }
-                    // FileSystem.write (9,2): persist into the signal store.
-                    put(9u, 2u.toUShort()) { args, signals ->
-                        val rec = args as? FluxValue.RecordVal ?: throw VmError(TYPE_MISMATCH, 0u)
-                        val pathId =
-                            (rec.fields.firstOrNull()?.value as? FluxValue.StrVal)?.id
-                                ?: throw VmError(TYPE_MISMATCH, 0u)
-                        val data = rec.fields.getOrNull(1)?.value ?: throw VmError(TYPE_MISMATCH, 0u)
-                        signals.write(fileSignalId(pathId), data)
-                        val id = signals.allocateCell()
-                        signals.write(id, data)
-                        id
-                    }
-                    // FileSystem.delete (9,3): clear the persisted value.
-                    put(9u, 3u.toUShort()) { args, signals ->
-                        val pathId =
-                            (args as? FluxValue.RecordVal)?.fields?.firstOrNull()?.value?.let { first ->
-                                if (first is FluxValue.StrVal) first.id else null
-                            } ?: throw VmError(TYPE_MISMATCH, 0u)
-                        signals.write(fileSignalId(pathId), FluxValue.NullVal)
-                        val id = signals.allocateCell()
-                        signals.write(id, FluxValue.NullVal)
-                        id
-                    }
-                    // DeepLink.openURL (10,1): record the target (signal 44) for the reconciler.
-                    put(10u, 1u.toUShort()) { args, signals ->
-                        signals.write(44u, args)
-                        44u
-                    }
-                    // Sensors.read (11,1): dev returns an empty record.
-                    put(11u, 1u.toUShort()) { _args, signals ->
-                        val id = signals.allocateCell()
-                        signals.write(id, FluxValue.RecordVal(emptyList()))
-                        id
+                    // ids 6..=11 are delegated to the injectable [NativeCapabilityHost]
+                    // (defaults to [DevNativeCapabilityHost] for dev/test; the app shell
+                    // supplies [AndroidNativeCapabilityHost] with real OS calls). This keeps
+                    // the pure-JVM `:host` core free of `android.*` imports while the real
+                    // device frameworks live in the app shell.
+                    for (cap in 6u..11u) {
+                        for (method in ushortRange(1u, 3u)) {
+                            put(cap, method) { args, signals ->
+                                nativeHost.call(cap, method, args, signals)
+                            }
+                        }
                     }
                     // --- FLUX-047: Http (14) async + Persist (15) sync host bodies. ---
                     // These reuse `store` (the same StorageBackend as `Storage`, since
@@ -360,6 +294,10 @@ public class CapabilityRegistry(
                 store,
             )
         }
+
+        /** Builds a `UShort` range `[start..end]` inclusive (Kotlin has no `UShortRange` literal). */
+        private fun ushortRange(start: UInt, end: UInt): List<UShort> =
+            (start..end).map { it.toUShort() }
 
         /**
          * FileSystem contents are persisted into the signal store under a
