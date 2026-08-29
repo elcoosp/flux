@@ -39,3 +39,6 @@ path = "src/main.rs"
 [dev-dependencies]
 tempfile.workspace = true
 serde_json.workspace = true
+# `tokio-util` compat shim adapts tokio::io::duplex to the AsyncRead/AsyncWrite
+# async-lsp expects in the FLUX-024 loopback integration test.
+tokio-util = { version = "^0.7", features = ["compat"] }
