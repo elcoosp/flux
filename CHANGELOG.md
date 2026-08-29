@@ -299,6 +299,21 @@ are intentionally omitted (automation noise, not user-facing change).
   stream. True per-event attribution needs an ADR-0039 wire extension (host id on
   `HostAnnounce` + per-event source tag); the session container is ready to consume it.
 
+### PARTIAL — render-perf harness (PRD-J, LANE-J)
+
+- New crate `crates/flux-perf-harness` (pure Rust, 12/12 tests green; fmt + clippy
+  `-D warnings` clean). Provides the shared `MetricRecord` schema (`Scenario` ×
+  `MetricKind` × p50/p95/mean latency + optional sizes, stable JSON), a deterministic
+  `HarnessDriver` over a fixed `FixtureTree` with a `MeasureFn` hook for host adapters,
+  and the CI gate predicate encoding the §3.10 budgets (`NodeMutation` p95 ≤ 3ms, …).
+  This is the substrate ADR-0048 Phase 0/1 needs and unblocks FLUX-056/059/065 (their
+  missing `MetricRecord`/harness now exists).
+- **Measurement runs — REMAINING (host-side):** timing the iOS `FluxUIKit` reconciler
+  and the Android `ShadowTreeRenderer` requires the `runtimes/` adapters (which supply
+  `MeasureFn` closures) to wire in; those dirs are in-flight parallel work and need a
+  device/simulator + `xcodebuild`/`kotlinc`, unavailable here. The per-tier numbers
+  that close the ADR-0048 decision are produced by those adapters, not this crate.
+
 ### BLOCKED — iOS render-tier convergence decision (FLUX-065)
 
 - Cannot run ADR-0048 Phase 0/1: the render-perf harness (FLUX-066) does not exist

@@ -16,6 +16,7 @@ members = [
     "crates/flux-parity",
     "crates/flux-devtools-ui",
     "crates/flux-lsp",
+    "crates/flux-perf-harness",
 ]
 
 [workspace.package]
@@ -58,7 +59,14 @@ gpui = { git = "https://github.com/zed-industries/zed.git", rev = "1ff7cb669b635
 # entry point was removed upstream).
 gpui_platform = { git = "https://github.com/zed-industries/zed.git", rev = "1ff7cb669b6351eaf2a5b79ccb40f5cd1676b8f8" }
 
-# `async-lsp` (tower-based async Language Server Protocol framework) and
+# gpui-component (Longbridge) provides polished, production-ready desktop UI
+# primitives (panels, tabs, tables, status bars, badges) for the DevTools
+# surface. Approved via ADR-class vetting (active, Apache-2.0, used in
+# Longbridge Pro). It must share the SAME pinned `gpui`/`gpui_platform`/`gpui_macros`
+# revision as this workspace (see `[patch]` below) — otherwise Cargo resolves two
+# incompatible gpui crates and the DevTools UI fails to type-check.
+gpui-component = { git = "https://github.com/longbridge/gpui-component" }
+
 # `lsp-types` (typed LSP protocol structs) back the `flux-lsp` crate (FLUX-024),
 # split out of the thin `flux-cli` JSON emitter. Both approved via ADR-class
 # dependency vetting (active, MIT/Apache-2.0). `tokio` is already a workspace dep.

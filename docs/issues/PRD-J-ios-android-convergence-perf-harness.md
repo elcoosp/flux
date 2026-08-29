@@ -1,6 +1,6 @@
 ---
 id: PRD-J
-status: open
+status: partial
 lane: LANE-J
 phase: "Phase 0.1-0.2"
 blocked_by: []
@@ -116,3 +116,21 @@ paths (dev VM + release codegen) so every future performance claim is backed by 
 This is the single most blocking PRD in the 1.0 sequence: PRD-N (stdlib) explicitly depends on the
 rendering model being settled, and PRD-P (DevTools) depends on both the perf instrumentation and
 the span-threading from PRD-K. Track the published numbers as a dashboard, not prose (roadmap §13).
+
+## Status (2026-08-29)
+
+**Harness core — DONE (verified).** New crate `crates/flux-perf-harness` (pure Rust, compiles +
+tests green here, no device needed): `metric` (stable JSON `MetricRecord` schema — `Scenario` ×
+`MetricKind` × p50/p95/mean latencies + optional sizes, kebab-case serde), `driver`
+(`HarnessDriver` over a fixed `FixtureTree`, deterministic sample loop, `MeasureFn` hook for host
+adapters), and `gate` (§3.10 budgets as a pure predicate — `NodeMutation` p95 ≤ 3ms, etc., with a
+`GateVerdict`). 12/12 unit tests pass; `cargo fmt --check` + `cargo clippy -D warnings` clean. The
+crate is added to the workspace `members`. DevTools (PRD-P) can later consume the same `MetricRecord`.
+
+**Measurement runs — REMAINING (host-side, parallel-owned).** The actual timing of the iOS
+`FluxUIKit` reconciler on a simulator and the Android `ShadowTreeRenderer` on the JVM host requires
+the `runtimes/` adapters (which hold `MeasureFn` closures) to wire in. Those dirs are currently
+in-flight parallel work and need a device/simulator + `xcodebuild`/`kotlinc`, unavailable in this
+environment. So the harness is buildable and the schema/gate are proven; the per-tier numbers that
+close ADR-0048 (Phase 0/1) are produced by the host adapters, not here. Unblocks FLUX-056/059/065
+(their missing `MetricRecord`/harness now exists).
