@@ -31,3 +31,8 @@ rows, which merge cleanly.
 
 | crate | dependency | version | reason |
 | --- | --- | --- | --- |
+| (workspace) | flux-lsp (new member crate) | — | FLUX-024: real `flux-lsp` language server on async-lsp, split out of the thin `flux-cli` JSON emitter (PRD-O deferred follow-up). Add `crates/flux-lsp` to workspace `members` + `flux-lsp = { path = "crates/flux-lsp" }` to `[workspace.dependencies]`. |
+| flux-lsp | async-lsp | ^0.2 (latest 0.2.4) | FLUX-024: tower-based async LSP framework; MIT/Apache-2.0, ~1.3M downloads / 517K recent — passes AGENTS.md §1.3 vetting (active, >1000 stars). Drives the stdio server loop. |
+| flux-lsp | lsp-types | ^0.97 (latest 0.97.0) | FLUX-024: typed LSP protocol structs (Diagnostic/Range/InitializeParams/CompletionItem) — 33M downloads, canonical LSP type crate. |
+| flux-lsp | flux-parser / flux-types / flux-syntax / flux-ir | path | FLUX-024/025: the server reuses the compiler (PRD-O) — never re-implements analysis. |
+| flux-cli | flux-types | path | FLUX-025: extend `flux lsp <file>` to run type-checking (PRD-O deferred "flux lsp type-checking (needs a flux-types dependency)"). Reuse existing workspace path dep. |
