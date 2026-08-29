@@ -96,7 +96,11 @@ public final class ImageAdapter: FluxAdapter {
         request.timeoutInterval = Self.loadTimeout
         loadTask?.cancel()
         let task = URLSession.shared.dataTask(with: request) { data, response, error in
-            MainActor.assumeIsolated {
+            // The completion runs on a background session queue, NOT the main
+            // actor. Hop to the main actor to mutate the view — `assumeIsolated`
+            // would trap here because we are not isolated (it crashed the app
+            // on any screen that renders an `Image`, e.g. the About screen).
+            Task { @MainActor in
                 defer { self.loadTask = nil }
                 if error != nil {
                     view.image = Self.placeholder

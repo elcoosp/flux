@@ -31,7 +31,7 @@ pub(crate) mod error;
 pub(crate) mod ids;
 pub(crate) mod mono;
 
-pub use bytecode::{HandlerCompileError, compile_handler};
+pub use bytecode::{HandlerCompileError, compile_handler, compile_handler_with_params};
 pub use error::LoweringError;
 pub use mono::{Monomorphization, mangle_specialised};
 
@@ -642,11 +642,20 @@ impl<'a> Lowerer<'a> {
             flux_parser::ExprKind::Float(f) => Ok(Value::Float(*f)),
             flux_parser::ExprKind::Bool(b) => Ok(Value::Bool(*b)),
             flux_parser::ExprKind::Str(parts) => self.lower_str(parts, owner, handlers),
-            flux_parser::ExprKind::Lambda { params: _, body } => {
+            flux_parser::ExprKind::Null => Ok(Value::Null),
+            flux_parser::ExprKind::Lambda { params, body } => {
                 let handler = self.next_handler();
                 let mut intern = |s: &str| self.builder.intern_string(s);
-                let (bytecode, captured) = compile_handler(
+                // A `Lambda`'s params are `Param`s; the handler compiler binds
+                // `Pattern`s, so project to identifiers (MLP handlers take at
+                // most one payload param).
+                let pattern_params: Vec<flux_parser::Pattern> = params
+                    .iter()
+                    .map(|p| flux_parser::Pattern::Ident(p.name.clone()))
+                    .collect();
+                let (bytecode, captured) = compile_handler_with_params(
                     body,
+                    &pattern_params,
                     &self.signal_scope,
                     &std::collections::HashSet::new(),
                     expr.span,

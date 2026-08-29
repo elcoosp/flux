@@ -45,23 +45,26 @@ public fun FluxTreeView(
      * route (signal 97) and swap the visible screen even though a router node's
      * own props do not change on navigation. */
     routerVersion: Int = 0,
+    /** Fired with a text-input's `onChangeText` handler id and the new value. */
+    onTextChange: (handlerId: UInt, value: String) -> Unit = { _, _ -> },
 ) {
     if (node == null) return
     when (node.kind) {
-        "column" -> RenderColumn(node, onButtonClick, routerVersion)
-        "row" -> RenderRow(node, onButtonClick, routerVersion)
+        "column" -> RenderColumn(node, onButtonClick, routerVersion, onTextChange)
+        "row" -> RenderRow(node, onButtonClick, routerVersion, onTextChange)
         "text" -> RenderText(node)
         "button" -> RenderButton(node, onButtonClick)
+        "textinput" -> RenderTextInput(node, onTextChange)
         // A router shows exactly one screen — the one whose `route` prop matches
         // the active navigation signal (ADR-0045). Every other screen is hidden,
         // so tapping "Go to Settings" actually swaps the visible view instead of
         // stacking all screens in a column.
-        "router" -> RenderRouter(node, onButtonClick, routerVersion)
+        "router" -> RenderRouter(node, onButtonClick, routerVersion, onTextChange)
         // A screen renders the content it wraps (its own children).
-        "screen" -> RenderContainer(node, onButtonClick, routerVersion)
+        "screen" -> RenderContainer(node, onButtonClick, routerVersion, onTextChange)
         // TextField/Image have no live adapter subtree in the MLP host; surface
         // a contained placeholder so the tree stays visible.
-        else -> RenderContainer(node, onButtonClick, routerVersion)
+        else -> RenderContainer(node, onButtonClick, routerVersion, onTextChange)
     }
 }
 
@@ -77,13 +80,14 @@ private fun RenderRouter(
     node: ShadowNode,
     onButtonClick: (UInt) -> Unit,
     routerVersion: Int,
+    onTextChange: (UInt, String) -> Unit = { _, _ -> },
 ) {
     // `routerVersion` is read by the caller's recomposition: when it changes
     // (every applied frame / dispatch) FluxRoot re-runs and re-invokes this with
     // a new value, so the active child is re-resolved. We forward it down so any
     // nested router also swaps.
     val child = activeChildrenProvider?.invoke(node)
-    if (child != null) FluxTreeView(child, onButtonClick, routerVersion)
+    if (child != null) FluxTreeView(child, onButtonClick, routerVersion, onTextChange)
 }
 
 /**
@@ -104,12 +108,13 @@ private fun RenderColumn(
     node: ShadowNode,
     onButtonClick: (UInt) -> Unit,
     routerVersion: Int,
+    onTextChange: (UInt, String) -> Unit = { _, _ -> },
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(gapOf(node)),
     ) {
-        for (child in node.children) FluxTreeView(child, onButtonClick, routerVersion)
+        for (child in node.children) FluxTreeView(child, onButtonClick, routerVersion, onTextChange)
     }
 }
 
@@ -119,12 +124,13 @@ private fun RenderRow(
     node: ShadowNode,
     onButtonClick: (UInt) -> Unit,
     routerVersion: Int,
+    onTextChange: (UInt, String) -> Unit = { _, _ -> },
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(gapOf(node)),
     ) {
-        for (child in node.children) FluxTreeView(child, onButtonClick, routerVersion)
+        for (child in node.children) FluxTreeView(child, onButtonClick, routerVersion, onTextChange)
     }
 }
 
@@ -159,10 +165,37 @@ private fun RenderContainer(
     node: ShadowNode,
     onButtonClick: (UInt) -> Unit,
     routerVersion: Int,
+    onTextChange: (UInt, String) -> Unit = { _, _ -> },
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        for (child in node.children) FluxTreeView(child, onButtonClick, routerVersion)
+        for (child in node.children) FluxTreeView(child, onButtonClick, routerVersion, onTextChange)
     }
+}
+
+/**
+ * A native [TextField] leaf driven by the node's `text` / `placeholder` props.
+ *
+ * Editing the field dispatches the node's `onChangeText` handler with the new
+ * value as the [HandlerEvent.payload] (the compiler binds that payload to the
+ * handler's first parameter, FLUX-014), so a Flux `TextInput` is fully
+ * interactive: typed characters flow into a state signal and back out as the
+ * controlled `text` prop. A null/invalid handler id is a no-op.
+ */
+@Composable
+private fun RenderTextInput(
+    node: ShadowNode,
+    onTextChange: (UInt, String) -> Unit,
+) {
+    val props = node.observeProps()
+    val text = props.getString(PropsIndex.TEXT_INPUT_TEXT).orEmpty()
+    val placeholder = props.getString(PropsIndex.TEXT_INPUT_PLACEHOLDER).orEmpty()
+    val handlerId = props.getHandler(PropsIndex.TEXT_INPUT_ON_CHANGE_TEXT)
+    androidx.compose.material3.TextField(
+        value = text,
+        onValueChange = { onTextChange(handlerId, it) },
+        placeholder = { Text(placeholder) },
+        modifier = Modifier.fillMaxWidth().padding(4.dp),
+    )
 }
 
 /** Reads the `gap` spacing prop of a linear container, defaulting to 0dp. */

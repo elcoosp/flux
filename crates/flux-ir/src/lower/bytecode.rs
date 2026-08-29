@@ -87,7 +87,32 @@ pub fn compile_handler(
     span: Span,
     str_interner: StringInterner<'_>,
 ) -> Result<(Vec<u8>, Vec<SignalId>), HandlerCompileError> {
+    compile_handler_with_params(body, &body.params, scope, constructors, span, str_interner)
+}
+
+/// Like [`compile_handler`] but takes the handler's parameter list explicitly so
+/// callers that already have it (e.g. `lower_value` for a `Lambda` AST node)
+/// need not re-read `body.params`. The first parameter is bound to `r0` (the
+/// host-supplied event payload) so bodies can read typed/event values.
+pub fn compile_handler_with_params(
+    body: &Block,
+    params: &[flux_parser::Pattern],
+    scope: &SignalScope,
+    constructors: &HashSet<String>,
+    span: Span,
+    str_interner: StringInterner<'_>,
+) -> Result<(Vec<u8>, Vec<SignalId>), HandlerCompileError> {
     let mut emitter = Emitter::new(scope, constructors, str_interner);
+    // A handler's first declared parameter is the event payload, delivered by
+    // the host as `r0` (Appendix E: r0 is the entry payload; both native
+    // `TextInput`/`Button` adapters dispatch `FluxEvent(payload)` into r0). Bind
+    // it so a body like `onChangeText: |text| { name = text }` reads the typed
+    // value. Extra params beyond the first are not part of the MLP envelope.
+    if let Some(first) = params.first() {
+        if let flux_parser::Pattern::Ident(ident) = first {
+            emitter.bind_payload(ident.name.clone());
+        }
+    }
     for item in &body.items {
         match item {
             BlockItem::State(decl) => {
@@ -364,6 +389,13 @@ impl<'a> Emitter<'a> {
             reg: 1,
             str_interner,
         }
+    }
+
+    /// Binds the handler's first parameter name to `r0`, the register the host
+    /// loads the event payload into before dispatching (Appendix E §E.3). After
+    /// this, an `Ident` reference to that name reads the payload directly.
+    fn bind_payload(&mut self, name: String) {
+        self.locals.insert(name, 0);
     }
 
     /// Creates an emitter for a prop thunk (ADR-0027 T14).
@@ -905,6 +937,40 @@ impl<'a> Emitter<'a> {
                 self.code.push(0u8);
                 self.code.push(fut);
                 Ok(0u8)
+            }
+            // Null-safe field access `base?.field` (FLUX-053 / ADR-0051).
+            //
+            // Desugars to a value-form `if (IS_NULL base) then Null else
+            // base.field`: the chain short-circuits to `Null` when `base` is
+            // `Null`, otherwise it performs the ordinary `GET_FIELD`. The result
+            // is therefore always a value (never a null-dereference fault), which
+            // the runtime models as `Option[...]` (ADR-0051).
+            ExprKind::OptField { base, field } => {
+                let base_reg = self.compile_value(base)?;
+                let out = self.alloc_reg();
+                // `is_null = base == Null` (the null-distinguishing test the
+                // `truthy`-based `if` cannot express — `Int(0)` is also falsey).
+                let is_null = self.alloc_reg();
+                self.code.push(raw::IS_NULL);
+                self.code.push(is_null);
+                self.code.push(base_reg);
+                // `COND_JUMP_NOT is_null` falls through (base IS null → out =
+                // Null) and jumps to the `else` (field-read) branch only when
+                // `is_null` is false (base is present).
+                let else_label = self.jump_placeholder(raw::COND_JUMP_NOT, is_null);
+                // Then-branch (base is Null): out = Null.
+                self.code.push(raw::LOAD_NULL);
+                self.code.push(out);
+                let join_label = self.jump_placeholder(raw::JUMP, 0);
+                // Else-branch (base present): out = base.field.
+                self.patch_jump(else_label);
+                self.code.push(raw::GET_FIELD);
+                self.code.push(out);
+                let tag = method_id_for("", &field.name);
+                self.code.extend_from_slice(&tag.to_le_bytes());
+                self.code.push(base_reg);
+                self.patch_jump(join_label);
+                Ok(out)
             }
             other => Err(HandlerCompileError::new(
                 format!("unsupported handler operand: {other:?}"),
@@ -1496,6 +1562,61 @@ mod tests {
         assert_eq!(
             method_id, 1,
             "Router.navigate method_id must be 1 (CAPABILITY_IDL)"
+        );
+    }
+
+    #[test]
+    fn opt_field_lowers_to_is_null_and_get_field() {
+        // FLUX-053 / ADR-0051: `user?.name` inside a handler must lower to a
+        // null-check (`IS_NULL`) guarding a `GET_FIELD` — the value-form
+        // bytecode that was previously rejected as "unsupported handler
+        // operand". We assert both opcodes are present in the emitted program.
+        let scope = vec![
+            ("user".to_owned(), SignalId::from(1u32)),
+            ("count".to_owned(), SignalId::from(2u32)),
+        ];
+        let user = ident("user");
+        let opt_field = Expr {
+            kind: ExprKind::OptField {
+                base: Box::new(user),
+                field: Ident {
+                    name: "name".to_owned(),
+                    span: span(),
+                },
+            },
+            span: span(),
+        };
+        // `let x = user?.name` — the binding forces `compile_value` down the
+        // OptField arm.
+        let body = Block {
+            params: vec![],
+            items: vec![BlockItem::Expr(Expr {
+                kind: ExprKind::Let {
+                    pattern: flux_parser::LetPattern::Ident(Ident {
+                        name: "x".to_owned(),
+                        span: span(),
+                    }),
+                    value: Some(Box::new(opt_field)),
+                },
+                span: span(),
+            })],
+            span: span(),
+        };
+        let (bytecode, _) = compile_handler(
+            &body,
+            &scope,
+            &std::collections::HashSet::new(),
+            span(),
+            &mut |_s| StringTable::new().intern(_s),
+        )
+        .expect("OptField lowers to value-form bytecode");
+        assert!(
+            bytecode.contains(&raw::IS_NULL),
+            "OptField must emit IS_NULL for the null short-circuit: {bytecode:?}"
+        );
+        assert!(
+            bytecode.contains(&raw::GET_FIELD),
+            "OptField must emit GET_FIELD for the present-base path: {bytecode:?}"
         );
     }
 }

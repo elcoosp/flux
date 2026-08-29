@@ -75,6 +75,9 @@ public fun FluxRoot(session: FluxSession) {
                 node = rootNode,
                 routerVersion = frameVersion,
                 onButtonClick = { handlerId -> executor.dispatch(dev.flux.ui.HandlerEvent(handlerId)) },
+                onTextChange = { handlerId, value ->
+                    executor.dispatch(dev.flux.ui.HandlerEvent(handlerId, dev.flux.ui.FluxValue.Str(value)))
+                },
             )
             else -> Text("Flux — connecting…", modifier = Modifier.align(Alignment.Center))
         }
