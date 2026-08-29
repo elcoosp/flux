@@ -28,6 +28,11 @@ tracing-subscriber.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 
+# `flux-lsp` is the canonical home for diagnostics (FLUX-025); the `flux lsp`
+# subcommand reuses its `diagnostics_with_types` so the CLI never diverges
+# from the language server (AGENTS.md §3.11).
+flux-lsp.workspace = true
+
 # Dev-dependencies the FLUX-022 acceptance criteria require (a real tungstenite
 # client for `flux dev`, `flux-ir-serde` to decode the served `Init` frame, and
 # `tempfile` to isolate the integration tests) that the foundation manifest did

@@ -22,11 +22,16 @@ mod build;
 mod dev;
 mod doc;
 mod init;
+mod lsp;
 mod sources;
 
 /// Re-exported for the integration tests, which validate the stdlib schema
 /// JSON directly without going through the `Command` dispatch.
 pub use doc::build_schema;
+
+/// Re-exported so the integration tests exercise the `flux lsp` core directly
+/// (the subcommand prints what this returns).
+pub use lsp::collect_lsp;
 
 use std::path::PathBuf;
 
@@ -87,6 +92,17 @@ pub enum Command {
         root: PathBuf,
     },
 
+    /// Emit parse + type-check diagnostics for a `.flux` source file as JSON (FLUX-025).
+    Lsp {
+        /// The `.flux` source file to analyze.
+        file: PathBuf,
+
+        /// Also run the type-checker (default). When false, only parse
+        /// diagnostics are emitted (the fast path for large files).
+        #[arg(long, default_value_t = true)]
+        types: bool,
+    },
+
     /// Emit a JSON schema of the stdlib API to stdout.
     Doc,
 }
@@ -136,6 +152,7 @@ pub async fn run(command: Command) -> anyhow::Result<()> {
             http_port,
         } => dev::run(&root, &ws_host, ws_port, http_port).await,
         Command::Build { platform, root } => build::run(platform, &root),
+        Command::Lsp { file, types } => lsp::run(&file, types),
         Command::Doc => doc::run(),
     }
 }

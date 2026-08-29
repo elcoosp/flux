@@ -184,3 +184,35 @@ fn write_sample_project(root: &Path) {
     )
     .expect("write entry component");
 }
+
+/// `flux lsp <file>` surfaces parse + type diagnostics (FLUX-025).
+#[test]
+fn lsp_collects_type_diagnostics_for_bad_source() {
+    let dir = TempDir::new().expect("temp dir");
+    let file = dir.path().join("bad.flux");
+    std::fs::write(&file, "compo Bad\n  let s = 1 + \"not a number\"\n\n").expect("write fixture");
+
+    // `collect_lsp` is the CLI's core; the `flux lsp` subcommand prints its result.
+    let diags = flux_cli::collect_lsp(&file, true).expect("lsp collects");
+    assert!(
+        diags.iter().any(|d| d.source == "type"),
+        "expected a type diagnostic, got: {diags:?}"
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.source == "type" && d.message.contains("hint")),
+        "type diagnostic must carry a how-hint: {diags:?}"
+    );
+}
+
+/// `flux lsp <file>` rejects non-Flux inputs with an actionable error.
+#[test]
+fn lsp_rejects_non_flux_file() {
+    let dir = TempDir::new().expect("temp dir");
+    let file = dir.path().join("notes.txt");
+    std::fs::write(&file, "hello").expect("write fixture");
+
+    let result = flux_cli::collect_lsp(&file, true);
+    assert!(result.is_err(), "non-.flux file must be rejected");
+}
