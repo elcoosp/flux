@@ -27,6 +27,11 @@ use crate::wire::{
 pub const FRAME_TELEMETRY: u8 = 0x10;
 /// `frame_type` byte for the `DebugCommand` frame (Server → Host), Appendix D §D.12.
 pub const FRAME_DEBUG_COMMAND: u8 = 0x11;
+/// `frame_type` byte for the `HostAnnounce` frame (Server → DevTools), Appendix
+/// D §D.12. Carries the host identity the dev server learned during the `Hello`
+/// handshake so the DevTools UI can show *which* device is being debugged
+/// (e.g. an iOS Simulator vs an Android phone).
+pub const FRAME_HOST_ANNOUNCE: u8 = 0x12;
 
 /// A single axis-aligned rectangle in layout space (device points).
 ///
@@ -414,9 +419,84 @@ impl EnrichedTelemetryFrame {
     }
 }
 
-/// A debug control command sent from the DevTools app to the host VM.
+/// A `HostAnnounce` frame (Server → DevTools, Appendix D §D.12, kind `0x12`).
 ///
-/// Encoded as a `DebugCommand` frame (Appendix D §D.12, kind `0x11`):
+/// Sent once per host connection so the DevTools client knows *which* device it
+/// is inspecting. The dev server learns this from the host's `Hello` handshake
+/// (`platform`, `device`, advertised `capabilities`) and forwards it to every
+/// subscribed DevTools client.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HostAnnounceFrame {
+    /// Protocol version.
+    pub version: u8,
+    /// Host platform, e.g. `"ios"` or `"android"`.
+    pub platform: String,
+    /// Device model string (e.g. `UIDevice.current.model` on iOS).
+    pub device: String,
+    /// Capabilities the host advertised at handshake (`(name, version, features)`).
+    pub capabilities: Vec<(String, u32, Vec<String>)>,
+}
+
+impl HostAnnounceFrame {
+    /// Encodes this frame per Appendix D §D.12 (kind `0x12`).
+    #[must_use]
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut w = Writer::new();
+        w.u32(MAGIC);
+        w.u8(PROTOCOL_VERSION);
+        w.u8(FRAME_HOST_ANNOUNCE);
+        encode_str(&mut w, &self.platform);
+        encode_str(&mut w, &self.device);
+        w.u16(self.capabilities.len() as u16);
+        for (name, ver, feats) in &self.capabilities {
+            encode_str(&mut w, name);
+            w.u32(*ver);
+            w.u16(feats.len() as u16);
+            for f in feats {
+                encode_str(&mut w, f);
+            }
+        }
+        w.into_vec()
+    }
+
+    /// Decodes a `HostAnnounce` frame, or `None` if malformed / wrong kind.
+    #[must_use]
+    pub fn from_bytes(bytes: &[u8]) -> Option<HostAnnounceFrame> {
+        let mut r = Reader::new(bytes);
+        let magic = r.u32("host_announce.magic").ok()?;
+        if magic != MAGIC {
+            return None;
+        }
+        let version = r.u8("host_announce.version").ok()?;
+        if version != PROTOCOL_VERSION {
+            return None;
+        }
+        let kind = r.u8("host_announce.kind").ok()?;
+        if kind != FRAME_HOST_ANNOUNCE {
+            return None;
+        }
+        let platform = decode_str(&mut r, "host_announce.platform").ok()?;
+        let device = decode_str(&mut r, "host_announce.device").ok()?;
+        let cap_count = r.u16("host_announce.cap_count").ok()? as usize;
+        let mut capabilities = Vec::with_capacity(cap_count);
+        for _ in 0..cap_count {
+            let name = decode_str(&mut r, "host_announce.cap.name").ok()?;
+            let ver = r.u32("host_announce.cap.ver").ok()?;
+            let feat_count = r.u16("host_announce.cap.feat_count").ok()? as usize;
+            let mut feats = Vec::with_capacity(feat_count);
+            for _ in 0..feat_count {
+                feats.push(decode_str(&mut r, "host_announce.cap.feat").ok()?);
+            }
+            capabilities.push((name, ver, feats));
+        }
+        Some(HostAnnounceFrame {
+            version,
+            platform,
+            device,
+            capabilities,
+        })
+    }
+}
 /// `MAGIC(4) version(1) kind(0x11) command_id(4) payload_len(2) payload`.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
@@ -884,4 +964,22 @@ fn decode_optional_span(r: &mut Reader<'_>) -> Result<Option<Span>, WireError> {
         0 => Ok(None),
         _ => Ok(Some(decode_span(r)?)),
     }
+}
+
+/// Length-prefixed UTF-8 string encoder (little-endian `u16` length).
+fn encode_str(w: &mut Writer, s: &str) {
+    w.u16(s.len() as u16);
+    w.bytes(s.as_bytes());
+}
+
+/// Length-prefixed UTF-8 string decoder (little-endian `u16` length).
+fn decode_str(r: &mut Reader<'_>, ctx: &'static str) -> Result<String, WireError> {
+    let len = r.u16(ctx)?.into();
+    let raw = r.bytes(len, ctx)?;
+    std::str::from_utf8(raw)
+        .map(str::to_owned)
+        .map_err(|_| WireError::InvalidUtf8 {
+            context: ctx,
+            at: 0,
+        })
 }

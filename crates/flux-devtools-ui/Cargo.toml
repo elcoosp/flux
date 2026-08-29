@@ -29,12 +29,16 @@ futures-util = "^0.3"
 # nightly, so gpui is a hard dependency and no longer feature-gated. gpui's
 # `font-kit` feature MUST stay enabled or the window renders with no text
 # (blank screen) — see the gpui_macos `font-kit` compile warning.
-gpui = { git = "https://github.com/zed-industries/zed.git", rev = "1ff7cb669b6351eaf2a5b79ccb40f5cd1676b8f8", default-features = true, features = ["font-kit"] }
+gpui = { workspace = true }
 # Desktop launcher companion to `gpui`: provides `current_platform()` used by
 # `gpui_platform::application()` (the replacement for the removed
 # `Application::new()`). Required to launch the DevTools window. Its `font-kit`
 # feature must also be enabled for text rendering.
-gpui_platform = { git = "https://github.com/zed-industries/zed.git", rev = "1ff7cb669b6351eaf2a5b79ccb40f5cd1676b8f8", features = ["font-kit"] }
+gpui_platform = { workspace = true }
+# Polished, production-ready desktop UI primitives (panels, tabs, status bar,
+# badges, table) for the DevTools surface (ADR-0041 UI). Shares the workspace's
+# pinned gpui via `[patch]` in the root manifest.
+gpui-component = { workspace = true }
 
 [[bin]]
 name = "flux-devtools"

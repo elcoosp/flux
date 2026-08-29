@@ -48,6 +48,17 @@ pub fn ingest_message(state: &DevToolsState, message: &Message) -> usize {
         None => match flux_ir_serde::TelemetryFrame::from_bytes(bytes) {
             Some(frame) => frame.events.into_iter().map(enrich_telemetry).collect(),
             None => {
+                // Not a telemetry frame: maybe the server is announcing the host
+                // identity (platform/device) so the UI can show which device
+                // streams. Apply it and bail (no timeline events this frame).
+                if let Some(announce) = flux_ir_serde::HostAnnounceFrame::from_bytes(bytes) {
+                    state.set_host(crate::state::HostInfo {
+                        platform: announce.platform,
+                        device: announce.device,
+                        capabilities: announce.capabilities,
+                    });
+                    return 0;
+                }
                 tracing::warn!(bytes = bytes.len(), "dropping unparseable telemetry frame");
                 return 0;
             }

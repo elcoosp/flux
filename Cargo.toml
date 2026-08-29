@@ -50,14 +50,20 @@ flux-lsp = { path = "crates/flux-lsp" }
 # `flux-devtools-ui` DevTools desktop crate (ADR-0041). It is a git dependency
 # because gpui is not published to crates.io. Pinned to a `main` commit; bump
 # deliberately via ADR when upgrading.
-gpui = { git = "https://github.com/zed-industries/zed.git", rev = "1ff7cb669b6351eaf2a5b79ccb40f5cd1676b8f8" }
+gpui = { git = "https://github.com/zed-industries/zed" }
 # `gpui_platform` is the mandatory desktop companion to `gpui`: it provides the
 # concrete `Platform` (winit/AppKit) and `current_platform()` that
 # `Application::with_platform` requires. Without it a `gpui` app cannot be
 # launched (ADR-0041 pins gpui to a `main` commit; this is the same rev). Added
 # while porting `flux-devtools-ui` to the current gpui API (the `Application::new`
 # entry point was removed upstream).
-gpui_platform = { git = "https://github.com/zed-industries/zed.git", rev = "1ff7cb669b6351eaf2a5b79ccb40f5cd1676b8f8" }
+#
+# Aligned to gpui_component's floating zed `main` pin (no `rev`): both our
+# `gpui`/`gpui_platform` and `gpui-component`'s own gpui must float to the SAME
+# source so Cargo does not compile two incompatible `gpui` crates (which broke
+# `Styled`/`IntoElement`/`Theme` resolution). Do NOT pin a `rev` here — that
+# reintroduces a `?rev=` vs `#` source split and two gpui types.
+gpui_platform = { git = "https://github.com/zed-industries/zed" }
 
 # gpui-component (Longbridge) provides polished, production-ready desktop UI
 # primitives (panels, tabs, tables, status bars, badges) for the DevTools
