@@ -1,6 +1,6 @@
 ---
 id: FLUX-041
-status: partial
+status: todo
 lane: LANE-N
 phase: "Phase 2"
 blocked_by: []
@@ -14,6 +14,11 @@ related_adrs:
 ---
 
 # FLUX-041: Stdlib gesture primitives — long-press / swipe / drag / pinch
+
+> **Status note (2026-08-29):** relabeled `partial` → `todo`. A source grep of
+> `stdlib/` finds **zero** gesture primitives (`onLongPress`/`onSwipe`/`onDrag`/
+> `onPinch`) — only the ADR-0047 contract intent exists. Nothing has landed in the
+> stdlib yet.
 
 - **Lane:** LANE-N (Phase 2)
 - **Depends on:** PRD-N `ScrollView` (scroll already uses pan)
