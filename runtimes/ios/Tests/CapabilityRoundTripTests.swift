@@ -43,8 +43,8 @@ final class CapabilityRoundTripTests: XCTestCase {
     func testCameraTakeEchoesForOracleParity() throws {
         var signals: any SignalStore = InMemorySignals()
         let out = try CapabilityRegistry.dev.lookup(1, 1)!(1, 1, .record([(0, .int(7))]), &signals)
-        XCTAssertEqual(out, 99, "Camera.take returns its result-cell id (99)")
-        XCTAssertEqual(signals.read(99), .int(7), "Camera.take echoes into signal 99 (oracle parity)")
+        XCTAssertEqual(out, 99, "Camera.takePicture returns its result-cell id (99)")
+        XCTAssertEqual(signals.read(99), .int(7), "Camera.takePicture echoes into signal 99 (oracle parity)")
     }
 
     func testStorageDeleteClearsValue() throws {

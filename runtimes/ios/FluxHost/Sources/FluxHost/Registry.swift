@@ -80,14 +80,14 @@ final class CapabilityRegistry: @unchecked Sendable {
     /// A registry with the MLP capability set registered (G4).
     ///
     /// IDs follow `stdlib/capabilities.flux` and the debug-bridge convention:
-    /// - `Camera`  (cap 1): `take` (1,1), `startPreview` (1,2), `stopPreview` (1,3).
-    /// - `Storage` (cap 2): `set` (2,1), `get` (2,2), `delete` (2,3).
+    /// - `Camera`  (cap 1): `takePicture` (1,1), `startPreview` (1,2), `stopPreview` (1,3).
+    /// - `Storage` (cap 2): `setItem` (2,1), `getItem` (2,2), `removeItem` (2,3).
     /// - `Router`  (cap 3): `navigate` (3,1).
-    /// - `Clipboard` (cap 4): `set` (4,1), `get` (4,2).
-    /// - `Geolocation` (cap 5): `get` (5,1).
+    /// - `Clipboard` (cap 4): `setString` (4,1), `getString` (4,2).
+    /// - `Geolocation` (cap 5): `getCurrentPosition` (5,1).
     ///
     /// `Storage` is backed by the injected `StorageBackend` (dev/test:
-    /// in-memory; app shell: `UserDefaults`) — see Task 1 (LANE-C). `Camera.take`
+    /// in-memory; app shell: `UserDefaults`) — see Task 1 (LANE-C). `Camera.takePicture`
     /// (1,1) preserves the oracle-parity echo of its first argument into signal
     /// 99 so `flux-vm-ref`'s `call_cap_basic` vector stays green. `startPreview`/
     /// `stopPreview` manage a preview flag (signal 96) and are no-ops for capture

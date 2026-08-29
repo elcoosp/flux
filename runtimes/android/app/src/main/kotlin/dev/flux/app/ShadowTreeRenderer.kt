@@ -139,7 +139,7 @@ private fun RenderText(node: ShadowNode) {
     )
 }
 
-/** A [Button] whose label comes from `text` and whose tap fires `onClick`. */
+/** A [Button] whose label comes from `text` and whose tap fires `onPress`. */
 @Composable
 private fun RenderButton(
     node: ShadowNode,
@@ -147,7 +147,7 @@ private fun RenderButton(
 ) {
     val props = node.observeProps()
     val label = props.getString(PropsIndex.BUTTON_TEXT).orEmpty()
-    val handlerId = props.getHandler(PropsIndex.BUTTON_ON_CLICK)
+    val handlerId = props.getHandler(PropsIndex.BUTTON_ON_PRESS)
     Button(onClick = { onButtonClick(handlerId) }) {
         Text(label)
     }

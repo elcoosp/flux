@@ -37,7 +37,7 @@ import org.junit.jupiter.api.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class EndToEndTest {
     /** The seven stdlib component ids the Init frame declares and resolves. */
-    private val stdlibKinds = listOf("column", "text", "button", "row", "text_field", "screen", "router")
+    private val stdlibKinds = listOf("column", "text", "button", "row", "textinput", "screen", "router")
 
     private fun stdlibEntries(): List<Pair<UInt, String>> {
         val ids = (100u..106u).toList()
@@ -126,7 +126,7 @@ class EndToEndTest {
                             props =
                                 listOf(
                                     PropsIndex.BUTTON_TEXT to WireValue.StrVal(9u),
-                                    PropsIndex.BUTTON_ON_CLICK to WireValue.HandlerRefVal(5u),
+                                    PropsIndex.BUTTON_ON_PRESS to WireValue.HandlerRefVal(5u),
                                 ),
                             childIds = emptyList(),
                         )

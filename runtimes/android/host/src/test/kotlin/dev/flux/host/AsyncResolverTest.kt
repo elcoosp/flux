@@ -49,7 +49,7 @@ class AsyncResolverTest {
         )
 
     private val stdlibEntries =
-        (100u..106u).zip(listOf("column", "text", "button", "row", "text_field", "screen", "router")) +
+        (100u..106u).zip(listOf("column", "text", "button", "row", "textinput", "screen", "router")) +
             listOf(200u to "text", 300u to "button", 500u to "screen", 600u to "router")
 
     private fun executor(

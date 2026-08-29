@@ -32,7 +32,7 @@ import org.junit.jupiter.api.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class RenderMountTest {
     private fun stdlibEntries(): List<Pair<UInt, String>> {
-        val kinds = listOf("column", "text", "button", "row", "text_field", "screen", "router")
+        val kinds = listOf("column", "text", "button", "row", "textinput", "screen", "router")
         return (100u..106u).toList().zip(kinds) +
             listOf(200u to "text", 300u to "button", 500u to "screen", 600u to "router")
     }
@@ -67,7 +67,7 @@ class RenderMountTest {
                     props =
                         listOf(
                             PropsIndex.BUTTON_TEXT to WireValue.StrVal(8u),
-                            PropsIndex.BUTTON_ON_CLICK to WireValue.HandlerRefVal(5u),
+                            PropsIndex.BUTTON_ON_PRESS to WireValue.HandlerRefVal(5u),
                         ),
                     childIds = emptyList(),
                 )

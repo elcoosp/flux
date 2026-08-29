@@ -42,7 +42,7 @@ class AdapterRegistryTest {
     @Test
     fun `resolves every stdlib component the Init frame can declare`() {
         val ids = (100u..106u).toList()
-        val kinds = listOf("column", "text", "button", "row", "text_field", "screen", "router")
+        val kinds = listOf("column", "text", "button", "row", "textinput", "screen", "router")
         val registry =
             AdapterRegistry.fromStringTable(
                 ids.zip(kinds) { id, kind -> StringTableEntry(id, kind) },

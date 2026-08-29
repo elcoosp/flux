@@ -29,28 +29,28 @@ extension HelloFrame {
     // ===== GENERATED-BEGIN (derived from flux-devserver capability_idl; do not edit) =====
     private static let idlCapabilities: [(String, UInt32, [(String, UInt16)])] = [
         ("Camera", 1, [
-            ("take", 1),
+            ("takePicture", 1),
             ("startPreview", 2),
             ("stopPreview", 3),
         ]),
         ("Storage", 2, [
-            ("set", 1),
-            ("get", 2),
-            ("delete", 3),
+            ("setItem", 1),
+            ("getItem", 2),
+            ("removeItem", 3),
         ]),
         ("Router", 3, [
             ("navigate", 1),
         ]),
         ("Clipboard", 4, [
-            ("set", 1),
-            ("get", 2),
+            ("setString", 1),
+            ("getString", 2),
         ]),
         ("Geolocation", 5, [
-            ("get", 1),
+            ("getCurrentPosition", 1),
         ]),
         ("Push", 6, [
-            ("register", 1),
-            ("notify", 2),
+            ("registerForNotifications", 1),
+            ("scheduleNotification", 2),
         ]),
         ("Biometric", 7, [
             ("authenticate", 1),
@@ -59,12 +59,12 @@ extension HelloFrame {
             ("schedule", 1),
         ]),
         ("FileSystem", 9, [
-            ("read", 1),
-            ("write", 2),
+            ("readAsString", 1),
+            ("writeAsString", 2),
             ("delete", 3),
         ]),
         ("DeepLink", 10, [
-            ("open", 1),
+            ("openURL", 1),
         ]),
         ("Sensors", 11, [
             ("read", 1),

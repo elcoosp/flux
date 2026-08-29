@@ -38,7 +38,7 @@ import dev.flux.ui.FluxValue as KitValue
  */
 class RuntimeFixesPart2Test {
     private val stdlibEntries =
-        (100u..106u).zip(listOf("column", "text", "button", "row", "text_field", "screen", "router")) +
+        (100u..106u).zip(listOf("column", "text", "button", "row", "textinput", "screen", "router")) +
             listOf(200u to "text", 300u to "button", 500u to "screen", 600u to "router")
 
     private fun newTree(): ShadowTree =
@@ -152,7 +152,7 @@ class RuntimeFixesPart2Test {
         // gate expression is the single source of truth.
         val releaseGate = false
         if (releaseGate) tree.trace = { collected.add(it) }
-        tree.emitTrace(TraceEvent.FluxFrame(seq = 0u, full = true, root = 1u, nodes = 1u, patches = 0u))
+        tree.emitTrace(TraceEvent.Frame(seq = 0u, full = true, root = 1u, nodes = 1u, patches = 0u))
         assertTrue(collected.isEmpty(), "when the DEBUG gate is false the trace sink is never invoked")
     }
 
@@ -161,7 +161,7 @@ class RuntimeFixesPart2Test {
         val collected = mutableListOf<TraceEvent>()
         val tree = newTree()
         tree.trace = { collected.add(it) }
-        tree.emitTrace(TraceEvent.FluxFrame(seq = 3u, full = true, root = 1u, nodes = 1u, patches = 0u))
+        tree.emitTrace(TraceEvent.Frame(seq = 3u, full = true, root = 1u, nodes = 1u, patches = 0u))
         if (BuildFlags.DEBUG) {
             assertEquals(1, collected.size, "debug build must emit the frame trace")
             assertEquals(3u, collected[0].seq)

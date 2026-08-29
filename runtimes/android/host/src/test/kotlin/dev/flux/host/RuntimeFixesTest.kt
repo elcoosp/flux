@@ -36,7 +36,7 @@ import org.junit.jupiter.api.Test
  * regression is caught without re-running the full conformance suite.
  */
 class RuntimeFixesTest {
-    private val stdlibKinds = listOf("column", "text", "button", "row", "text_field", "screen", "router")
+    private val stdlibKinds = listOf("column", "text", "button", "row", "textinput", "screen", "router")
     private val stdlibEntries =
         (100u..106u).zip(stdlibKinds) +
             listOf(200u to "text", 300u to "button", 500u to "screen", 600u to "router")
