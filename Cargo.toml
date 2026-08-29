@@ -15,6 +15,7 @@ members = [
     "crates/flux-cli",
     "crates/flux-parity",
     "crates/flux-devtools-ui",
+    "crates/flux-lsp",
 ]
 
 [workspace.package]
@@ -42,6 +43,7 @@ flux-codegen-kotlin = { path = "crates/flux-codegen-kotlin" }
 flux-codegen-core = { path = "crates/flux-codegen-core" }
 
 flux-devtools-ui = { path = "crates/flux-devtools-ui" }
+flux-lsp = { path = "crates/flux-lsp" }
 
 # gpui (Zed's retained-mode UI framework) is approved ONLY for the
 # `flux-devtools-ui` DevTools desktop crate (ADR-0041). It is a git dependency
@@ -55,6 +57,13 @@ gpui = { git = "https://github.com/zed-industries/zed.git", rev = "1ff7cb669b635
 # while porting `flux-devtools-ui` to the current gpui API (the `Application::new`
 # entry point was removed upstream).
 gpui_platform = { git = "https://github.com/zed-industries/zed.git", rev = "1ff7cb669b6351eaf2a5b79ccb40f5cd1676b8f8" }
+
+# `async-lsp` (tower-based async Language Server Protocol framework) and
+# `lsp-types` (typed LSP protocol structs) back the `flux-lsp` crate (FLUX-024),
+# split out of the thin `flux-cli` JSON emitter. Both approved via ADR-class
+# dependency vetting (active, MIT/Apache-2.0). `tokio` is already a workspace dep.
+async-lsp = "^0.2"
+lsp-types = "^0.97"
 
 ahash = "^0.8"
 anyhow = "^1"

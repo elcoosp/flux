@@ -1454,3 +1454,57 @@ stays current.
   (architecture diagram). `notify_fsevent_test.rs` was committed then removed
   (`4958ac4` → removal commit) — it was a root-level fsevent scratch probe, not
   project source.
+
+---
+
+## Promoted follow-up issues (deferred PRD work → tracked FLUX-0XX)
+
+Every "Deferred (documented follow-up)" / "Blocker" / "remain follow-up" /
+"PARTIAL" bullet in this changelog was promoted into a self-contained
+`FLUX-0XX` issue under `docs/issues/` so there is **no dangling follow-up**.
+The full mapping (deferred line → issue id → source pointer) lives in
+`docs/issues/00-FOLLOWUP-INDEX.md`. The LSP work (PRD-O's deferred server) is
+promoted into its **own crate** (`crates/flux-lsp`) built on `async-lsp`
+(^0.2.4) + `lsp-types` (^0.97), with the crate scaffold + workspace wiring +
+manifest request already applied (FLUX-024). Summary by cluster:
+
+- **LSP / editor (PRD-O)** — FLUX-024 (real async-lsp server, own crate),
+  FLUX-025 (`flux lsp` type-checking via `flux-types`), FLUX-026 (VS Code
+  extension), FLUX-027 (go-to-def / hover / completion over compiler symbols),
+  FLUX-028 (native on-device error overlay, PRD-K `FluxError`/`Span`),
+  FLUX-029 (incremental `didChange` + debounced re-analysis).
+- **Docs / ecosystem (PRD-R)** — FLUX-030 (docs site + en/es i18n-drift
+  checker), FLUX-031 (getting-started / cookbook), FLUX-032 (RN / Flutter
+  migration guides), FLUX-033 (troubleshooting keyed to `FluxError`),
+  FLUX-034 (headless `.flux` test framework reusing `flux-parity`),
+  FLUX-035 (release crash reporting), FLUX-036 (state patterns + app i18n +
+  showcase apps).
+- **Stdlib (PRD-N)** — FLUX-037 (`Stack`/`Grid`/`Spacer`/`SafeArea`),
+  FLUX-038 (`Modal`/`Sheet`/`Dialog`), FLUX-039 (`Image` local+remote caching),
+  FLUX-040 (form primitives), FLUX-041 (gestures), FLUX-042 (signal-graph
+  animation), FLUX-043 (design-token theming codegen), FLUX-044 (a11y props).
+- **Capabilities (PRD-Q)** — FLUX-045 (six concrete capabilities),
+  FLUX-046 (native-module escape hatch), FLUX-047 (HTTP/JSON + persistence),
+  FLUX-048 (WebView escape hatch), FLUX-049 (permission gate + CALL_CAP threat
+  model), FLUX-050 (production update-integrity, ADR-0050).
+- **Language maturity (PRD-S)** — FLUX-051 (list comprehension),
+  FLUX-052 (slot/children composition), FLUX-053 (nullable/optional chaining),
+  FLUX-054 (structural vs nominal prop typing), FLUX-055 (in-language `Result`).
+- **Performance (PRD-T)** — FLUX-056 (large-list scroll benchmark),
+  FLUX-057 (RN/Flutter published comparison).
+- **DevTools (PRD-P)** — FLUX-058 (signal-graph edge rendering),
+  FLUX-059 (timeline / flamegraph from `MetricRecord`), FLUX-060 (network
+  inspector + log viewer), FLUX-061 (multi-device connect), FLUX-062
+  (on-device verification evidence).
+- **Correctness / architecture blockers** — FLUX-063 (FLUX-011 PARTIAL:
+  6/10 B.3 lowering gap at `flux-ir`), FLUX-064 (Phase-2 async wire host
+  halves unlanded), FLUX-065 (iOS declarative-tier convergence, ADR-0048
+  Phase 0/1), FLUX-066 (on-device render-perf harness), FLUX-067 (mutation
+  testing + toolchain matrix), FLUX-068 (`flux build` toolchain invoke +
+  distribution), FLUX-069 (1.0 beta evidence gates).
+
+**Status:** 46 issues created (FLUX-024 … FLUX-069), all committed. The
+`flux-lsp` crate (FLUX-024) is scaffolded, wired into the workspace
+`members` + `[workspace.dependencies]`, and its `async-lsp`/`lsp-types`
+dependency request in `MANIFEST_REQUESTS.md` has been applied. No production
+code outside the `flux-lsp` scaffold was changed by this promotion.

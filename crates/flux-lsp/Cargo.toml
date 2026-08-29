@@ -1,0 +1,28 @@
+[package]
+name = "flux-lsp"
+description = "Language server for the Flux UI language (FLUX-024), built on async-lsp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+# async-lsp is the LSP framework (tower-based). Enable `tokio` so the stdio
+# server runs on the workspace's tokio runtime; `lsp_types` is re-exported by
+# async-lsp (no separate `lsp-types` dependency needed in this crate).
+async-lsp = { version = "^0.2", features = ["tokio"] }
+tokio = { workspace = true }
+futures = "^0.3"
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# The server REUSES the compiler (PRD-O) — never re-implements analysis.
+flux-parser.workspace = true
+flux-types.workspace = true
+flux-syntax.workspace = true
+flux-ir.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
