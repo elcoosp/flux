@@ -77,6 +77,19 @@ are intentionally omitted (automation noise, not user-facing change).
   interactivity + readability (`73608ce`, `f974e70`, `9b0e508`); README / website / repo-URL fixes
   (`3012103`, `512b220`, `4c1b5da`).
 
+### Language — structural record typing (FLUX-054 / ADR-0052) — DONE
+
+- Records are now **structural** (width-subtyping): a value carrying extra fields is
+  assignable where a narrower record type is expected (`unify_records` no longer requires
+  equal field counts). A narrower value missing a required field is still rejected with a
+  precise diagnostic (`crates/flux-types/src/unify.rs`).
+- Added anonymous record literals `{ x: 1, y: 2 }` (FLUX-054 / ADR-0052): the parser emits
+  `ExprKind::Record` with an empty name when a `{ ... }` primary's entries are all
+  `ident: expr` and there is no `name =>` block-param header; the checker already lowers
+  `ExprKind::Record` to a structural `TcType::Record` (`crates/flux-parser/src/parser.rs`).
+- ADR-0052 records the structural-vs-nominal decision and scope boundary (no new VM opcode
+  or IR node; codegen already walks `ExprKind::Record` fields).
+
 ### CI — real Kotlin / Compose codegen check + rust-check unblock — DONE
 
 - Provision the Compose toolchain and run the real `kotlinc` codegen check without platform-37;

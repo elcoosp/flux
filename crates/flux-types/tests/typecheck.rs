@@ -183,6 +183,30 @@ fn area(shape: Shape) -> Float {
     }
 }
 
+mod structural_records {
+    use super::*;
+
+    #[test]
+    fn wider_record_assignable_to_narrower_annotation() {
+        // FLUX-054: structural (width-subtyping) records. A value carrying
+        // extra fields must be assignable where a narrower record type is
+        // expected.
+        check_ok("compo C\n  state p: { x: Int } = { x: 1, y: 2 }\n  Text(\"ok\")\n\n");
+    }
+
+    #[test]
+    fn missing_field_still_rejected() {
+        // The reverse is still an error: a narrower value lacks a required
+        // field of the wider expected type.
+        let err = check_err("compo C\n  state p: { x: Int, y: Int } = { x: 1 }\n\n");
+        assert!(
+            err.message.contains("y") || err.message.to_lowercase().contains("field"),
+            "expected a missing-field error, got: {}",
+            err.message
+        );
+    }
+}
+
 mod instantiations {
     use super::*;
 

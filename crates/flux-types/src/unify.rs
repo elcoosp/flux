@@ -124,9 +124,10 @@ fn unify_records(
     fy: &[(String, Box<TcType>)],
     subst: &mut HashMap<u32, TcType>,
 ) -> Result<(), ()> {
-    if fx.len() != fy.len() {
-        return Err(());
-    }
+    // Structural (width-subtyping) records (FLUX-054 / ADR-0052): every field
+    // required by `expected` must be present in `found` with a compatible type.
+    // A `found` record carrying extra fields is still assignable to a narrower
+    // `expected` — this is the structural-vs-nominal prop-typing decision.
     for (nx, tx) in fx {
         let Some((_, ty)) = fy.iter().find(|(ny, _)| ny == nx) else {
             return Err(());

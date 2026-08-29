@@ -721,6 +721,56 @@ impl<'s> Parser<'s> {
         })
     }
 
+    /// Whether the `{ ... }` at the cursor is an anonymous record literal
+    /// (`{ x: 1, y: 2 }`) rather than a code block. True only when there is no
+    /// `name =>` block-param header and every top-level entry is `ident: expr`.
+    fn looks_like_record_lit(&self) -> bool {
+        if self.is_block_param_list() {
+            return false;
+        }
+        // Inspect the first entry: it must be `ident:`.
+        let first = self.tokens.get(self.pos + 1);
+        match first {
+            Some(t) if t.kind == TokenKind::Ident => {
+                self.tokens.get(self.pos + 2).map(|t| t.kind) == Some(TokenKind::Colon)
+            }
+            _ => false,
+        }
+    }
+
+    /// Parses an anonymous record literal `{ name: expr, ... }` (FLUX-054).
+    /// The record carries no type name; the checker treats it as a structural
+    /// `TcType::Record`.
+    fn record_lit(&mut self) -> Result<Expr, ParseError> {
+        let start = self.eat(TokenKind::LBrace)?;
+        self.skip_newlines();
+        let mut fields = Vec::new();
+        while !self.at(TokenKind::RBrace) && !self.at(TokenKind::Eof) {
+            self.skip_layout();
+            if self.at(TokenKind::RBrace) || self.at(TokenKind::Eof) {
+                break;
+            }
+            let name = self.ident()?;
+            self.eat(TokenKind::Colon)?;
+            let value = self.expr()?;
+            fields.push((name, value));
+            self.try_eat(TokenKind::Newline);
+            self.try_eat(TokenKind::Comma);
+        }
+        let end = self.eat(TokenKind::RBrace)?;
+        let span = Span::new(self.file_id, start.start as u32, end.end as u32);
+        // Anonymous records have no type name; use an empty identifier so the
+        // checker's `ExprKind::Record` arm produces a structural record.
+        let name = Ident {
+            name: String::new(),
+            span,
+        };
+        Ok(Expr {
+            kind: ExprKind::Record { name, fields },
+            span,
+        })
+    }
+
     /// Whether the tokens after `{` form a `name (, name)* =>` header.
     fn is_block_param_list(&self) -> bool {
         let mut p = self.pos + 1;
@@ -1081,6 +1131,15 @@ impl<'s> Parser<'s> {
             TokenKind::LParen => self.paren_expr(),
             TokenKind::LBracket => self.list_lit(),
             TokenKind::LBrace => {
+                // An anonymous record literal `{ x: 1, y: 2 }` parses as a
+                // `Record` value (FLUX-054 / ADR-0052). Only switch to the
+                // record path when every entry is `ident: expr` and there is no
+                // `name =>` block-param header — otherwise keep the existing
+                // code-block / lambda behavior.
+                if self.looks_like_record_lit() {
+                    let record = self.record_lit()?;
+                    return Ok(record);
+                }
                 let block = self.braced_block()?;
                 Ok(Expr {
                     kind: ExprKind::Lambda {
