@@ -1,6 +1,6 @@
 ---
 id: PRD-P
-status: open
+status: closed
 lane: LANE-P
 phase: "Phase 4"
 blocked_by:
@@ -18,6 +18,7 @@ source: docs/roadmaps/flux-roadmap-to-1.0.md §4,§12,§13
 related_adrs:
   - ADR-0041
   - ADR-0042
+verified: "2026-08-29 — live telemetry host->server->gpui confirmed on iOS Sim + gpui DevTools; gpui repaint-on-update fixed (spawn-free animation-frame loop)"
 ---
 
 # PRD-P: DevTools — Ship What Is Scaffolded

@@ -39,6 +39,24 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### LANE-P — DevTools live telemetry bridge (PRD-P) — DONE `[verified]`
+- **Live telemetry host → server → gpui DevTools, end-to-end.** The host emits
+  `FRAME_TELEMETRY` (0x10) frames over the existing `:7331` WS; `DevToolsRouter`
+  (multiplexed onto `Shared.devtools_router`) enriches and broadcasts them to the
+  gpui DevTools client on `:7333`. Verified on iOS Sim: host sends 0x10 frames on
+  every tap, server `route_telemetry` increments, gpui holds the ESTABLISHED `:7333`
+  connection and reconstructs timeline/live state via `flux-ir-serde`.
+- **gpui frozen-window fix.** The pinned gpui version's `AsyncFnOnce` spawn trait
+  rejects every `&mut AsyncApp` capture form (E0282 / "not general enough"), so the
+  spawn-based repaint drain could not compile. Replaced with a spawn-free repaint
+  loop in `DevToolsRoot::render`: while `timeline_len()` grows it calls
+  `window.request_animation_frame()`, so every pane re-renders live on each tap
+  without a 60fps idle spin.
+- **Dev server:** binds the devtools WS on `0.0.0.0:7333` (`DEFAULT_DEVTOOLS_PORT`);
+  iOS host default dev server URL is `ws://127.0.0.1:7331` (sim only forwards :7331).
+- **iOS host observability:** `FluxWebSocketTransport` appends connect/send events to
+  `Documents/flux_host.log` (os_log captured nothing in CI's headless sim env).
+
 The entries below land the work committed since the changelog was last updated
 (`a8c86d0`, 2026-08-27). The `[skip ci]` merge-guard directory-recording commits
 are intentionally omitted (automation noise, not user-facing change).
