@@ -20,6 +20,7 @@ use flux_ir_serde::{
 };
 use flux_syntax::{NodeId, Span};
 use futures_util::{SinkExt, StreamExt};
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 ///
 /// Built once per successful compile from the [`LoweredIr`] so telemetry can be
 /// enriched without re-lowering on every event (spec §4.2).
@@ -139,6 +140,7 @@ impl DevToolsRouter {
             }
             Err(_) => false, // drop disconnected clients
         });
+        tracing::debug!(reached, "route_telemetry: broadcast complete");
         reached
     }
 
@@ -160,18 +162,18 @@ pub const DEFAULT_DEVTOOLS_PORT: u16 = 7333;
 /// until the listener errors. This is the only I/O path in the bridge.
 pub async fn serve_devtools(
     addr: std::net::SocketAddr,
-    source_map: SourceMap,
-    host_sink: mpsc::UnboundedSender<DebugCommand>,
+    router: std::sync::Arc<parking_lot::Mutex<DevToolsRouter>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     // One router shared by every connection so host telemetry is broadcast to
     // all subscribed DevTools clients (not just the sender's own connection).
-    let router = std::sync::Arc::new(parking_lot::Mutex::new(DevToolsRouter::new(
-        source_map, host_sink,
-    )));
+    // The router is owned by the server and shared with the host patch-channel
+    // accept loop, which routes telemetry the host sends over `:7331`.
     loop {
         let (stream, _) = listener.accept().await?;
-        let upgraded = tokio_tungstenite::accept_async(stream).await;
+        let upgraded =
+            tokio_tungstenite::accept_async_with_config(stream, Some(WebSocketConfig::default()))
+                .await;
         let Ok(ws) = upgraded else {
             continue; // malformed handshake; skip this connection
         };
@@ -207,6 +209,7 @@ pub async fn serve_devtools(
                     tokio_tungstenite::tungstenite::Message::Binary(b) => b,
                     _ => continue,
                 }) else {
+                    tracing::debug!("serve_devtools: inbound frame failed to decode");
                     continue;
                 };
                 for event in frame.events {
@@ -292,7 +295,10 @@ mod tests {
 
         let (host_tx, _host_rx) = mpsc::unbounded_channel();
         let source_map = SourceMap::default();
-        tokio::spawn(async move { serve_devtools(addr, source_map, host_tx).await });
+        let test_router = std::sync::Arc::new(parking_lot::Mutex::new(DevToolsRouter::new(
+            source_map, host_tx,
+        )));
+        tokio::spawn(async move { serve_devtools(addr, test_router).await });
         // Give the accept loop a moment to bind.
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 

@@ -15,8 +15,8 @@ use std::sync::Arc;
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::UnboundedReceiver;
-use tokio_tungstenite::tungstenite::{Error as WsError, Message};
-use tokio_tungstenite::{WebSocketStream, accept_async};
+use tokio_tungstenite::tungstenite::{Error as WsError, Message, protocol::WebSocketConfig};
+use tokio_tungstenite::{WebSocketStream, accept_async_with_config};
 
 use crate::dispatch::FRAME_DISPATCH_REPORT;
 use crate::error::Diagnostic;
@@ -24,6 +24,18 @@ use crate::server::Shared;
 
 /// The upgraded WebSocket stream a session is driven over.
 type HostSocket = WebSocketStream<TcpStream>;
+
+/// WebSocket configuration for accepted host connections.
+///
+/// Compression (permessage-deflate) is negotiated automatically when the
+/// `compression` cargo feature is enabled on `tokio-tungstenite`
+/// (requested in `MANIFEST_REQUESTS.md`). The feature gates the capability at
+/// compile time; this config is what actually turns it on at runtime. Clients
+/// that do not offer the extension complete the handshake and receive
+/// uncompressed frames, so enabling compression is backward-compatible.
+pub(crate) fn websocket_config() -> WebSocketConfig {
+    WebSocketConfig::default()
+}
 
 /// Drives one host connection: `Hello` handshake, `Init` reply, then frame fan-out.
 ///
@@ -37,7 +49,12 @@ type HostSocket = WebSocketStream<TcpStream>;
 pub(crate) async fn serve_client(stream: TcpStream, shared: Arc<Shared>) -> Result<(), WsError> {
     // Nagle off: patch frames are small and latency-sensitive (spec §3.7).
     stream.set_nodelay(true).map_err(WsError::Io)?;
-    let socket = accept_async(stream).await?;
+    // Accept with an explicit config so permessage-deflate is negotiated when the
+    // `compression` cargo feature is enabled (see MANIFEST_REQUESTS.md). Clients
+    // that never offer the extension (older URLSession/okhttp) still complete the
+    // handshake and receive uncompressed frames — enabling compression is
+    // backward-compatible and never breaks a connection.
+    let socket = accept_async_with_config(stream, Some(websocket_config())).await?;
     let queue = shared.register();
     run_session(socket, queue, shared).await
 }
@@ -97,6 +114,25 @@ async fn handle_host_frame(bytes: &[u8], shared: &Arc<Shared>) -> Vec<Vec<u8>> {
             handle_intern_string(bytes, shared).into_iter().collect()
         }
         Some(flux_ir_serde::FRAME_HELLO) => handle_hello(bytes, shared).await.into_iter().collect(),
+        // Host telemetry (spec §4.1): the iOS/Android host ships `Telemetry`
+        // (`0x10`) frames over the same patch-channel WebSocket the Simulator
+        // can reach (`:7331`), since the Simulator does not forward a separate
+        // `:7333` device→server socket. Route them through the shared router so
+        // every connected DevTools app receives them.
+        Some(flux_ir_serde::FRAME_TELEMETRY) => {
+            match flux_ir_serde::TelemetryFrame::from_bytes(bytes) {
+                Some(frame) => {
+                    for event in &frame.events {
+                        shared.devtools_router.lock().route_telemetry(event);
+                    }
+                    Vec::new()
+                }
+                None => {
+                    tracing::warn!("malformed telemetry frame from host");
+                    Vec::new()
+                }
+            }
+        }
         // Roadmap Phase 2: the host parked a handler on a pending result cell.
         // The server owns the resumption, so it replies with `Resume` as soon as
         // the cell settles (immediately, when it settled first).
