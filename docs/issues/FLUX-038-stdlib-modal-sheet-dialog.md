@@ -1,6 +1,6 @@
 ---
 id: FLUX-038
-status: done
+status: partial
 lane: LANE-N
 phase: "Phase 2"
 blocked_by: []
@@ -13,6 +13,12 @@ related_adrs:
 ---
 
 # FLUX-038: Stdlib container primitives — Modal / Sheet / Dialog
+
+> **Status note (2026-08-29):** relabeled `done` → `partial`. `flux-codegen-core`
+> defines `Modal`/`Sheet`/`Dialog` enum variants (template scaffolding) but there
+> is **no stdlib declaration** and **no host reconciler branch** on either platform
+> (grep of `ShadowTreeReconciler.swift` / `DirtyReconciler.kt` for Modal/Sheet/Dialog
+> returns nothing). A Flux app cannot express or render these containers yet.
 
 - **Lane:** LANE-N (Phase 2)
 - **Depends on:** FLUX-037 (layout primitives + the iOS convergence decision)
