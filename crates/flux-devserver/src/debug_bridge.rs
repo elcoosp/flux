@@ -16,7 +16,8 @@ use std::collections::HashMap;
 
 use flux_ir::LoweredIr;
 use flux_ir_serde::{
-    DebugCommand, EnrichedTelemetryEvent, EnrichedTelemetryFrame, TelemetryEvent, TelemetryFrame,
+    DebugCommand, EnrichedTelemetryEvent, EnrichedTelemetryFrame, HostAnnounceFrame,
+    TelemetryEvent, TelemetryFrame,
 };
 use flux_syntax::{NodeId, Span};
 use futures_util::{SinkExt, StreamExt};
@@ -100,12 +101,16 @@ use tokio::sync::mpsc;
 /// `DevToolsRouter` is the pure routing core: telemetry from the host is
 /// enriched and broadcast to every subscribed DevTools client; commands from a
 /// DevTools client are forwarded to the host. It holds no network state, so it
-/// is unit-tested directly.
+/// is unit-tested directly. A separate channel carries [`HostAnnounceFrame`]s so
+/// the DevTools UI learns which device is streaming (the server learns this from
+/// the host `Hello` and re-broadcasts it to every connected DevTools client).
 #[derive(Debug)]
 pub struct DevToolsRouter {
     source_map: SourceMap,
-    /// One sender per connected DevTools client.
+    /// One sender per connected DevTools client (telemetry stream).
     devtools: Vec<mpsc::UnboundedSender<EnrichedTelemetryEvent>>,
+    /// One sender per connected DevTools client (host-identity stream).
+    host_announce: Vec<mpsc::UnboundedSender<HostAnnounceFrame>>,
     /// Where host-bound `DebugCommand`s are forwarded.
     host_command: mpsc::UnboundedSender<DebugCommand>,
 }
@@ -117,6 +122,7 @@ impl DevToolsRouter {
         Self {
             source_map,
             devtools: Vec::new(),
+            host_announce: Vec::new(),
             host_command,
         }
     }
@@ -126,6 +132,30 @@ impl DevToolsRouter {
         let (tx, rx) = mpsc::unbounded_channel();
         self.devtools.push(tx);
         rx
+    }
+
+    /// Registers a new DevTools client for the host-identity stream and returns
+    /// its receiver.
+    pub fn subscribe_host_announce(&mut self) -> mpsc::UnboundedReceiver<HostAnnounceFrame> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.host_announce.push(tx);
+        rx
+    }
+
+    /// Broadcasts a host-identity frame to all subscribed DevTools clients.
+    /// Returns the number of clients reached.
+    pub fn announce_host(&mut self, announce: &HostAnnounceFrame) -> usize {
+        let mut reached = 0;
+        self.host_announce
+            .retain(|tx| match tx.send(announce.clone()) {
+                Ok(()) => {
+                    reached += 1;
+                    true
+                }
+                Err(_) => false,
+            });
+        tracing::debug!(reached, "announce_host: broadcast complete");
+        reached
     }
 
     /// Enriches a host telemetry event and broadcasts it to all DevTools clients.
@@ -181,22 +211,42 @@ pub async fn serve_devtools(
         // Subscribe this connection; the returned receiver drives its outbound
         // stream. Dropped connections are pruned by `route_telemetry`.
         let mut sub_rx = router.lock().subscribe_devtools();
-        // Outbound: enriched events → WebSocket.
+        let mut host_rx = router.lock().subscribe_host_announce();
+        // Outbound: enriched telemetry events AND host-identity frames share a
+        // single sink (a `SplitSink` is not `Clone`, so we `select!` over both
+        // receivers in one task that owns `writer`).
         tokio::spawn(async move {
-            while let Some(event) = sub_rx.recv().await {
-                let frame = EnrichedTelemetryFrame {
-                    version: flux_ir_serde::PROTOCOL_VERSION,
-                    event_count: 1,
-                    events: vec![event],
-                };
-                if writer
-                    .send(tokio_tungstenite::tungstenite::Message::Binary(
-                        frame.to_bytes().into(),
-                    ))
-                    .await
-                    .is_err()
-                {
-                    break;
+            loop {
+                tokio::select! {
+                    event = sub_rx.recv() => {
+                        let Some(event) = event else { break };
+                        let frame = EnrichedTelemetryFrame {
+                            version: flux_ir_serde::PROTOCOL_VERSION,
+                            event_count: 1,
+                            events: vec![event],
+                        };
+                        if writer
+                            .send(tokio_tungstenite::tungstenite::Message::Binary(
+                                frame.to_bytes().into(),
+                            ))
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    announce = host_rx.recv() => {
+                        let Some(announce) = announce else { break };
+                        if writer
+                            .send(tokio_tungstenite::tungstenite::Message::Binary(
+                                announce.to_bytes().into(),
+                            ))
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
                 }
             }
         });
