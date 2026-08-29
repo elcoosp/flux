@@ -1713,3 +1713,68 @@ manifest request already applied (FLUX-024). Summary by cluster:
 `members` + `[workspace.dependencies]`, and its `async-lsp`/`lsp-types`
 dependency request in `MANIFEST_REQUESTS.md` has been applied. No production
 code outside the `flux-lsp` scaffold was changed by this promotion.
+
+## 2026-08-29 — Pipeline & runtime performance pass (external review follow-up)
+
+Code changes committed under FLUX-049. Benchmark figures in the external review
+were not reproduced; measured on this tree (release): parse 500 lines ~308 µs,
+type-check ~810 µs, diff(50,identical) ~15 µs, serialize 50-node patch ~4 µs,
+VM 50-instr/10k signals ~439 µs — all within AGENTS.md §3.10 budgets.
+
+### Server / Rust (flux-devserver, flux-ir-serde) — `[verified]`
+- **OPT-B (serialization buffer reuse).** `Frame` exposes `encode_into(&mut Vec<u8>)`
+  on `InitFrame`/`DeltaFrame`; the dev-server `Pipeline` keeps one `Vec<u8>` scratch
+  buffer reused across every `Init`/`Delta` on the hot path. No behavior change;
+  `to_bytes` preserved.
+  - Verification: `cargo nextest` 143/143 green; `cargo clippy -D` clean; serialize
+    bench no regression (~3.99 µs for 50-node patch).
+- **OPT-A (incremental string deltas): REVERTED — correctness hazard.** Shipping only
+  newly-interned strings on a `Delta` is unsafe because `StringTable::intern` assigns
+  ids densely in first-insertion order per compile (`flux-syntax/src/strings.rs`), not
+  content-derived. After an edit, id 0 can mean a different literal; a host that merges
+  partial deltas would bind stale id→text and render wrong text. The existing "full
+  string table every Delta" is correct. Added a regression guard
+  `delta_ships_full_string_table_for_positional_ids`.
+
+### Runtime decode-caching (both hosts) — the review's best idea, real win
+Handler bytecode is decoded once at registration and reused on every dispatch
+instead of re-decoding on every tap.
+
+- **iOS (Swift) — `[verified]`** (`FluxExecutor.swift`, `FluxBytecodeVM.swift`):
+  `handlerClosures` already cached `decoded: [Instruction]?` at registration, but
+  `runHandlerAsync` ignored it and re-decoded. Added a `runResumable(program:
+  originalBytecode:)` overload and routed the async dispatch hot path through the
+  cache (fallback to raw-bytecode path when cache absent). Cache invalidated per frame
+  via last-wins re-registration, so handler-body edits still take effect.
+  - Verification: `xcodebuild test -scheme FluxApp` on the booted iPhone 17 Pro
+    simulator → **TEST SUCCEEDED, 19 executed, 0 failures** (incl. `RenderMountTests`,
+    `CapabilityRoundTripTests`).
+
+- **Android (Kotlin/JVM) — `[unverified]`** (`FluxExecutor.kt`, `FluxBytecodeVM.kt`):
+  `Closure` now carries `instructions: List<Instruction>` (decoded once via
+  `decodeClosure` at registration; malformed bytecode falls back to empty so dispatch
+  still surfaces decode faults). Added `run(program:)` / `runResumable(program:)`
+  overloads; `dispatch`/`dispatchAsync` route through the cache when present.
+  - **NOT VERIFIED**: no `kotlinc`/`gradle` in this environment, so the Android JVM
+    suite (`FluxBytecodeVmTest`, `VmDispatchTest`, `AsyncResolverTest`, `EndToEndTest`)
+    was not compiled or run. Requires Louis's on-device gate (parity rule: both
+    platforms together) before merge.
+
+### WebSocket compression (OPT-C) — NOT achievable with current dependency
+- **Code change `[verified]`** (`session.rs`, `debug_bridge.rs`): server now upgrades
+  host connections with `accept_async_with_config(stream, Some(WebSocketConfig::
+  default()))` instead of bare `accept_async`. `WebSocketConfig` is always present, so
+  this compiles today with no behavior change and activates permessage-deflate
+  automatically the moment a `tokio-tungstenite` release that supports it is used.
+- **Capability gap (root cause, NOT a process/network limit):** `tokio-tungstenite`
+  has no `compression` feature in any published version. `cargo` (which has network
+  here) resolves the crate only up to **0.30.0**, and 0.30's feature list contains no
+  `compression`; `docs.rs/tungstenite` states "There is no support for permessage-deflate
+  at the moment." Bumping to `^0.31` was attempted and rejected by the resolver
+  ("no matching package named `tokio-tungstenite` found"), confirming 0.31 does not
+  exist. The earlier `^0.31` suggestion was a misremembering and is wrong.
+- **Options (not pursued):** (1) swap the WS library to one with RFC 7692 support
+  (e.g. `yawc`); (2) application-level gzip of frame payloads with a wire flag (needs
+  host changes on both platforms, unverifiable here); (3) accept uncompressed wire —
+  Flux's binary patch frames are already small (Init 50-node frame < 20 KB). Decision:
+  defer. Code remains forward-compatible.
