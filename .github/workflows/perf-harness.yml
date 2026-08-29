@@ -1,0 +1,42 @@
+name: perf-harness
+
+# PRD-J (LANE-J) — render-perf harness CI.
+#
+# Exercises the flux-perf-harness crate end to end: builds it, runs the
+# demonstration runner (which constructs a fixed warm record and evaluates the
+# §3.10 budget gate), and runs the crate's own unit tests (the hard gate). The
+# per-tier device numbers that close ADR-0048 are produced by the runtimes/
+# host adapters wiring MeasureFn closures; this job proves the harness itself
+# is buildable and executable on every push.
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "crates/flux-perf-harness/**"
+      - "scripts/run-perf-harness.sh"
+      - ".github/workflows/perf-harness.yml"
+  pull_request:
+    paths:
+      - "crates/flux-perf-harness/**"
+      - "scripts/run-perf-harness.sh"
+      - ".github/workflows/perf-harness.yml"
+
+jobs:
+  perf-harness:
+    name: flux-perf-harness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Run perf harness
+        run: bash scripts/run-perf-harness.sh --json perf-metric-record.json
+      - name: Upload metric record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flux-perf-metric-record
+          path: perf-metric-record.json

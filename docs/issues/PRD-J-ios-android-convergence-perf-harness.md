@@ -134,3 +134,18 @@ in-flight parallel work and need a device/simulator + `xcodebuild`/`kotlinc`, un
 environment. So the harness is buildable and the schema/gate are proven; the per-tier numbers that
 close ADR-0048 (Phase 0/1) are produced by the host adapters, not here. Unblocks FLUX-056/059/065
 (their missing `MetricRecord`/harness now exists).
+
+## Status update (2026-08-29, CI wired)
+
+**Harness is now CI-gated (collision-free, verified locally).** Added:
+- `crates/flux-perf-harness/examples/ci_run.rs` — builds a fixed warm sample record and runs
+  `gate::evaluate` (§3.10 budgets), printing the `GateVerdict` + stable JSON `MetricRecord`.
+- `scripts/run-perf-harness.sh` — builds + runs the example and the crate's lib tests (the hard
+  gate).
+- `.github/workflows/perf-harness.yml` — runs on every push/PR touching the crate; uploads the
+  `MetricRecord` JSON as an artifact.
+
+Verified: `cargo run -p flux-perf-harness --example ci_run` exits 0 (verdict printed, JSON
+emitted); `cargo test -p flux-perf-harness --lib` 12/12 green; `cargo fmt --check` + `cargo clippy
+-D warnings` clean (example included). This is non-colliding new-file work in `scripts/`/`.github/`
+and the harness crate's `examples/`, independent of the round-1 code crates.
