@@ -181,6 +181,32 @@ fn area(shape: Shape) -> Float {
             err.message
         );
     }
+
+    #[test]
+    fn null_literal_is_option_typed() {
+        // `Null` is the sole inhabitant of every `Option[T]`; assigning it to an
+        // `Option[Int]` state must type-check (FLUX-053 / ADR-0051).
+        check_ok("compo C\n  state maybe: Option[Int] = Null\n  Text(\"ok\")\n\n");
+    }
+
+    #[test]
+    fn result_type_constructs_and_matches() {
+        // FLUX-055 / ADR-0055: `Result[T, E]` is a prelude ADT with `Ok(T)` /
+        // `Err(E)`. Construction must infer `T`/`E` from the arguments and a
+        // `match` on `Ok`/`Err` must type-check exhaustively.
+        check_ok(
+            "compo C\n  state r: Result[Int, String] = Ok(1)\n  match r {\n    Ok(n) => Text(\"ok {n}\")\n    Err(e) => Text(\"err {e}\")\n  }\n\n",
+        );
+    }
+
+    #[test]
+    fn result_err_inferred_from_argument() {
+        // The error type `E` is inferred from the `Err` argument; here `E` must
+        // unify with `String`.
+        check_ok(
+            "compo C\n  state r: Result[Int, String] = Err(\"boom\")\n  match r {\n    Ok(n) => Text(\"ok\")\n    Err(e) => Text(e)\n  }\n\n",
+        );
+    }
 }
 
 mod structural_records {

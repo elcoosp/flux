@@ -104,9 +104,28 @@ pub(crate) fn unify_into(
             if na != nb {
                 return Err(UnifyError::Mismatch(a, b));
             }
-            unify_lists(aa, ab, subst)
+            // An ADT constructor yields the opaque form `Named(adt, [])`; a
+            // type annotation may be parameterized (`Result[Int, String]`).
+            // Both denote the same nominal ADT, so when one side carries no
+            // payload arguments unify by name and ignore the (absent) payload
+            // lists. Concrete payload types are recovered at `match` time via
+            // `bind_pattern_ty`. (FLUX-055; non-generic ADTs like `Shape` are
+            // never annotated with payload args, so this only changes the
+            // generic-ADT path.)
+            if aa.is_empty() || ab.is_empty() {
+                Ok(())
+            } else {
+                unify_lists(aa, ab, subst)
+            }
         }
-        // A variant value is also a value of its ADT's named type.
+        // A variant value is also a value of its ADT's named type. For a
+        // generic ADT (e.g. `Result[T, E]`) the *constructor* yields an opaque
+        // `Named(adt, [])` while an annotation may be parameterized
+        // (`Result[Int, String]`); both denote the same nominal ADT, so unify
+        // by name and ignore the payload lists (concrete payload types are
+        // recovered at `match` time via `bind_pattern_ty`). This does not
+        // weaken `Shape`/`Circle` checking: there the annotation is never
+        // parameterized, so the existing `Named`/`Named` arm already covered it.
         (TcType::Variant(na, _), TcType::Named(nb, _))
         | (TcType::Named(nb, _), TcType::Variant(na, _)) => {
             if na == nb {

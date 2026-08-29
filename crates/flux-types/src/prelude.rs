@@ -81,6 +81,29 @@ pub(crate) fn prelude(supply: &mut Supply) -> Env {
             }),
         );
     }
+    // `Result[T, E]` — in-language fallible-result type (FLUX-055 / ADR-0055).
+    // Models a capability/computation that may fail with a typed error instead
+    // of crashing. Reuses the existing `Variant`/`MATCH_TAG` machinery; the
+    // variant fields reference the ADT's generic params as `Var(PARAM_BASE + i)`
+    // so construction (e.g. `Ok(x)`) infers `T = typeof(x)` and `Err(e)` infers
+    // `E = typeof(e)`.
+    {
+        use crate::env::{AdtDef, VariantDef};
+        let result_adt = AdtDef {
+            params: vec!["T".to_owned(), "E".to_owned()],
+            variants: vec![
+                VariantDef {
+                    name: "Ok".to_owned(),
+                    fields: vec![TcType::Var(crate::env::PARAM_BASE)],
+                },
+                VariantDef {
+                    name: "Err".to_owned(),
+                    fields: vec![TcType::Var(crate::env::PARAM_BASE + 1)],
+                },
+            ],
+        };
+        env.register_adt("Result", result_adt);
+    }
     env.insert(
         "Map".to_owned(),
         Binding::Ctor(CtorKind::Component {

@@ -1,0 +1,13 @@
+{
+  "bytecode_hex": "b0000500000000000000d1010000",
+  "description": "IS_NULL reports false when the source register holds a non-Null value, including Int(0) which is also falsey under truthy() (FLUX-053).",
+  "expected_error": null,
+  "expected_gas_used": 2,
+  "expected_registers": {
+    "r1": { "type": "Bool", "value": false }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "is_null_false",
+  "payload": null
+}

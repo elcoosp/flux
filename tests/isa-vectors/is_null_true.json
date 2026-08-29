@@ -1,0 +1,13 @@
+{
+  "bytecode_hex": "b400d1010000",
+  "description": "IS_NULL reports true when the source register holds Null (FLUX-053).",
+  "expected_error": null,
+  "expected_gas_used": 2,
+  "expected_registers": {
+    "r1": { "type": "Bool", "value": true }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "is_null_true",
+  "payload": null
+}

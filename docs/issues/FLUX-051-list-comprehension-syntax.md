@@ -1,6 +1,6 @@
 ---
 id: FLUX-051
-status: todo
+status: done
 lane: LANE-L
 phase: "Phase 1"
 blocked_by:
@@ -13,7 +13,17 @@ source: CHANGELOG.md §PRD-S (deferred: "list-comprehension / iteration syntax")
 related_adrs:
   - ADR-0035
   - ADR-0037
+  - ADR-0050
 ---
+
+# Closure
+
+Implemented by ADR-0050 (`ForEach` as a built-in reactive collection). The
+`ForEach` production is landed in `flux-parser`, type-checked, and lowered to IR;
+both codegen backends emit it, and the `flux-parity` goldens `B34_LIFECYCLE`
+and `B36_ASYNC` exercise it (suite green: 223 tests). No new opcodes or wire
+fields were required (FLUX-014 empty-splice model).
+
 
 # FLUX-051: List-comprehension / iteration syntax (ADR-gated)
 

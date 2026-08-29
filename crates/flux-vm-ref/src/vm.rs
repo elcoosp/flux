@@ -697,6 +697,14 @@ fn exec_tail(
             Opcode::LoadNull => {
                 regs[usize::from(instr.u8(0))] = Value::Null;
             }
+            Opcode::IsNull => {
+                // FLUX-053 null-safe access. Sets `dst` to `true` iff `src`
+                // holds the `Null` value — the one null-distinguishing test
+                // `truthy` cannot provide (both `Null` and `Int(0)` are falsey).
+                let src = reg!(instr.u8(1));
+                let is_null = matches!(src, Value::Null);
+                regs[usize::from(instr.u8(0))] = Value::Bool(is_null);
+            }
             Opcode::Mov => {
                 regs[usize::from(instr.u8(0))] = reg!(instr.u8(1));
             }
