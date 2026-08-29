@@ -87,7 +87,7 @@ issue, and the LSP work (PRD-O's deferred server) is promoted into its own
 | CHANGELOG location | Issue | Why |
 |---|---|---|
 | §FLUX-011 PARTIAL — 6/10 B.3 fail at `flux-ir` lowering (`unsupported handler operand/expression`) | FLUX-063 | lowering fix, not codegen; gates 10/10 parity |
-| §Roadmap Phase 2 async wire — host halves (`resume` call sites + codegen `Task`/`suspend`) unlanded | FLUX-064 | real host `AWAIT` never resumes today |
+| §Roadmap Phase 2 async wire — host `resume` call sites MERGED; codegen `Task`/`suspend` emission still unlanded | FLUX-064 | release path cannot yet suspend on a real capability; sync/async decision is FLUX-070 |
 | AGENTS.md §0.2 Axis 2 — iOS not converged to declarative tier | FLUX-065 | blocking Phase 0 decision (ADR-0048 Phase 0/1) |
 | AGENTS.md §0.2 — no on-device render-perf test on either platform | FLUX-066 | CI-gated on-device §3.10 harness |
 | roadmap §0.5 — mutation testing + toolchain compat matrix | FLUX-067 | `cargo-mutants` is a CI binary, not a manifest dep |
