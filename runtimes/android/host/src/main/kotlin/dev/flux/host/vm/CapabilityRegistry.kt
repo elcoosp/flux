@@ -228,6 +228,25 @@ public class CapabilityRegistry(
                         signals.write(92u, FluxValue.NullVal)
                         92u
                     }
+                    // WebView (12): escape-valve native web content (FLUX-048).
+                    // `load` (12,1) records the requested `src` into signal 82 so
+                    // the UI kit can mount a sandboxed WebView; no OS permission
+                    // required (PermissionKind::None).
+                    put(12u, 1u.toUShort()) { args, signals ->
+                        val src = (args as? FluxValue.RecordVal)?.fields?.firstOrNull()?.value ?: FluxValue.NullVal
+                        signals.write(82u, src)
+                        82u
+                    }
+                    // NativeModule (13): wraps an arbitrary native SDK through the
+                    // `.native` escape hatch (FLUX-046). `invoke` (13,1) records the
+                    // requested (name, method) into signal 83; gated by
+                    // PermissionKind::NativeModule (the LANE-I allow-list), never an
+                    // open CALL_NATIVE.
+                    put(13u, 1u.toUShort()) { args, signals ->
+                        val request = (args as? FluxValue.RecordVal)?.fields?.firstOrNull()?.value ?: FluxValue.NullVal
+                        signals.write(83u, request)
+                        83u
+                    }
                     // Reference async capability (2,99): allocate a fresh Pending cell, return its id
                     // immediately (ADR-0045). The host resolves it later via SignalStore.resolveCell,
                     // resuming the awaiting handler. Mirrors the oracle's `async_deferred`.

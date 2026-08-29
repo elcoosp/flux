@@ -93,6 +93,14 @@ private val idlCapabilities: List<Triple<String, UInt, List<Pair<String, UInt>>>
     Triple("Sensors", 11u, listOf(
         "read" to 1u,
     )),
+    Triple("WebView", 12u, listOf(
+        "load" to 1u,
+        "evaluate" to 2u,
+        "sendMessage" to 3u,
+    )),
+    Triple("NativeModule", 13u, listOf(
+        "invoke" to 1u,
+    )),
 )
 // ===== GENERATED-END =====
 

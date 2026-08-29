@@ -23,6 +23,13 @@ public object FrameDeserializer {
     /** Little-endian magic FLUX (Appendix D §D.1). */
     public const val MAGIC: UInt = 0x465C5558u
 
+    /** The wire protocol version this host implements. A frame whose version
+     * byte differs is rejected fail-closed (FLUX-050 / ADR-0056): an old host
+     * must never silently mis-decode a newer server's frames, and a new host
+     * must never accept an older server's incompatible layout. The mismatch
+     * surfaces as a red banner, never a crash. */
+    public const val PROTOCOL_VERSION: UByte = 0x01u
+
     /** FluxFrame kind constants mirroring crates/flux-ir-serde/src/frame.rs. */
     private const val FRAME_INIT: UByte = 0x02u
     private const val FRAME_DELTA: UByte = 0x04u
@@ -38,6 +45,16 @@ public object FrameDeserializer {
             throw WireError("bad magic 0x%08X (expected 0x%08X)".format(magic.toLong(), MAGIC.toLong()))
         }
         val version = r.u8().toUByte()
+        if (version != PROTOCOL_VERSION) {
+            // Fail-closed handshake (FLUX-050 / ADR-0056): refuse to decode a
+            // frame whose protocol version the host does not implement. An old
+            // host + new server (or vice-versa) must surface an actionable red
+            // banner, not a silent mis-decode / crash.
+            throw WireError(
+                "protocol version 0x%02X not supported by host (expected 0x%02X); " +
+                    "update the host or the dev server".format(version.toInt(), PROTOCOL_VERSION.toInt()),
+            )
+        }
         val kind = r.u8().toUByte()
         return when (kind) {
             FRAME_INIT -> decodeInit(r, version)
