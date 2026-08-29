@@ -79,7 +79,7 @@ pub const CAPABILITY_IDL: &[CapabilityIdl] = &[
         id: 1,
         methods: &[
             MethodIdl {
-                name: "take",
+                name: "takePicture",
                 id: 1,
             },
             MethodIdl {
@@ -96,10 +96,16 @@ pub const CAPABILITY_IDL: &[CapabilityIdl] = &[
         name: "Storage",
         id: 2,
         methods: &[
-            MethodIdl { name: "set", id: 1 },
-            MethodIdl { name: "get", id: 2 },
             MethodIdl {
-                name: "delete",
+                name: "setItem",
+                id: 1,
+            },
+            MethodIdl {
+                name: "getItem",
+                id: 2,
+            },
+            MethodIdl {
+                name: "removeItem",
                 id: 3,
             },
         ],
@@ -116,14 +122,23 @@ pub const CAPABILITY_IDL: &[CapabilityIdl] = &[
         name: "Clipboard",
         id: 4,
         methods: &[
-            MethodIdl { name: "set", id: 1 },
-            MethodIdl { name: "get", id: 2 },
+            MethodIdl {
+                name: "setString",
+                id: 1,
+            },
+            MethodIdl {
+                name: "getString",
+                id: 2,
+            },
         ],
     },
     CapabilityIdl {
         name: "Geolocation",
         id: 5,
-        methods: &[MethodIdl { name: "get", id: 1 }],
+        methods: &[MethodIdl {
+            name: "getCurrentPosition",
+            id: 1,
+        }],
     },
     // --- FLUX-045: six concrete native capabilities (PRD-Q deferred set) ---
     // IDs continue the stable sequence; native host bodies are wired in
@@ -133,11 +148,11 @@ pub const CAPABILITY_IDL: &[CapabilityIdl] = &[
         id: 6,
         methods: &[
             MethodIdl {
-                name: "register",
+                name: "registerForNotifications",
                 id: 1,
             },
             MethodIdl {
-                name: "notify",
+                name: "scheduleNotification",
                 id: 2,
             },
         ],
@@ -163,11 +178,11 @@ pub const CAPABILITY_IDL: &[CapabilityIdl] = &[
         id: 9,
         methods: &[
             MethodIdl {
-                name: "read",
+                name: "readAsString",
                 id: 1,
             },
             MethodIdl {
-                name: "write",
+                name: "writeAsString",
                 id: 2,
             },
             MethodIdl {
@@ -180,7 +195,7 @@ pub const CAPABILITY_IDL: &[CapabilityIdl] = &[
         name: "DeepLink",
         id: 10,
         methods: &[MethodIdl {
-            name: "open",
+            name: "openURL",
             id: 1,
         }],
     },
@@ -512,7 +527,7 @@ mod tests {
                 assert_eq!(c.method_id, 1);
                 assert_eq!(c.required_permission, ".camera");
                 assert_eq!(c.cap_name.as_deref(), Some("Camera"));
-                assert_eq!(c.method_name.as_deref(), Some("take"));
+                assert_eq!(c.method_name.as_deref(), Some("takePicture"));
             }
             other => panic!("expected Capability error, got {other:?}"),
         }

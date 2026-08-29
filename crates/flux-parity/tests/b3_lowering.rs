@@ -13,15 +13,15 @@ use flux_types::type_check;
 const B3_EXAMPLES: &[(&str, &str)] = &[
     (
         "b31_simple",
-        "compo HelloWorld\n  state count: Int = 0\n\n  Column(gap: 12) {\n    Text(\"Count: {count}\")\n    Button(text: \"Increment\", onClick: {\n      count = count + 1\n    })\n}\n",
+        "compo HelloWorld\n  state count: Int = 0\n\n  Column(gap: 12) {\n    Text(\"Count: {count}\")\n    Button(text: \"Increment\", onPress: {\n      count = count + 1\n    })\n}\n",
     ),
     (
         "b32_generic",
-        "trait Numeric[T] {\n  fn zero() -> T\n  fn one() -> T\n  fn +(a: T, b: T) -> T\n  fn -(a: T, b: T) -> T\n}\n\ncompo Counter[T: Numeric]\n  state count: T = Numeric.zero()\n\n  Column(gap: 8) {\n    Text(\"Count: {count}\")\n    Button(text: \"+\", onClick: { count = count + Numeric.one() })\n    Button(text: \"-\", onClick: { count = count - Numeric.one() })\n}\n",
+        "trait Numeric[T] {\n  fn zero() -> T\n  fn one() -> T\n  fn +(a: T, b: T) -> T\n  fn -(a: T, b: T) -> T\n}\n\ncompo Counter[T: Numeric]\n  state count: T = Numeric.zero()\n\n  Column(gap: 8) {\n    Text(\"Count: {count}\")\n    Button(text: \"+\", onPress: { count = count + Numeric.one() })\n    Button(text: \"-\", onPress: { count = count - Numeric.one() })\n}\n",
     ),
     (
         "b33_adt",
-        "type Shape =\n  | Circle(Float)\n  | Rectangle(Float, Float)\n  | Triangle(Float, Float, Float)\n\nfn area(shape: Shape) -> Float {\n  match shape {\n    Circle(r) => 3.14159 * r * r\n    Rectangle(w, h) => w * h\n    Triangle(b, h, _) => 0.5 * b * h\n  }\n}\n\ncompo ShapeDisplay\n  state shape: Shape = Circle(5.0)\n\n  Column {\n    Text(\"Area: {area(shape)}\")\n    Button(text: \"Make Square\", onClick: {\n      shape = Rectangle(4.0, 4.0)\n    })\n}\n",
+        "type Shape =\n  | Circle(Float)\n  | Rectangle(Float, Float)\n  | Triangle(Float, Float, Float)\n\nfn area(shape: Shape) -> Float {\n  match shape {\n    Circle(r) => 3.14159 * r * r\n    Rectangle(w, h) => w * h\n    Triangle(b, h, _) => 0.5 * b * h\n  }\n}\n\ncompo ShapeDisplay\n  state shape: Shape = Circle(5.0)\n\n  Column {\n    Text(\"Area: {area(shape)}\")\n    Button(text: \"Make Square\", onPress: {\n      shape = Rectangle(4.0, 4.0)\n    })\n}\n",
     ),
     (
         "b34_lifecycle",
@@ -29,19 +29,19 @@ const B3_EXAMPLES: &[(&str, &str)] = &[
     ),
     (
         "b35_navigation",
-        "compo App\n  state route: String = \"home\"\n\n  Router {\n    Screen(\"home\") { Home() }\n    Screen(\"profile\") { Profile() }\n    Screen(\"settings\") { Settings() }\n}\n\ncompo Home\n  let router = useContext(RouterContext)\n\n  Column(gap: 16) {\n    Text(\"Home\")\n    Button(text: \"Open Profile\", onClick: {\n      router.navigate(\"profile\")\n    })\n}\n\ncompo Profile\n  Column { Text(\"Profile\") }\n\ncompo Settings\n  Column { Text(\"Settings\") }\n",
+        "compo App\n  state route: String = \"home\"\n\n  Router {\n    Screen(\"home\") { Home() }\n    Screen(\"profile\") { Profile() }\n    Screen(\"settings\") { Settings() }\n}\n\ncompo Home\n  let router = useContext(RouterContext)\n\n  Column(gap: 16) {\n    Text(\"Home\")\n    Button(text: \"Open Profile\", onPress: {\n      router.navigate(\"profile\")\n    })\n}\n\ncompo Profile\n  Column { Text(\"Profile\") }\n\ncompo Settings\n  Column { Text(\"Settings\") }\n",
     ),
     (
         "b36_async",
-        "compo UserList\n  let (users, { refetch }) = resource(fn {\n    Api.fetch(\"/users\")\n  })\n\n  Column {\n    when users.is_loading {\n      Text(\"Loading...\")\n    }\n    otherwise {\n      ForEach(users.value, key: fn(u) { u.id }) { user =>\n        Text(\"{user.name}\")\n      }\n    }\n    Button(text: \"Refresh\", onClick: { refetch() })\n  }\n\n",
+        "compo UserList\n  let (users, { refetch }) = resource(fn {\n    Api.fetch(\"/users\")\n  })\n\n  Column {\n    when users.is_loading {\n      Text(\"Loading...\")\n    }\n    otherwise {\n      ForEach(users.value, key: fn(u) { u.id }) { user =>\n        Text(\"{user.name}\")\n      }\n    }\n    Button(text: \"Refresh\", onPress: { refetch() })\n  }\n\n",
     ),
     (
         "b37_pure",
-        "@pure\ncompo Avatar(url: String, size: Float)\n  Image(url) {\n    width: size,\n    height: size,\n    cornerRadius: size / 2\n}\n\ncompo Profile\n  state avatarUrl: String = \"https://example.com/me.png\"\n\n  Column {\n    Avatar(url: avatarUrl, size: 80)\n    Text(\"Profile\")\n}\n",
+        "@pure\ncompo Avatar(url: String, size: Float)\n  Image(source: url) {\n    width: size,\n    height: size,\n    cornerRadius: size / 2\n}\n\ncompo Profile\n  state avatarUrl: String = \"https://example.com/me.png\"\n\n  Column {\n    Avatar(url: avatarUrl, size: 80)\n    Text(\"Profile\")\n}\n",
     ),
     (
         "b38_platform",
-        "compo PlatformButton\n  if platform() == \"ios\" {\n    CupertinoButton(text: \"Tap\", onClick: { 1 })\n  } else {\n    MaterialButton(text: \"Tap\", onClick: { 1 })\n  }\n\n",
+        "compo PlatformButton\n  if platform() == \"ios\" {\n    CupertinoButton(text: \"Tap\", onPress: { 1 })\n  } else {\n    MaterialButton(text: \"Tap\", onPress: { 1 })\n  }\n\n",
     ),
     (
         "b39_capability",
@@ -49,7 +49,7 @@ const B3_EXAMPLES: &[(&str, &str)] = &[
     ),
     (
         "b310_refs",
-        "compo LoginForm\n  let emailRef = createRef[TextField]()\n  let passwordRef = createRef[TextField]()\n\n  onMount {\n    emailRef.focus()\n  }\n\n  Column(gap: 12) {\n    TextField(ref: emailRef, placeholder: \"Email\")\n    TextField(ref: passwordRef, placeholder: \"Password\")\n    Button(text: \"Submit\", onClick: {\n      let email = emailRef.text()\n      let password = passwordRef.text()\n      Auth.login(email, password)\n    })\n  }\n\n",
+        "compo LoginForm\n  let emailRef = createRef[TextInput]()\n  let passwordRef = createRef[TextInput]()\n\n  onMount {\n    emailRef.focus()\n  }\n\n  Column(gap: 12) {\n    TextInput(ref: emailRef, placeholder: \"Email\")\n    TextInput(ref: passwordRef, placeholder: \"Password\")\n    Button(text: \"Submit\", onPress: {\n      let email = emailRef.text()\n      let password = passwordRef.text()\n      Auth.login(email, password)\n    })\n  }\n\n",
     ),
 ];
 

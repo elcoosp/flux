@@ -17,7 +17,7 @@ compo Counter
 
     Column gap: 8.0
         Text text: "tapped {count} times"
-        Button text: "Increment", onClick: || { count = count + 1 }
+        Button text: "Increment", onPress: || { count = count + 1 }
 "#;
 
 #[test]

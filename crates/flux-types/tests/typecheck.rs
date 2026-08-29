@@ -110,7 +110,7 @@ capability Storage {
     #[test]
     fn b3_10_refs() {
         check_ok(
-            "compo LoginForm\n  let emailRef = createRef[TextField]()\n  let passwordRef = createRef[TextField]()\n\n  onMount {\n    emailRef.focus()\n  }\n\n  Column(gap: 12) {\n    TextField(ref: emailRef, placeholder: \"Email\")\n    TextField(ref: passwordRef, placeholder: \"Password\")\n    Button(text: \"Submit\", onClick: {\n      let email = emailRef.text()\n      let password = passwordRef.text()\n      Auth.login(email, password)\n    })\n  }\n\n",
+            "compo LoginForm\n  let emailRef = createRef[TextInput]()\n  let passwordRef = createRef[TextInput]()\n\n  onMount {\n    emailRef.focus()\n  }\n\n  Column(gap: 12) {\n    TextInput(ref: emailRef, placeholder: \"Email\")\n    TextInput(ref: passwordRef, placeholder: \"Password\")\n    Button(text: \"Submit\", onPress: {\n      let email = emailRef.text()\n      let password = passwordRef.text()\n      Auth.login(email, password)\n    })\n  }\n\n",
         );
     }
 }

@@ -100,8 +100,11 @@ mod tests {
     fn idl_ids_match_native_registries() {
         // The ids here must equal the native registry tables and
         // stdlib/capabilities.flux.
-        assert_eq!(CapabilityIdl::names_for(1, 1), Some(("Camera", "take")));
-        assert_eq!(CapabilityIdl::names_for(2, 2), Some(("Storage", "get")));
+        assert_eq!(
+            CapabilityIdl::names_for(1, 1),
+            Some(("Camera", "takePicture"))
+        );
+        assert_eq!(CapabilityIdl::names_for(2, 2), Some(("Storage", "getItem")));
         assert_eq!(CapabilityIdl::names_for(3, 1), Some(("Router", "navigate")));
         assert_eq!(CapabilityIdl::names_for(99, 99), None);
         // FLUX-045 extends the manifest from 5 to 11 capabilities.

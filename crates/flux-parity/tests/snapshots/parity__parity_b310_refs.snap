@@ -14,12 +14,12 @@ verdict: equivalent
                 props: [],
                 children: [
                     Primitive {
-                        name: "TextField",
+                        name: "TextInput",
                         props: [],
                         children: [],
                     },
                     Primitive {
-                        name: "TextField",
+                        name: "TextInput",
                         props: [],
                         children: [],
                     },
@@ -42,12 +42,12 @@ swift  == [
                 props: [],
                 children: [
                     Primitive {
-                        name: "TextField",
+                        name: "TextInput",
                         props: [],
                         children: [],
                     },
                     Primitive {
-                        name: "TextField",
+                        name: "TextInput",
                         props: [],
                         children: [],
                     },
@@ -70,12 +70,12 @@ kotlin == [
                 props: [],
                 children: [
                     Primitive {
-                        name: "TextField",
+                        name: "TextInput",
                         props: [],
                         children: [],
                     },
                     Primitive {
-                        name: "TextField",
+                        name: "TextInput",
                         props: [],
                         children: [],
                     },

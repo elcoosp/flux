@@ -223,6 +223,15 @@ async fn handle_hello(bytes: &[u8], shared: &Arc<Shared>) -> Option<Vec<u8>> {
         capabilities = hello.capabilities.len(),
         "host handshake"
     );
+    // Announce the host identity to every connected DevTools client so the UI can
+    // show *which* device is streaming (iOS Simulator vs Android phone, etc.).
+    let announce = flux_ir_serde::HostAnnounceFrame {
+        version: flux_ir_serde::PROTOCOL_VERSION,
+        platform: hello.platform.clone(),
+        device: hello.device.clone(),
+        capabilities: hello.capabilities.clone(),
+    };
+    shared.devtools_router.lock().announce_host(&announce);
     let shared = Arc::clone(shared);
     blocking(move || init_reply(&shared)).await.flatten()
 }

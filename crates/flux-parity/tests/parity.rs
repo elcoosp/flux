@@ -230,7 +230,7 @@ fn positional_screen_does_not_emit_route_prop_at_fnv_index() {
     Screen("home") {
       Column(gap: 16) {
         Text("Home")
-        Button(text: "Go to Settings", onClick: {
+        Button(text: "Go to Settings", onPress: {
           Router.navigate("settings")
         })
       }
@@ -238,7 +238,7 @@ fn positional_screen_does_not_emit_route_prop_at_fnv_index() {
     Screen("settings") {
       Column(gap: 16) {
         Text("Settings")
-        Button(text: "Go to Home", onClick: {
+        Button(text: "Go to Home", onPress: {
           Router.navigate("home")
         })
       }

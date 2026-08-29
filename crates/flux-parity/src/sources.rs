@@ -7,13 +7,13 @@
 //! structurally equivalent.
 
 /// B.3.1 — simple component declaring `state` and a `Column` tree, with a string
-/// interpolation and an `onClick` handler.
+/// interpolation and an `onPress` handler.
 pub(crate) const B31_SIMPLE: &str = r#"compo HelloWorld
   state count: Int = 0
 
   Column(gap: 12) {
     Text("Count: {count}")
-    Button(text: "Increment", onClick: {
+    Button(text: "Increment", onPress: {
       count = count + 1
     })
 }"#;
@@ -31,8 +31,8 @@ compo Counter[T: Numeric]
 
   Column(gap: 8) {
     Text("Count: {count}")
-    Button(text: "+", onClick: { count = count + Numeric.one() })
-    Button(text: "-", onClick: { count = count - Numeric.one() })
+    Button(text: "+", onPress: { count = count + Numeric.one() })
+    Button(text: "-", onPress: { count = count - Numeric.one() })
 }"#;
 
 /// B.3.3 — ADT and pattern matching over every arm.
@@ -54,7 +54,7 @@ compo ShapeDisplay
 
   Column {
     Text("Area: {area(shape)}")
-    Button(text: "Make Square", onClick: {
+    Button(text: "Make Square", onPress: {
       shape = Rectangle(4.0, 4.0)
     })
 }"#;
@@ -102,7 +102,7 @@ compo Home
 
   Column(gap: 16) {
     Text("Home")
-    Button(text: "Open Profile", onClick: {
+    Button(text: "Open Profile", onPress: {
       router.navigate("profile")
     })
 }
@@ -128,14 +128,14 @@ pub(crate) const B36_ASYNC: &str = r#"compo UserList
         Text("{user.name}")
       }
     }
-    Button(text: "Refresh", onClick: { refetch() })
+    Button(text: "Refresh", onPress: { refetch() })
   }
 "#;
 
 /// B.3.7 — `@pure` component with a prop block (`Image(url) { width: size }`).
 pub(crate) const B37_PURE: &str = r#"@pure
 compo Avatar(url: String, size: Float)
-  Image(url) {
+  Image(source: url) {
     width: size,
     height: size,
     cornerRadius: size / 2
@@ -152,9 +152,9 @@ compo Profile
 /// B.3.8 — platform conditional routing between two native components.
 pub(crate) const B38_PLATFORM: &str = r#"compo PlatformButton
   if platform() == "ios" {
-    CupertinoButton(text: "Tap", onClick: { ... })
+    CupertinoButton(text: "Tap", onPress: { ... })
   } else {
-    MaterialButton(text: "Tap", onClick: { ... })
+    MaterialButton(text: "Tap", onPress: { ... })
 }"#;
 
 /// B.3.9 — capability declarations listing every method.
@@ -170,19 +170,19 @@ capability Storage {
   fn delete(key: String) -> Unit
 }"#;
 
-/// B.3.10 — refs via `createRef[TextField]()` and binding them in `onMount`.
+/// B.3.10 — refs via `createRef[TextInput]()` and binding them in `onMount`.
 pub(crate) const B310_REFS: &str = r#"compo LoginForm
-  let emailRef = createRef[TextField]()
-  let passwordRef = createRef[TextField]()
+  let emailRef = createRef[TextInput]()
+  let passwordRef = createRef[TextInput]()
 
   onMount {
     emailRef.focus()
   }
 
   Column(gap: 12) {
-    TextField(ref: emailRef, placeholder: "Email")
-    TextField(ref: passwordRef, placeholder: "Password")
-    Button(text: "Submit", onClick: {
+    TextInput(ref: emailRef, placeholder: "Email")
+    TextInput(ref: passwordRef, placeholder: "Password")
+    Button(text: "Submit", onPress: {
       let email = emailRef.text()
       let password = passwordRef.text()
       Auth.login(email, password)

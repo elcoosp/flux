@@ -235,6 +235,7 @@ pub fn normalize_view_name(name: &str) -> String {
         "VStack" => "Column",
         "HStack" => "Row",
         "CupertinoButton" | "MaterialButton" => "Button",
+        "TextField" => "TextInput",
         other => other,
     }
     .to_owned()

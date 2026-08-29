@@ -36,7 +36,7 @@ fn examples() -> Vec<(&'static str, &'static str)> {
   state count: Int = 0
   Column {
     Text("Count: {count}")
-    Button(onClick: { count = count + 1 }) { Text("Increment") }
+    Button(onPress: { count = count + 1 }) { Text("Increment") }
   }
 "#,
         ),
@@ -44,7 +44,7 @@ fn examples() -> Vec<(&'static str, &'static str)> {
             "b3_2_button",
             r#"compo Tapped
   state taps: Int = 0
-  Button(onClick: { taps = taps + 1 }) { Text("Tapped {taps} times") }
+  Button(onPress: { taps = taps + 1 }) { Text("Tapped {taps} times") }
 "#,
         ),
         (
@@ -107,7 +107,7 @@ compo AreaView(shape: Shape)
   state value: String = ""
   Column {
     Text("Login")
-    Button(onClick: { value = "" }) { Text("Reset") }
+    Button(onPress: { value = "" }) { Text("Reset") }
   }
 "#,
         ),
@@ -115,7 +115,7 @@ compo AreaView(shape: Shape)
             "b3_9_state",
             r#"compo Toggle
   state on: Bool = false
-  Button(onClick: { on = true }) { Text("on = {on}") }
+  Button(onPress: { on = true }) { Text("on = {on}") }
 "#,
         ),
         (
@@ -379,7 +379,7 @@ fn generated_kotlin_parses() {
 fn button_emits_handler_and_label() {
     let src = r#"compo Tapped
   state taps: Int = 0
-  Button(text: "Tap me", onClick: fn() { taps = taps + 1 })
+  Button(text: "Tap me", onPress: fn() { taps = taps + 1 })
 "#;
     let out = codegen_example("button_regression", src);
     assert!(
@@ -394,7 +394,7 @@ fn button_emits_handler_and_label() {
     // Trailing-block label form must also work.
     let src2 = r#"compo Tapped2
   state taps: Int = 0
-  Button(onClick: fn() { taps = taps + 1 }) { Text("Block") }
+  Button(onPress: fn() { taps = taps + 1 }) { Text("Block") }
 "#;
     let out2 = codegen_example("button_regression_2", src2);
     assert!(

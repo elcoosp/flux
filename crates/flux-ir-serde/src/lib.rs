@@ -44,8 +44,8 @@ pub use frame::{
 pub use resume::{AwaitSuspendFrame, FRAME_AWAIT_SUSPEND, FRAME_RESUME, ResumeFrame};
 pub use telemetry::{
     DebugCommand, DebugCommandFrame, EnrichedTelemetryEvent, EnrichedTelemetryFrame,
-    FRAME_DEBUG_COMMAND, FRAME_TELEMETRY, Rect, Registers, TelemetryEvent, TelemetryFrame,
-    enrich_telemetry, enrich_with_span,
+    FRAME_DEBUG_COMMAND, FRAME_TELEMETRY, HostAnnounceFrame, Rect, Registers, TelemetryEvent,
+    TelemetryFrame, enrich_telemetry, enrich_with_span,
 };
 pub use wire::NodeSignalMeta;
 pub use wire::{MAX_FRAME_BYTES, WireError, validate_bytecode};

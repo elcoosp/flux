@@ -465,7 +465,7 @@ impl<'a, B: Backend> Emitter<'a, B> {
                     .unwrap_or("");
                 let on_change = props
                     .get("onValueChange")
-                    .or_else(|| props.get("onChange"))
+                    .or_else(|| props.get("onChangeText"))
                     .map(String::as_str)
                     .unwrap_or("");
                 let placeholder = props.get("placeholder").map(String::as_str).unwrap_or("");
@@ -671,13 +671,13 @@ impl<'a, B: Backend> Emitter<'a, B> {
         "\"\"".to_owned()
     }
 
-    /// Finds the `onClick`/`onTap` handler and renders its body as statements.
+    /// Finds the `onPress`/`onTap` handler and renders its body as statements.
     fn collect_handler(args: &[Arg]) -> String {
         for arg in args {
             let Arg::Named { name, value } = arg else {
                 continue;
             };
-            if name.name != "onClick" && name.name != "onTap" {
+            if name.name != "onPress" && name.name != "onTap" {
                 continue;
             }
             if let Some(body) = render_handler_body::<B>(value) {

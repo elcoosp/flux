@@ -89,7 +89,7 @@ pub(crate) fn prelude(supply: &mut Supply) -> Env {
         }),
     );
 
-    // `WebSocket`, `TextField`, `RouterContext` are adapter/platform types
+    // `WebSocket`, `TextInput`, `RouterContext` are adapter/platform types
     // whose internal shape is opaque to the checker; treat them as opaque
     // nominal types so `createRef[WebSocket]()` etc. resolve.
     bind_poly(
@@ -101,8 +101,8 @@ pub(crate) fn prelude(supply: &mut Supply) -> Env {
     bind_poly(
         &mut env,
         supply,
-        "TextField",
-        TcType::Named("TextField".into(), Vec::new()),
+        "TextInput",
+        TcType::Named("TextInput".into(), Vec::new()),
     );
     bind_poly(
         &mut env,
@@ -129,7 +129,7 @@ pub(crate) fn prelude(supply: &mut Supply) -> Env {
         "ForEach",
         "CupertinoButton",
         "MaterialButton",
-        "TextField",
+        "TextInput",
         "Provider",
         "When",
         "Switch",
