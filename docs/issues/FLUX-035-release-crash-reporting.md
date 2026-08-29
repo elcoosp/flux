@@ -1,8 +1,6 @@
 ---
 id: FLUX-035
-status: blocked
-blocked_by:
-  - PRD-K
+status: partial
 lane: LANE-R
 phase: "Phase 8"
 labels:
@@ -26,6 +24,11 @@ related_adrs: []
 > green-verified in this environment without trespassing the boundary contract.
 > Marked blocked; the host-side reporter is the native lane's work once PRD-K's
 > shape is consumed there.
+
+**Update 2026-08-29 (iOS verified):** the iOS native reporter is now authored
+and BUILD-VERIFIED (see Status section below). The `blocked` note above is
+retained for history but the iOS half is no longer blocked — only the Android
+half remains (no `gradle`/`kotlinc`, in-flight parallel-owned).
 
 - **Lane:** LANE-R (Phase 8)
 - **Depends on:** PRD-K (`FluxError` taxonomy)
@@ -58,3 +61,19 @@ leak — note FLUX-028 is dev-only, this is release-only).
 ## Out of Scope
 
 - The dev overlay (FLUX-028), the docs site (FLUX-030).
+
+## Status update (2026-08-29, iOS verified)
+
+**iOS native crash reporter authored + BUILD-VERIFIED** via
+`xcodebuild -scheme FluxApp -destination 'generic/platform=iOS Simulator'`
+(BUILD SUCCEEDED, no errors/warnings from new files). New file
+`CrashReporter.swift`: a release-only (`#if !DEBUG`) `CrashReporter` that maps a
+crash into the PRD-K `FluxError` shape (component id / source reference) and
+installs `NSSetUncaughtExceptionHandler`. `FluxError.swift` (shared with
+FLUX-028) is the error model. The handler registration is a one-line shell call
+at `FluxApp` launch (RELEASE-TODO noted in-file).
+
+Android (`CrashReporter.kt`) remains unverified here: no `gradle`/`kotlinc` in
+this environment, and the Android host is in-flight parallel-owned. So the issue
+moves from `blocked` to `partial` — iOS done/verified, Android pending the
+native toolchain + parallel tree.

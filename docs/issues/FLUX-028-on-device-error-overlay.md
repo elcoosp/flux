@@ -1,6 +1,6 @@
 ---
 id: FLUX-028
-status: todo
+status: partial
 lane: LANE-O
 phase: "Phase 3"
 blocked_by:
@@ -57,6 +57,20 @@ Compose `Composable`), never a webview, and never a crash.
   overlay view renders the message + highlighted range + non-empty stack.
 - Android (`:host` JVM test): same assertion on a `Composable` preview/test.
 - Both reuse the PRD-P `SourceMap` span-resolution tests as the shared core.
+
+## Status update (2026-08-29, iOS verified)
+
+**iOS native overlay authored + BUILD-VERIFIED** via
+`xcodebuild -scheme FluxApp -destination 'generic/platform=iOS Simulator'`
+(BUILD SUCCEEDED, no errors/warnings from new files). New files:
+- `FluxError.swift` — iOS mirror of PRD-K `FluxError` + `SourceSpan` (consumed
+  by host + DevTools, one error shape).
+- `ErrorOverlay.swift` — native `ErrorOverlayView` (UIKit `UIView`, `#if DEBUG`
+  guarded, never a webview) rendering message + highlighted span + dispatch
+  stack, plus `presentFluxError(_:fileResolver:)` (marked `@MainActor`).
+
+Android (`Composable` overlay) remains unverified here: no `gradle`/`kotlinc`
+and the Android host is in-flight parallel-owned.
 
 ## Out of Scope
 

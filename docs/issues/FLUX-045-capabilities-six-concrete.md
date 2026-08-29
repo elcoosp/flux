@@ -51,6 +51,25 @@ in this CLI):**
   (ADR-0045). These files are owned by the runtime agents; landing them is their
   scope, not this crate pass.
 
+## Status update (2026-08-29, iOS verified)
+
+**iOS native bodies are now authored and BUILD-VERIFIED** via
+`xcodebuild -scheme FluxApp -destination 'generic/platform=iOS Simulator'`
+(BUILD SUCCEEDED, zero errors, zero warnings from the new files). New file
+`runtimes/ios/FluxHost/Sources/FluxHost/ConcreteCapabilities.swift` adds
+`CapabilityRegistry.makeProduction(backend:)` composing the MLP dev set
+(1..=5 + async ref 2,99) with the six concrete caps (6..=11): Push (register
+async / getToken), Biometric (authenticate), Background (schedule async /
+cancel), FileSystem (read/write/delete, persisted into the signal store under a
+derived id), DeepLink (open), Sensors (read). Async caps allocate a Pending
+result cell and resolve inline with a deterministic dev value; real OS calls
+(UNUserNotificationCenter / LAContext / BGTaskScheduler / FileManager /
+UIApplication / CMMotionManager) are flagged RELEASE-TODO. The file is NEW and
+does not edit the in-flight `Registry.swift`.
+
+Android (`CapabilityRegistry.kt`) remains unverified here: no `gradle`/`kotlinc`
+in this environment, and the Kotlin file is in-flight parallel-owned.
+
 ## Problem Statement
 
 PRD-Q locked the *contract* for the six concrete capabilities (push, biometric,
