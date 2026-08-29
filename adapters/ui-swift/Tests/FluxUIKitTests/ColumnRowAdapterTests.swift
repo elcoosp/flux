@@ -13,6 +13,42 @@ final class ColumnRowAdapterTests: XCTestCase {
         XCTAssertEqual(stack.spacing, 12)
     }
 
+    @MainActor func testColumnPacksChildrenTopLeadingWithIntrinsicSizes() {
+        let adapter = ColumnAdapter()
+        let stack = adapter.create()
+        // Defaults must not leave the stack ambiguous when its parent stretches
+        // it full-screen: distribution must be `.fill` (top-pack) and the default
+        // alignment (no `alignment` prop) must resolve to `.leading` (left).
+        XCTAssertEqual(stack.distribution, .fill)
+        XCTAssertEqual(stack.alignment, .leading)
+        let a = UILabel(), b = UIButton(type: .system)
+        adapter.setChildren([a, b], on: stack)
+        // Each child must keep its intrinsic size on the main (vertical) axis so
+        // the stack packs them at the top instead of distributing the extra
+        // height (the iOS-only "big gap + centered Home + bottom button" bug).
+        XCTAssertEqual(a.contentHuggingPriority(for: .vertical), .required)
+        XCTAssertEqual(b.contentHuggingPriority(for: .vertical), .required)
+        // On the cross (horizontal) axis children must not be stretched either,
+        // matching Android's `fillMaxWidth` + left alignment.
+        XCTAssertEqual(a.contentHuggingPriority(for: .horizontal), .required)
+        XCTAssertEqual(b.contentHuggingPriority(for: .horizontal), .required)
+    }
+
+    @MainActor func testRowPacksChildrenLeadingWithIntrinsicSizes() {
+        let adapter = RowAdapter()
+        let stack = adapter.create()
+        XCTAssertEqual(stack.distribution, .fill)
+        XCTAssertEqual(stack.alignment, .center)
+        let a = UILabel(), b = UIButton(type: .system)
+        adapter.setChildren([a, b], on: stack)
+        // Cross axis is vertical for a Row: children keep intrinsic height and
+        // are centered (mirrors Android's `Row(fillMaxWidth())` default).
+        XCTAssertEqual(a.contentHuggingPriority(for: .vertical), .required)
+        XCTAssertEqual(b.contentHuggingPriority(for: .vertical), .required)
+        XCTAssertEqual(a.contentHuggingPriority(for: .horizontal), .required)
+        XCTAssertEqual(b.contentHuggingPriority(for: .horizontal), .required)
+    }
+
     @MainActor func testSetChildrenInsertsAndPreservesOrder() {
         let adapter = ColumnAdapter()
         let stack = adapter.create()

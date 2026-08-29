@@ -271,7 +271,7 @@ func toRuntime(_ value: FluxUIKit.FluxValue, interner: any AnyStringInterner) as
 /// and be driven uniformly by the reconciler.
 ///
 /// Each box wraps a **fresh** adapter instance (the kit's adapters are
-/// reference types that retain per-node state, e.g. `TextFieldAdapter`'s
+/// reference types that retain per-node state, e.g. `TextInputAdapter`'s
 /// delegate), so identity and state are preserved per native view. The executor
 /// is injected at creation time via the adapter's public `init(executor:)`
 /// (the `executor` property is `internal` to `FluxUIKit`, so it cannot be set
@@ -369,7 +369,7 @@ public struct AdapterRegistry {
             "Button": { AnyFluxAdapter(ButtonAdapter(executor: $0)) },
             "Column": { AnyFluxAdapter(ColumnAdapter(executor: $0)) },
             "Row": { AnyFluxAdapter(RowAdapter(executor: $0)) },
-            "TextField": { AnyFluxAdapter(TextFieldAdapter(executor: $0)) },
+            "TextInput": { AnyFluxAdapter(TextInputAdapter(executor: $0)) },
             "Image": { AnyFluxAdapter(ImageAdapter(executor: $0)) },
             "Router": { AnyFluxAdapter(RouterAdapter(executor: $0)) },
             "Screen": { AnyFluxAdapter(ScreenAdapter(executor: $0)) },

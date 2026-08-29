@@ -21,12 +21,19 @@ public final class ColumnAdapter: FluxAdapter {
     public func create() -> UIStackView {
         let stack = UIStackView()
         stack.axis = .vertical
+        stack.distribution = .fill
+        // Default alignment is `.leading` (left). A `Column` fills its parent's
+        // width (mirrors Android's `Column(fillMaxWidth())`) and packs children
+        // at the top; the `alignment` prop overrides this in `update`.
+        stack.alignment = .leading
         stack.translatesAutoresizingMaskIntoConstraints = false
         return stack
     }
 
     public func update(_ view: UIStackView, from old: Props, to new: Props) {
         view.spacing = CGFloat(new.getFloat(named: "gap") ?? 0)
+        // Resolve the `alignment` prop: `.start` → `.leading` (left),
+        // `.center` → `.center`, `.end` → `.trailing`. Absent → keep `.leading`.
         if let align = new.getRecord(named: "alignment").flatMap(FluxAlignment.init(record:)) {
             view.alignment = align.stackAlignment
         }
@@ -34,6 +41,18 @@ public final class ColumnAdapter: FluxAdapter {
 
     public func setChildren(_ children: [AnyObject], on view: UIStackView) {
         let views = children.compactMap { $0 as? UIView }
+        // Pin every child to its intrinsic size on BOTH axes. Without this, a
+        // `Column` whose parent has been stretched edge-to-edge to full screen
+        // (ScreenAdapter/ContainerAdapter pin children to the screen edges)
+        // becomes taller/wider than its content and UIKit's default `.fill`
+        // distribution stretches the children to absorb the slack — producing the
+        // iOS-only "big gap, vertically-centered first child, bottom-centered
+        // second child" bug. Required hugging keeps each child at its natural
+        // size so the stack packs them top-leading like Android does.
+        for child in views {
+            child.setContentHuggingPriority(.required, for: .vertical)
+            child.setContentHuggingPriority(.required, for: .horizontal)
+        }
         reconcileChildren(views, on: view)
     }
 

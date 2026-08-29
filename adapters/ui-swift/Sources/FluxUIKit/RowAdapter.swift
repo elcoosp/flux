@@ -21,6 +21,11 @@ public final class RowAdapter: FluxAdapter {
     public func create() -> UIStackView {
         let stack = UIStackView()
         stack.axis = .horizontal
+        stack.distribution = .fill
+        // Default cross-axis alignment is `.center` (mirrors Android's
+        // `Row(fillMaxWidth())` which centers children vertically). The `alignment`
+        // prop overrides this in `update`.
+        stack.alignment = .center
         stack.translatesAutoresizingMaskIntoConstraints = false
         return stack
     }
@@ -34,6 +39,13 @@ public final class RowAdapter: FluxAdapter {
 
     public func setChildren(_ children: [AnyObject], on view: UIStackView) {
         let views = children.compactMap { $0 as? UIView }
+        // Pin every child to its intrinsic size on BOTH axes (see ColumnAdapter:
+        // prevents the full-screen parent stretch from distributing slack into the
+        // children, so a `Row` packs them leading like Android).
+        for child in views {
+            child.setContentHuggingPriority(.required, for: .vertical)
+            child.setContentHuggingPriority(.required, for: .horizontal)
+        }
         reconcileChildren(views, on: view)
     }
 
