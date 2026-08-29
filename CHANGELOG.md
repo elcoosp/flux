@@ -238,10 +238,10 @@ are intentionally omitted (automation noise, not user-facing change).
 - Added `.github/workflows/artifact-publish.yml`: the CI/publish step producing
   `FluxHost.xcframework` (macOS runner) and the `:runtimes:android:host` AAR (linux runner),
   uploaded as release artifacts — closing the ADR-0036 packaging-gap publish path.
-- REMAINING (owned by the native iOS/Android lanes, not touched here): the host-side
-  fail-closed `PROTOCOL_VERSION` handshake (runtimes/ios + runtimes/android) and the
-  `docs/embed-flux.md` "Embed Flux in an existing app" guide. These require editing/verifying
-  parallel-owned native files and are out of this crate's scope.
+- REMAINING (owned by the native iOS/Android lanes): the `docs/embed-flux.md`
+  "Embed Flux in an existing app" guide. (The host-side fail-closed `PROTOCOL_VERSION`
+  handshake is now done — see the FLUX-050 subsection below; it was delivered and
+  verified on both simulators.)
 
 ### BLOCKED — release crash reporting (FLUX-035)
 
@@ -1840,3 +1840,51 @@ instead of re-decoding on every tap.
   host changes on both platforms, unverifiable here); (3) accept uncompressed wire —
   Flux's binary patch frames are already small (Init 50-node frame < 20 KB). Decision:
   defer. Code remains forward-compatible.
+
+### Capabilities — WebView / NativeModule escape hatches + permission gate + fail-closed handshake (FLUX-048 / FLUX-046 / FLUX-049 / FLUX-050) — DONE `[verified]`
+
+- **New capabilities (caps 12 & 13).** `WebView` (cap 12: `load` / `evaluate` /
+  `sendMessage`) and `NativeModule` (cap 13: `invoke`) declared in
+  `stdlib/capabilities.flux` and registered in `CAPABILITY_IDL`
+  (`crates/flux-types/src/capabilities.rs`) with **deterministic FNV-1a ids** so the
+  server and both hosts agree (no hand-assigned ids). `WebView` → `PermissionKind::None`
+  (sandbox-contained, no OS grant); `NativeModule` → `PermissionKind::NativeModule` (an
+  explicit allow-list grant, because a wrapped SDK runs arbitrary native code).
+- **Both hosts register the impls.** `WebView.load` writes the requested URL into signal
+  82 and `NativeModule.invoke` records the SDK call into signal 83 (`CapabilityRegistry.kt`
+  Android, `Registry.swift` iOS), so the dev loop resolves them like any other cap. Both
+  `HelloFrame` GENERATED tables advertise the new ids.
+- **Permission gate wired into native `CALL_CAP` (FLUX-049).** A `PermissionChecker` is
+  threaded through the whole VM dispatch path (`run` / `runResumable` / `resume` /
+  `execTail` / `execTailWith`) on both hosts. A `CALL_CAP` to a capability whose
+  `required_permission(capId, methodId)` is ungranted — or to an unknown cap id — throws a
+  **typed** error (`CAPABILITY_DENIED` / `capabilityDenied`), surfaced as a red banner,
+  never a crash into native code. The `required_permission` table is mirrored 1:1 on all
+  three sites (Rust / Android `Permission.kt` / iOS `Permission.swift`). Production injects
+  an OS-backed checker; the dev default is `AllowAllPermissionChecker`.
+- **Fail-closed protocol-version handshake (FLUX-050).** Both `FrameDeserializer`s now
+  reject a frame whose version byte ≠ `PROTOCOL_VERSION` with a typed `WireError` **before
+  any tree decoding** — an old host + new server (or vice-versa) can no longer be fed
+  incompatible frames and mis-parsed into a corrupt/blank tree. This closes the update-
+  integrity gap called out as REMAINING in the FLUX-068 entry above.
+- **Native `WebHost` (WebView) adapters.** `WebViewAdapter` (Kotlin) + `WebHostView`
+  (Swift, sandboxed `WKWebView`) map a `WebHost` node to a web view, reading `src` by the
+  FNV-1a prop index (never a hardcoded positional index); they no-op on empty/non-http(s)
+  `src` rather than navigating to garbage. `PropsIndex.propIndexForName` made `public` so
+  adapters derive indices by name.
+- **Threat-model docs.** ADR-0056 (fail-closed version handshake / update integrity) and
+  ADR-0057 (capability permission threat model, with a fuzz/dispatch coverage note), plus
+  `docs/NATIVE_MODULE_ESCAPE_HATCH.md` (how to wrap any SDK as a capability: deterministic
+  id, host binding, gated by intent).
+- **Verification.**
+  - Rust: `cargo nextest -p flux-types` — capability tests green (the two pre-existing
+    `Result`-diagnostic failures belong to the incomplete ADR-0055 `Result` wiring in
+    `checker.rs` / `prelude.rs` / `typecheck.rs`, untouched here).
+  - Android (JVM): `./gradlew :runtimes:android:host:test` — new `RuntimeFixesTest`
+    (denied/unknown/granted `CALL_CAP` + WebView/NativeModule round-trips) and
+    `FrameDeserializerTest` (version mismatch) green; only the 2 pre-existing
+    `IsaConformanceTest` failures remain (confirmed on clean tree, unrelated).
+  - iOS (sim, iPhone 17 Pro): `xcodebuild -scheme FluxApp` → **TEST SUCCEEDED**; new
+    `CapabilityRoundTripTests` (denied/unknown/granted) + `RuntimeGapTests` (version
+    mismatch) green; `xcodebuild -scheme FluxUIKit` → 39/39 (incl. 3 `WebHostView` tests).
+
