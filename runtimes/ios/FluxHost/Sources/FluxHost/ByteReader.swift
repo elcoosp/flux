@@ -14,6 +14,10 @@ enum WireError: Error, Equatable, Sendable {
     case unknownTag(offset: Int, tag: UInt8)
     /// A frame did not begin with the `FLUX` magic.
     case badMagic(offset: Int, value: UInt32)
+    /// The protocol version byte did not match the host's implemented version
+    /// (FLUX-050 / ADR-0056). The handshake fails closed: an old host must not
+    /// mis-decode a newer server's frames, nor a new host a older server's.
+    case unsupportedVersion(offset: Int, actual: UInt8, expected: UInt8)
 }
 
 /// A forward-only, little-endian reader over an immutable byte buffer.

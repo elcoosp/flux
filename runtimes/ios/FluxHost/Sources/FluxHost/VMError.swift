@@ -26,6 +26,9 @@ public enum VmErrorKind: Equatable {
     /// ADR-0015). The VM bounds total heap it may allocate (records, lists)
     /// so a runaway closure cannot exhaust device memory.
     case memoryExhausted
+    /// A `CALL_CAP` was gated but the required OS permission was not granted
+    /// (FLUX-049). Surfaced as a red banner, never a crash into native code.
+    case capabilityDenied
 }
 
 extension VmErrorKind {
@@ -39,7 +42,8 @@ extension VmErrorKind {
         case .typeMismatch: "TypeMismatch"
         case .divByZero: "DivByZero"
         case .memoryExhausted: "MemoryExhausted"
-        }
+        case .capabilityDenied: "CapabilityDenied"
+    }
     }
 }
 
@@ -57,4 +61,5 @@ public struct VmError: Error, Equatable {
     static func typeMismatch(offset: Int) -> VmError { VmError(kind: .typeMismatch, offset: offset) }
     static func divByZero(offset: Int) -> VmError { VmError(kind: .divByZero, offset: offset) }
     static func memoryExhausted(offset: Int) -> VmError { VmError(kind: .memoryExhausted, offset: offset) }
+    static func capabilityDenied(offset: Int) -> VmError { VmError(kind: .capabilityDenied, offset: offset) }
 }

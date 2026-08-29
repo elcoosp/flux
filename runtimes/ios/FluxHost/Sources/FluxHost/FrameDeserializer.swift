@@ -30,6 +30,13 @@ enum FrameDeserializer {
     /// The 4-byte frame magic: `0x465C5558` (FLUX in little-endian).
     static let magic: UInt32 = 0x465C_5558
 
+    /// The wire protocol version this host implements. A frame whose version
+    /// byte differs is rejected fail-closed (FLUX-050 / ADR-0056): an old host
+    /// must never silently mis-decode a newer server's frames, and a new host
+    /// must never accept an older server's incompatible layout. The mismatch
+    /// surfaces as a red banner, never a crash.
+    static let protocolVersion: UInt8 = 0x01
+
     /// Decodes a frame from raw bytes.
     ///
     /// The 6-byte header is `magic(4) | version(1) | kind(1)`; the remaining
@@ -54,6 +61,13 @@ enum FrameDeserializer {
             throw WireError.badMagic(offset: 0, value: rawMagic)
         }
         let version = try r.u8()
+        guard version == Self.protocolVersion else {
+            // Fail-closed handshake (FLUX-050 / ADR-0056): refuse to decode a
+            // frame whose protocol version the host does not implement. An old
+            // host + new server (or vice-versa) must surface an actionable red
+            // banner, not a silent mis-decode / crash.
+            throw WireError.unsupportedVersion(offset: 5, actual: version, expected: Self.protocolVersion)
+        }
         let kind = try r.u8()
         switch kind {
         case FrameKind.initByte:

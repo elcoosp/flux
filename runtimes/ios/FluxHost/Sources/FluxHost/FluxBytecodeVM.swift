@@ -158,10 +158,11 @@ enum FluxBytecodeVM {
         signals: inout S,
         payload: FluxValue,
         stringTable: any StringResolver = EmptyStringTable(),
-        capRegistry: CapabilityRegistry = .dev
+        capRegistry: CapabilityRegistry = .dev,
+        permissions: PermissionChecker = AllowAllPermissionChecker()
     ) throws -> VmOutcome {
         let program = try Instruction.decode(bytecode)
-        return try run(program, signals: &signals, payload: payload, stringTable: stringTable, capRegistry: capRegistry)
+        return try run(program, signals: &signals, payload: payload, stringTable: stringTable, capRegistry: capRegistry, permissions: permissions)
     }
 
     /// Runs an already-decoded instruction stream (R3). The executor caches the
@@ -172,7 +173,8 @@ enum FluxBytecodeVM {
         signals: inout S,
         payload: FluxValue,
         stringTable: any StringResolver = EmptyStringTable(),
-        capRegistry: CapabilityRegistry = .dev
+        capRegistry: CapabilityRegistry = .dev,
+        permissions: PermissionChecker = AllowAllPermissionChecker()
     ) throws -> VmOutcome {
         let offsets = program.map { $0.offset }
         var regs = [FluxValue](repeating: .null, count: 16)
@@ -455,6 +457,18 @@ enum FluxBytecodeVM {
                 let capID = instr.u32(1)
                 let methodID = instr.u16(5)
                 let argsReg = instr.u8(7)
+                // Permission gate (FLUX-049): a `CALL_CAP` is only resolved when
+                // the host has granted the OS permission the capability requires.
+                // An unknown capability (requiredPermission == nil) or a denied
+                // grant faults as `capabilityDenied` — surfaced as a red banner,
+                // never a crash into native code, and never a silent no-op.
+                if let required = requiredPermission(capID: capID, methodID: methodID) {
+                    if !permissions.isGranted(required) {
+                        throw VmError.capabilityDenied(offset: instr.offset)
+                    }
+                } else {
+                    throw VmError.capabilityDenied(offset: instr.offset)
+                }
                 guard let impl = capRegistry.lookup(capID, methodID) else {
                     // No registered implementation for this (capId, methodId):
                     // the loop below only raises on a *known but invalid* shape,
@@ -556,14 +570,15 @@ enum FluxBytecodeVM {
         signals: inout S,
         payload: FluxValue,
         stringTable: any StringResolver = EmptyStringTable(),
-        capRegistry: CapabilityRegistry = .dev
+        capRegistry: CapabilityRegistry = .dev,
+        permissions: PermissionChecker = AllowAllPermissionChecker()
     ) -> Result<RunResult, VmError> {
         let program: [Instruction]
         do { program = try Instruction.decode(bytecode) }
         catch let err as VmError { return .failure(err) }
         catch { return .failure(.invalidDispatch(offset: 0)) }
         return execTail(program, signals: &signals, startOffset: 0, payload: payload,
-                        stringTable: stringTable, capRegistry: capRegistry, programBytes: bytecode)
+                        stringTable: stringTable, capRegistry: capRegistry, permissions: permissions, programBytes: bytecode)
     }
 
     /// Runs an already-decoded instruction stream with resumable semantics (R3).
@@ -580,11 +595,12 @@ enum FluxBytecodeVM {
         payload: FluxValue,
         stringTable: any StringResolver = EmptyStringTable(),
         capRegistry: CapabilityRegistry = .dev,
+        permissions: PermissionChecker = AllowAllPermissionChecker(),
         programBytes: [UInt8]
     ) -> Result<RunResult, VmError> {
         let offsets = program.map { $0.offset }
         return execTail(program, signals: &signals, startOffset: 0, payload: payload,
-                        stringTable: stringTable, capRegistry: capRegistry, programBytes: programBytes)
+                        stringTable: stringTable, capRegistry: capRegistry, permissions: permissions, programBytes: programBytes)
     }
 
     /// Continues a suspended handler (ADR-0044), delivering `value` as the awaited result.
@@ -596,7 +612,8 @@ enum FluxBytecodeVM {
         signals: inout S,
         value: FluxValue,
         stringTable: any StringResolver = EmptyStringTable(),
-        capRegistry: CapabilityRegistry = .dev
+        capRegistry: CapabilityRegistry = .dev,
+        permissions: PermissionChecker = AllowAllPermissionChecker()
     ) -> Result<RunResult, VmError> {
         for (id, v) in state.signals { signals.write(id, v) }
         let program: [Instruction]
@@ -609,7 +626,7 @@ enum FluxBytecodeVM {
         // re-entry would clobber the captured regs, so call the shared helper with them.
         return execTailWith(program, signals: &signals, startOffset: Int(state.resumeOffset),
                             registers: regs, gas: state.gasRemaining, payload: value,
-                            stringTable: stringTable, capRegistry: capRegistry, programBytes: state.program)
+                            stringTable: stringTable, capRegistry: capRegistry, permissions: permissions, programBytes: state.program)
     }
 
     /// Shared interpreter tail used by `run`, `runResumable` and `resume` (ADR-0044).
@@ -625,6 +642,7 @@ enum FluxBytecodeVM {
         payload: FluxValue,
         stringTable: any StringResolver,
         capRegistry: CapabilityRegistry,
+        permissions: PermissionChecker = AllowAllPermissionChecker(),
         programBytes: [UInt8]
     ) -> Result<RunResult, VmError> {
         var regs = [FluxValue](repeating: .null, count: 16)
@@ -633,7 +651,7 @@ enum FluxBytecodeVM {
         regs[15] = .int(Int64(gas))
         return execTailWith(program, signals: &signals, startOffset: startOffset,
                              registers: regs, gas: gas, payload: payload,
-                             stringTable: stringTable, capRegistry: capRegistry, programBytes: programBytes)
+                             stringTable: stringTable, capRegistry: capRegistry, permissions: permissions, programBytes: programBytes)
     }
 
     /// Core interpreter tail: runs from `startOffset` with a caller-supplied live
@@ -647,6 +665,7 @@ enum FluxBytecodeVM {
         payload: FluxValue,
         stringTable: any StringResolver,
         capRegistry: CapabilityRegistry,
+        permissions: PermissionChecker = AllowAllPermissionChecker(),
         programBytes: [UInt8]
     ) -> Result<RunResult, VmError> {
         let offsets = program.map { $0.offset }
@@ -932,6 +951,14 @@ enum FluxBytecodeVM {
                 let capID = instr.u32(1)
                 let methodID = instr.u16(5)
                 let argsReg = instr.u8(7)
+                // Permission gate (FLUX-049): see the v1 `run` path for the contract.
+                if let required = requiredPermission(capID: capID, methodID: methodID) {
+                    if !permissions.isGranted(required) {
+                        return .failure(.capabilityDenied(offset: instr.offset))
+                    }
+                } else {
+                    return .failure(.capabilityDenied(offset: instr.offset))
+                }
                 guard let impl = capRegistry.lookup(capID, methodID) else {
                     return .failure(.typeMismatch(offset: instr.offset))
                 }

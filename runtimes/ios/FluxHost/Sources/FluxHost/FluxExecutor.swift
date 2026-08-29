@@ -156,6 +156,11 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
     /// pass-through; a live host replaces it with a bridge to its real async
     /// capability surface (network/timer/etc.).
     public var asyncResolver: any AsyncResolver = PassthroughAsyncResolver()
+    /// The OS-permission gate for `CALL_CAP` (FLUX-049). Defaults to
+    /// `AllowAllPermissionChecker`; the production host injects a real OS-backed
+    /// checker (`AuthorizationStatus`) so a denied grant surfaces as a red banner
+    /// rather than a crash.
+    public var permissionChecker: PermissionChecker = AllowAllPermissionChecker()
     /// Handler id → (closure descriptor + bytecode blob + pre-decoded instruction
     /// stream). The decoded `[Instruction]` is produced once at registration (R3)
     /// and reused on every dispatch, so the per-tap hot path never re-decodes. A
@@ -349,7 +354,8 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
                 signals: &store,
                 payload: payload,
                 stringTable: table,
-                capRegistry: .dev
+                capRegistry: .dev,
+                permissions: permissionChecker
             )
             return (outcome, nil)
         } catch let err as VmError {
@@ -389,6 +395,7 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
                 payload: payload,
                 stringTable: table,
                 capRegistry: .dev,
+                permissions: permissionChecker,
                 programBytes: bytecode
             )
         } else {
@@ -397,7 +404,8 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
                 signals: &store,
                 payload: payload,
                 stringTable: table,
-                capRegistry: .dev
+                capRegistry: .dev,
+                permissions: permissionChecker
             )
         }
         while true {
@@ -433,7 +441,8 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
                     signals: &store,
                     value: resolved,
                     stringTable: table,
-                    capRegistry: .dev
+                    capRegistry: .dev,
+                    permissions: permissionChecker
                 )
             case let .failure(err):
                 return (nil, err)
