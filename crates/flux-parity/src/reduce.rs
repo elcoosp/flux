@@ -84,13 +84,24 @@ fn node_from_ast(expr: &Expr, out: &mut Vec<ViewNode>) {
                         .map(|b| block_children(b))
                         .unwrap_or_default();
                     out.push(ViewNode::Primitive {
-                        // The dev path reduces the *source* (canonical Flux surface
-                        // names like `Modal`/`Sheet`/`Dialog`); do NOT run
-                        // `normalize_view_name` on it — that mapping is for codegen
-                        // native output (Swift `FullScreenCover`/Kotlin `Dialog`),
-                        // and folding the dev name through it would mislabel a
-                        // `Dialog` call as `Modal`. Keep the source spelling.
-                        name: name.clone(),
+                        // Normalize the source name through `normalize_view_name`
+                        // so the dev tree matches the release recognizers (`VStack`
+                        // →`Column`, `CupertinoButton`/`MaterialButton`→`Button`,
+                        // `TextField`→`TextInput`, `withAnimation`→`Animate`,
+                        // `MaterialTheme`/`FluxTheme`→`Theme`). The overlay
+                        // primitives `Modal`/`Sheet`/`Dialog` are the one exception:
+                        // the release backends emit *different* host surfaces for
+                        // them (Swift `FullScreenCover`/Kotlin `Dialog` for `Modal`),
+                        // so folding the dev source name through the remap would
+                        // mislabel a `Dialog` call as `Modal`. Keep their source
+                        // spelling (FLUX-038) — the parity test asserts dev/release
+                        // equivalence only within each overlay surface, not across
+                        // them.
+                        name: if matches!(normalized.as_str(), "Modal" | "Sheet" | "Dialog") {
+                            name.clone()
+                        } else {
+                            normalized
+                        },
                         props: vec![],
                         children,
                     });

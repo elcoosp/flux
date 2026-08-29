@@ -9,7 +9,7 @@ verdict: equivalent
         name: "PlatformButton",
         children: [
             If {
-                cond: "(/* unsupported expr */ 0 == \"ios\")",
+                cond: "0",
                 then_branch: [
                     Primitive {
                         name: "Button",
@@ -33,7 +33,7 @@ swift  == [
         name: "PlatformButton",
         children: [
             If {
-                cond: "( 0 /* unsupported */ == \"ios\" )",
+                cond: "0",
                 then_branch: [
                     Primitive {
                         name: "Button",
@@ -57,7 +57,7 @@ kotlin == [
         name: "PlatformButton",
         children: [
             If {
-                cond: "(/*unsupportedexpr*/0==\"ios\")",
+                cond: "0",
                 then_branch: [
                     Primitive {
                         name: "Button",

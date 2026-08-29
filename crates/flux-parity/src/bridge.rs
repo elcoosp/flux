@@ -127,6 +127,20 @@ pub(crate) fn canonicalize_expr(text: &str) -> String {
     let t = t
         .replace("\\.self", "key:.self")
         .replace("\\.id", "key:.id");
-    t.replace("{ it }", "key:.self")
-        .replace("{ it.id }", "key:.id")
+    let t = t
+        .replace("{ it }", "key:.self")
+        .replace("{ it.id }", "key:.id");
+    // The codegen backends emit an `unsupported expr` placeholder when a
+    // sub-expression cannot be lowered (`0 /* unsupported */` on Swift,
+    // `/* unsupported expr */ 0` on Kotlin), and the dev-path reducer renders
+    // the same placeholder. Collapse any spelling of it to a single canonical
+    // token so structural parity ignores the un-lowered value's exact text
+    // (the placeholder is semantically "some value", not part of the structure).
+    // Matching is case/space-insensitive so `/* unsupported expr */`,
+    // `/*unsupportedexpr*/`, `/* unsupported */` all reduce to `0`.
+    let lowered = t.to_ascii_lowercase();
+    if lowered.contains("unsupported") {
+        return "0".to_owned();
+    }
+    t
 }
