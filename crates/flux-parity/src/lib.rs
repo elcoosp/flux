@@ -26,6 +26,7 @@
 
 mod bridge;
 mod equivalence;
+mod harness;
 mod model;
 mod recognize_kotlin;
 mod recognize_swift;
@@ -35,6 +36,10 @@ mod sources;
 mod tokenize;
 pub mod trace;
 
+pub use harness::{
+    ComponentUnderTest, InteractionOutcome, RenderError, render_component, run_tap,
+    signal_after_tap,
+};
 pub use model::{ViewNode, from_ast, normalize_view_name};
 pub use recognize_kotlin::{KotlinRecognitionError, recognize as recognize_kotlin};
 pub use recognize_swift::{SwiftRecognitionError, recognize as recognize_swift};
