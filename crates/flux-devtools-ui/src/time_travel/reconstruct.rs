@@ -245,6 +245,49 @@ mod tests {
     }
 
     #[test]
+    fn replay_keeps_per_signal_reader_sets() {
+        // Each signal is its own graph node: its reader set must not bleed into
+        // another signal's edge. Pins the "node per signal, edge per dependency"
+        // contract from FLUX-058 user story 2.
+        let events = vec![
+            signal_write_with_effects(1, 10, &[1, 2]),
+            signal_write_with_effects(3, 30, &[7, 8, 9]),
+            signal_write_with_effects(1, 11, &[1, 2, 3]),
+        ];
+        let state = reconstruct_state(&ReconstructedState::base(), &events);
+        // Latest write to signal 1 carries readers [1,2,3].
+        let readers_1 = state
+            .signal_edges
+            .iter()
+            .find(|(id, _)| *id == SignalId::from(1u32))
+            .map(|(_, e)| e.clone())
+            .unwrap();
+        assert_eq!(
+            readers_1,
+            vec![
+                EffectId::from(1u32),
+                EffectId::from(2u32),
+                EffectId::from(3u32)
+            ]
+        );
+        // Signal 3 keeps its own, independent reader set.
+        let readers_3 = state
+            .signal_edges
+            .iter()
+            .find(|(id, _)| *id == SignalId::from(3u32))
+            .map(|(_, e)| e.clone())
+            .unwrap();
+        assert_eq!(
+            readers_3,
+            vec![
+                EffectId::from(7u32),
+                EffectId::from(8u32),
+                EffectId::from(9u32)
+            ]
+        );
+    }
+
+    #[test]
     fn replay_tracks_view_frames_and_removal() {
         let mut events = vec![view_layout(5, 10.0), view_layout(6, 20.0)];
         events.push(EnrichedTelemetryEvent::ViewMutation {

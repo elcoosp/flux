@@ -1,6 +1,6 @@
 ---
 id: FLUX-058
-status: todo
+status: done
 lane: LANE-P
 phase: "Phase 4"
 blocked_by: []
@@ -18,6 +18,26 @@ related_adrs:
 - **Depends on:** none (telemetry `SignalGraph.write` already instruments)
 - **Source:** `CHANGELOG.md` §PRD-P deferred (user story 2)
 - **Related ADRs:** ADR-0040 (host instrumentation)
+
+## Status (2026-08-29)
+
+**DONE (verifiable slice — green):**
+- `ReconstructedState.signal_edges: Vec<(SignalId, Vec<EffectId>)>` is populated by
+  `reconstruct_state` from `EnrichedTelemetryEvent::SignalWrite { triggered_effect_ids, .. }`
+  — the "what reads this signal" direction (PRD-P user story 2).
+- `views/signal_graph.rs::SignalGraphView::render_pane` renders the dependency edges as
+  `sig#{id} → fx#{e}` rows (and `∅` when a signal has no readers), so the live graph is
+  visible in DevTools.
+- Two unit tests pin it deterministically without a socket:
+  `replay_tracks_signal_dependency_edges` (readers = triggered effects per write) and
+  `replay_keeps_per_signal_reader_sets` (each signal is its own node; reader sets do not
+  bleed across signals). Both pass under `cargo test -p flux-devtools-ui --lib` (18/18).
+
+**CAVEAT (data-model limitation, out of view scope):** the inverse "what *wrote* this
+signal" direction is NOT representable today — `SignalWrite` carries no `writer_id`, so the
+telemetry stream cannot tell which effect/node authored a write. That is a telemetry-schema
+gap (a `SignalWrite.writer_id` field + host instrumentation), not a signal-graph view bug,
+and warrants its own issue rather than scope-creep here.
 
 ## Problem Statement
 

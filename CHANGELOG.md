@@ -365,6 +365,19 @@ extensions, host instrumentation, a dev-server source-map enrichment bridge, a
 ADRs ADR-0039…ADR-0042 (the spec requested ADR-0030…ADR-0033, but those numbers
 are already taken by unrelated topics, so the next free slots were used).
 
+### DevTools — signal-graph dependency-edge rendering (FLUX-058, LANE-P) — DONE
+
+- The signal-graph view now renders reactive dependency edges: `ReconstructedState.signal_edges`
+  (per-signal `Vec<EffectId>` of readers) is reconstructed from `EnrichedTelemetryEvent::SignalWrite
+  { triggered_effect_ids, .. }`, and `views/signal_graph.rs` renders each as `sig#{id} → fx#{e}`
+  (or `∅` when a signal has no readers). This is PRD-P user story 2 ("what reads a signal").
+- Pinned with two deterministic, socket-free unit tests in `crates/flux-devtools-ui/src/time_travel/reconstruct.rs`:
+  `replay_tracks_signal_dependency_edges` and `replay_keeps_per_signal_reader_sets` (each signal
+  is its own graph node; reader sets do not bleed across signals). `cargo test -p flux-devtools-ui --lib`
+  is 18/18 green.
+- CAVEAT: the inverse "what *wrote* this signal" direction is not representable — `SignalWrite`
+  carries no `writer_id`, a telemetry-schema gap (separate issue), not a view bug.
+
 - **Wire protocol (`flux-ir-serde`)** — new `telemetry.rs` module with
   `TelemetryEvent` / `DebugCommand` / `EnrichedTelemetryEvent` and their frame
   types (`TelemetryFrame` host→server, `EnrichedTelemetryFrame` server→DevTools,
