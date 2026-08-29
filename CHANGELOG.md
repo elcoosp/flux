@@ -109,6 +109,21 @@ are intentionally omitted (automation noise, not user-facing change).
   min+max (Android) matrix reusing the ios-check/android-check build steps, so version
   drift is surfaced instead of assumed.
 
+### Release — `flux build` toolchain invoke + distribution (FLUX-068) — PARTIAL
+
+- The core of FLUX-068 — `flux build` actually invokes the native toolchain — was already
+  implemented in `crates/flux-cli/src/build.rs`: it emits generated sources first, then spawns
+  `xcodebuild` / `./gradlew` and FAILS on a non-zero exit (release gate), with an emit-only
+  fallback + actionable log when the toolchain is absent. Covered by three unit tests
+  (absent / passing / failing toolchain).
+- Added `.github/workflows/artifact-publish.yml`: the CI/publish step producing
+  `FluxHost.xcframework` (macOS runner) and the `:runtimes:android:host` AAR (linux runner),
+  uploaded as release artifacts — closing the ADR-0036 packaging-gap publish path.
+- REMAINING (owned by the native iOS/Android lanes, not touched here): the host-side
+  fail-closed `PROTOCOL_VERSION` handshake (runtimes/ios + runtimes/android) and the
+  `docs/embed-flux.md` "Embed Flux in an existing app" guide. These require editing/verifying
+  parallel-owned native files and are out of this crate's scope.
+
 ### BLOCKED — large-list scroll benchmark (FLUX-056)
 
 - Cannot land: both dependencies are absent from the tree. `flux-perf-harness` (PRD-J)

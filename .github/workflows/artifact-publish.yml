@@ -1,0 +1,94 @@
+name: artifact-publish
+
+# FLUX-068 (LANE-G, Phase 9 — release distribution) — publish host artifacts.
+#
+# Produces the two consumable engine artifacts so a downstream app can import a
+# versioned Flux runtime instead of building from source (ADR-0036 packaging gap,
+# closed via ADR-0050 runtime versioning):
+#   * iOS:   `FluxHost.xcframework` via `xcodebuild -create-xcframework` (needs a
+#            macOS runner with Xcode).
+#   * Android: `:runtimes:android:host` AAR via `./gradlew :runtimes:android:host:
+#            bundleReleaseAar` (linux runner is fine — no Xcode needed).
+#
+# This is the CI/publish step the issue calls out; the host-side fail-closed
+# PROTOCOL_VERSION handshake and the `docs/embed-flux.md` guide are owned by the
+# native (iOS/Android) lanes and are NOT touched here.
+#
+# Runner split (per the spawn brief): xcframework → macos-latest; AAR → ubuntu-latest.
+
+on:
+  push:
+    tags: ["v*"]
+    branches: ["main"]
+    paths:
+      - "runtimes/ios/**"
+      - "runtimes/android/**"
+      - "adapters/ui-swift/**"
+      - "adapters/ui-kotlin/**"
+      - "crates/flux-codegen-swift/**"
+      - "crates/flux-codegen-kotlin/**"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "runtimes/ios/**"
+      - "runtimes/android/**"
+
+permissions:
+  contents: read
+
+jobs:
+  ios-xcframework:
+    name: FluxHost.xcframework (macOS)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: runtimes/ios
+        run: xcodegen generate
+
+      - name: Build FluxHost as a framework
+        working-directory: runtimes/ios
+        run: xcodebuild build -scheme FluxHost -configuration Release -destination "generic/platform=iOS" -derivedDataPath "${{ runner.temp }}/dd" -quiet
+
+      - name: Create xcframework
+        run: |
+          xcodebuild -create-xcframework \
+            -framework "${{ runner.temp }}/dd/Build/Products/Release-iphoneos/FluxHost.framework" \
+            -output "${{ runner.temp }}/FluxHost.xcframework"
+
+      - name: Upload xcframework artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FluxHost.xcframework
+          path: "${{ runner.temp }}/FluxHost.xcframework"
+
+  android-aar:
+    name: flux-host AAR (linux)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Assemble host AAR
+        run: ./gradlew :runtimes:android:host:bundleReleaseAar --no-daemon
+
+      - name: Upload AAR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flux-host-aar
+          path: "runtimes/android/host/build/outputs/aar/*.aar"
