@@ -1,6 +1,6 @@
 ---
 id: FLUX-042
-status: done
+status: partial
 lane: LANE-N
 phase: "Phase 2"
 blocked_by: []
@@ -15,6 +15,12 @@ related_adrs:
 ---
 
 # FLUX-042: Signal-graph animation primitive
+
+> **Status note (2026-08-29):** relabeled `done` → `partial`. A source grep of
+> `stdlib/` finds **no animation primitive**, and neither host reconciler branches
+> on animation (grep of `ShadowTreeReconciler.swift` / `DirtyReconciler.kt` for
+> `Animation` returns nothing). `flux-codegen-core` mentions it only in template/
+> comment scaffolding. A Flux app cannot yet author signal-driven animation.
 
 - **Lane:** LANE-N (Phase 2)
 - **Depends on:** ADR-0048 convergence decision (LANE-J) — animation targets the
