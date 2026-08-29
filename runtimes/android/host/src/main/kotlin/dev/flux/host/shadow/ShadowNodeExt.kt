@@ -14,7 +14,7 @@ import dev.flux.ui.PropsIndex
 public fun ShadowNode.displayText(): String? = props.getString(PropsIndex.TEXT_TEXT)
 
 /** Reads the bound handler id off a button node, for test assertions. */
-public fun ShadowNode.buttonHandlerId(): UInt = props.getHandler(PropsIndex.BUTTON_ON_CLICK)
+public fun ShadowNode.buttonHandlerId(): UInt = props.getHandler(PropsIndex.BUTTON_ON_PRESS)
 
 /** `true` when [value] is a resolved (non-id) string, used by tests. */
 public fun FluxValue.isResolvedString(): Boolean = this is FluxValue.Str
