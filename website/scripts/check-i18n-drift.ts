@@ -34,7 +34,28 @@ const TRANSLATION_LOCALES = ['es', 'fr'];
 const NON_EN_DIRS = new Set(['es', 'fr', 'adr']);
 
 /** Specific slugs exempt from parity (documented inline above). */
-const EXEMPT_SLUGS = new Set(['guides/quickstart']);
+const EXEMPT_SLUGS = new Set([
+  'guides/quickstart',
+  // FLUX-031/032/033/036: the ecosystem guides below are English-first.
+  // They are exempt until a translation lands so the build does not break.
+  // Remove each slug here once its es/<slug> and fr/<slug> counterparts exist.
+  'guides/getting-started',
+  'guides/cookbook',
+  'guides/cookbook/column',
+  'guides/cookbook/row',
+  'guides/cookbook/text',
+  'guides/cookbook/button',
+  'guides/cookbook/textinput',
+  'guides/cookbook/image',
+  'guides/cookbook/router',
+  'guides/cookbook/screen',
+  'guides/state-management',
+  'guides/app-i18n',
+  'guides/showcase-apps',
+  'guides/troubleshooting',
+  'guides/migrate-from-rn',
+  'guides/migrate-from-flutter',
+]);
 
 /**
  * Verifies that every English doc exists in all translation locales.

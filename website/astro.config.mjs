@@ -70,6 +70,14 @@ export default defineConfig({
           // above, so they are listed here explicitly rather than via
           // autogenerate (which would duplicate them).
           items: [
+            { label: 'Getting started', link: '/guides/getting-started/', translations: { es: 'Empezando', fr: 'Premiers pas' } },
+            { label: 'Cookbook', link: '/guides/cookbook/', translations: { es: 'Recetas', fr: 'Recettes' } },
+            { label: 'State management', link: '/guides/state-management/', translations: { es: 'Gestión de estado', fr: 'Gestion d’état' } },
+            { label: 'App i18n', link: '/guides/app-i18n/', translations: { es: 'i18n de app', fr: 'i18n d’app' } },
+            { label: 'Showcase apps', link: '/guides/showcase-apps/', translations: { es: 'Apps de muestra', fr: 'Apps de démo' } },
+            { label: 'Troubleshooting', link: '/guides/troubleshooting/', translations: { es: 'Solución de problemas', fr: 'Dépannage' } },
+            { label: 'From React Native', link: '/guides/migrate-from-rn/', translations: { es: 'Desde React Native', fr: 'Depuis React Native' } },
+            { label: 'From Flutter', link: '/guides/migrate-from-flutter/', translations: { es: 'Desde Flutter', fr: 'Depuis Flutter' } },
             { label: 'Adding a Primitive', link: '/guides/adding-a-primitive/', translations: { es: 'Añadir una primitiva', fr: 'Ajouter une primitive' } },
           ],
         },
