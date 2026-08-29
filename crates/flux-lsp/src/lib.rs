@@ -139,7 +139,10 @@ struct FluxTypeSpan {
 #[must_use]
 fn resolve_type_span(source: &str, offset: usize) -> FluxTypeSpan {
     let loc = flux_parser::Location::from_offset(source, offset);
-    FluxTypeSpan { line: loc.line as u32, character: loc.column as u32 }
+    FluxTypeSpan {
+        line: loc.line,
+        character: loc.column,
+    }
 }
 
 impl FluxLsp {
@@ -151,27 +154,46 @@ impl FluxLsp {
     /// flag); when `false` this equals [`Self::diagnostics_for_text`].
     #[must_use]
     pub fn diagnostics_with_types(
-        &self, path: &std::path::Path, text: &str, types_enabled: bool,
+        &self,
+        path: &std::path::Path,
+        text: &str,
+        types_enabled: bool,
     ) -> Vec<LspDiagnostic> {
         let path_str = path.to_string_lossy().into_owned();
         let mut out = Vec::new();
         let ast = match flux_parser::parse(text, 0, &path_str) {
             Ok(ast) => ast,
-            Err(err) => { out.push(LspDiagnostic {
-                line: err.location.line, character: err.location.column,
-                length: err.span.len().max(1), severity: 1,
-                message: err.message.clone(), source: "parse".to_owned() });
-                return out; } };
-        if !types_enabled { return out; }
+            Err(err) => {
+                out.push(LspDiagnostic {
+                    line: err.location.line,
+                    character: err.location.column,
+                    length: err.span.len().max(1),
+                    severity: 1,
+                    message: err.message.clone(),
+                    source: "parse".to_owned(),
+                });
+                return out;
+            }
+        };
+        if !types_enabled {
+            return out;
+        }
         if let Err(type_err) = flux_types::type_check(&ast) {
             let FluxTypeSpan { line, character } =
                 resolve_type_span(text, type_err.span.start as usize);
-            let hint = type_err.hint.as_deref()
-                .map(|h| format!(" (hint: {h})")).unwrap_or_default();
-            out.push(LspDiagnostic { line, character,
-                length: type_err.span.len().max(1), severity: 1,
+            let hint = type_err
+                .hint
+                .as_deref()
+                .map(|h| format!(" (hint: {h})"))
+                .unwrap_or_default();
+            out.push(LspDiagnostic {
+                line,
+                character,
+                length: type_err.span.len().max(1),
+                severity: 1,
                 message: format!("{}{}", type_err.message, hint),
-                source: "type".to_owned() });
+                source: "type".to_owned(),
+            });
         }
         out
     }
@@ -335,10 +357,15 @@ mod tests {
         let path = fixture(src);
         let text = std::fs::read_to_string(&path).expect("read");
         let diags = FluxLsp::new().diagnostics_with_types(&path, &text, true);
-        let type_diag = diags.iter().find(|d| d.source == "type")
+        let type_diag = diags
+            .iter()
+            .find(|d| d.source == "type")
             .expect("expected a type-source diagnostic");
         assert!(!type_diag.message.is_empty());
-        assert!(type_diag.message.contains("hint"), "type diagnostic must carry a how-hint: {type_diag:?}");
+        assert!(
+            type_diag.message.contains("hint"),
+            "type diagnostic must carry a how-hint: {type_diag:?}"
+        );
         assert!(type_diag.line >= 1);
         assert_eq!(type_diag.severity, 1);
         assert_eq!(type_diag.source, "type");
@@ -360,7 +387,10 @@ mod tests {
         let path = fixture(src);
         let text = std::fs::read_to_string(&path).expect("read");
         let diags = FluxLsp::new().diagnostics_with_types(&path, &text, false);
-        assert!(!diags.iter().any(|d| d.source == "type"), "types disabled must skip type-check");
+        assert!(
+            !diags.iter().any(|d| d.source == "type"),
+            "types disabled must skip type-check"
+        );
     }
 
     #[test]
@@ -370,7 +400,10 @@ mod tests {
         let text = std::fs::read_to_string(&path).expect("read");
         let diags = FluxLsp::new().diagnostics_with_types(&path, &text, true);
         let json = serde_json::to_string(&diags).expect("serialize");
-        assert!(json.contains("\"source\":\"type\""), "JSON must carry the type source: {json}");
+        assert!(
+            json.contains("\"source\":\"type\""),
+            "JSON must carry the type source: {json}"
+        );
         let back: Vec<LspDiagnostic> = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(back, diags);
     }

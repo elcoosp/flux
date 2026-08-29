@@ -29,10 +29,13 @@ flux-ir.workspace = true
 # (AGENTS.md §3.11 - diagnostics never diverge between LSP and CLI).
 serde = { workspace = true, features = ["derive"] }
 
+# Spawnable language-server binary consumed by the FLUX-026 VS Code extension
+# (and any LSP client) over stdio. The library crate is the canonical home for
+# the server loop via `run_stdio`.
+[[bin]]
+name = "flux-lsp"
+path = "src/main.rs"
+
 [dev-dependencies]
 tempfile.workspace = true
 serde_json.workspace = true
-# `tokio-util`'s `compat` shim adapts the loopback `tokio::io::duplex` streams to
-# the `AsyncRead`/`AsyncWrite` byte streams `async-lsp` expects in the
-# integration test (FLUX-024 testing decision); `compat` is an opt-in feature.
-tokio-util = { version = "^0.7", features = ["compat"] }
