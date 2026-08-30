@@ -84,11 +84,15 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Assemble host AAR
-        run: ./gradlew :runtimes:android:host:bundleReleaseAar --no-daemon
+      - name: Assemble host app APK
+        # `:host` is a pure-JVM module (kotlin-jvm plugin) with no Android AAR
+        # target; the consumable Android artifact is the `:app` debug APK. Release
+        # APK signing is configured per-environment and out of scope for this
+        # publish step.
+        run: ./gradlew :runtimes:android:app:assembleDebug --no-daemon
 
-      - name: Upload AAR artifact
+      - name: Upload app APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: flux-host-aar
-          path: "runtimes/android/host/build/outputs/aar/*.aar"
+          name: flux-host-app-apk
+          path: "runtimes/android/app/build/outputs/apk/debug/*.apk"
