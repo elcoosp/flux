@@ -81,8 +81,16 @@ class LayoutOverlayAdapterTest {
     }
 
     @Test
-    fun `every flux-037-042 adapter resolves from the kit registry`() {
-        for (kind in listOf("stack", "grid", "spacer", "safearea", "modal", "sheet", "dialog", "animate")) {
+    fun `scrollview records orientation axis`() {
+        val adapter = ScrollViewAdapter.create()
+        val view = adapter.create(27u)
+        adapter.update(view, propsOf(PropsIndex.SCROLL_ORIENTATION to FluxValue.Str("horizontal")))
+        assertEquals("horizontal", view.getProperty(ScrollViewAdapter.PROP_ORIENTATION))
+    }
+
+    @Test
+    fun `every flux-037-042-056 adapter resolves from the kit registry`() {
+        for (kind in listOf("stack", "grid", "spacer", "safearea", "modal", "sheet", "dialog", "animate", "scrollview")) {
             assertTrue(FluxUiKit.adapterFor(kind) != null, "registry must resolve $kind")
         }
     }

@@ -52,6 +52,11 @@ public object PropsIndex {
     public val SPACER_FLEX: UShort = propIndexForName("flex")
     public val SAFEAREA_EDGES: UShort = propIndexForName("edges")
 
+    // FLUX-056 `ScrollView` (PRD-N). The `orientation` prop selects the scroll
+    // axis; the adapter records it so the host renderer scrolls the children
+    // along the right axis. Absent means "vertical".
+    public val SCROLL_ORIENTATION: UShort = propIndexForName("orientation")
+
     // FLUX-038 overlay containers (`Modal` / `Sheet` / `Dialog`)
     public val OVERLAY_ON_DISMISS: UShort = propIndexForName("onDismiss")
 

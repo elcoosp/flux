@@ -51,6 +51,8 @@ public object FluxUiKit {
             TextAreaAdapter.KIND to FluxAdapterFactory(TextAreaAdapter::create),
             // FLUX-041 gesture primitive (PRD-N family).
             GestureAdapter.KIND to FluxAdapterFactory(GestureAdapter::create),
+            // FLUX-056 `ScrollView` (PRD-N family).
+            ScrollViewAdapter.KIND to FluxAdapterFactory(ScrollViewAdapter::create),
         )
 
     /** Returns the factory registered for [kind], or `null`. */
