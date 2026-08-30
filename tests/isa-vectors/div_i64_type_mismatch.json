@@ -1,0 +1,11 @@
+{
+  "name": "div_i64_type_mismatch",
+  "description": "divides an Int operand against a Float operand raises TypeMismatch (ADR-0024 alignment: monomorphized ops reject non-Int).",
+  "bytecode_hex": "b0010500000000000000b10200000000000000402303010200",
+  "initial_signals": [],
+  "payload": null,
+  "expected_signals": [],
+  "expected_registers": {},
+  "expected_error": "TypeMismatch",
+  "expected_gas_used": 0
+}

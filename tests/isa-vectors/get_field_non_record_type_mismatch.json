@@ -1,0 +1,11 @@
+{
+  "name": "get_field_non_record_type_mismatch",
+  "description": "GET_FIELD on a non-record, non-Null value (here an Int) raises TypeMismatch (ADR-0024: only Null is NullDereference).",
+  "bytecode_hex": "b0010500000000000000710200000100",
+  "initial_signals": [],
+  "payload": null,
+  "expected_signals": [],
+  "expected_registers": {},
+  "expected_error": "TypeMismatch",
+  "expected_gas_used": 0
+}

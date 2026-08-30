@@ -1,0 +1,11 @@
+{
+  "name": "invalid_dispatch_bad_opcode",
+  "description": "An unknown opcode byte (0xff) raises InvalidDispatch at offset 0.",
+  "bytecode_hex": "ff",
+  "initial_signals": [],
+  "payload": null,
+  "expected_signals": [],
+  "expected_registers": {},
+  "expected_error": "InvalidDispatch",
+  "expected_gas_used": 0
+}

@@ -1,0 +1,11 @@
+{
+  "name": "set_field_non_record_type_mismatch",
+  "description": "SET_FIELD on a non-record, non-Null value (here an Int) raises TypeMismatch (ADR-0024).",
+  "bytecode_hex": "b0010500000000000000b0020900000000000000720100000200",
+  "initial_signals": [],
+  "payload": null,
+  "expected_signals": [],
+  "expected_registers": {},
+  "expected_error": "TypeMismatch",
+  "expected_gas_used": 0
+}

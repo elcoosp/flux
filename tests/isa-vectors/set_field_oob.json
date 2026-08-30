@@ -1,0 +1,11 @@
+{
+  "name": "set_field_oob",
+  "description": "SET_FIELD beyond the record's field count raises IndexOutOfBounds (mirror of GET_FIELD-oob).",
+  "bytecode_hex": "70010100b0020900000000000000720105000200",
+  "initial_signals": [],
+  "payload": null,
+  "expected_signals": [],
+  "expected_registers": {},
+  "expected_error": "IndexOutOfBounds",
+  "expected_gas_used": 0
+}

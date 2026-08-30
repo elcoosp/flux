@@ -1,0 +1,11 @@
+{
+  "name": "set_field_null_deref",
+  "description": "SET_FIELD on a Null object raises NullDereference (mirror of GET_FIELD-on-Null, ADR-0024).",
+  "bytecode_hex": "b401b0020900000000000000720100000200",
+  "initial_signals": [],
+  "payload": null,
+  "expected_signals": [],
+  "expected_registers": {},
+  "expected_error": "NullDereference",
+  "expected_gas_used": 0
+}

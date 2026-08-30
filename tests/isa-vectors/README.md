@@ -134,6 +134,16 @@ through the orchestrator, who re-runs all three VM conformance suites.
   (→ +inf), `add_f64_inf`, `add_f64_neginf`, `eq_f64_nan`
 - `get_field_null_deref` (`NullDereference`), `get_field_oob`,
   `list_get_oob` (`IndexOutOfBounds`)
+- `set_field_null_deref` (`NullDereference`), `set_field_non_record_type_mismatch`,
+  `set_field_oob` (`IndexOutOfBounds`) — SET_FIELD now has symmetric null/type/bounds
+  error paths to GET_FIELD (FLUX-086).
+- `sub_i64_type_mismatch`, `mul_i64_type_mismatch`, `div_i64_type_mismatch`,
+  `mod_i64_type_mismatch`, `eq_i64_type_mismatch` (Int operand against a Float
+  operand → `TypeMismatch` per ADR-0024 monomorphized-op alignment), and
+  `get_field_non_record_type_mismatch` (GET_FIELD on a non-record, non-Null value →
+  `TypeMismatch`).
+- `invalid_dispatch_bad_opcode` (unknown opcode byte `0xff` → `InvalidDispatch` at
+  offset 0).
 - `gas_check_exhausted` (`GasExhausted` via `GAS_CHECK`), `gas_exhausted_loop`
   (`GasExhausted` via infinite `JUMP` loop, 100,000 instructions)
 - `call_cap_basic` (capability callback; stubbed host contract below)
@@ -141,7 +151,18 @@ through the orchestrator, who re-runs all three VM conformance suites.
 - `signal_roundtrip` (READ→WRITE round-trip, second signal/type)
 - `record_eq_true`, `list_concat_basic`
 
-Total: **71 vectors**.
+Total: **81 vectors** (71 prior + 10 error-path vectors added by FLUX-086).
+
+> **Async cancellation (`AWAIT` + drop/cancel) is intentionally NOT a golden
+> vector.** `AWAIT` is a v2 opcode and the v1 [`run`] entry point rejects it
+> (`InvalidDispatch`), so resumable/cancel behaviour cannot be expressed in the
+> v1 vector schema (which asserts a single terminal `expected_error` / final
+> state). Cancellation parity is instead pinned in each runtime's dedicated async
+> test (`AsyncSuspendResumeTests.swift` on iOS, `FluxBytecodeVmTest` on Android, and
+> the `await_resume` test in `flux-vm-ref`), which assert the post-cancel signal
+> graph matches the Rust oracle's `SuspendState`: the `Pending` result cell is left
+> untouched and no signal was written before the `AWAIT`. The oracle's
+> `run_resumable`/`resume` is the source of truth for that contract.
 
 ## Host contract assumed for CALL_CAP
 
