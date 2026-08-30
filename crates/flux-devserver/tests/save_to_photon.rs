@@ -154,7 +154,7 @@ fn next_frame(client: &mut Client, timeout: Duration) -> Option<Vec<u8>> {
 
 /// Saves `source` over `file` and returns the millisecond wall-clock from the
 /// save to the host receiving the resulting `Delta` frame.
-fn measure_one(client: &mut Client, server: &RunningServer, file: &Path, source: &str) -> f64 {
+fn measure_one(client: &mut Client, _server: &RunningServer, file: &Path, source: &str) -> f64 {
     let start = Instant::now();
     fs::write(file, source).expect("save edit");
     let frame = next_frame(client, Duration::from_secs(5)).expect("delta frame arrives");

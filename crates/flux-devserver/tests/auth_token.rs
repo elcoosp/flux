@@ -70,7 +70,7 @@ fn handshake_frame(client: &mut Client, token: Option<&str>) -> u8 {
         if std::time::Instant::now() >= deadline {
             panic!("handshake timed out");
         }
-        match client.read_message() {
+        match client.read() {
             Ok(Message::Binary(b)) => return *b.get(5).expect("frame kind"),
             Ok(_) => continue,
             Err(_) => {

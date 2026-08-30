@@ -1655,9 +1655,7 @@ mod use_resolution_tests {
     use std::collections::HashMap;
 
     /// Builds a loader over an in-memory map of module name -> source.
-    fn mem_loader(
-        map: HashMap<String, String>,
-    ) -> Arc<dyn Fn(&str) -> Option<String> + Send + Sync> {
+    fn mem_loader(map: HashMap<String, String>) -> ModuleLoader {
         Arc::new(move |name: &str| map.get(name).cloned())
     }
 

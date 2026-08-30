@@ -195,14 +195,11 @@ impl Backend for Swift {
         // Build the cases from the table.
         let cases: Vec<String> = tokens
             .iter()
-            .map(|t| {
-                let value = match t.group {
-                    flux_codegen_core::primitives::TokenGroup::Color => {
-                        format!("static let {} = {}", t.name, t.swift)
-                    }
-                    _ => format!("static let {}: CGFloat = {}", t.name, t.swift),
-                };
-                value
+            .map(|t| match t.group {
+                flux_codegen_core::primitives::TokenGroup::Color => {
+                    format!("static let {} = {}", t.name, t.swift)
+                }
+                _ => format!("static let {}: CGFloat = {}", t.name, t.swift),
             })
             .collect();
         for case in cases {
