@@ -18,6 +18,7 @@ object FluxTheme {
     var items by remember { mutableStateOf<List<String>>(listOf("a", "b")) }
     Column {
         items(items, key = { it.id }) { item ->
+            Text(item)
         }
     }
 }

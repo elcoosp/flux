@@ -1,6 +1,5 @@
 ---
 source: crates/flux-parity/tests/parity.rs
-assertion_line: 41
 expression: serialized
 ---
 verdict: equivalent
@@ -164,9 +163,15 @@ swift  == [
         name: "Profile",
         children: [
             Primitive {
-                name: "Text",
+                name: "Column",
                 props: [],
-                children: [],
+                children: [
+                    Primitive {
+                        name: "Text",
+                        props: [],
+                        children: [],
+                    },
+                ],
             },
         ],
     },
@@ -174,9 +179,15 @@ swift  == [
         name: "Settings",
         children: [
             Primitive {
-                name: "Text",
+                name: "Column",
                 props: [],
-                children: [],
+                children: [
+                    Primitive {
+                        name: "Text",
+                        props: [],
+                        children: [],
+                    },
+                ],
             },
         ],
     },
@@ -246,9 +257,15 @@ kotlin == [
         name: "Profile",
         children: [
             Primitive {
-                name: "Text",
+                name: "Column",
                 props: [],
-                children: [],
+                children: [
+                    Primitive {
+                        name: "Text",
+                        props: [],
+                        children: [],
+                    },
+                ],
             },
         ],
     },
@@ -256,9 +273,15 @@ kotlin == [
         name: "Settings",
         children: [
             Primitive {
-                name: "Text",
+                name: "Column",
                 props: [],
-                children: [],
+                children: [
+                    Primitive {
+                        name: "Text",
+                        props: [],
+                        children: [],
+                    },
+                ],
             },
         ],
     },

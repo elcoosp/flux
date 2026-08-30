@@ -25,9 +25,15 @@ swift  == [
     Component {
         name: "Chat",
         children: [
-            ForEach {
-                collection: "messages",
-                key_path: "key:.self",
+            Primitive {
+                name: "Column",
+                props: [],
+                children: [
+                    ForEach {
+                        collection: "messages",
+                        key_path: "key:.self",
+                    },
+                ],
             },
         ],
     },
@@ -36,9 +42,15 @@ kotlin == [
     Component {
         name: "Chat",
         children: [
-            ForEach {
-                collection: "messages",
-                key_path: "{it}",
+            Primitive {
+                name: "Column",
+                props: [],
+                children: [
+                    ForEach {
+                        collection: "messages",
+                        key_path: "{it}",
+                    },
+                ],
             },
         ],
     },

@@ -18,6 +18,7 @@ object FluxTheme {
 ) {
     Column {
         items(items, key = { it.id }) { item ->
+            Text(item)
         }
     }
 }

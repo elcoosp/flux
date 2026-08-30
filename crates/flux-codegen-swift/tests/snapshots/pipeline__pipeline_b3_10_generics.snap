@@ -18,6 +18,7 @@ struct List: View {
     var body: some View {
   VStack {
       ForEach(items, id: \.id) { item in
+          Text(item)
       }
   }
     }

@@ -52,14 +52,20 @@ swift  == [
         name: "Profile",
         children: [
             Primitive {
-                name: "Avatar",
+                name: "Column",
                 props: [],
-                children: [],
-            },
-            Primitive {
-                name: "Text",
-                props: [],
-                children: [],
+                children: [
+                    Primitive {
+                        name: "Avatar",
+                        props: [],
+                        children: [],
+                    },
+                    Primitive {
+                        name: "Text",
+                        props: [],
+                        children: [],
+                    },
+                ],
             },
         ],
     },
@@ -79,14 +85,20 @@ kotlin == [
         name: "Profile",
         children: [
             Primitive {
-                name: "Avatar",
+                name: "Column",
                 props: [],
-                children: [],
-            },
-            Primitive {
-                name: "Text",
-                props: [],
-                children: [],
+                children: [
+                    Primitive {
+                        name: "Avatar",
+                        props: [],
+                        children: [],
+                    },
+                    Primitive {
+                        name: "Text",
+                        props: [],
+                        children: [],
+                    },
+                ],
             },
         ],
     },

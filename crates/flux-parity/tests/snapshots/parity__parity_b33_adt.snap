@@ -1,6 +1,5 @@
 ---
 source: crates/flux-parity/tests/parity.rs
-assertion_line: 41
 expression: serialized
 ---
 verdict: equivalent
@@ -33,14 +32,20 @@ swift  == [
         name: "ShapeDisplay",
         children: [
             Primitive {
-                name: "Text",
+                name: "Column",
                 props: [],
-                children: [],
-            },
-            Primitive {
-                name: "Button",
-                props: [],
-                children: [],
+                children: [
+                    Primitive {
+                        name: "Text",
+                        props: [],
+                        children: [],
+                    },
+                    Primitive {
+                        name: "Button",
+                        props: [],
+                        children: [],
+                    },
+                ],
             },
         ],
     },
@@ -50,14 +55,20 @@ kotlin == [
         name: "ShapeDisplay",
         children: [
             Primitive {
-                name: "Text",
+                name: "Column",
                 props: [],
-                children: [],
-            },
-            Primitive {
-                name: "Button",
-                props: [],
-                children: [],
+                children: [
+                    Primitive {
+                        name: "Text",
+                        props: [],
+                        children: [],
+                    },
+                    Primitive {
+                        name: "Button",
+                        props: [],
+                        children: [],
+                    },
+                ],
             },
         ],
     },
