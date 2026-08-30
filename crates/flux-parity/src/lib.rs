@@ -25,9 +25,12 @@
 )]
 
 mod bridge;
+mod cache;
 mod equivalence;
+mod error_frame;
 mod harness;
 mod model;
+mod persistence;
 mod recognize_kotlin;
 mod recognize_swift;
 mod reduce;
@@ -36,11 +39,23 @@ mod sources;
 mod tokenize;
 pub mod trace;
 
+pub use cache::{
+    CacheOp, ImageCacheBackend, LruImageCache, assert_cache_parity, default_cache_script,
+    run_cache_script,
+};
+pub use error_frame::{
+    CorpusFrame, HostDecoder, ReferenceDecoder, Rejection, WireErrorKind,
+    assert_error_frame_parity, default_corpus,
+};
 pub use harness::{
     ComponentUnderTest, InteractionOutcome, RenderError, render_component, run_tap,
     signal_after_tap,
 };
 pub use model::{ViewNode, from_ast, normalize_view_name};
+pub use persistence::{
+    GetResult, InMemoryStorageBackend, StorageBackend, StoreOp, StoreValue, assert_storage_parity,
+    default_persistence_script, run_storage_script,
+};
 pub use recognize_kotlin::{KotlinRecognitionError, recognize as recognize_kotlin};
 pub use recognize_swift::{SwiftRecognitionError, recognize as recognize_swift};
 pub use relation::{ParityPipelineError, ParityReport, check_parity, compile};

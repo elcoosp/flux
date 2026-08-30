@@ -412,6 +412,29 @@ pub(crate) fn encode_value(w: &mut Writer, value: &Value) {
     }
 }
 
+/// Encodes a [`Value`] into a standalone Appendix D §D.5 blob (no frame header).
+///
+/// This is the on-the-wire storage encoding the host `StorageBackend`s persist:
+/// a `set` writes this blob, a `get` decodes it back. The `flux-parity` harness
+/// uses it to drive the persistence-parity trace (FLUX-082) without inventing a
+/// second codec.
+#[must_use]
+pub fn encode_value_blob(value: &Value) -> Vec<u8> {
+    let mut w = Writer::new();
+    encode_value(&mut w, value);
+    w.into_vec()
+}
+
+/// Decodes a [`Value`] from a standalone Appendix D §D.5 blob.
+///
+/// Returns [`WireError`] on a truncated or corrupt blob — the exact failure a
+/// host `StorageBackend.get` must catch and treat as `absent` (FLUX-080/081),
+/// never propagate as a host crash.
+pub fn decode_value_blob(blob: &[u8]) -> Result<Value, WireError> {
+    let mut r = Reader::new(blob);
+    decode_value(&mut r)
+}
+
 const TAG_NULL: u8 = 0x00;
 const TAG_INT: u8 = 0x01;
 const TAG_FLOAT: u8 = 0x02;

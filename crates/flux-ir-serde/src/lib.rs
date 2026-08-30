@@ -48,4 +48,6 @@ pub use telemetry::{
     TelemetryFrame, enrich_telemetry, enrich_with_span,
 };
 pub use wire::NodeSignalMeta;
-pub use wire::{MAX_FRAME_BYTES, WireError, validate_bytecode};
+pub use wire::{
+    MAX_FRAME_BYTES, WireError, decode_value_blob, encode_value_blob, validate_bytecode,
+};
