@@ -5,7 +5,7 @@
 
 use std::hash::{Hash, Hasher};
 
-use ahash::AHashSet;
+use ahash::{AHashMap, AHashSet};
 use flux_ir::{IRArena, NodeView};
 use flux_syntax::{
     Child, ClosureRef, HandlerId, NodeId, NodeRef, Patch, PropDiff, PropIdx, SignalId, Span,
@@ -22,6 +22,13 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
     let mut patches = Vec::new();
     let old_ids: AHashSet<NodeId> = old.all_ids().collect();
     let new_ids: AHashSet<NodeId> = new.all_ids().collect();
+
+    // FLUX-079: precompute the parent/index projection once per arena (O(n))
+    // so the insert loop and the `reattach_pairs` inner loop read it in O(1)
+    // instead of re-scanning the whole arena per node (the old
+    // `find_parent_and_index` cold path was O(n·r·i)).
+    let old_index = build_parent_index(old);
+    let new_index = build_parent_index(new);
 
     // Nodes present in both: compare for in-place changes.
     for id in old_ids.intersection(&new_ids) {
@@ -112,7 +119,7 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
     // `Patch::Reattach` before falling back to remove+insert (roadmap Phase 3).
     let removed: Vec<NodeId> = old_ids.difference(&new_ids).copied().collect();
     let inserted: Vec<NodeId> = new_ids.difference(&old_ids).copied().collect();
-    let pairs = reattach_pairs(old, new, &removed, &inserted);
+    let pairs = reattach_pairs(old, new, &old_index, &new_index, &removed, &inserted);
 
     for id in &removed {
         if pairs.iter().any(|(old_id, _)| old_id == id) {
@@ -125,7 +132,7 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
         if pairs.iter().any(|(_, new_id)| new_id == id) {
             continue;
         }
-        if let Some((parent, index)) = find_parent_and_index(new, *id) {
+        if let Some((parent, index)) = new_index.get(id).copied() {
             let n = new.get(*id).expect("present in new");
             patches.push(Patch::Insert {
                 parent,
@@ -158,6 +165,8 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
 fn reattach_pairs(
     old: &IRArena,
     new: &IRArena,
+    old_index: &AHashMap<NodeId, (NodeId, u16)>,
+    new_index: &AHashMap<NodeId, (NodeId, u16)>,
     removed: &[NodeId],
     inserted: &[NodeId],
 ) -> Vec<(NodeId, NodeId)> {
@@ -165,7 +174,7 @@ fn reattach_pairs(
     let mut taken: AHashSet<NodeId> = AHashSet::new();
     for old_id in removed {
         let Some(o) = old.get(*old_id) else { continue };
-        let old_slot = find_parent_and_index(old, *old_id);
+        let old_slot = old_index.get(old_id).copied();
         for new_id in inserted {
             if taken.contains(new_id) {
                 continue;
@@ -174,7 +183,7 @@ fn reattach_pairs(
             if o.component_id() != n.component_id() || o.kind() != n.kind() {
                 continue;
             }
-            if old_slot != find_parent_and_index(new, *new_id) {
+            if old_slot != new_index.get(new_id).copied() {
                 continue;
             }
             taken.insert(*new_id);
@@ -246,22 +255,30 @@ fn to_ref(v: &NodeView<'_>) -> NodeRef {
     }
 }
 
-/// Finds the parent of `child_id` in `arena` and the child's index among the
-/// parent's flattened child node list.
-fn find_parent_and_index(arena: &IRArena, child_id: NodeId) -> Option<(NodeId, u16)> {
+/// Walks `arena` once, recording each child node's `(parent_id, index)` in the
+/// parent's flattened child-node list (FLUX-079).
+///
+/// The index is over child *nodes* only (`Child::Node` and the items of a
+/// `Child::Splice`), mirroring the layout that [`Patch::Insert`] and the
+/// reattach pairing rely on. Building this once replaces the per-node
+/// `find_parent_and_index` arena scan, dropping the differ from O(n·r·i) to
+/// O(r·i) for reattachment and O(n) for inserts.
+fn build_parent_index(arena: &IRArena) -> AHashMap<NodeId, (NodeId, u16)> {
+    let mut index: AHashMap<NodeId, (NodeId, u16)> = AHashMap::new();
     for pid in arena.all_ids() {
-        let parent = arena.get(pid)?;
-        let mut index = 0u16;
+        let parent = match arena.get(pid) {
+            Some(p) => p,
+            None => continue,
+        };
+        let mut child_index = 0u16;
         for child in parent.children() {
-            if let Child::Node(cid) = child {
-                if cid == child_id {
-                    return Some((pid, index));
-                }
-                index = index.saturating_add(1);
+            for cid in child.node_ids() {
+                index.insert(cid, (pid, child_index));
+                child_index = child_index.saturating_add(1);
             }
         }
     }
-    None
+    index
 }
 
 /// Returns the ordered list of child node-ids for `v` (ignoring splices'
@@ -398,6 +415,7 @@ fn handlers_equal(
 mod tests {
     use super::*;
     use flux_ir::{ArenaBuilder, Node};
+    use flux_syntax::Key;
     use flux_syntax::{ComponentId, NodeKind, Props};
 
     /// Builds a single-node arena (id 1) with the given prop.
@@ -664,5 +682,80 @@ mod tests {
                 if *parent == NodeId::from(1u32)
                     && *keys == vec![NodeId::from(3u32), NodeId::from(2u32)]
         ));
+    }
+
+    #[test]
+    fn splice_items_use_precomputed_parent_index() {
+        // FLUX-079: a `ForEach` splice's items must resolve their parent/index
+        // through the precomputed index (covering `Child::Splice`, not just
+        // `Child::Node`). Re-spawning one spliced item under the same splice
+        // (same parent/index, same component/kind) must reattach state-
+        // preservingly — proving the precomputed map sees through splices and
+        // the removed/inserted ids pair up instead of remove+insert.
+        let splice_child = |parent_id: u32, child_id: u32| Node {
+            id: NodeId::from(parent_id),
+            kind: NodeKind::Component,
+            component_id: ComponentId::from(1u32),
+            props: Props::from_fields(vec![]),
+            children: vec![Child::Splice {
+                items: vec![(Key::from(child_id as u64), NodeId::from(child_id))],
+            }],
+            handlers: vec![],
+            span: Span::new(0, 0, 10),
+        };
+        let mut b_old = ArenaBuilder::new();
+        b_old.pack(splice_child(1, 2));
+        b_old.pack(Node {
+            id: NodeId::from(2u32),
+            kind: NodeKind::Primitive,
+            component_id: ComponentId::from(7u32),
+            props: Props::from_fields(vec![]),
+            children: vec![],
+            handlers: vec![],
+            span: Span::new(0, 0, 4),
+        });
+        let a = b_old.finish();
+
+        // Same child primitive, now re-spanned (new id 3) under the same splice.
+        let mut b_new = ArenaBuilder::new();
+        b_new.pack(splice_child(1, 3));
+        b_new.pack(Node {
+            id: NodeId::from(3u32),
+            kind: NodeKind::Primitive,
+            component_id: ComponentId::from(7u32),
+            props: Props::from_fields(vec![]),
+            children: vec![],
+            handlers: vec![],
+            span: Span::new(0, 0, 4),
+        });
+        let b = b_new.finish();
+
+        let patches = diff(&a, &b);
+        // The spliced child reparents state-preservingly (Reattach, not Remove+Insert),
+        // and no spurious Remove/Insert is emitted.
+        let reattach = patches
+            .iter()
+            .find(|p| matches!(p, Patch::Reattach { .. }))
+            .expect("re-spanned spliced child must reattach");
+        match reattach {
+            Patch::Reattach {
+                old_id,
+                new_id,
+                node,
+            } => {
+                assert_eq!(*old_id, NodeId::from(2u32));
+                assert_eq!(*new_id, NodeId::from(3u32));
+                assert_eq!(node.component_id, ComponentId::from(7u32));
+            }
+            other => panic!("expected Reattach, got {other:?}"),
+        }
+        assert!(
+            !patches.iter().any(|p| matches!(p, Patch::Remove { .. })),
+            "reattached spliced child must not also be removed: {patches:?}"
+        );
+        assert!(
+            !patches.iter().any(|p| matches!(p, Patch::Insert { .. })),
+            "reattached spliced child must not also be inserted: {patches:?}"
+        );
     }
 }

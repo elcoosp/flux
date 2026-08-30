@@ -62,6 +62,53 @@ jobs:
           path: target/criterion
           retention-days: 30
 
+  diff-prev-compute-gate:
+    name: differ parent/index precompute gate (FLUX-079)
+    runs-on: macos-14
+    # Locks in FLUX-079: the 10k list-splice diff must stay well below the
+    # O(n·r·i) blow-up (which would be seconds). Runs on every event so a
+    # regression that re-introduces the scan is caught in CI, not on a 10k tree.
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install nightly toolchain
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustup default nightly
+
+      - name: Run FLUX-079 list-splice bench
+        # `profile.bench.strip=none` avoids the macOS rust-objcopy SIGABRT
+        # warning that would otherwise fail under `-D warnings`.
+        run: |
+          cargo bench -p flux-differ --bench diff -- 'diff_list_splice' \
+            --config 'profile.bench.strip="none"' \
+            --measurement-time 5 --sample-size 20
+
+      - name: Gate assertion
+        # Ceiling: generous vs the ~8 ms measured median (12× headroom) but far
+        # below the multi-second O(n·r·i) cost, so a re-introduced scan fails
+        # the job. Point estimate is in nanoseconds (criterion estimates.json).
+        run: |
+          python3 - <<'PY'
+          import json, sys, glob, os
+          # Find the FLUX-079 benchmark estimates.json.
+          paths = glob.glob("target/criterion/diff_list_splice/**/estimates.json",
+                            recursive=True)
+          if not paths:
+              print("::error::no criterion estimates for diff_list_splice found")
+              sys.exit(1)
+          with open(paths[0]) as f:
+              est = json.load(f)
+          point_ns = est["mean"]["point_estimate"]
+          point_ms = point_ns / 1_000_000.0
+          ceiling_ms = 100.0
+          print(f"diff_list_splice median = {point_ms:.3f} ms (ceiling {ceiling_ms} ms)")
+          if point_ms > ceiling_ms:
+              print(f"::error::FLUX-079 gate FAILED: {point_ms:.3f} ms exceeds {ceiling_ms} ms ceiling")
+              sys.exit(1)
+          print("FLUX-079 gate: passed")
+          PY
+
   save-photon:
     name: save→photon e2e (loopback LANE-H)
     runs-on: macos-14

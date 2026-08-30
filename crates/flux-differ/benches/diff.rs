@@ -3,7 +3,7 @@
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use flux_differ::diff;
 use flux_ir::{ArenaBuilder, Node};
-use flux_syntax::{Child, ComponentId, NodeId, NodeKind, PropIdx, Props, Span, Value};
+use flux_syntax::{Child, ComponentId, Key, NodeId, NodeKind, PropIdx, Props, Span, Value};
 use std::hint::black_box;
 
 /// Builds a chain of `n` nodes so there is real structure to reconcile.
@@ -185,10 +185,137 @@ fn bench_diff_large(c: &mut Criterion) {
     group.finish();
 }
 
+/// Builds a wide `n`-node tree whose `n` leaves are a single `Child::Splice`
+/// (modelling a `ForEach` list), so a mid-list 500-item splice exercises the
+/// reattach-pairing cold path on a realistic dynamic list (FLUX-079).
+fn spliced(n: u32) -> flux_ir::IRArena {
+    let mut bld = ArenaBuilder::new();
+    let root = NodeId::from(1u32);
+    let items: Vec<(Key, NodeId)> = (1..=n)
+        .map(|i| (Key::from(u64::from(i)), NodeId::from(1 + i)))
+        .collect();
+    bld.pack(Node {
+        id: root,
+        kind: NodeKind::Component,
+        component_id: ComponentId::from(1u32),
+        props: Props::from_fields(vec![]),
+        children: vec![Child::Splice { items }],
+        handlers: vec![],
+        span: Span::new(0, 0, 4),
+    });
+    for i in 1..=n {
+        let id = NodeId::from(1 + i);
+        bld.pack(Node {
+            id,
+            kind: NodeKind::Primitive,
+            component_id: ComponentId::from(2u32),
+            props: Props::from_fields(vec![(PropIdx::from(0u16), Value::Int(i64::from(i)))]),
+            children: vec![],
+            handlers: vec![],
+            span: Span::new(0, i * 10, i * 10 + 5),
+        });
+    }
+    bld.finish()
+}
+
+/// Returns a copy of `base` whose splice drops the 500 items `[offset..offset+500)`
+/// and appends 500 fresh items at the tail — a large list splice, the workload
+/// FLUX-079's precompute targets. The surviving items keep their ids (so the
+/// reattach pairing must run), and the new tail items must each resolve their
+/// parent/index through the precomputed map.
+fn with_spliced_append(
+    base: &flux_ir::IRArena,
+    n: u32,
+    offset: u32,
+    count: u32,
+) -> flux_ir::IRArena {
+    let mut bld = ArenaBuilder::new();
+    let root = NodeId::from(1u32);
+    let kept: Vec<(Key, NodeId)> = (1..=n)
+        .filter(|i| !(*i > offset && *i <= offset + count))
+        .map(|i| (Key::from(u64::from(i)), NodeId::from(1 + i)))
+        .collect();
+    let appended: Vec<(Key, NodeId)> = (0..count)
+        .map(|k| {
+            let id = NodeId::from(1 + n + k);
+            (Key::from(u64::from(1 + n + k)), id)
+        })
+        .collect();
+    let mut items = kept;
+    items.extend(appended);
+    bld.pack(Node {
+        id: root,
+        kind: NodeKind::Component,
+        component_id: ComponentId::from(1u32),
+        props: Props::from_fields(vec![]),
+        children: vec![Child::Splice { items }],
+        handlers: vec![],
+        span: Span::new(0, 0, 4),
+    });
+    for i in 1..=n {
+        if i > offset && i <= offset + count {
+            continue;
+        }
+        let id = NodeId::from(1 + i);
+        let v = base.get(id).expect("leaf present");
+        bld.pack(Node {
+            id,
+            kind: v.kind(),
+            component_id: v.component_id(),
+            props: v.props(),
+            children: vec![],
+            handlers: vec![],
+            span: v.span(),
+        });
+    }
+    for k in 0..count {
+        let id = NodeId::from(1 + n + k);
+        bld.pack(Node {
+            id,
+            kind: NodeKind::Primitive,
+            component_id: ComponentId::from(2u32),
+            props: Props::from_fields(vec![(
+                PropIdx::from(0u16),
+                Value::Int(i64::from(1u32 + n + k)),
+            )]),
+            children: vec![],
+            handlers: vec![],
+            span: Span::new(0, 0, 4),
+        });
+    }
+    bld.finish()
+}
+
+fn bench_diff_list_splice(c: &mut Criterion) {
+    // FLUX-079 acceptance: diff two 10k-node arenas differing by a 500-item
+    // list splice. The §3.10 diff-50-node budget is sub-millisecond; a 10k
+    // reattach-heavy diff is allowed to be larger but must stay well under the
+    // linear-in-changed-node bound (no O(n·r·i) blow-up). We assert the emitted
+    // patch set is non-empty (the splice produced Inserts/Removes) and measure.
+    let mut group = c.benchmark_group("diff_list_splice");
+    let n = 10_000u32;
+    let offset = 4_000u32;
+    let count = 500u32;
+    let old = spliced(n);
+    let new = with_spliced_append(&old, n, offset, count);
+    group.bench_with_input(BenchmarkId::new("ten_k_minus_500_splice", n), &n, |b, _| {
+        b.iter(|| {
+            let patches = diff(black_box(&old), black_box(&new));
+            assert!(
+                !patches.is_empty(),
+                "a list splice must emit at least one patch"
+            );
+            patches
+        })
+    });
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_diff,
     bench_diff_identical_subtrees,
-    bench_diff_large
+    bench_diff_large,
+    bench_diff_list_splice
 );
 criterion_main!(benches);
