@@ -21,6 +21,7 @@ pub mod time_travel;
 pub mod wire_client;
 
 mod app;
+mod perf_record;
 mod row;
 mod views;
 

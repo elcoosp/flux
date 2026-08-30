@@ -13,6 +13,9 @@ default = []
 flux-syntax.workspace = true
 flux-ir-serde.workspace = true
 flux-ir.workspace = true
+# Consume the render-perf harness `MetricRecord` schema verbatim for the
+# timeline/flamegraph (FLUX-059) — DevTools and CI share one source of truth.
+flux-perf-harness.workspace = true
 parking_lot.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true

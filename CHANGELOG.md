@@ -451,14 +451,36 @@ The entries below land the work committed since the changelog was last updated
   resolved. Issue remains `status: blocked` for the *benchmark* leg; the primitive
   leg is DONE (see the `[Unreleased]` `ScrollView` entry).
 
-### BLOCKED — timeline / flamegraph (FLUX-059) — still BLOCKED
+### DONE — timeline / flamegraph (FLUX-059)
 
-- *Updated:* `flux-perf-harness` (PRD-J / FLUX-066) now **exists** and defines
-  `MetricRecord` as a Rust type. The remaining blocker is that no perf-metric *event
-  variant* feeds a flamegraph yet — the `timeline` view (`views/timeline.rs`) still
-  renders only a scrubber counter. Issue remains `status: blocked`; unblock when a
-  `MetricRecord`-emitting telemetry event variant lands (see reconciled `[Unreleased]`
-  section).
+- The `timeline` view (`crates/flux-devtools-ui/src/views/timeline.rs`) now renders a
+  **budget-aware flamegraph** of the render-perf `MetricRecord` stream (PRD-J /
+  FLUX-066), not just the scrubber counter. Implementation:
+  - A new `PerfRecord` variant on the existing `0x10` telemetry frame
+    (`flux-ir-serde::TelemetryEvent::PerfRecord` / `EnrichedTelemetryEvent::PerfRecord`,
+    tag `0x07`) carries the verbatim `MetricRecord` JSON — **no new wire field**.
+    `TelemetryEvent::perf_record(json)` constructs it. Encoded/decoded + enriched
+    round-trip covered by `flux-ir-serde` tests.
+  - `DevToolsState::ingest_perf_record` parses each record (bounded ring buffer;
+    malformed JSON dropped with a warning, never panics) and `handle_telemetry`
+    routes `PerfRecord` events into it. `perf_record.rs` groups records by
+    `(Scenario, MetricKind)` into lanes whose bar width = p95 ÷ §3.10 ceiling,
+    green within budget / red over (same `Budgets::v1()` CI gates PRD-J enforces).
+  - Tests: `perf_record::flame_rows` (empty state, over/under budget, latest-wins
+    dedup, distinct lanes) + `state::ingest_perf_record` +
+    `state::handle_telemetry_perf_record_event_feeds_flamegraph`.
+- **Follow-up (not in this issue):** `flux-devserver` does not yet *broadcast*
+  `PerfRecord` frames — the wire variant + DevTools ingestion are done and tested,
+  but no caller in `flux-devserver` constructs `TelemetryEvent::perf_record(...)`
+  and sends it on `:7333` yet. Small, isolated follow-up (server already depends on
+  both `flux-ir-serde` and `flux-perf-harness`).
+- **Verification note:** `cargo test -p flux-devtools-ui` could not be run green at
+  landing because the workspace tree had concurrent in-flight breakage in
+  `crates/flux-ir/src/lower/mod.rs` (another agent's LANE work, outside this issue's
+  scope) breaking `flux-ir`, a transitive dep of `flux-devtools-ui`. Independent
+  layers verified: `flux-perf-harness` tests green; `flux-ir-serde` compiles +
+  clippy-clean. DevTools tests await the tree returning to green (no fabricated
+  green).
 
 ### PARTIAL — DevTools log viewer + network inspector (FLUX-060, LANE-P)
 

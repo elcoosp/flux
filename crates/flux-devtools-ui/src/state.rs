@@ -5,9 +5,11 @@ use parking_lot::RwLock;
 use std::collections::BTreeMap;
 
 use flux_ir_serde::EnrichedTelemetryEvent;
+use flux_perf_harness::MetricRecord;
 
 use crate::time_travel::{
-    LogBuffer, LogEntry, ReconstructedState, TimelineBuffer, ViewFrame, reconstruct_state,
+    LogBuffer, LogEntry, NetworkLog, NetworkRecord, ReconstructedState, TimelineBuffer, ViewFrame,
+    reconstruct_state,
 };
 
 /// Snapshot of the VM register/instruction view.
@@ -170,6 +172,10 @@ pub struct DevToolsState {
     /// Retained structured log stream for the log viewer (FLUX-060). Bounded; the
     /// oldest record is evicted once at capacity, mirroring the timeline buffer.
     pub logs: RwLock<LogBuffer>,
+    /// Retained HTTP exchange log for the network inspector (FLUX-060). Bounded;
+    /// the oldest exchange is evicted once at capacity. Fed from the host's
+    /// `TelemetryEvent::NetworkRequest` / `NetworkResponse` telemetry.
+    pub net: RwLock<NetworkLog>,
     /// The host currently streaming telemetry, if any. `None` until the first
     /// `HostAnnounce` arrives (the dev server sends one per host connection).
     pub host: RwLock<Option<HostInfo>>,
@@ -180,6 +186,10 @@ pub struct DevToolsState {
     /// calls currently route to (the most recent `HostAnnounce` on this
     /// connection). `None` until a host announces, then the anonymous key.
     pub active: RwLock<Option<HostKey>>,
+    /// Render-perf harness [`MetricRecord`]s (PRD-J / FLUX-059) ingested from
+    /// `PerfRecord` telemetry events, in arrival order. This is the backing
+    /// store the timeline/flamegraph view renders. Bounded like the timeline.
+    pub perf_records: RwLock<Vec<MetricRecord>>,
 }
 
 impl DevToolsState {
@@ -191,9 +201,11 @@ impl DevToolsState {
             live: RwLock::new(ReconstructedState::base()),
             is_paused: RwLock::new(false),
             logs: RwLock::new(LogBuffer::new(512)),
+            net: RwLock::new(NetworkLog::new(512)),
             host: RwLock::new(None),
             sessions: RwLock::new(BTreeMap::new()),
             active: RwLock::new(None),
+            perf_records: RwLock::new(Vec::new()),
         }
     }
 
@@ -268,7 +280,80 @@ impl DevToolsState {
             let mut live = self.live.write();
             *live = reconstruct_state(&live, std::slice::from_ref(&event));
         }
-        self.timeline.write().push(event);
+        self.timeline.write().push(event.clone());
+
+        // Feed the network inspector (FLUX-060) from the HTTP capability telemetry.
+        match &event {
+            EnrichedTelemetryEvent::NetworkRequest {
+                request_id,
+                method,
+                url,
+                body,
+                capability_id,
+                ..
+            } => self.ingest_network_request(
+                *request_id,
+                method.clone(),
+                url.clone(),
+                body.clone(),
+                *capability_id,
+            ),
+            EnrichedTelemetryEvent::NetworkResponse {
+                request_id,
+                status_code,
+                latency_ms,
+                body,
+                result_kind,
+                ..
+            } => self.ingest_network_response(
+                *request_id,
+                *status_code,
+                *latency_ms,
+                body.clone(),
+                *result_kind,
+            ),
+            EnrichedTelemetryEvent::PerfRecord { json } => {
+                self.ingest_perf_record(json);
+            }
+            _ => {}
+        }
+    }
+
+    /// Ingests a render-perf harness [`MetricRecord`] (PRD-J / FLUX-059) emitted
+    /// as a `PerfRecord` telemetry event. Records whose JSON fails to parse are
+    /// dropped with a warning rather than crashing the client (AGENTS.md: never
+    /// panic in prod). Returns `true` if the record was accepted.
+    pub fn ingest_perf_record(&self, json: &str) -> bool {
+        match MetricRecord::from_json(json) {
+            Ok(record) => {
+                let mut records = self.perf_records.write();
+                // Bound the retained records like the timeline buffer so a
+                // long-running session cannot grow without limit.
+                const MAX_PERF_RECORDS: usize = 1024;
+                if records.len() >= MAX_PERF_RECORDS {
+                    records.remove(0);
+                }
+                records.push(record);
+                true
+            }
+            Err(e) => {
+                tracing::warn!(%e, "dropping unparseable PerfRecord JSON");
+                false
+            }
+        }
+    }
+
+    /// A snapshot of the retained render-perf [`MetricRecord`]s in arrival order
+    /// (FLUX-059). Empty until a `PerfRecord` telemetry event arrives.
+    #[must_use]
+    pub fn perf_records(&self) -> Vec<MetricRecord> {
+        self.perf_records.read().clone()
+    }
+
+    /// Number of retained render-perf [`MetricRecord`]s (FLUX-059).
+    #[must_use]
+    pub fn perf_record_count(&self) -> usize {
+        self.perf_records.read().len()
     }
 
     /// Appends a reconstructed view frame to the live component tree directly
@@ -332,6 +417,54 @@ impl DevToolsState {
     pub fn log_snapshot(&self) -> Vec<LogEntry> {
         self.logs.read().snapshot()
     }
+
+    /// Records an outbound HTTP request into the network inspector log (FLUX-060).
+    ///
+    /// The host emits `TelemetryEvent::NetworkRequest` when the `Http` capability
+    /// (FLUX-047) issues a fetch; this starts the exchange `Pending`. This is the
+    /// single ingest point so the network inspector reads a consistent, bounded
+    /// buffer.
+    pub fn ingest_network_request(
+        &self,
+        request_id: u32,
+        method: String,
+        url: String,
+        body: Option<String>,
+        capability_id: u32,
+    ) {
+        self.net.write().push_request(NetworkRecord::from_request(
+            request_id,
+            method,
+            url,
+            body,
+            capability_id,
+        ));
+    }
+
+    /// Records a resolved HTTP response into the network inspector log (FLUX-060),
+    /// pairing it with the pending request by `request_id`.
+    ///
+    /// A response whose request was never retained (evicted or never seen) is
+    /// dropped silently — the inspector only shows complete exchanges it can
+    /// attribute to a request.
+    pub fn ingest_network_response(
+        &self,
+        request_id: u32,
+        status_code: u16,
+        latency_ms: u32,
+        body: Option<String>,
+        result_kind: u8,
+    ) {
+        self.net
+            .write()
+            .push_response(request_id, status_code, latency_ms, body, result_kind);
+    }
+
+    /// A snapshot of the retained HTTP exchanges (oldest first).
+    #[must_use]
+    pub fn network_snapshot(&self) -> Vec<NetworkRecord> {
+        self.net.read().snapshot()
+    }
 }
 
 impl Default for DevToolsState {
@@ -393,6 +526,116 @@ mod tests {
         assert_eq!(logs[0].target, "flux-devserver");
         assert_eq!(logs[1].level, LogLevel::Error);
         assert_eq!(logs[1].render(), "E flux-host: boom");
+    }
+
+    #[test]
+    fn ingest_network_pairs_request_and_response() {
+        // FLUX-060 network inspector: a request starts the exchange pending, a
+        // response completes it, and a response with no retained request is
+        // dropped (no fabricated row).
+        let state = DevToolsState::new();
+        state.ingest_network_request(
+            1,
+            "GET".into(),
+            "https://api.example.com/users".into(),
+            None,
+            14,
+        );
+        assert_eq!(state.network_snapshot().len(), 1);
+        assert_eq!(
+            state.network_snapshot()[0].phase,
+            crate::time_travel::NetworkPhase::Pending
+        );
+
+        state.ingest_network_response(1, 200, 42, Some("{\"ok\":true}".into()), 1);
+        let snap = state.network_snapshot();
+        assert_eq!(snap.len(), 1);
+        assert_eq!(snap[0].phase, crate::time_travel::NetworkPhase::Complete);
+        assert_eq!(snap[0].status_code, Some(200));
+        assert_eq!(snap[0].latency_ms, Some(42));
+        assert!(!snap[0].is_error());
+
+        // A response whose request was never retained must not create a record.
+        state.ingest_network_response(99, 200, 1, None, 1);
+        assert_eq!(state.network_snapshot().len(), 1);
+    }
+
+    #[test]
+    fn handle_telemetry_feeds_network_log() {
+        // The HTTP-capability telemetry must reach the network log through the
+        // single `handle_telemetry` ingest path (not a separate call site).
+        let state = DevToolsState::new();
+        state.handle_telemetry(EnrichedTelemetryEvent::NetworkRequest {
+            request_id: 5,
+            method: "POST".into(),
+            url: "https://api.example.com/login".into(),
+            body: Some("u=1".into()),
+            capability_id: 14,
+            source_span: None,
+        });
+        state.handle_telemetry(EnrichedTelemetryEvent::NetworkResponse {
+            request_id: 5,
+            status_code: 201,
+            latency_ms: 17,
+            body: None,
+            result_kind: 1,
+            source_span: None,
+        });
+        let snap = state.network_snapshot();
+        assert_eq!(snap.len(), 1);
+        assert_eq!(snap[0].method, "POST");
+        assert_eq!(snap[0].status_code, Some(201));
+    }
+
+    #[test]
+    fn ingest_perf_record_stores_parsed_metric_record() {
+        // A `PerfRecord` telemetry event carries the verbatim `MetricRecord`
+        // JSON; ingestion must parse it and expose it for the flamegraph.
+        use flux_perf_harness::{
+            LatencyMs, MetricKind, MetricRecord, MetricSample, Scenario,
+        };
+        let rec = MetricRecord::new(
+            Scenario::AndroidDeclarativeDev,
+            MetricKind::NodeMutation,
+            50,
+            vec![MetricSample::latency(LatencyMs::from_raw(1.5))],
+        );
+        let json = rec.to_json().expect("serialize record");
+
+        let state = DevToolsState::new();
+        assert!(state.ingest_perf_record(&json));
+        assert_eq!(state.perf_record_count(), 1);
+        let stored = &state.perf_records()[0];
+        assert_eq!(stored.scenario, Scenario::AndroidDeclarativeDev);
+        assert_eq!(stored.kind, MetricKind::NodeMutation);
+        assert_eq!(stored.p95().map(|l| l.as_f64()), Some(1.5));
+    }
+
+    #[test]
+    fn ingest_perf_record_rejects_malformed_json() {
+        let state = DevToolsState::new();
+        assert!(!state.ingest_perf_record("not valid json"));
+        assert_eq!(state.perf_record_count(), 0);
+    }
+
+    #[test]
+    fn handle_telemetry_perf_record_event_feeds_flamegraph() {
+        // End-to-end through the public handle_telemetry path (the wire client
+        // routes every event here). A PerfRecord event must populate perf_records.
+        use flux_perf_harness::{
+            LatencyMs, MetricKind, MetricRecord, MetricSample, Scenario,
+        };
+        let rec = MetricRecord::new(
+            Scenario::LoopbackE2e,
+            MetricKind::SaveToPhoton,
+            50,
+            vec![MetricSample::latency(LatencyMs::from_raw(42.0))],
+        );
+        let json = rec.to_json().expect("serialize record");
+        let event = EnrichedTelemetryEvent::PerfRecord { json };
+        let state = DevToolsState::new();
+        state.handle_telemetry(event);
+        assert_eq!(state.perf_record_count(), 1);
     }
 
     #[test]

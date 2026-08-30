@@ -15,6 +15,7 @@ rows, which merge cleanly.
 
 | crate | dependency | version | reason |
 | --- | --- | --- | --- |
+| flux-devtools-ui | flux-perf-harness | workspace (= path crate) | FLUX-059: DevTools timeline/flamegraph consumes `MetricRecord` verbatim (CI + DevTools share one schema) |
 
 > All pending requests applied. The `flux-lsp` member crate, the `async-lsp`
 > (`^0.2`) and `lsp-types` (`^0.97`) workspace deps, and the `flux-cli` →

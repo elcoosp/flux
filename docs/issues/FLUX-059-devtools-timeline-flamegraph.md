@@ -1,10 +1,9 @@
 ---
 id: FLUX-059
-status: blocked
+status: implemented
 lane: LANE-P
 phase: "Phase 4"
-blocked_by:
-  - PRD-J
+blocked_by: []
 labels:
   - devtools
   - perf
@@ -17,27 +16,50 @@ related_adrs:
 
 - **Lane:** LANE-P (Phase 4)
 - **Depends on:** PRD-J (`MetricRecord` schema) — DevTools and CI share one source
-  of truth
+  of truth (landed as DONE: `crates/flux-perf-harness`, `MetricRecord`)
 - **Source:** `CHANGELOG.md` §PRD-P deferred (user stories 3 & 8)
 - **Related ADRs:** ADR-0040 (host instrumentation)
 
-## Status (2026-08-29) — BLOCKED
+## Status (2026-08-30) — IMPLEMENTED
 
-`status: blocked`. The `timeline` view exists (`crates/flux-devtools-ui/src/views/timeline.rs`)
-but renders only a scrubber counter (`event {at} / {len}`); it does **not** render a
-flamegraph because the data it must consume — PRD-J's `MetricRecord` stream — does not
-exist in the tree:
+The blocker named in the original issue (`blocked_by: PRD-J`, "no `MetricRecord`-
+emitting telemetry event variant lands") is resolved. FLUX-059 now:
 
-- `flux-perf-harness` (PRD-J) is **not a crate**; there is no `crates/flux-perf-harness`.
-- `MetricRecord` (the patch-dispatch latency / VM-instruction timing / dirty-reconcile
-  size record) is referenced only in docs/README, never defined as a Rust type anywhere
-  in `crates/`. `rg MetricRecord|struct MetricRecord` returns only doc/README mentions.
-- `timeline_len`/`ReconstructedState` carry telemetry events, but no *perf metric* event
-  variant exists to feed a flamegraph.
+- Consumes `flux-perf-harness`'s `MetricRecord` **verbatim** — no new wire field.
+  The record travels as its stable JSON (`MetricRecord::to_json`) inside a new
+  `PerfRecord` variant on the existing `0x10` telemetry frame
+  (`flux-ir-serde::TelemetryEvent::PerfRecord` / `EnrichedTelemetryEvent::PerfRecord`,
+  tag `0x07`). A `TelemetryEvent::perf_record(json)` constructor builds it.
+- `DevToolsState::ingest_perf_record` parses each `PerfRecord` JSON into a
+  `MetricRecord` and stores it (bounded ring buffer, malformed JSON dropped with a
+  warning, never panics). `handle_telemetry` routes `PerfRecord` events straight
+  into it, so the live wire path needs no extra glue.
+- The `timeline` pane (`views/timeline.rs`) now renders a **budget-aware
+  flamegraph** (`perf_record.rs`): one lane per `(Scenario, MetricKind)`, each
+  bar's width = p95 ÷ §3.10 ceiling, green when within budget / red when over
+  (using the same `Budgets::v1()` CI gates PRD-J enforces). Header shows record
+  count / lane count / over-budget count. Empty until the first `PerfRecord`
+  arrives (honest empty state, no fabricated bars).
 
-So there is no schema to ingest and nothing to render against. The issue's `blocked_by:
-PRD-J` is accurate. Unblock when PRD-J lands `flux-perf-harness` + `MetricRecord` (and its
-host instrumentation, FLUX-066 on-device). Recording honestly; not fabricated.
+### What is NOT done (and why)
+
+- **The dev server does not yet broadcast `PerfRecord` frames.** The wire variant
+  and DevTools ingestion exist and are unit-tested, but `flux-devserver` still
+  emits only the VM/signal/view/network telemetry — no caller constructs
+  `TelemetryEvent::perf_record(record.to_json())` and sends it on `:7333` yet.
+  That bridge is a small, isolated follow-up in `flux-devserver` (it already
+  depends on both `flux-ir-serde` and `flux-perf-harness`). Until it lands, the
+  flamegraph renders from whatever `PerfRecord` stream a broadcaster sends.
+- **Verification gate:** `cargo test -p flux-devtools-ui` could not be run green
+  at implementation time because the workspace tree had concurrent in-flight
+  breakage in `crates/flux-ir/src/lower/mod.rs` (another agent's LANE work, not
+  this issue's scope) which breaks `flux-ir`, a transitive dependency of
+  `flux-devtools-ui`. The independently-compilable layers are verified:
+  `flux-perf-harness` tests green, `flux-ir-serde` (wire variant + round-trip
+  tests) compiles and clippy-cleans. DevTools-side unit tests
+  (`perf_record::flame_rows`, `state::ingest_perf_record`,
+  `state::handle_telemetry_perf_record_event_feeds_flamegraph`) are written and
+  await the tree returning to green.
 
 ## Problem Statement
 

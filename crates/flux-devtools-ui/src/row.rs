@@ -8,9 +8,9 @@
 use gpui::{AnyElement, Div, IntoElement, ParentElement, Pixels, Styled, px};
 
 /// Standard horizontal padding for pane rows.
-const ROW_PAD_X: Pixels = gpui::px(12.0);
+pub(crate) const ROW_PAD_X: Pixels = gpui::px(12.0);
 /// Standard vertical padding for pane rows.
-const ROW_PAD_Y: Pixels = gpui::px(5.0);
+pub(crate) const ROW_PAD_Y: Pixels = gpui::px(5.0);
 
 /// A single key/value row: `label` on the left (muted), `value` on the right.
 /// Used for registers, signals, component frames, and timeline metadata.
