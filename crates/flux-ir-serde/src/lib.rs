@@ -28,7 +28,7 @@ mod encode;
 mod frame;
 mod resume;
 mod telemetry;
-mod wire;
+mod wire; // wire/ directory module (FLUX-088 split of former wire.rs)
 
 pub use encode::{deserialize_patches, hash_closure, hash_props, serialize_patches};
 pub use flux_syntax::opcode::Opcode;
