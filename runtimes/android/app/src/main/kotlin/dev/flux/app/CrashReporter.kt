@@ -24,7 +24,7 @@ public object CrashReporter {
 
     /** Records a crash as a [FluxError]. Invoked from the installed handler. */
     public fun report(message: String, callSites: List<String> = emptyList()) {
-        lastCrash = FluxError(message, FluxErrorKind.RUNTIME, callSites = callSites)
+        lastCrash = FluxError(FluxErrorKind.RUNTIME, message, callSites = callSites)
         Log.e("FluxCrash", lastCrash!!.summary)
     }
 

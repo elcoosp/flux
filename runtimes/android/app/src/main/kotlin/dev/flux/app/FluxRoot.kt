@@ -45,6 +45,7 @@ public fun FluxRoot(session: FluxSession) {
     // screen (blank/stale on hot reload, FLUX-019). The counter always changes,
     // forcing the re-read.
     var frameVersion by remember { mutableStateOf(0) }
+    var fluxError by remember { mutableStateOf<FluxError?>(null) }
 
     val executor = session.executor
     DisposableEffect(executor) {
@@ -52,7 +53,7 @@ public fun FluxRoot(session: FluxSession) {
         executor.onTreeChanged = {
             frameVersion++
         }
-        executor.onError = { errorMessage = it }
+        executor.onError = { fluxError = it }
         onDispose { /* session is retained by the ViewModel; not disposed here */ }
     }
 
@@ -81,26 +82,8 @@ public fun FluxRoot(session: FluxSession) {
             )
             else -> Text("Flux — connecting…", modifier = Modifier.align(Alignment.Center))
         }
-        errorMessage?.let { msg ->
-            ErrorOverlay(message = msg, modifier = Modifier.align(Alignment.BottomCenter))
+        fluxError?.let { err ->
+            ErrorOverlay(error = err, modifier = Modifier.align(Alignment.BottomCenter))
         }
-    }
-}
-
-/**
- * A red error banner shown when the VM or wire layer faults. Errors never crash
- * the host (FLUX-007 acceptance: gas exhaustion → red banner, no crash).
- */
-@Composable
-@Suppress("ktlint:standard:function-naming")
-private fun ErrorOverlay(
-    message: String,
-    modifier: Modifier,
-) {
-    Box(modifier = modifier) {
-        Text(
-            text = "Flux error: $message",
-            color = androidx.compose.ui.graphics.Color.Red,
-        )
     }
 }
