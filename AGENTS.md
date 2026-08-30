@@ -491,6 +491,30 @@ All agents work on `main` at once. No branches, no worktrees, no PRs.
   `git commit`, never `git commit -a`. Verify with
   `git diff --cached --name-only` before any commit.
 
+### 4.3 Commit autonomously — do NOT ask to commit
+
+When your change is complete and you have **verified it green** (the relevant
+test/lint/build command from §5 actually run and passed — not merely
+inspected), you MUST commit it yourself. Do not end your turn by asking the
+user "should I commit?" or "want me to commit?". Shipping the verified commit
+is part of finishing the job.
+
+- Run the verification FIRST (e.g. `cargo nextest run -p <crate>`, `cargo clippy
+  -p <crate> --all-targets`, `cargo fmt`, `swift test`, `./gradlew test`). Only
+  commit once that command reports success.
+- Then commit immediately with `git commit --only <your/files> -m "…"` (§4.2
+  rules still apply: `--only`, never `git add -A`, no other agents' files).
+- One logical change per commit; group tightly-related files (e.g. the table,
+  its parity guard, and the kit registration that the guard enforces) into a
+  single commit.
+- Reference the FLUX issue and follow the `<type>(<scope>): <subject>` form
+  (§4.1) in the message body. State what was verified (e.g.
+  "107 passed; clippy clean").
+- Do not commit build junk, untracked generated bundles, or other agents'
+  files. If a verification step cannot run in the available environment, say so
+  explicitly in your final report and still commit what you could verify — do
+  not block on asking.
+
 ---
 
 ## 5. Reviewer Checklist (Self-Review Before Committing)
