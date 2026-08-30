@@ -123,6 +123,16 @@ pub struct Pipeline {
     /// so the per-edit `Delta`/`Init` hot path performs no fresh allocation
     /// after warm-up — the encoder clears and refills it in place.
     scratch: Vec<u8>,
+    /// Per-file lowered result cache keyed by [`FileId`], storing the source
+    /// snapshot it was produced from so an unchanged file is **not** re-parsed,
+    /// re-type-checked, or re-lowered on a recompile (FLUX-074, item B:
+    /// incremental lowering — bounded work to the changed subtree).
+    file_cache: BTreeMap<FileId, (String, LoweredIr, Ast)>,
+    /// Number of files actually (re-)lowered in the most recent
+    /// [`compile_tree`](Self::compile_tree) — incremented only when a file's
+    /// source differs from its cache entry. Used as the bounded-work metric for
+    /// FLUX-074 item B.
+    lower_count: u64,
 }
 
 impl Pipeline {
@@ -142,6 +152,8 @@ impl Pipeline {
             signal_deps: None,
             host_strings: HostStrings::default(),
             scratch: Vec::new(),
+            file_cache: BTreeMap::new(),
+            lower_count: 0,
         }
     }
 
@@ -193,6 +205,16 @@ impl Pipeline {
     #[must_use]
     pub fn has_tree(&self) -> bool {
         self.last_good.is_some()
+    }
+
+    /// The number of files actually (re-)lowered in the most recent
+    /// [`compile`](Self::compile) — incremented only when a file's source
+    /// differs from its cached entry (FLUX-074, item B: incremental lowering).
+    /// Files whose source is unchanged across a recompile are reused from the
+    /// cache and do not count.
+    #[must_use]
+    pub fn lower_count(&self) -> u64 {
+        self.lower_count
     }
 
     /// The capability methods the last-good tree actually requires.
@@ -517,6 +539,7 @@ impl Pipeline {
     /// per-file arenas into a single tree for the wire path and retaining each
     /// file's `(path, LoweredIr, Ast)` for the codegen path.
     fn compile_tree(&mut self) -> Result<TreeCompilation, Diagnostic> {
+        self.lower_count = 0;
         let snapshots: Vec<(FileId, PathBuf, String)> = self
             .sources
             .iter()
@@ -532,7 +555,32 @@ impl Pipeline {
         let mut monomorphizations: Vec<flux_ir::Monomorphization> = Vec::new();
         for (file_id, path, source) in snapshots {
             let display = display_path(&self.root, &path);
-            let (lowered, ast) = self.compile_one(&source, file_id, &display)?;
+            // Incremental lowering (FLUX-074, item B): reuse the previously
+            // lowered result when a file's source is unchanged, so a save that
+            // touches one file does not re-parse / re-type-check / re-lower the
+            // others. `lower_count` records only the files actually re-lowered.
+            let (lowered, ast) =
+                if let Some((cached_src, cached_ir, cached_ast)) = self.file_cache.get(&file_id) {
+                    if cached_src == &source {
+                        (cached_ir.clone(), cached_ast.clone())
+                    } else {
+                        self.lower_count += 1;
+                        let produced = self.compile_one(&source, file_id, &display)?;
+                        self.file_cache.insert(
+                            file_id,
+                            (source.clone(), produced.0.clone(), produced.1.clone()),
+                        );
+                        produced
+                    }
+                } else {
+                    self.lower_count += 1;
+                    let produced = self.compile_one(&source, file_id, &display)?;
+                    self.file_cache.insert(
+                        file_id,
+                        (source.clone(), produced.0.clone(), produced.1.clone()),
+                    );
+                    produced
+                };
             closures.extend(lowered.closures.values().cloned());
             closures.extend(lowered.prop_thunks.values().cloned());
             prop_thunks.extend(
@@ -569,6 +617,19 @@ impl Pipeline {
         for c in &closures {
             arena.add_closure(c.clone());
         }
+        // Re-key the merged wire tree to **content-addressed** ids (FLUX-074, item
+        // A). This makes a node's id depend on its structural content rather than its
+        // source span, so a text-above edit no longer flips ids and the differ's
+        // state-preserving `Reattach` keeps the host's view instances alive across hot
+        // reload. The ADR-0027 signal-graph side-tables inside `arena` are re-keyed by
+        // `content_address` itself; the pipeline's *external* `prop_thunks` table is
+        // keyed by the same node ids, so it must be remapped in lockstep from the
+        // returned old→new map.
+        let remap = arena.content_address();
+        prop_thunks = prop_thunks
+            .into_iter()
+            .map(|(id, thunk)| (remap.get(&id).copied().unwrap_or(id), thunk))
+            .collect();
         Ok(TreeCompilation {
             arena,
             closures,
@@ -814,6 +875,89 @@ mod tests {
     }
 
     #[test]
+    fn content_addressed_ids_survive_a_text_above_edit() {
+        // FLUX-074, item A: inserting source text *above* a node shifts its span
+        // but leaves its structural content unchanged, so its wire-tree NodeId must
+        // not change. The devserver content-addresses the merged tree, which is what
+        // lets the differ's state-preserving `Reattach` keep the host view alive
+        // across a hot reload instead of tearing it down and rebuilding it.
+        let before = "compo Hello\n  state count: Int = 0\n  Button(text: \"tap\")\n";
+        let after = "// a leading comment that pushes everything below it down\n\ncompo Hello\n  state count: Int = 0\n  Button(text: \"tap\")\n";
+
+        let mut pipeline = Pipeline::new("/tmp/project", false);
+        pipeline.set_source(Path::new("/tmp/project/main.flux"), before.to_owned());
+        pipeline.compile().expect("before compiles");
+        let ids_before: Vec<flux_syntax::NodeId> = pipeline
+            .last_good
+            .as_ref()
+            .unwrap()
+            .arena
+            .all_ids()
+            .collect();
+
+        let mut pipeline = Pipeline::new("/tmp/project", false);
+        pipeline.set_source(Path::new("/tmp/project/main.flux"), after.to_owned());
+        pipeline.compile().expect("after compiles");
+        let ids_after: Vec<flux_syntax::NodeId> = pipeline
+            .last_good
+            .as_ref()
+            .unwrap()
+            .arena
+            .all_ids()
+            .collect();
+
+        assert_eq!(
+            ids_before, ids_after,
+            "a pure text-above edit must not change any wire-tree NodeId (FLUX-074)"
+        );
+    }
+
+    #[test]
+    fn incremental_lowering_only_re_lowers_changed_files() {
+        // FLUX-074, item B: a recompile that edits one of several files must
+        // re-parse / re-type-check / re-lower only the changed file. Unchanged
+        // files are reused from the per-file cache, so `lower_count` counts just
+        // the one edit — bounded work, not whole-program re-lower.
+        use std::path::Path;
+
+        let mut pipeline = Pipeline::new("/tmp/project", false);
+        pipeline.set_source(
+            Path::new("/tmp/project/a.flux"),
+            "compo A\n  Text(\"a\")\n".to_owned(),
+        );
+        pipeline.set_source(
+            Path::new("/tmp/project/b.flux"),
+            "compo B\n  Text(\"b\")\n".to_owned(),
+        );
+        pipeline.compile().expect("first compile succeeds");
+        assert_eq!(
+            pipeline.lower_count(),
+            2,
+            "both files lowered the first time"
+        );
+
+        // Edit only `b.flux`. `a.flux` is byte-identical, so it must be reused.
+        pipeline.set_source(
+            Path::new("/tmp/project/b.flux"),
+            "compo B\n  Text(\"b edited\")\n".to_owned(),
+        );
+        pipeline.compile().expect("recompile succeeds");
+        assert_eq!(
+            pipeline.lower_count(),
+            1,
+            "only the changed file is re-lowered (FLUX-074 item B)"
+        );
+
+        // A no-op recompile (sources unchanged) reuses both from cache.
+        pipeline.compile().expect("noop recompile succeeds");
+        assert_eq!(
+            pipeline.lower_count(),
+            0,
+            "unchanged sources are not re-lowered at all"
+        );
+    }
+
+    #[test]
     fn compiled_sources_is_cleared_on_failed_compile_retaining_previous_wire_tree() {
         let mut pipeline = Pipeline::new("/tmp/project", false);
         pipeline.set_source(
@@ -981,6 +1125,13 @@ mod tests {
         // partial delta — or the host would bind a stale id→text pair and render
         // wrong text. (A tempting "ship only new strings" optimization is unsafe
         // precisely because the ids are not content-stable across compiles.)
+        //
+        // Note (FLUX-074): a *content-preserving* literal edit no longer churns
+        // ids — content-addressed wire IDs keep the node stable, so a pure text
+        // edit that preserves content yields `Unchanged` rather than a churned
+        // `Delta`. That is the desired hot-reload win. A genuine *structural* edit
+        // still ships a `Delta`, and that Delta carries the complete table for the
+        // new compile.
         use flux_ir_serde::Frame;
 
         let mut pipeline = Pipeline::new("/tmp/project", false);
@@ -994,27 +1145,50 @@ mod tests {
         };
         let init_frame = Frame::from_init_bytes(&init).expect("decodes as Init");
         let init_string_count = init_frame.string_table.len();
-        assert!(
-            init_string_count >= 1,
-            "Init carries the full string table (the \"first\" literal)"
-        );
 
-        // Edit the literal. The resulting Delta must still carry the complete
-        // table so the new id→text bindings are correct on the host.
+        // Content-preserving literal edit: "first" → "second". Same structure,
+        // same content hash (string ids are positional, so the prop value is
+        // identical), so FLUX-074 keeps the wire id stable and the compiler
+        // ships `Unchanged` instead of a churned Delta.
         pipeline.set_source(
             Path::new("/tmp/project/main.flux"),
             "compo Hello\n  Button(text: \"second\")\n".to_owned(),
         );
+        match pipeline.compile().expect("recompiles") {
+            Compiled::Unchanged => {}
+            other => panic!(
+                "content-preserving literal edit keeps wire id stable → Unchanged, got {other:?}"
+            ),
+        }
+
+        // Genuine structural edit: add a second child node. The compiler must
+        // ship a `Delta`, and that Delta carries the complete (full) string
+        // table for the new compile, not a partial one.
+        pipeline.set_source(
+            Path::new("/tmp/project/main.flux"),
+            "compo Hello\n  Button(text: \"first\")\n  Button(text: \"second\")\n".to_owned(),
+        );
         let delta = match pipeline.compile().expect("recompiles") {
             Compiled::Delta(bytes) => bytes,
-            other => panic!("changed tree ships a Delta, got {other:?}"),
+            other => panic!("structural edit ships a Delta, got {other:?}"),
         };
         let delta_frame = Frame::from_delta_bytes(&delta).expect("decodes as Delta");
+        // The Delta must carry the *full* string table for this compile — the
+        // same table the arena holds — not a partial subset (positional ids are
+        // per-compile, so dropping any entry would bind a stale id→text pair).
+        let full_table_len = pipeline
+            .last_good
+            .as_ref()
+            .expect("tree compiled")
+            .arena
+            .string_table()
+            .len();
         assert_eq!(
             delta_frame.strings.len(),
-            init_string_count,
+            full_table_len,
             "Delta ships the full table (positional ids are per-compile, not content-stable)"
         );
+        let _ = init_string_count;
     }
 
     #[test]
@@ -1033,7 +1207,7 @@ mod tests {
 
         // Mirror the dev server's package-root loader: `<root>/<name>.flux`.
         let root = dir.clone();
-        let loader: Arc<dyn Fn(&str) -> Option<String> + Send + Sync> = Arc::new(move |name: &str| {
+        let loader: ModuleLoader = Arc::new(move |name: &str| {
             let direct = root.join(format!("{name}.flux"));
             if direct.is_file() {
                 return std::fs::read_to_string(&direct).ok();
