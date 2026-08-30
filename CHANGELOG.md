@@ -39,6 +39,43 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Android host VM — `IS_NULL` opcode port (FLUX-053) + Counter tap-handler binding — DONE `[verified]`
+- **`IS_NULL` opcode missing from the Kotlin host VM.** The Rust reference VM
+  (`flux-vm-ref`) and the ISA golden vectors emit `IS_NULL` (`0xD1`, 2-operand
+  dst/src) for null-safe access (FLUX-053), but the Kotlin host VM enum
+  (`Opcode.kt`) had no entry. Decoding any `0xD1` vector threw `INVALID_DISPATCH`,
+  so `IsaConformanceTest.is_null_{true,false}` failed. Added `IS_NULL(0xD1, 2)`
+  to `Opcode.kt` and the interpreter case in `StepResult.kt`, mirroring the
+  oracle exactly (`dst = (src == Null)`). `IsaConformanceTest` now 74/0.
+- **Counter tap handler never bound (fixture prop-name drift).**
+  `CounterIncrementE2ETest` decoded fine but rendered `tapped 0 times` after a
+  tap: the button's `onPress` handler was emitted on the wire under
+  FNV-1a(`"onClick"`)=20360, while the host `PropsIndex.BUTTON_ON_PRESS` derives
+  FNV-1a(`"onPress"`)=10279 (the canonical Flux prop name, per
+  `stdlib/button.flux` + `examples/counter/main.flux`). The mismatch left
+  `handlerId=0` so the tap did nothing. `gen_frames.rs` had hardcoded an
+  `onClick` inline source that drifted from `examples/counter`; corrected it to
+  `onPress` and regenerated `counter_init_frame.bin` from the canonical source so
+  the button binds. `CounterIncrementE2ETest` now 1/0; full `:host` suite 163/0.
+- Verification: `./gradlew :runtimes:android:host:test` → 163 passed, 0 failed.
+- **Host VM list-mutation opcodes ported (FLUX-072).** The same
+  opcode-parity discipline also covers the Kotlin host VM list opcodes
+  `0x85-0x88` (ListPush / ListInsert / ListRemove / ListClear), ported from
+  the Rust reference VM so `ForEach`/list-driven UI evaluates on-device
+  (`f6f2b17`). These are the VM-level support behind the FLUX-072 host-side
+  `ForEach` expansion.
+
+### Language — `use` module resolution end-to-end (FLUX-054 follow-on) — DONE
+- Module imports now resolve through a single `use` directive end-to-end:
+  `flux-types` gained the resolution pass (`checker.rs`, +338 lines) and
+  `flux-devserver::Pipeline` integrates it (`pipeline.rs`); `flux-ir`/`flux-lsp`/
+  `flux-cli` were consolidated so import syntax lowers to the one `use` form
+  (`parser.rs`/`ast.rs`/`lexer.rs`/`fmt/decl.rs` simplified, `doc.rs` trimmed).
+- The spec (`mlp-spec.md` / `mlp-appendices.md`) was updated to the single-`use`
+  module-import surface. `cargo nextest run --workspace` green (597/597) after
+  the resolution pass landed.
+- Commits: `5b9fa61` (resolution), `6cb88b7` (consolidate on single `use`).
+
 ### LANE-P — DevTools live telemetry bridge (PRD-P) — DONE `[verified]`
 - **Live telemetry host → server → gpui DevTools, end-to-end.** The host emits
   `FRAME_TELEMETRY` (0x10) frames over the existing `:7331` WS; `DevToolsRouter`
