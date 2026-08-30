@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 
 use flux_ir_serde::EnrichedTelemetryEvent;
 use flux_perf_harness::MetricRecord;
+use flux_syntax::SignalId;
 
 use crate::time_travel::{
     LogBuffer, LogEntry, NetworkLog, NetworkRecord, ReconstructedState, TimelineBuffer, ViewFrame,
@@ -194,6 +195,9 @@ pub struct DevToolsState {
     /// slider (`None` = live edge). Shared so other panes can reflect the
     /// scrubbed state (FLUX-062 time-travel UX).
     pub scrub_index: RwLock<Option<usize>>,
+    /// The signal node currently selected in the signal graph (None = none).
+    /// Selecting reveals the effect ids that re-run when the signal changes.
+    pub selected_signal: RwLock<Option<SignalId>>,
 }
 
 impl DevToolsState {
@@ -211,6 +215,7 @@ impl DevToolsState {
             active: RwLock::new(None),
             perf_records: RwLock::new(Vec::new()),
             scrub_index: RwLock::new(None),
+            selected_signal: RwLock::new(None),
         }
     }
 
@@ -221,10 +226,28 @@ impl DevToolsState {
         *self.scrub_index.read()
     }
 
+    /// The signal node currently selected in the signal graph (`None` = none).
+    #[must_use]
+    pub fn selected_signal(&self) -> Option<SignalId> {
+        *self.selected_signal.read()
+    }
+
     /// Sets the time-travel scrub index (`None` returns to the live edge) and
     /// notifies so every pane repaints to the scrubbed state.
     pub fn set_scrub_index(&self, index: Option<usize>) {
         *self.scrub_index.write() = index;
+    }
+
+    /// Toggles the selected signal node in the signal graph. Clicking a signal
+    /// selects it (revealing its reader effects); clicking it again deselects.
+    /// Selecting a different signal switches the selection.
+    pub fn toggle_signal_selection(&self, id: SignalId) {
+        let mut selected = self.selected_signal.write();
+        if *selected == Some(id) {
+            *selected = None;
+        } else {
+            *selected = Some(id);
+        }
     }
 
     /// Records the identity of the host now streaming telemetry.
@@ -506,6 +529,20 @@ mod tests {
             gas_remaining: 10,
             source_span: None,
         }
+    }
+
+    #[test]
+    fn toggle_signal_selection_switches_and_deselects() {
+        let state = DevToolsState::new();
+        // Selecting a signal reveals it as the active selection.
+        state.toggle_signal_selection(7);
+        assert_eq!(state.selected_signal(), Some(7));
+        // Selecting a different signal switches the selection.
+        state.toggle_signal_selection(12);
+        assert_eq!(state.selected_signal(), Some(12));
+        // Selecting the same signal again deselects it.
+        state.toggle_signal_selection(12);
+        assert_eq!(state.selected_signal(), None);
     }
 
     #[test]
