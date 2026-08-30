@@ -45,6 +45,7 @@ fn sample_events() -> Vec<TelemetryEvent> {
                 width: 3.0,
                 height: 4.0,
             }),
+            component_name: "Row".to_string(),
         },
         TelemetryEvent::ViewMutation {
             node_id: NodeId::from(8u32),
@@ -52,6 +53,7 @@ fn sample_events() -> Vec<TelemetryEvent> {
             parent_id: NodeId::from(2u32),
             mutation_kind: 1, // Remove
             frame: None,
+            component_name: "Button".to_string(),
         },
         TelemetryEvent::HandlerInvocation {
             handler_id: 5,

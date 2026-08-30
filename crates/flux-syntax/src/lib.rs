@@ -38,7 +38,7 @@ mod value;
 
 pub use ids::{
     ComponentId, DeclTag, EffectId, ExprTag, FileId, HandlerId, InstanceId, Key, NodeId, NodeTag,
-    PropIdx, SignalId, Span, StringId, TypeId, compute_node_id,
+    PropIdx, SignalId, SourceExcerpt, Span, StringId, TypeId, compute_node_id,
 };
 pub use node::{Child, NodeKind, NodeRef, Props};
 pub use patch::{ClosureRef, Patch, PropDiff};

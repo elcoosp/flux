@@ -95,7 +95,7 @@ fn init_frame_type_byte_is_0x02_and_string_count_is_u32() {
 
 #[test]
 fn error_frame_type_byte_is_0x03() {
-    let frame = Frame::error(9, "boom", Some(Span::new(0, 1, 2)));
+    let frame = Frame::error(9, "boom", Some(Span::new(0, 1, 2)), None);
     let bytes = frame.to_bytes();
     assert_eq!(&bytes[0..4], &magic_bytes());
     assert_eq!(bytes[4], PROTOCOL_VERSION);
@@ -157,6 +157,7 @@ fn patch_tags_match_d2() {
         bytecode_len: 0,
         captured_signals: vec![],
         span: Span::new(0, 0, 0),
+        excerpt: None,
     };
     let samples = [
         (

@@ -255,6 +255,7 @@ fn test_closure_ref_bytecode_range_matches_offset_and_length() {
         bytecode_len: 4,
         captured_signals: Vec::new(),
         span: Span::new(0, 0, 0),
+        excerpt: None,
     };
     assert_eq!(closure.bytecode_range(), 16..20);
 }

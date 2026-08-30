@@ -25,13 +25,20 @@ use crate::wire::{
 };
 use flux_ir::ClosureIR;
 use flux_syntax::{
-    ComponentId, FileId, HandlerId, NodeRef, Patch, SignalId, Span, StringId, StringTable, Value,
+    ComponentId, FileId, HandlerId, NodeRef, Patch, SignalId, SourceExcerpt, Span, StringId,
+    StringTable, Value,
 };
 
 /// Magic bytes `"FLUX"` in little-endian (`0x465C5558`).
 pub const MAGIC: u32 = 0x465C_5558;
 /// Current wire protocol version.
-pub const PROTOCOL_VERSION: u8 = 1;
+///
+/// Bumped 1 → 2 for the ADR-0057 `SourceExcerpt` field (carried on `ClosureRef`
+/// and the `Error` frame). v2 frames are not byte-compatible with v1 decoders,
+/// so an old host must fail closed (FLUX-050 / ADR-0056) rather than mis-decode.
+/// All three decoders (Rust round-trip, iOS, Android) are updated in lockstep in
+/// FLUX-075; no v1 host ships to users.
+pub const PROTOCOL_VERSION: u8 = 2;
 
 /// `frame_type` byte at header offset 5 (Appendix D §D.12).
 pub const FRAME_HELLO: u8 = 0x01;
@@ -183,6 +190,7 @@ fn write_closures(w: &mut Writer, closures: &[ClosureIR]) {
             bytecode_len: len,
             captured_signals: closure.captured_signals.clone(),
             span: closure.span,
+            excerpt: closure.excerpt.clone(),
         };
         encode_handler_def(w, closure.id, &closure_ref);
     }
@@ -654,6 +662,7 @@ fn decode_closures(r: &mut Reader<'_>) -> Result<Vec<ClosureIR>, WireError> {
             bytecode,
             captured_signals: closure_ref.captured_signals,
             span: closure_ref.span,
+            excerpt: closure_ref.excerpt,
             param_types: Vec::new(),
             return_type: flux_syntax::TypeId::from(0u32),
         });
@@ -894,18 +903,27 @@ pub struct ErrorFrame {
     pub message: String,
     /// Source span where the error occurred, if known.
     pub span: Option<Span>,
+    /// Server-computed source excerpt (path:line:col + snippet) for the cited
+    /// span (ADR-0057). `None` when the server had no source text for `span`.
+    pub excerpt: Option<SourceExcerpt>,
 }
 
 impl Frame {
     /// Builds an `Error` frame.
     #[must_use]
-    pub fn error(seq: u32, message: &str, span: Option<Span>) -> ErrorFrame {
+    pub fn error(
+        seq: u32,
+        message: &str,
+        span: Option<Span>,
+        excerpt: Option<SourceExcerpt>,
+    ) -> ErrorFrame {
         ErrorFrame {
             version: PROTOCOL_VERSION,
             seq,
             kind: FrameKind::Error,
             message: message.to_owned(),
             span,
+            excerpt,
         }
     }
 
@@ -936,12 +954,26 @@ impl Frame {
         } else {
             None
         };
+        // ADR-0057: trailing server-computed excerpt for the cited span.
+        let excerpt = if r.u8("error.excerpt.present")? != 0 {
+            Some(SourceExcerpt {
+                file_id: FileId::from(r.u32("error.excerpt.file")?),
+                byte_start: r.u32("error.excerpt.start")?,
+                byte_end: r.u32("error.excerpt.end")?,
+                line: r.u16("error.excerpt.line")?,
+                col: r.u16("error.excerpt.col")?,
+                snippet: crate::wire::decode_str(&mut r, "error.excerpt.snippet")?,
+            })
+        } else {
+            None
+        };
         Ok(ErrorFrame {
             version,
             seq,
             kind,
             message,
             span,
+            excerpt,
         })
     }
 }
@@ -968,6 +1000,19 @@ impl ErrorFrame {
             Some(span) => {
                 w.u8(1);
                 encode_span(&mut w, span);
+            }
+            None => w.u8(0),
+        }
+        // ADR-0057: trailing server-computed excerpt for the cited span.
+        match &self.excerpt {
+            Some(ex) => {
+                w.u8(1);
+                w.u32(ex.file_id);
+                w.u32(ex.byte_start);
+                w.u32(ex.byte_end);
+                w.u16(ex.line);
+                w.u16(ex.col);
+                encode_str(&mut w, &ex.snippet);
             }
             None => w.u8(0),
         }

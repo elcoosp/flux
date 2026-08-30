@@ -313,11 +313,8 @@ fn error_frame_round_trips() {
     // ADR-0057: the error frame carries a server-computed excerpt (path:line:col
     // + snippet) so the host renders source without a round-trip. Assert both the
     // span and the excerpt survive encode/decode.
-    let excerpt = SourceExcerpt::from_span(
-        Span::new(0, 12, 20),
-        "count = count + 1\nwrong line\n",
-    )
-    .expect("excerpt computes from source");
+    let excerpt = SourceExcerpt::from_span(Span::new(0, 12, 20), "count = count + 1\nwrong line\n")
+        .expect("excerpt computes from source");
     let frame = Frame::error(
         3,
         "type mismatch in Counter",

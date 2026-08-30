@@ -129,6 +129,9 @@ pub struct ClosureRef {
     pub captured_signals: Vec<SignalId>,
     /// Source span of the handler body.
     pub span: Span,
+    /// Server-computed source excerpt for off-device diagnostics (ADR-0057),
+    /// shipped inline so a VM fault maps `offset → handler → snippet` offline.
+    pub excerpt: Option<crate::ids::SourceExcerpt>,
 }
 
 impl ClosureRef {

@@ -68,6 +68,7 @@ fn arb_patch() -> impl Strategy<Value = Patch> {
                 bytecode_len: 4,
                 captured_signals: vec![SignalId::from(1u32)],
                 span: Span::new(0, 0, 4),
+                excerpt: None,
             },
         }),
     ]

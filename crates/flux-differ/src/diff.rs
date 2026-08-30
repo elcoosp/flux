@@ -228,6 +228,7 @@ fn closure_ref(bytecode: &[u8], captured: Vec<SignalId>, span: Span) -> ClosureR
         bytecode_len: bytecode.len() as u16,
         captured_signals: captured,
         span,
+        excerpt: None,
     }
 }
 
