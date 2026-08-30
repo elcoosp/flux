@@ -13,7 +13,7 @@ use gpui::{AnyElement, Context, IntoElement, Render, Window};
 
 use flux_perf_harness::MetricRecord;
 
-use crate::perf_record::{flame_rows, render_pane_rows};
+use crate::perf_record::render_pane_rows;
 use crate::row::{into_any, kv_row, rows_column};
 use crate::state::DevToolsState;
 
@@ -60,11 +60,4 @@ impl Render for TimelineView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         self.render_pane(cx)
     }
-}
-
-/// Builds the flamegraph lanes from the state's retained records (exposed for
-/// unit tests that render without a display).
-#[must_use]
-pub fn lanes_for(state: &DevToolsState) -> Vec<crate::perf_record::FlameRow> {
-    flame_rows(&state.perf_records())
 }

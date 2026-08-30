@@ -12,9 +12,9 @@
 //! red (over budget); within budget it is green. The bar width is the budget
 //! ratio on a linear scale so "looks full == at the limit" reads at a glance.
 
-use flux_perf_harness::{Budgets, LatencyMs, MetricKind, MetricRecord, Scenario, evaluate};
+use flux_perf_harness::{evaluate, Budgets, LatencyMs, MetricKind, MetricRecord, Scenario};
 
-use gpui::{AnyElement, Div, IntoElement, ParentElement, Pixels, Styled, px};
+use gpui::{px, AnyElement, Div, ParentElement, Styled};
 
 use crate::row::{empty_row, into_any, kv_row};
 
@@ -223,7 +223,7 @@ pub fn render_pane_rows(records: &[MetricRecord]) -> Vec<AnyElement> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flux_perf_harness::{LatencyMs, MetricSample, MetricRecord, Scenario};
+    use flux_perf_harness::{LatencyMs, MetricRecord, MetricSample, Scenario};
 
     fn record(scenario: Scenario, kind: MetricKind, p95: f64) -> MetricRecord {
         let samples = vec![MetricSample::latency(LatencyMs::from_raw(p95))];
@@ -277,7 +277,11 @@ mod tests {
     #[test]
     fn distinct_keys_make_distinct_lanes() {
         let stream = vec![
-            record(Scenario::AndroidDeclarativeDev, MetricKind::NodeMutation, 1.0),
+            record(
+                Scenario::AndroidDeclarativeDev,
+                MetricKind::NodeMutation,
+                1.0,
+            ),
             record(Scenario::AndroidDeclarativeDev, MetricKind::VmDispatch, 1.0),
             record(Scenario::IosImperativeDev, MetricKind::NodeMutation, 1.0),
         ];
