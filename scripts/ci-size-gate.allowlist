@@ -52,7 +52,7 @@ crates/flux-parser/src/fmt/expr.rs
 crates/flux-parser/src/lexer.rs
 crates/flux-parser/src/parser.rs
 crates/flux-perf-harness/src/metric.rs
-crates/flux-syntax/src/ids.rs
+
 crates/flux-types/src/capabilities.rs
 
 crates/flux-types/src/error.rs
