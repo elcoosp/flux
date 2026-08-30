@@ -93,6 +93,15 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   fails as designed; YAML validated (every callee declares `workflow_call:` and is
   referenced). No production code changed — CI + docs only, within the LANE-U
   (`docs/`, `.github/`, `scripts/`) ownership.
+- **Android gate hardened to HARD.** `android-check.yml` and the Android cells of
+  `compat-matrix.yml` previously ran their Gradle/kotlinc steps with
+  `continue-on-error` because the GitHub-hosted runners lacked `platforms;android-37`
+  (this repo pins `compileSdk = 37`). That is now stale: the live `actions/runner-images`
+  readme shows `ubuntu-24.04` preinstalls `android-37.0/37.1/37.2-beta` + Build-tools
+  37.0.0. Both Android jobs now run on `ubuntu-24.04` with the SDK-install, kotlinc
+  codegen check, and `:adapters:ui-kotlin:test :runtimes:android:app:test` steps as
+  HARD gates (no `continue-on-error`). The iOS compat cells stay best-effort (Xcode
+  version availability is a separate runner concern, not a code-correctness gate).
 
 ### Android host VM — `IS_NULL` opcode port (FLUX-053) + Counter tap-handler binding — DONE `[verified]`
 - **`IS_NULL` opcode missing from the Kotlin host VM.** The Rust reference VM
@@ -1275,11 +1284,24 @@ docs/issues) and the on-disk tree, not the prose above. Items marked
   codegen trace test pins it to a native container. **REMAINING (host-side):**
   `UIGestureRecognizer` / `Modifier.pointerInput` wiring is not in the hosts yet.
 
-### Stdlib — Image (FLUX-039) — PARTIAL
+### Stdlib — Image (FLUX-039) — DONE
 - `882215d` pins `Image` lowers to its native binding; native `ImageAdapter.swift`
-  / `ImageAdapter.kt` exist. **REMAINING (host-side):** the local/remote cache
-  (Coil on Android, `URLCache` on iOS) is not wired — grep finds no cache call
-  site in either adapter.
+  / `ImageAdapter.kt` exist. The host-side local/remote cache is now wired
+  (FLUX-039 completion):
+  - **Android:** `ImageCache` (LRU + single-flight, OkHttp-backed) lives in the
+    pure-JVM `:host` module with 6/6 JVM unit tests (cache hit on repeat load,
+    concurrent-same-URL single-flight, distinct-URL each-once, failure-not-cached,
+    LRU eviction, clear). `ShadowTreeRenderer` gained the missing `image` case
+    (`RenderImage`) — previously `Image` fell through to an empty container, so it
+    rendered nothing; it now resolves+decodes the bitmap via the shared
+    `FluxSession.imageCache`, with a placeholder while loading and a red box on
+    failure (BR-003).
+  - **iOS:** `ImageCache` actor backed by a dedicated `URLCache` (disk + memory)
+    plus single-flight, in `FluxUIKit`; `ImageAdapter` loads through it instead of
+    an ad-hoc `URLSession.shared` task. Unit tests added (`ImageCacheTests`).
+  - Caching is a host concern (no new wire field); the primitive only carries
+    `src`. Both hosts build/run: Android `:host` + `:app` compile green, iOS
+    `FluxApp` builds for the simulator under Swift 6 strict concurrency.
 
 ### Capabilities — six concrete native caps (FLUX-045) — PARTIAL
 - `597f969` declares Push/Biometric/Background/FileSystem/DeepLink/Sensors in

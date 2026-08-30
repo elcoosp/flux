@@ -9,10 +9,11 @@ name: compat-matrix
 #     Kotlin versions").
 #
 # The build/test steps mirror ios-check.yml / android-check.yml so a version bump only
-# touches the `matrix:` block, never the commands. Each cell is best-effort
-# (continue-on-error) until a version is confirmed provisionable on the runners — the
-# point of the matrix is to surface version drift, not to hard-red the tree on a runner
-# image that lacks a given Xcode/AGP/Kotlin.
+# touches the `matrix:` block, never the commands. The Android cells are HARD
+# (ubuntu-24.04 preinstalls android-37 + Build-tools 37, so every AGP/Kotlin cell
+# resolves and runs). The iOS cells stay best-effort (continue-on-error) because
+# Xcode-version availability on the macos runners is a separate environment concern,
+# not a code-correctness gate — the point of the matrix is to surface version drift.
 
 on:
   workflow_call:
@@ -86,8 +87,12 @@ jobs:
 
   android-matrix:
     name: Android (AGP ${{ matrix.agp }}, Kotlin ${{ matrix.kotlin }})
-    runs-on: ubuntu-latest
-    continue-on-error: true
+    # HARD GATE (Android cells): ubuntu-24.04 preinstalls android-37 + Build-tools
+    # 37, so every AGP/Kotlin cell resolves the SDK and runs. These cells must
+    # pass for a 1.0 cut (FLUX-069 / PRD-U contract-version surface). The iOS
+    # cells stay best-effort (Xcode-version availability is a separate runner
+    # concern, not a code-correctness gate).
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -136,10 +141,8 @@ jobs:
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: kotlinc compile-check of generated Compose
-        continue-on-error: true
+      - name: kotlinc compile-check of generated Compose (HARD)
         run: cargo test -p flux-codegen-kotlin generated_kotlin_parses -- --nocapture
 
-      - name: Run adapter & runtime unit tests
-        continue-on-error: true
+      - name: Run adapter & runtime unit tests (HARD)
         run: ./gradlew :adapters:ui-kotlin:test :runtimes:android:app:test --no-daemon

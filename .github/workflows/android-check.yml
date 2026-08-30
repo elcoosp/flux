@@ -9,10 +9,14 @@ name: android-check
 # directly here (see "Provision Compose toolchain"), so the check runs without
 # depending on `platforms;android-37` being installable on the runner.
 #
-# The Android SDK platform install below is best-effort: the GitHub-hosted
-# runner's SDK mirror does not yet offer android-37, which blocks the Android
-# app's own Gradle tests (a separate image/compileSdk concern, surfaced
-# non-fatally via continue-on-error on that step).
+# HARD GATE: the GitHub-hosted `ubuntu-24.04` image now preinstalls
+# `platforms;android-37` (verified against actions/runner-images: Android SDK
+# Platforms includes android-37.0/37.1/37.2-beta + Build-tools 37.0.0), which
+# matches this repo's `compileSdk = 37`. So the Android app's Gradle tests no
+# longer hit a missing-SDK environment failure and the gradle test step is HARD
+# (no continue-on-error). The kotlinc codegen check is also HARD — it must pass
+# for a 1.0 cut. (The Compose classpath is still provisioned from Google Maven
+# so the kotlinc check does not depend on a full platform install.)
 
 on:
   workflow_call:
@@ -39,7 +43,7 @@ permissions:
 jobs:
   android:
     name: gradlew tests + kotlinc codegen check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -54,10 +58,10 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android platform (best-effort; android-37 may be absent on the hosted runner)
+      - name: Install Android platform (ubuntu-24.04 preinstalls android-37; fail if absent)
         run: |
           yes | sdkmanager --licenses >/dev/null
-          sdkmanager "platforms;android-37" || echo "platforms;android-37 unavailable on this runner; the Compose-only kotlinc check does not require it"
+          sdkmanager "platforms;android-37"
 
       - name: Provision Compose toolchain from Google Maven
         # Resolve the full Compose BOM (runtime/foundation/material3/ui +
@@ -137,21 +141,18 @@ jobs:
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: kotlinc compile-check of generated Compose
+      - name: kotlinc compile-check of generated Compose (HARD)
         # Runs the real kotlinc compile-check now that the Compose classpath +
         # compiler plugin are provisioned above. Uses stable (flux-codegen-kotlin
         # and its deps compile without the nightly-only gpui-ui feature).
-        # continue-on-error: this is a best-effort compile-check. It is expected to
-        # surface genuine codegen defects in flux-codegen-kotlin (e.g. the emitted
-        # Compose uses shapes like Circle/Rect that are not valid Compose Shape
-        # APIs); such findings are reported in the step log but do not fail the job
-        # until the codegen is corrected.
-        continue-on-error: true
+        # HARD GATE: a codegen defect (e.g. emitted Compose using an invalid Shape
+        # API) must fail the release gate — fix flux-codegen-kotlin, do not relax
+        # the check. This is the FLUX-069 / PRD-U contract that generated Compose
+        # actually compiles.
         run: cargo test -p flux-codegen-kotlin generated_kotlin_parses -- --nocapture
 
-      - name: Run adapter & runtime unit tests
-        # Best-effort: the Android app needs platforms;android-37, which the
-        # hosted runner's SDK mirror does not yet provide. Keep this visible but
-        # non-fatal until a platform-37-capable runner image is in place.
-        continue-on-error: true
+      - name: Run adapter & runtime unit tests (HARD)
+        # HARD GATE: ubuntu-24.04 preinstalls android-37, so the app Gradle tests
+        # resolve the SDK and run. This is the Android half of the release gate —
+        # a failing adapter/runtime test must red the tree.
         run: ./gradlew :adapters:ui-kotlin:test :runtimes:android:app:test --no-daemon
