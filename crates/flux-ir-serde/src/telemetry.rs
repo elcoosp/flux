@@ -134,6 +134,50 @@ pub enum TelemetryEvent {
         /// Gas consumed; present only on finish (`is_start == false`).
         gas_used: Option<u32>,
     },
+    /// Emitted when the HTTP capability (FLUX-047) issues a request, so the
+    /// DevTools network inspector (FLUX-060) can show outbound traffic. Carries
+    /// the method, URL, latency-sensitive metadata, and (optionally) a request
+    /// body snippet — never the full body, to keep the telemetry frame small.
+    NetworkRequest {
+        /// Stable per-request id so the matching [`NetworkResponse`](Self::NetworkResponse)
+        /// can be correlated (a response with no matching request is a protocol error).
+        request_id: u32,
+        /// HTTP method, e.g. `GET`, `POST`.
+        method: String,
+        /// Fully-qualified request URL.
+        url: String,
+        /// Optional request body snippet (truncated). `None` for GET/HEAD.
+        body: Option<String>,
+        /// Opaque capability id that issued the request (diagnostics: which
+        /// `Http.fetch` call), carried as a u32 wire value.
+        capability_id: u32,
+    },
+    /// Emitted when a pending HTTP request resolves, so the inspector can pair
+    /// it with its [`NetworkRequest`](Self::NetworkRequest) and show status,
+    /// latency, and a response snippet.
+    NetworkResponse {
+        /// The request id this response answers.
+        request_id: u32,
+        /// HTTP status code (e.g. `200`, `404`).
+        status_code: u16,
+        /// Latency in milliseconds, measured host-side from send to resolve.
+        latency_ms: u32,
+        /// Optional response body snippet (truncated). `None` for empty bodies.
+        body: Option<String>,
+        /// `0`=Pending, `1`=Ready, `2`=Error (cell state, ADR-0044). A `2` with a
+        /// `body` snippet carries the error text instead of a payload.
+        result_kind: u8,
+    },
+    /// Emitted when the render-perf harness (PRD-J / FLUX-059) reports a
+    /// `MetricRecord` — the timeline/flamegraph data source in the DevTools.
+    /// The full record travels as the stable JSON produced by
+    /// `flux_perf_harness::MetricRecord::to_json` (the harness's canonical,
+    /// parseable document — PRD-J Implementation Decisions), so no new wire
+    /// *field* is introduced: the DevTools consumes the record verbatim.
+    PerfRecord {
+        /// The verbatim `MetricRecord` JSON emitted by the harness.
+        json: String,
+    },
 }
 
 /// Tag byte for [`TelemetryEvent::VmStep`].
@@ -144,6 +188,12 @@ const EVENT_SIGNAL_WRITE: u8 = 0x02;
 const EVENT_VIEW_MUTATION: u8 = 0x03;
 /// Tag byte for [`TelemetryEvent::HandlerInvocation`].
 const EVENT_HANDLER_INVOCATION: u8 = 0x04;
+/// Tag byte for [`TelemetryEvent::NetworkRequest`].
+const EVENT_NETWORK_REQUEST: u8 = 0x05;
+/// Tag byte for [`TelemetryEvent::NetworkResponse`].
+const EVENT_NETWORK_RESPONSE: u8 = 0x06;
+/// Tag byte for [`TelemetryEvent::PerfRecord`].
+const EVENT_PERF_RECORD: u8 = 0x07;
 
 impl TelemetryEvent {
     /// Encodes this event into `w` as a length-prefixed union (without the
@@ -222,6 +272,50 @@ impl TelemetryEvent {
                     }
                     None => w.u8(0),
                 }
+            }
+            TelemetryEvent::NetworkRequest {
+                request_id,
+                method,
+                url,
+                body,
+                capability_id,
+            } => {
+                w.u8(EVENT_NETWORK_REQUEST);
+                w.u32(*request_id);
+                encode_str(w, method);
+                encode_str(w, url);
+                match body {
+                    Some(b) => {
+                        w.u8(1);
+                        encode_str(w, b);
+                    }
+                    None => w.u8(0),
+                }
+                w.u32(*capability_id);
+            }
+            TelemetryEvent::NetworkResponse {
+                request_id,
+                status_code,
+                latency_ms,
+                body,
+                result_kind,
+            } => {
+                w.u8(EVENT_NETWORK_RESPONSE);
+                w.u32(*request_id);
+                w.u16(*status_code);
+                w.u32(*latency_ms);
+                match body {
+                    Some(b) => {
+                        w.u8(1);
+                        encode_str(w, b);
+                    }
+                    None => w.u8(0),
+                }
+                w.u8(*result_kind);
+            }
+            TelemetryEvent::PerfRecord { json } => {
+                w.u8(EVENT_PERF_RECORD);
+                encode_str(w, json);
             }
         }
         let end = w.buf_len();
@@ -304,6 +398,44 @@ impl TelemetryEvent {
                     gas_used,
                 })
             }
+            EVENT_NETWORK_REQUEST => {
+                let request_id = inner.u32("network_request.id")?;
+                let method = decode_str(&mut inner, "network_request.method")?;
+                let url = decode_str(&mut inner, "network_request.url")?;
+                let body = match inner.u8("network_request.body.present")? {
+                    0 => None,
+                    _ => Some(decode_str(&mut inner, "network_request.body")?),
+                };
+                let capability_id = inner.u32("network_request.cap")?;
+                Ok(TelemetryEvent::NetworkRequest {
+                    request_id,
+                    method,
+                    url,
+                    body,
+                    capability_id,
+                })
+            }
+            EVENT_NETWORK_RESPONSE => {
+                let request_id = inner.u32("network_response.id")?;
+                let status_code = inner.u16("network_response.status")?;
+                let latency_ms = inner.u32("network_response.latency")?;
+                let body = match inner.u8("network_response.body.present")? {
+                    0 => None,
+                    _ => Some(decode_str(&mut inner, "network_response.body")?),
+                };
+                let result_kind = inner.u8("network_response.result")?;
+                Ok(TelemetryEvent::NetworkResponse {
+                    request_id,
+                    status_code,
+                    latency_ms,
+                    body,
+                    result_kind,
+                })
+            }
+            EVENT_PERF_RECORD => {
+                let json = decode_str(&mut inner, "perf_record.json")?;
+                Ok(TelemetryEvent::PerfRecord { json })
+            }
             other => Err(WireError::InvalidTag {
                 tag: other,
                 context: "telemetry.event",
@@ -313,7 +445,18 @@ impl TelemetryEvent {
     }
 }
 
-/// A decoded `Telemetry` frame (Appendix D §D.12, kind `0x10`).
+impl TelemetryEvent {
+    /// Builds a [`PerfRecord`](Self::PerfRecord) telemetry event carrying the
+    /// verbatim `MetricRecord` JSON produced by `flux_perf_harness::
+    /// MetricRecord::to_json`. This is the single helper the dev server / harness
+    /// uses to emit a render-perf record onto the `0x10` telemetry frame (FLUX-059
+    /// / PRD-J) without introducing a new wire field — the record travels as the
+    /// harness's canonical, parseable JSON document.
+    #[must_use]
+    pub fn perf_record(json: impl Into<String>) -> Self {
+        Self::PerfRecord { json: json.into() }
+    }
+}
 ///
 /// Layout: `MAGIC(4) version(1) kind(0x10) event_count(2) [events...]`.
 #[derive(Clone, Debug, PartialEq)]
@@ -727,6 +870,49 @@ pub enum EnrichedTelemetryEvent {
         /// `.flux` source span of the handler, if resolvable.
         source_span: Option<Span>,
     },
+    /// An outbound HTTP request (FLUX-047), enriched (the network inspector
+    /// pairs it with its [`NetworkResponse`](Self::NetworkResponse)). Enrichment
+    /// carries no source span for now (a future phase may attach the `.flux`
+    /// `Http.fetch` call site); the variant stays field-compatible with the raw
+    /// [`TelemetryEvent::NetworkRequest`].
+    NetworkRequest {
+        /// Stable per-request id.
+        request_id: u32,
+        /// HTTP method.
+        method: String,
+        /// Fully-qualified request URL.
+        url: String,
+        /// Optional request body snippet (truncated).
+        body: Option<String>,
+        /// Opaque capability id that issued the request.
+        capability_id: u32,
+        /// `.flux` source span of the `Http.fetch` call, if resolvable.
+        source_span: Option<Span>,
+    },
+    /// A resolved HTTP response (FLUX-047), enriched.
+    NetworkResponse {
+        /// The request id this response answers.
+        request_id: u32,
+        /// HTTP status code.
+        status_code: u16,
+        /// Latency in milliseconds.
+        latency_ms: u32,
+        /// Optional response body snippet (truncated).
+        body: Option<String>,
+        /// `0`=Pending, `1`=Ready, `2`=Error (cell state, ADR-0044).
+        result_kind: u8,
+        /// `.flux` source span of the `Http.fetch` call, if resolvable.
+        source_span: Option<Span>,
+    },
+    /// A render-perf harness `MetricRecord` (PRD-J / FLUX-059) — the DevTools
+    /// timeline/flamegraph data source. Carries the verbatim `MetricRecord` JSON
+    /// produced by `flux_perf_harness::MetricRecord::to_json`; the DevTools
+    /// consumes it directly, so no new wire field is introduced. `PerfRecord`
+    /// has no source span (it is not tied to a `.flux` location).
+    PerfRecord {
+        /// The verbatim `MetricRecord` JSON emitted by the harness.
+        json: String,
+    },
 }
 
 impl EnrichedTelemetryEvent {
@@ -811,6 +997,54 @@ impl EnrichedTelemetryEvent {
                     None => w.u8(0),
                 }
                 encode_optional_span(w, *source_span);
+            }
+            EnrichedTelemetryEvent::NetworkRequest {
+                request_id,
+                method,
+                url,
+                body,
+                capability_id,
+                source_span,
+            } => {
+                w.u8(EVENT_NETWORK_REQUEST);
+                w.u32(*request_id);
+                encode_str(w, method);
+                encode_str(w, url);
+                match body {
+                    Some(b) => {
+                        w.u8(1);
+                        encode_str(w, b);
+                    }
+                    None => w.u8(0),
+                }
+                w.u32(*capability_id);
+                encode_optional_span(w, *source_span);
+            }
+            EnrichedTelemetryEvent::NetworkResponse {
+                request_id,
+                status_code,
+                latency_ms,
+                body,
+                result_kind,
+                source_span,
+            } => {
+                w.u8(EVENT_NETWORK_RESPONSE);
+                w.u32(*request_id);
+                w.u16(*status_code);
+                w.u32(*latency_ms);
+                match body {
+                    Some(b) => {
+                        w.u8(1);
+                        encode_str(w, b);
+                    }
+                    None => w.u8(0),
+                }
+                w.u8(*result_kind);
+                encode_optional_span(w, *source_span);
+            }
+            EnrichedTelemetryEvent::PerfRecord { json } => {
+                w.u8(EVENT_PERF_RECORD);
+                encode_str(w, json);
             }
         }
         let end = w.buf_len();
@@ -898,6 +1132,48 @@ impl EnrichedTelemetryEvent {
                     source_span,
                 })
             }
+            EVENT_NETWORK_REQUEST => {
+                let request_id = inner.u32("enriched.network_request.id")?;
+                let method = decode_str(&mut inner, "enriched.network_request.method")?;
+                let url = decode_str(&mut inner, "enriched.network_request.url")?;
+                let body = match inner.u8("enriched.network_request.body.present")? {
+                    0 => None,
+                    _ => Some(decode_str(&mut inner, "enriched.network_request.body")?),
+                };
+                let capability_id = inner.u32("enriched.network_request.cap")?;
+                let source_span = decode_optional_span(&mut inner)?;
+                Ok(EnrichedTelemetryEvent::NetworkRequest {
+                    request_id,
+                    method,
+                    url,
+                    body,
+                    capability_id,
+                    source_span,
+                })
+            }
+            EVENT_NETWORK_RESPONSE => {
+                let request_id = inner.u32("enriched.network_response.id")?;
+                let status_code = inner.u16("enriched.network_response.status")?;
+                let latency_ms = inner.u32("enriched.network_response.latency")?;
+                let body = match inner.u8("enriched.network_response.body.present")? {
+                    0 => None,
+                    _ => Some(decode_str(&mut inner, "enriched.network_response.body")?),
+                };
+                let result_kind = inner.u8("enriched.network_response.result")?;
+                let source_span = decode_optional_span(&mut inner)?;
+                Ok(EnrichedTelemetryEvent::NetworkResponse {
+                    request_id,
+                    status_code,
+                    latency_ms,
+                    body,
+                    result_kind,
+                    source_span,
+                })
+            }
+            EVENT_PERF_RECORD => {
+                let json = decode_str(&mut inner, "enriched.perf_record.json")?;
+                Ok(EnrichedTelemetryEvent::PerfRecord { json })
+            }
             other => Err(WireError::InvalidTag {
                 tag: other,
                 context: "enriched.event",
@@ -966,6 +1242,35 @@ pub fn enrich_telemetry(event: TelemetryEvent) -> EnrichedTelemetryEvent {
             gas_used,
             source_span: None,
         },
+        TelemetryEvent::NetworkRequest {
+            request_id,
+            method,
+            url,
+            body,
+            capability_id,
+        } => EnrichedTelemetryEvent::NetworkRequest {
+            request_id,
+            method,
+            url,
+            body,
+            capability_id,
+            source_span: None,
+        },
+        TelemetryEvent::NetworkResponse {
+            request_id,
+            status_code,
+            latency_ms,
+            body,
+            result_kind,
+        } => EnrichedTelemetryEvent::NetworkResponse {
+            request_id,
+            status_code,
+            latency_ms,
+            body,
+            result_kind,
+            source_span: None,
+        },
+        TelemetryEvent::PerfRecord { json } => EnrichedTelemetryEvent::PerfRecord { json },
     }
 }
 
@@ -979,7 +1284,12 @@ pub fn enrich_with_span(event: TelemetryEvent, span: Option<Span>) -> EnrichedTe
         EnrichedTelemetryEvent::VmStep { source_span, .. }
         | EnrichedTelemetryEvent::SignalWrite { source_span, .. }
         | EnrichedTelemetryEvent::ViewMutation { source_span, .. }
-        | EnrichedTelemetryEvent::HandlerInvocation { source_span, .. } => *source_span = span,
+        | EnrichedTelemetryEvent::HandlerInvocation { source_span, .. }
+        | EnrichedTelemetryEvent::NetworkRequest { source_span, .. }
+        | EnrichedTelemetryEvent::NetworkResponse { source_span, .. } => *source_span = span,
+        // `PerfRecord` carries no source span (it is not tied to a `.flux` location),
+        // so there is nothing to enrich.
+        EnrichedTelemetryEvent::PerfRecord { .. } => {}
     }
     enriched
 }
@@ -1019,4 +1329,62 @@ fn decode_str(r: &mut Reader<'_>, ctx: &'static str) -> Result<String, WireError
             context: ctx,
             at: 0,
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A representative `MetricRecord` JSON (PRD-J / FLUX-059). The DevTools
+    /// consumes this verbatim; the exact values are not asserted here — only
+    /// that the wire frame preserves the document byte-for-byte.
+    const SAMPLE_RECORD_JSON: &str = r#"{"scenario":"ios-imperative-dev","kind":"node-mutation","tree_size":50,"samples":[{"latency":1.2}]}"#;
+
+    #[test]
+    fn perf_record_round_trips_on_raw_frame() {
+        let event = TelemetryEvent::perf_record(SAMPLE_RECORD_JSON);
+        let frame = TelemetryFrame {
+            version: PROTOCOL_VERSION,
+            event_count: 1,
+            events: vec![event],
+        };
+        let bytes = frame.to_bytes();
+        let decoded = TelemetryFrame::from_bytes(&bytes).expect("frame decodes");
+        assert_eq!(decoded.events.len(), 1);
+        match &decoded.events[0] {
+            TelemetryEvent::PerfRecord { json } => assert_eq!(json, SAMPLE_RECORD_JSON),
+            other => panic!("expected PerfRecord, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn perf_record_round_trips_on_enriched_frame() {
+        let event = EnrichedTelemetryEvent::PerfRecord {
+            json: SAMPLE_RECORD_JSON.to_string(),
+        };
+        let frame = EnrichedTelemetryFrame {
+            version: PROTOCOL_VERSION,
+            event_count: 1,
+            events: vec![event],
+        };
+        let bytes = frame.to_bytes();
+        let decoded = EnrichedTelemetryFrame::from_bytes(&bytes).expect("frame decodes");
+        assert_eq!(decoded.events.len(), 1);
+        match &decoded.events[0] {
+            EnrichedTelemetryEvent::PerfRecord { json } => assert_eq!(json, SAMPLE_RECORD_JSON),
+            other => panic!("expected PerfRecord, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn perf_record_survives_enrich_pipeline() {
+        // The dev server enriches a raw event client-side with no span; the
+        // verbatim JSON must be preserved through that path too.
+        let raw = TelemetryEvent::perf_record(SAMPLE_RECORD_JSON);
+        let enriched = enrich_telemetry(raw);
+        match enriched {
+            EnrichedTelemetryEvent::PerfRecord { json } => assert_eq!(json, SAMPLE_RECORD_JSON),
+            other => panic!("expected PerfRecord after enrich, got {other:?}"),
+        }
+    }
 }
