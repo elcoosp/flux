@@ -9,7 +9,7 @@
 import Foundation
 
 /// Why a handler invocation terminated without producing a value.
-public enum VmErrorKind: Equatable {
+public enum VmErrorKind: Equatable, Sendable {
     /// The 100,000-instruction gas budget was exhausted (Appendix E §E.3).
     case gasExhausted
     /// An index (list/record/string) fell outside its bounds.

@@ -578,6 +578,13 @@ enum FluxBytecodeVM {
             case .mov:
                 regs[Int(instr.u8(0))] = reg(instr.u8(1))
 
+            case .isNull:
+                // FLUX-053 null-safe access (mirror flux-vm-ref IsNull): `dst` is
+                // `true` iff `src` holds `.null`. Operand order matches the oracle
+                // (dst = u8(0), src = u8(1)); see tests/isa-vectors/is_null_*.json.
+                let src = Int(instr.u8(1))
+                regs[Int(instr.u8(0))] = .bool(regs[src] == .null)
+
             case .gasCheck:
                 let budget = instr.u32(0)
                 if gas < budget {
@@ -1100,6 +1107,13 @@ enum FluxBytecodeVM {
 
             case .mov:
                 regs[Int(instr.u8(0))] = reg(instr.u8(1))
+
+            case .isNull:
+                // FLUX-053 null-safe access (mirror flux-vm-ref IsNull): `dst` is
+                // `true` iff `src` holds `.null`. Operand order matches the oracle
+                // (dst = u8(0), src = u8(1)); see tests/isa-vectors/is_null_*.json.
+                let src = Int(instr.u8(1))
+                regs[Int(instr.u8(0))] = .bool(regs[src] == .null)
 
             case .gasCheck:
                 let budget = instr.u32(0)

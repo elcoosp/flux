@@ -477,20 +477,28 @@ struct ShadowTreeReconciler {
         let effectiveProps = materializeProps(for: nodeId, fallbackProps: node.props)
 
         // Visit children first to find dirty descendants and collect their views.
+        // A `ForEach` node's `children` are a *template* splice, not real rows: the
+        // rows are expanded lazily by `collectChildViews` from the live list signal.
+        // So for a ForEach we must NOT recurse into the template here (that would
+        // build a stray template view) — the expansion below handles the real rows.
         var childViews: [AnyObject] = []
         var anyChildDirty = false
-        for child in node.children {
-            let childIds: [UInt32]
-            switch child {
-            case let .node(id):
-                childIds = [id]
-            case let .splice(_, items):
-                childIds = items.map { $0.node }
-            }
-            for cid in childIds {
-                let childDirty = reconcileDirty(nodeId: cid, parentId: node.id, signalIds: signalIds, nodes: nodes, report: &report)
-                anyChildDirty = anyChildDirty || childDirty
-                if let v = built[cid]?.view { childViews.append(v) }
+        if signalMeta[nodeId]?.itemSlot != nil {
+            childViews = []
+        } else {
+            for child in node.children {
+                let childIds: [UInt32]
+                switch child {
+                case let .node(id):
+                    childIds = [id]
+                case let .splice(_, items):
+                    childIds = items.map { $0.node }
+                }
+                for cid in childIds {
+                    let childDirty = reconcileDirty(nodeId: cid, parentId: node.id, signalIds: signalIds, nodes: nodes, report: &report)
+                    anyChildDirty = anyChildDirty || childDirty
+                    if let v = built[cid]?.view { childViews.append(v) }
+                }
             }
         }
 
@@ -514,7 +522,7 @@ struct ShadowTreeReconciler {
                         x: Double($0.frame.origin.x),
                         y: Double($0.frame.origin.y),
                         width: Double($0.frame.size.width),
-                        height: Double($0.frame.size.height),
+                        height: Double($0.frame.size.height)
                     )
                 }
                 fluxDevtoolsEmit(.viewMutation(nodeId: nodeId, nativeViewId: UInt64(nodeId), parentId: parentId, mutationKind: 0, frame: rect, componentName: componentNames[node.componentId] ?? "?"))
@@ -523,20 +531,15 @@ struct ShadowTreeReconciler {
             // Re-parent children so a dirty descendant lands in this view. For a
             // Router, navigation (signal 97) changes which single child is active,
             // so `collectChildViews` must be re-run to re-apply `routerActiveChildId`
-            // (which filters to exactly the active Screen and builds it). Re-attaching
-            // the blanket `childViews` collected above would keep showing the
-            // originally-built child and navigation would "do nothing".
+            // (which filters to exactly the active Screen and builds it). For a
+            // `ForEach` (itemSlot != nil) the same re-run re-expands the rows from
+            // the live list signal — without this the rows never appear after an
+            // `append`/`remove`/clear and the list stays blank (FLUX-072 / ADR-0050).
             let views: [AnyObject]
-            // Detect a router by the resolved adapter name (the server lowers it
-            // as a `component` with `componentId="Router"`, so the wire `NodeKind`
-            // is `.component`, not `.router`). This mirrors Android's
-            // `adapter?.kind == ROUTER_KIND` check and must not rely on the
-            // build-time `owner.isRouter` flag, which can be stale if
-            // `componentNames` was populated after the node was first built.
-            if node.kind == .router || componentNames[node.componentId] == "Router" {
+            if node.kind == .router || componentNames[node.componentId] == "Router" || signalMeta[nodeId]?.itemSlot != nil {
                 views = collectChildViews(of: node, nodes: nodes, report: &report)
                 #if DEBUG
-                NSLog("[FluxRT] reconcileDirty router: collected \(views.count) views for node \(nodeId)")
+                NSLog("[FluxRT] reconcileDirty router/foreach: collected \(views.count) views for node \(nodeId)")
                 #endif
             } else {
                 views = childViews
@@ -758,9 +761,6 @@ struct ShadowTreeReconciler {
             #endif
             return fallbackProps
         }
-        #if DEBUG
-        NSLog("[materialize] node \(nodeId) RUNNING thunk hash=\(Data(thunk.hash).map { String(format: "%02x", $0) }.joined()) bcLen=\(bytecode.count) deps=\(meta.deps) layout=\(meta.layout)")
-        #endif
         do {
             // The thunk only reads signals; run it against a copy of the live
             // graph so materialisation never mutates graph state. Derived strings

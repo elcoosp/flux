@@ -19,8 +19,13 @@ import Foundation
 #if !DEBUG
 /// Captures release-path crashes and renders them into a `FluxError` carrying
 /// the component id / source reference (PRD-R §9). Release-only.
-public final class CrashReporter {
+public final class CrashReporter: @unchecked Sendable {
     /// The most recent crash, if any, for display/telemetry.
+    ///
+    /// `@unchecked Sendable`: this is a process-global singleton. `lastCrash` is
+    /// only ever written from the installed uncaught-exception / signal handler,
+    /// a single serialized entry point, so cross-task shared mutable state is not
+    /// a concurrency hazard in practice.
     public private(set) var lastCrash: FluxError?
 
     public static let shared = CrashReporter()

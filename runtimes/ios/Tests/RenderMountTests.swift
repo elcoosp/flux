@@ -443,4 +443,110 @@ final class RenderMountTests: XCTestCase {
             )
         }
     }
+
+    /// FLUX-072 / ADR-0050 regression: a `ForEach` must re-expand its rows when the
+    /// backing list signal changes via a dispatch — not only at initial apply.
+    ///
+    /// Reproduces the reported To-Do bug: the list starts empty (so no rows render),
+    /// the user taps "Add task" which appends to the list signal; the handler writes
+    /// the list signal and `reconcileDirty` then runs. If the host only expanded the
+    /// ForEach in `apply(frame)`, the new element never produces a row and the todo
+    /// list stays blank — exactly what the user sees. This exercises the real
+    /// `FluxUIKit` adapters on the simulator (the same path the device uses).
+    @MainActor
+    func testForEachReExpandsRowsAfterDispatch() async {
+        let forEachId: UInt32 = 1
+        let templateRowId: UInt32 = 10
+        let listSignal: UInt32 = 5
+        let itemSlot: UInt32 = 9
+
+        // ForEach node carrying a single `.splice` template child (a Text row).
+        let forEachNode = mountNode(
+            forEachId,
+            componentId: 2, // Column-like container in the registry
+            kind: .forEach,
+            children: [.splice(itemCount: 1, items: [(key: UInt64(0), node: templateRowId)])]
+        )
+        let rowNode = mountNode(
+            templateRowId,
+            componentId: 0, // Text
+            props: [Prop(index: 0, value: .str(7))]
+        )
+
+        var table = StringTable()
+        table.intern(0, "Text")
+        table.intern(1, "Button")
+        table.intern(2, "Column")
+        table.intern(7, "todo")
+
+        let frame = FluxFrame(
+            version: 1, seq: 0, flags: 0x01,
+            root: forEachNode,
+            nodes: [forEachId: forEachNode, templateRowId: rowNode],
+            patches: [], handlers: [],
+            strings: [StringEntry(stringId: 7, value: "todo")],
+            state: [
+                StateCell(signalId: listSignal, value: .list([])),
+                StateCell(signalId: itemSlot, value: .null),
+            ],
+            files: [], componentNames: [],
+            signalMeta: [
+                forEachId: NodeSignalMeta(deps: [listSignal], thunk: nil, layout: [], itemSlot: itemSlot),
+                templateRowId: NodeSignalMeta(deps: [itemSlot], thunk: nil, layout: [], itemSlot: nil),
+            ]
+        )
+
+        let executor = FluxExecutor(graph: SignalGraph(), registry: AdapterRegistry(table: table))
+        _ = executor.apply(frame)
+
+        // Empty list => no rows rendered initially.
+        XCTAssertNil(executor.view(for: deriveRowId(forEachId, index: 0)),
+                     "empty list must render zero rows initially")
+
+        // Handler that appends a new element to the list signal:
+        // READ_SIGNAL r0, listSignal ; LOAD_STR_CONST r1, 50 ; LIST_PUSH r0, r1 ;
+        // WRITE_SIGNAL listSignal, r0 ; HALT
+        let appendBytecode: [UInt8] = [
+            0x10, 0x00, 0x05, 0x00, 0x00, 0x00, // READ_SIGNAL r0, signal 5
+            0xB3, 0x01, 0x32, 0x00, 0x00, 0x00, // LOAD_STR_CONST r1, string id 50
+            0x81, 0x00, 0x01,                   // LIST_PUSH r0, r1
+            0x11, 0x05, 0x00, 0x00, 0x00, 0x00, // WRITE_SIGNAL signal 5, r0
+            0x00,                               // HALT
+        ]
+        let closure = ClosureRef(
+            hash: Array(repeating: 0, count: 8),
+            bytecodeOffset: 0, bytecodeLen: UInt16(appendBytecode.count),
+            signalCount: 0, signals: [],
+            span: FluxSpan(fileId: 0, start: 0, end: 0), excerpt: nil
+        )
+        executor.registerHandler(1, closure: closure, bytecode: appendBytecode)
+
+        // Simulate the "Add task" tap. `dispatch(_:)` runs the handler in a
+        // `@MainActor` Task and reconciles when it completes, so we must yield to
+        // let that Task finish before asserting (mirrors Android's runCurrent()).
+        executor.dispatch(FluxEvent(handlerId: 1, nodeId: forEachId))
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertNil(executor.lastError, "append handler must not fault: \(String(describing: executor.lastError))")
+
+        // The list signal must have grown to one element...
+        let listVal = executor.graph.read(listSignal)
+        guard case let .list(items) = listVal else {
+            XCTFail("list signal should be a list, got \(String(describing: listVal))")
+            return
+        }
+        XCTAssertEqual(items.count, 1, "list signal must have grown to 1 element (got \(items.count))")
+
+        // ...and the ForEach must have re-expanded to one row view.
+        XCTAssertNotNil(executor.view(for: deriveRowId(forEachId, index: 0)),
+                        "ForEach must re-expand to 1 row after append")
+    }
+
+    /// Mirrors `ShadowTreeReconciler.deriveForEachRowId` so the test can address
+    /// the derived row id without reaching into the reconciler's internals.
+    private func deriveRowId(_ foreachId: UInt32, index: UInt32) -> UInt32 {
+        var h: UInt32 = foreachId &* 0x0100_0193
+        h = h ^ index
+        h = h &* 0x0100_0193
+        return h | 0x8000_0000
+    }
 }

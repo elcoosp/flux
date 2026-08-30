@@ -64,7 +64,7 @@ final class RenderPerfHarnessTests: XCTestCase {
             nodes[id] = mountNode(id, componentId: 0, props: [Prop(index: 0, value: .str(7))])
             // Each leaf depends on a distinct signal so a write marks exactly it
             // dirty (R1 — `reconcileDirty` touches only `dependents[S]`).
-            meta[id] = NodeSignalMeta(deps: [leafSignalBase + UInt32(i)], thunk: nil, layout: [])
+            meta[id] = NodeSignalMeta(deps: [leafSignalBase + UInt32(i)], thunk: nil, layout: [], itemSlot: nil)
         }
 
         let frame = FluxFrame(
