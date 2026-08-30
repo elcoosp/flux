@@ -298,16 +298,34 @@ New dependencies require an ADR (§1.3 vetting first).
 
 ### 3.2 Node IDs and Prop Indices (both load-bearing)
 
-**Node IDs** are `u32` FNV-1a-32 hashes (FLUX-071) from
-`flux_syntax::compute_node_id(parent_id, tag, span, key)` — **never
+There are **two** node-ID spaces; do not conflate them.
+
+**1. Canonical span-based IDs (ADR-0027 bridge).** These drive the
+type-checker/LSP/codegen bridge and are `u32` FNV-1a-32 hashes (FLUX-071)
+from `flux_syntax::compute_node_id(parent_id, tag, span, key)` — **never
 sequential**. Tags matter: expressions lower under `ExprTag`, declarations
 under `DeclTag`. Both wrap a `NodeKind` wire discriminant (`Component` = 0 …
 `Screen` = 6); `DeclTag` sets the high family bit (`0x80`) so the two families
 occupy disjoint byte ranges (`ExprTag` ∈ 0..=127, `DeclTag` ∈ 128..=255). Using
 the wrong family silently produces an ID that matches nothing (the codegen
-bridge in `flux-codegen-*/bridge.rs` depends on getting this exactly right). IDs
-are stable across edits where structure doesn't change; this drives state
-preservation and hot-swap.
+bridge in `flux-codegen-*/bridge.rs` depends on getting this exactly right).
+
+**2. Content-addressed wire IDs (FLUX-074, item A).** The devserver's wire path
+re-keys the merged tree to **content-addressed** ids via
+`IRArena::content_address()` *after* lowering. These ids fold a node's wire
+`kind`, `component_id`, prop *value* hash, its children's content ids
+(bottom-up, recursive), its position among siblings, and its parent's content
+id — and **ignore source spans**. Because a pure text-above edit shifts spans
+but not content or structure, a node's content-addressed id is stable across
+that edit, so the differ's state-preserving `Reattach` keeps the host's view
+instance (scroll/focus/animation) alive across hot reload instead of tearing it
+down. The ADR-0027 signal-graph side-tables (`signal_deps`/`prop_thunk`/
+`prop_layout`/`item_slot`) and the pipeline's external `prop_thunks` table are
+re-keyed in lockstep by `content_address`. Hosts still consume ids as opaque
+`u32`; the change only alters *which* `u32` each node gets — no protocol bump.
+
+Both spaces are stable across edits where structure doesn't change; this drives
+state preservation and hot-swap.
 
 **Prop indices** are FNV-1a-32 of the prop *name*, masked to `u16`
 (`flux_ir::lower::prop_index_for_name`). Host kits **derive** them the same

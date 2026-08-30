@@ -35,6 +35,32 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
     Build-time emission into the native dirs is intentionally out of scope
     (parallel ownership + unverifiable native compilation).
 
+### Incremental lowering + content-addressed wire IDs (flux-syntax, flux-ir, flux-devserver) — `[verified]`
+- **FLUX-074 — content-addressed subtree IDs + incremental lowering.** Editing
+  text *above* a node no longer flips its wire-tree `NodeId`, and a recompile that
+  edits one file re-lowers only that file.
+  - `flux-syntax/src/ids.rs`: added `content_addressed_id()` (FNV-1a-32, same
+    family/seed as `compute_node_id`) and made `fnv1a32` `pub` so derived id spaces
+    stay in agreement.
+  - `flux-ir/src/arena.rs`: added `IRArena::content_address() -> AHashMap<NodeId,
+    NodeId>`, an **acyclic two-pass** re-key (bottom-up parent-independent local id,
+    then top-down mix of parent's final id + position to break sibling collisions).
+    It ignores spans, preserves props/handlers/closures/string table, and re-keys the
+    ADR-0027 signal-graph side-tables (`signal_deps`/`prop_thunk`/`prop_layout`/
+    `item_slot`); returns the old→new map so callers re-key external id-keyed state.
+  - `flux-devserver/src/pipeline.rs`: `compile_tree()` now content-addresses the
+    merged wire tree and remaps the pipeline `prop_thunks` table in lockstep
+    (FLUX-074 item A). It also gained a per-file lower cache + `lower_count()`
+    metric: unchanged files skip parse/type-check/lower on recompile (FLUX-074 item
+    B, bounded work).
+  - Tests: `arena` (3) cover id stability across source move, change-on-content-edit,
+    and side-table/closures preservation; `pipeline` (2) cover end-to-end id
+    stability across a text-above edit and single-file incremental re-lower.
+  - `AGENTS.md` §3.2 updated to describe the two id spaces (canonical span-based
+    bridge vs content-addressed wire ids). `flux-parity` B.3 stays green (only id
+    *values* shift, which parity does not compare). No protocol bump — hosts still
+    consume opaque `u32`.
+
 ## 2026-08-29 — Flux syntax highlighting: grammar rebuild + compiler-driven LSP tokens
 
 ### Docs site + LSP (flux-lsp, flux-parser) — `[verified]`
