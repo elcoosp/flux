@@ -16,13 +16,17 @@ use crate::Platform;
 
 use crate::sources;
 
-/// Resolves the toolchain command to spawn for a platform.
+/// The resolved native-toolchain invocation for a platform: the argv to spawn
+/// (`program` is `args[0]`) and the working directory the spawn runs in (so a
+/// relative `-project`/`-workspace` or `gradlew` path resolves against the repo
+/// root rather than the process CWD).
 ///
 /// Injected so unit tests can drive `run` against a stubbed `xcodebuild` /
-/// `gradlew` without shelling out to the real toolchain. When the command is
+/// `gradlew` without shelling out to the real toolchain. When the resolution is
 /// `None` the toolchain is considered absent and only the generated sources are
 /// emitted (the CI-without-Xcode path).
-pub(crate) type CommandResolver = dyn Fn(Platform, &Path) -> Option<Vec<String>>;
+pub(crate) type CommandResolver =
+    dyn Fn(Platform, &Path) -> Option<(Vec<String>, std::path::PathBuf)>;
 
 /// Runs release codegen for `platform` over the project rooted at `root`.
 ///
@@ -109,17 +113,30 @@ fn invoke_native_toolchain(
     root: &Path,
     resolver: &CommandResolver,
 ) -> anyhow::Result<()> {
-    let Some(args) = resolver(platform, root) else {
-        // Toolchain absent → emit-only, but record the skipped verification.
+    let Some((args, cwd)) = resolver(platform, root) else {
+        // Toolchain absent → emit-only, but record the skipped verification and
+        // hand back the exact manual command so CI/local devs can finish the
+        // gate themselves (AGENTS.md §0.4). This is the manual-command fallback.
         match platform {
-            Platform::Ios => tracing::warn!(
-                "xcodebuild not found; emitted generated sources only — \
-                 build platforms/ios with Xcode/SwiftPM to produce the app"
-            ),
-            Platform::Android => tracing::warn!(
-                "gradle not found; emitted generated sources only — \
-                 build platforms/android with Gradle to produce the app"
-            ),
+            Platform::Ios => {
+                let project = root.join("runtimes").join("ios").join("FluxApp.xcodeproj");
+                println!(
+                    "warning: xcodebuild not found — emitted generated sources only.\n  \
+                     to finish the iOS release gate manually:\n    xcodebuild \
+                     -project {} -scheme FluxApp -configuration Release \
+                     -destination 'generic/platform=iOS' build",
+                    project.display()
+                );
+            }
+            Platform::Android => {
+                let gradlew = root.join("gradlew");
+                println!(
+                    "warning: gradle not found — emitted generated sources only.\n  \
+                     to finish the Android release gate manually:\n    {} \
+                     :runtimes:android:app:assembleDebug",
+                    gradlew.display()
+                );
+            }
         }
         return Ok(());
     };
@@ -130,10 +147,11 @@ fn invoke_native_toolchain(
             platform = platform
         );
     };
-    tracing::info!(program = %program, "invoking native toolchain");
+    tracing::info!(program = %program, cwd = %cwd.display(), "invoking native toolchain");
 
     let output = Command::new(program)
         .args(cmd_args)
+        .current_dir(cwd)
         .output()
         .with_context(|| format!("spawning native toolchain `{program}`"))?;
 
@@ -164,35 +182,87 @@ fn invoke_native_toolchain(
     );
 }
 
+/// The on-disk, repo-root-relative path of the real consumer app that wraps the
+/// generated sources for `platform`. `flux build` only invokes the native
+/// toolchain when this project actually exists — the generated-sources dir
+/// (`platforms/<platform>/Generated`, which `run` itself creates) is NOT a
+/// buildable app, so probing it would make the release gate fire spuriously.
+fn app_project_dir(platform: Platform, root: &Path) -> Option<std::path::PathBuf> {
+    let dir = match platform {
+        // The iOS consumer app is a standalone XcodeGen project at `runtimes/ios`
+        // (project.yml + FluxApp.xcodeproj); it imports the generated Swift via
+        // its own Sources glob. The `platforms/ios` dir is only generated output.
+        Platform::Ios => root.join("runtimes").join("ios"),
+        // Android shares the repo-root Gradle build; the app module lives under
+        // `runtimes/android/app` and is addressed by the `:runtimes:android:app`
+        // Gradle path. `platforms/android` is only generated output.
+        Platform::Android => root.join("runtimes").join("android").join("app"),
+    };
+    dir.exists().then_some(dir)
+}
+
 /// The default resolver: finds `xcodebuild` / `./gradlew` on `PATH` or the repo
 /// root and returns the concrete command to spawn.
-fn resolve_toolchain(platform: Platform, root: &Path) -> Option<Vec<String>> {
+///
+/// The native build is only attempted when a real consumer-app project exists
+/// for the platform (see [`app_project_dir`]); otherwise the resolver returns
+/// `None` and `flux build` stays in emit-only mode (the CI-without-Xcode path).
+fn resolve_toolchain(platform: Platform, root: &Path) -> Option<(Vec<String>, std::path::PathBuf)> {
     match platform {
         Platform::Ios => {
-            // Gate on a *real* consumer-app project wrapping Generated/, not just
-            // the generated dir (which `run` itself creates). LANE-F owns that
-            // scheme; until it exists, skip the spawn rather than invent one.
-            let scheme_dir = root.join("platforms").join("ios");
-            let has_app = scheme_dir.join("project.yml").exists()
-                || scheme_dir.join("FluxApp.xcodeproj").exists()
-                || scheme_dir.join("FluxApp.xcworkspace").exists();
-            if has_app && which("xcodebuild") {
-                Some(vec![
-                    "xcodebuild".to_owned(),
-                    "-scheme".to_owned(),
-                    "FluxApp".to_owned(),
-                    "-configuration".to_owned(),
-                    "Release".to_owned(),
-                    "-destination".to_owned(),
-                    "generic/platform=iOS".to_owned(),
-                    "build".to_owned(),
-                ])
+            // Only fire when both the Xcode app project and `xcodebuild` exist.
+            // The app project is `runtimes/ios` (project.yml + FluxApp.xcodeproj).
+            let app_dir = app_project_dir(platform, root);
+            let project_arg = app_dir.as_ref().map(|dir| {
+                if dir.join("FluxApp.xcworkspace").exists() {
+                    format!("-workspace={}", dir.join("FluxApp.xcworkspace").display())
+                } else if dir.join("FluxApp.xcodeproj").exists() {
+                    format!("-project={}", dir.join("FluxApp.xcodeproj").display())
+                } else {
+                    // XcodeGen manifest present — point xcodebuild at the generated
+                    // project dir so it discovers FluxApp.xcodeproj after `xcodegen`.
+                    format!("-project={}", dir.join("FluxApp.xcodeproj").display())
+                }
+            });
+            let has_app = app_dir
+                .as_ref()
+                .map(|dir| {
+                    dir.join("project.yml").exists()
+                        || dir.join("FluxApp.xcodeproj").exists()
+                        || dir.join("FluxApp.xcworkspace").exists()
+                })
+                .unwrap_or(false);
+            if let (Some(project_arg), Some(cwd)) = (project_arg, app_dir) {
+                if has_app && which("xcodebuild") {
+                    Some((
+                        vec![
+                            "xcodebuild".to_owned(),
+                            project_arg,
+                            "-scheme".to_owned(),
+                            "FluxApp".to_owned(),
+                            "-configuration".to_owned(),
+                            "Release".to_owned(),
+                            "-destination".to_owned(),
+                            "generic/platform=iOS".to_owned(),
+                            "build".to_owned(),
+                        ],
+                        cwd,
+                    ))
+                } else {
+                    None
+                }
             } else {
                 None
             }
         }
-        Platform::Android => find_gradlew(root)
-            .map(|gradlew| vec![gradlew, ":runtimes:android:app:assembleDebug".to_owned()]),
+        Platform::Android => app_project_dir(platform, root)
+            .and_then(|_| find_gradlew(root))
+            .map(|gradlew| {
+                (
+                    vec![gradlew, ":runtimes:android:app:assembleDebug".to_owned()],
+                    root.to_path_buf(),
+                )
+            }),
     }
 }
 
@@ -250,6 +320,119 @@ mod tests {
     }
 
     #[test]
+    fn app_project_dir_uses_real_ios_app_not_generated_dir() {
+        // The consumer app is at `runtimes/ios`, NOT `platforms/ios` (which is
+        // only generated output that `run` itself creates). The resolver must
+        // probe the real app so the release gate fires on a buildable project.
+        let tmp = std::env::temp_dir().join(format!(
+            "flux-build-appdir-{}-{}",
+            std::process::id(),
+            "ios"
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        // Only the generated dir exists — must NOT be treated as an app.
+        std::fs::create_dir_all(tmp.join("platforms").join("ios")).unwrap();
+        assert!(
+            app_project_dir(Platform::Ios, &tmp).is_none(),
+            "platforms/ios is generated output, not a buildable app"
+        );
+        // The real app project exists → resolves.
+        std::fs::create_dir_all(tmp.join("runtimes").join("ios")).unwrap();
+        assert!(
+            app_project_dir(Platform::Ios, &tmp).is_some(),
+            "runtimes/ios is the real consumer app"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn resolver_fires_only_with_real_ios_app() {
+        // Regression: the old resolver probed `platforms/ios` (only generated
+        // output that `run` itself creates) and would fire merely because sources
+        // had been emitted — before any real app existed — making the release
+        // gate fire spuriously. The resolver must return None when only the
+        // generated dir is present, and only resolve to a `xcodebuild` command
+        // once a real `runtimes/ios` app project exists AND `xcodebuild` is on
+        // PATH (neither env mutation nor a real Xcode install is assumed here).
+        let tmp = std::env::temp_dir().join(format!(
+            "flux-build-resgen-{}-{}",
+            std::process::id(),
+            "ios"
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        // Only the generated dir exists → never fire.
+        std::fs::create_dir_all(tmp.join("platforms").join("ios")).unwrap();
+        assert_eq!(
+            resolve_toolchain(Platform::Ios, &tmp),
+            None,
+            "resolver must not fire on generated-only dir"
+        );
+        // The real app project exists → resolve iff xcodebuild is available.
+        std::fs::create_dir_all(tmp.join("runtimes").join("ios")).unwrap();
+        std::fs::write(
+            tmp.join("runtimes").join("ios").join("project.yml"),
+            "name: FluxApp\n",
+        )
+        .unwrap();
+        let expected = if which("xcodebuild") {
+            Some((
+                vec![
+                    "xcodebuild".to_owned(),
+                    format!(
+                        "-project={}",
+                        tmp.join("runtimes")
+                            .join("ios")
+                            .join("FluxApp.xcodeproj")
+                            .display()
+                    ),
+                    "-scheme".to_owned(),
+                    "FluxApp".to_owned(),
+                    "-configuration".to_owned(),
+                    "Release".to_owned(),
+                    "-destination".to_owned(),
+                    "generic/platform=iOS".to_owned(),
+                    "build".to_owned(),
+                ],
+                tmp.join("runtimes").join("ios"),
+            ))
+        } else {
+            None
+        };
+        assert_eq!(resolve_toolchain(Platform::Ios, &tmp), expected);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn android_resolver_uses_local_gradlew() {
+        // With a local `./gradlew` and the `runtimes/android/app` module, the
+        // resolver must return the assembleDebug command targeting that module,
+        // run from the repo root.
+        let tmp = std::env::temp_dir().join(format!(
+            "flux-build-android-{}-{}",
+            std::process::id(),
+            "res"
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        create_stub(&tmp, "gradlew", "#!/bin/sh\nexit 0\n");
+        std::fs::create_dir_all(tmp.join("runtimes").join("android").join("app")).unwrap();
+        let resolved = resolve_toolchain(Platform::Android, &tmp);
+        assert_eq!(
+            resolved,
+            Some((
+                vec![
+                    tmp.join("gradlew").to_string_lossy().into_owned(),
+                    ":runtimes:android:app:assembleDebug".to_owned()
+                ],
+                tmp.clone()
+            ))
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
     fn absent_toolchain_emits_and_returns_ok() {
         // No xcodebuild/gradle on PATH and no platforms/ios scheme dir → the
         // resolver returns None → run() must still succeed after emitting.
@@ -294,8 +477,9 @@ mod tests {
         // Stub: a tiny shell that exits 1, capturing nothing useful. The handle
         // is closed by `create_stub`, so spawning it does not trip ETXTBSY.
         let stub_path = create_stub(&tmp, "fake_xcodebuild", "#!/bin/sh\nexit 1\n");
+        let cwd = tmp.clone();
         let resolver: Box<CommandResolver> =
-            Box::new(move |_, _| Some(vec![stub_path.clone(), "build".to_owned()]));
+            Box::new(move |_, _| Some((vec![stub_path.clone(), "build".to_owned()], cwd.clone())));
         let result = run_with(Platform::Ios, &tmp, &*resolver);
         assert!(result.is_err(), "non-zero toolchain must fail the build");
         let msg = format!("{result:?}");
@@ -320,8 +504,9 @@ mod tests {
         );
 
         let stub_path = create_stub(&tmp, "fake_xcodebuild_ok", "#!/bin/sh\nexit 0\n");
+        let cwd = tmp.clone();
         let resolver: Box<CommandResolver> =
-            Box::new(move |_, _| Some(vec![stub_path.clone(), "build".to_owned()]));
+            Box::new(move |_, _| Some((vec![stub_path.clone(), "build".to_owned()], cwd.clone())));
         let result = run_with(Platform::Ios, &tmp, &*resolver);
         assert!(
             result.is_ok(),
