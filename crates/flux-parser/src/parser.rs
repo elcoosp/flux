@@ -14,9 +14,10 @@ use flux_syntax::Span;
 
 use crate::ast::{
     Annotation, Arg, Ast, BinOp, Block, BlockItem, CapabilityDecl, ComponentDecl, ConstBinding,
-    Decl, Expr, ExprKind, FnDecl, FnName, Ident, ImportDecl, LetPattern, LifecycleKind, MatchArm,
-    MatchPattern, MatchPatternKind, MethodSig, Param, Pattern, PropDecl, StateDecl, StrPart,
-    TraitDecl, Type, TypeDecl, TypeKindAst, TypeParam, UseDecl, Variant,
+    Decl, DerivedDecl, Expr, ExprKind, FnDecl, FnName, Ident, ImportDecl, LetPattern,
+    LifecycleKind, MatchArm, MatchPattern, MatchPatternKind, MethodSig, Param, Pattern, PropDecl,
+    RecordDecl, RecordField, StateDecl, StrPart, TraitDecl, Type, TypeDecl, TypeKindAst, TypeParam,
+    UseDecl, Variant,
 };
 use crate::error::{Location, ParseError, line_at};
 use crate::lexer::{Token, TokenKind, lex};
@@ -299,6 +300,7 @@ impl<'s> Parser<'s> {
             TokenKind::Use => self.use_decl(),
             TokenKind::Fn => self.fn_decl().map(Decl::Fn),
             TokenKind::Type => self.type_decl(),
+            TokenKind::Record => self.record_decl(),
             TokenKind::Trait => self.trait_decl(),
             TokenKind::Capability => self.capability_decl(),
             TokenKind::At => self.component_decl(),
@@ -523,6 +525,36 @@ impl<'s> Parser<'s> {
             default,
             span: name.span,
         })
+    }
+
+    fn record_decl(&mut self) -> Result<Decl, ParseError> {
+        let start = self.eat(TokenKind::Record)?;
+        let name = self.ident()?;
+        self.eat(TokenKind::LBrace)?;
+        let mut fields = Vec::new();
+        self.skip_layout();
+        while !self.at(TokenKind::RBrace) {
+            let field_name = self.ident()?;
+            self.eat(TokenKind::Colon)?;
+            let ty = self.ty()?;
+            let field_span = Span::new(self.file_id, field_name.span.start, ty.span.end);
+            fields.push(RecordField {
+                name: field_name,
+                ty,
+                span: field_span,
+            });
+            self.skip_layout();
+            if !self.try_eat(TokenKind::Comma) {
+                break;
+            }
+            self.skip_layout();
+        }
+        self.eat(TokenKind::RBrace)?;
+        Ok(Decl::Record(RecordDecl {
+            name,
+            fields,
+            span: Span::new(self.file_id, start.start as u32, self.last_end()),
+        }))
     }
 
     fn type_decl(&mut self) -> Result<Decl, ParseError> {
@@ -803,6 +835,9 @@ impl<'s> Parser<'s> {
         if tok.kind == TokenKind::State || self.is_state_sigil(tok) {
             return self.state_decl();
         }
+        if tok.kind == TokenKind::Derived {
+            return self.derived_decl();
+        }
         let expr = self.expr()?;
         // A view call in the dream syntax reads `Name key: value, key: value`
         // (spaced props, no parentheses) and may own an indented child block.
@@ -869,6 +904,26 @@ impl<'s> Parser<'s> {
             ty,
             init: init.clone(),
             span: Span::new(self.file_id, start as u32, init.span.end),
+        }))
+    }
+
+    /// Parses `derived name = expr` — a computed signal that re-derives from
+    /// its sources. Mirrors [`Self::state_decl`] but produces a
+    /// [`BlockItem::Derived`] (FLUX-072 #12).
+    fn derived_decl(&mut self) -> Result<BlockItem, ParseError> {
+        let start = self.eat(TokenKind::Derived)?;
+        let name = self.ident()?;
+        let mut ty = None;
+        if self.try_eat(TokenKind::Colon) {
+            ty = Some(self.ty()?);
+        }
+        self.eat(TokenKind::Eq)?;
+        let init = self.expr()?;
+        Ok(BlockItem::Derived(DerivedDecl {
+            name,
+            ty,
+            init: init.clone(),
+            span: Span::new(self.file_id, start.start as u32, init.span.end),
         }))
     }
 
@@ -954,7 +1009,7 @@ impl<'s> Parser<'s> {
     }
 
     fn mul_expr(&mut self) -> Result<Expr, ParseError> {
-        let mut lhs = self.postfix_expr()?;
+        let mut lhs = self.unary_expr()?;
         loop {
             let op = match self.peek_kind() {
                 TokenKind::Star => Some(BinOp::Mul),
@@ -971,6 +1026,29 @@ impl<'s> Parser<'s> {
             }
         }
         Ok(lhs)
+    }
+
+    fn unary_expr(&mut self) -> Result<Expr, ParseError> {
+        if self.at(TokenKind::Not) {
+            self.pos += 1;
+            let operand = self.unary_expr()?;
+            let end = operand.span.end;
+            // Desugar `!x` to `x != true` so it reuses the existing `BinOp::Ne`
+            // lowering (EQ + NOT_BOOL) without inventing a new expression kind.
+            let true_lit = Expr {
+                kind: ExprKind::Bool(true),
+                span: operand.span,
+            };
+            return Ok(Expr {
+                kind: ExprKind::Binary {
+                    op: BinOp::Ne,
+                    lhs: Box::new(operand),
+                    rhs: Box::new(true_lit),
+                },
+                span: Span::new(self.file_id, end, end),
+            });
+        }
+        self.postfix_expr()
     }
 
     fn postfix_expr(&mut self) -> Result<Expr, ParseError> {
@@ -1848,6 +1926,7 @@ fn kind_name(kind: TokenKind) -> &'static str {
         TokenKind::Use => "use",
         TokenKind::Import => "import",
         TokenKind::Type => "type",
+        TokenKind::Record => "record",
         TokenKind::Trait => "trait",
         TokenKind::Capability => "capability",
         TokenKind::State => "state",
@@ -1939,6 +2018,12 @@ fn shift_block(block: Block, delta: u32) -> Block {
 fn shift_block_item(item: BlockItem, delta: u32) -> BlockItem {
     match item {
         BlockItem::State(decl) => BlockItem::State(StateDecl {
+            name: shift_ident(decl.name, delta),
+            ty: decl.ty.map(|t| shift_type(t, delta)),
+            init: shift_spans(decl.init, delta),
+            span: shift_span(decl.span, delta),
+        }),
+        BlockItem::Derived(decl) => BlockItem::Derived(DerivedDecl {
             name: shift_ident(decl.name, delta),
             ty: decl.ty.map(|t| shift_type(t, delta)),
             init: shift_spans(decl.init, delta),

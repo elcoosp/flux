@@ -85,3 +85,51 @@ impl TypeKind {
         }
     }
 }
+
+impl std::fmt::Display for TypeKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Int => write!(f, "Int"),
+            Self::Float => write!(f, "Float"),
+            Self::Bool => write!(f, "Bool"),
+            Self::String => write!(f, "String"),
+            Self::Unit => write!(f, "Unit"),
+            Self::List(inner) => write!(f, "List[{inner}]"),
+            Self::Map(key, value) => write!(f, "Map[{key}, {value}]"),
+            Self::Option(inner) => write!(f, "Option[{inner}]"),
+            Self::Fn(params, ret) => {
+                let params = params
+                    .iter()
+                    .map(|p| p.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "Fn({params}) -> {ret}")
+            }
+            Self::Record(fields) => {
+                let fields = fields
+                    .iter()
+                    .map(|(id, ty)| format!("{}: {}", *id, ty))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "{{ {fields} }}")
+            }
+            Self::Variant(id, payload) => {
+                let payload = payload
+                    .iter()
+                    .map(|p| p.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "{}({payload})", *id)
+            }
+            Self::Var(id) => write!(f, "?{id}"),
+            Self::Constrained(id, traits) => {
+                let traits = traits
+                    .iter()
+                    .map(|t| (*t).to_string())
+                    .collect::<Vec<_>>()
+                    .join(" + ");
+                write!(f, "?{id}: {traits}")
+            }
+        }
+    }
+}

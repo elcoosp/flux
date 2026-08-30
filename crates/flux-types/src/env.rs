@@ -37,6 +37,13 @@ pub enum CtorKind {
         /// types.
         props: Vec<(String, TcType)>,
     },
+    /// A product (struct) record type declared with `record Name { … }`.
+    /// Calling `Name(field: val, …)` constructs a `TcType::Record` with these
+    /// fields in order.
+    Record {
+        /// Field name → type, in declaration order.
+        fields: Vec<(String, TcType)>,
+    },
 }
 
 /// An algebraic data type definition.

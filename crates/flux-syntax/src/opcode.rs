@@ -97,6 +97,8 @@ pub enum Opcode {
     OrBool = raw::OR_BOOL,
     /// `NOT_BOOL` — boolean negation.
     NotBool = raw::NOT_BOOL,
+    /// `BOOL_EQ` — boolean equality (`==` / `!=` over `Bool` operands).
+    BoolEq = raw::BOOL_EQ,
     /// `STR_CONCAT` — string concatenation.
     StrConcat = raw::STR_CONCAT,
     /// `STR_INTERN` — intern a string literal.
@@ -129,6 +131,14 @@ pub enum Opcode {
     ListLen = raw::LIST_LEN,
     /// `LIST_CONCAT` — list concatenation.
     ListConcat = raw::LIST_CONCAT,
+    /// `LIST_INSERT` — insert `val` into `list` at `idx`.
+    ListInsert = raw::LIST_INSERT,
+    /// `LIST_REMOVE` — remove the element at `idx` from `list`.
+    ListRemove = raw::LIST_REMOVE,
+    /// `LIST_CLEAR` — clear `list`, leaving it empty.
+    ListClear = raw::LIST_CLEAR,
+    /// `LIST_REMOVE_ITEM` — remove the first element equal to `val`.
+    ListRemoveItem = raw::LIST_REMOVE_ITEM,
     /// `CALL_CAP` — invoke a host capability.
     CallCap = raw::CALL_CAP,
     /// `MATCH_TAG` — jump on variant tag match.

@@ -23,6 +23,9 @@ pub struct Block {
 pub enum BlockItem {
     /// `state count: Int = 0`.
     State(StateDecl),
+    /// `derived double = count * 2` — a computed signal that re-derives from
+    /// other signals whenever they change (FLUX-072 #12).
+    Derived(DerivedDecl),
     /// `width: size` — a prop entry in a trailing prop block.
     Prop {
         /// Prop name.
@@ -42,6 +45,22 @@ pub struct StateDecl {
     /// Declared type, absent when it is inferred from the initialiser.
     pub ty: Option<Type>,
     /// Initial value.
+    pub init: Expr,
+    /// Span of the declaration.
+    pub span: Span,
+}
+
+/// `derived double = count * 2`.
+///
+/// A computed signal: it re-evaluates `init` whenever any signal it reads
+/// changes, so it never desyncs from its sources (FLUX-072 #12).
+#[derive(Clone, Debug, PartialEq)]
+pub struct DerivedDecl {
+    /// Computed-signal name.
+    pub name: Ident,
+    /// Declared type, absent when inferred from the body.
+    pub ty: Option<Type>,
+    /// The expression that derives the value.
     pub init: Expr,
     /// Span of the declaration.
     pub span: Span,

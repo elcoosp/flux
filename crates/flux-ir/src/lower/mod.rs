@@ -36,7 +36,7 @@ pub use error::LoweringError;
 pub use mono::{Monomorphization, mangle_specialised};
 
 use flux_parser::{Ast, Decl, Expr, ExprKind};
-use flux_syntax::{Child, ComponentId, NodeId, NodeKind, Props, Span, Value};
+use flux_syntax::{Child, ComponentId, Key, NodeId, NodeKind, Props, Span, Value};
 use flux_types::TypedAST;
 
 /// Whether `kind` is a UI-producing expression that should become its own
@@ -180,6 +180,9 @@ struct Lowerer<'a> {
     handler_counter: flux_syntax::HandlerId,
     /// Generic-instantiation cursor (roadmap Phase 1).
     mono: mono::MonoTable,
+    /// Names of record types declared with `record Name { … }`; calls to these
+    /// construct values (FLUX-072), not capability invocations.
+    record_ctors: std::collections::HashSet<String>,
 }
 
 impl<'a> Lowerer<'a> {
@@ -196,6 +199,7 @@ impl<'a> Lowerer<'a> {
             signal_counter: flux_syntax::SignalId::from(0u32),
             handler_counter: flux_syntax::HandlerId::from(0u32),
             mono: mono::MonoTable::new(typed),
+            record_ctors: std::collections::HashSet::new(),
         }
     }
 
@@ -268,7 +272,7 @@ impl<'a> Lowerer<'a> {
         let scope = &self.signal_scope;
         if !prop_exprs.is_empty() {
             let mut intern = |s: &str| self.builder.intern_string(s);
-            match compile_prop_thunk(prop_exprs, scope, &mut intern) {
+            match compile_prop_thunk(prop_exprs, &self.typed.field_indices, scope, &mut intern) {
                 Ok((bytecode, deps, layout)) => {
                     let thunk_id = self.next_handler();
                     let closure =
@@ -320,6 +324,12 @@ impl<'a> Lowerer<'a> {
             | Decl::Import(_)
             | Decl::Use(_)
             | Decl::Const(_) => Ok(()),
+            // Record types register their constructor name so handler calls to
+            // `Name(field: …)` lower as value construction (FLUX-072).
+            Decl::Record(rec) => {
+                self.record_ctors.insert(rec.name.name.clone());
+                Ok(())
+            }
             #[allow(unreachable_patterns)]
             _ => Ok(()),
         }
@@ -339,6 +349,16 @@ impl<'a> Lowerer<'a> {
         // State cells are scoped per component.
         self.signal_scope.clear();
         self.signal_counter = flux_syntax::SignalId::from(0u32);
+
+        // Component props are backed by signals the host writes on each
+        // reconcile (props ARE the observable surface per §3.5). Allocating a
+        // signal id per prop lets handler bodies read/write `task`/`tasks`
+        // directly; an unseeded prop reads as `Null` in the reference oracle
+        // and is populated by the host at runtime (FLUX-072 #6 / #9).
+        for prop in &comp.props {
+            let sig = self.next_signal();
+            self.signal_scope.push((prop.name.name.clone(), sig));
+        }
 
         let children = self.lower_block(&comp.body, component_id)?;
         let node = Node {
@@ -373,6 +393,18 @@ impl<'a> Lowerer<'a> {
         for item in &block.items {
             match item {
                 flux_parser::BlockItem::State(decl) => {
+                    let sig = self.next_signal();
+                    let mut init_handlers: Vec<flux_syntax::HandlerId> = Vec::new();
+                    let init_value = self.lower_value(&decl.init, owner, &mut init_handlers)?;
+                    self.state_seed.push((sig, init_value));
+                    self.signal_scope.push((decl.name.name.clone(), sig));
+                }
+                flux_parser::BlockItem::Derived(decl) => {
+                    // A derived signal is a computed, read-only signal. For the
+                    // reference oracle we seed it with the lowered initial value
+                    // of its body so it is usable in prop positions; the host
+                    // runtime re-derives it from its sources on each change
+                    // (FLUX-072 #12).
                     let sig = self.next_signal();
                     let mut init_handlers: Vec<flux_syntax::HandlerId> = Vec::new();
                     let init_value = self.lower_value(&decl.init, owner, &mut init_handlers)?;
@@ -451,26 +483,44 @@ impl<'a> Lowerer<'a> {
                 Ok(Child::Node(id))
             }
             flux_parser::ExprKind::ForEach {
-                items,
-                key,
-                body: _,
+                items: items_expr,
+                key: key_expr,
+                body,
             } => {
                 let id = expr_node_id(expr, ExprNodeKind::ForEach);
-                // The items are produced at runtime by the host (keyed
-                // reconciliation, FLUX-014); we emit the ForEach node with an
-                // empty splice. Body is type-checked but not statically
-                // expanded.
+                // Real ForEach lowering (FLUX-072 / ADR-0050): lower the loop
+                // body into the child nodes that the host reconciles per item.
+                // The item binding is a runtime-scoped variable supplied by the
+                // host per iteration, so we lower the body structurally here;
+                // its prop expressions reference the item and are re-bound by
+                // the host when it instantiates the row for each element.
+                let row_children = self.lower_block(body, owner)?;
+                // `Child::Splice` carries the per-item child node ids as
+                // `(Key, NodeId)` pairs (arena.rs encode/decode contract). The
+                // key is the row's position in the source body; the host
+                // re-binds each row to its list element at reconcile time
+                // (FLUX-072 / ADR-0050).
+                let items: Vec<(Key, NodeId)> = row_children
+                    .into_iter()
+                    .enumerate()
+                    .flat_map(|(idx, child)| match child {
+                        Child::Node(id) => vec![(Key::from(idx as u64), id)],
+                        Child::Splice { items } => items,
+                        #[allow(unreachable_patterns)]
+                        _ => vec![],
+                    })
+                    .collect();
                 let node = Node {
                     id,
                     kind: NodeKind::ForEach,
                     component_id: owner,
                     props: Props::default(),
-                    children: vec![Child::Splice { items: vec![] }],
+                    children: vec![Child::Splice { items }],
                     handlers: vec![],
                     span: expr.span,
                 };
                 self.builder.pack(node);
-                self.emit_signal_metadata(id, &[], &[items, key])?;
+                self.emit_signal_metadata(id, &[], &[items_expr, key_expr])?;
                 Ok(Child::Node(id))
             }
             flux_parser::ExprKind::When {
@@ -657,7 +707,8 @@ impl<'a> Lowerer<'a> {
                     body,
                     &pattern_params,
                     &self.signal_scope,
-                    &std::collections::HashSet::new(),
+                    &self.record_ctors,
+                    &self.typed.field_indices,
                     expr.span,
                     &mut intern,
                 )?;

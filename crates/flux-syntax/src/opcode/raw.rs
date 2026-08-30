@@ -64,6 +64,8 @@ pub const AND_BOOL: u8 = 0x40;
 pub const OR_BOOL: u8 = 0x41;
 /// Boolean negation.
 pub const NOT_BOOL: u8 = 0x42;
+/// Boolean equality (`==` / `!=` over `Bool` operands).
+pub const BOOL_EQ: u8 = 0x43;
 
 /// String concatenation.
 pub const STR_CONCAT: u8 = 0x50;
@@ -100,6 +102,14 @@ pub const LIST_GET: u8 = 0x82;
 pub const LIST_LEN: u8 = 0x83;
 /// List concatenation.
 pub const LIST_CONCAT: u8 = 0x84;
+/// Insert `val` into `list` at `idx` (shifting later elements right).
+pub const LIST_INSERT: u8 = 0x85;
+/// Remove the element at `idx` from `list`, returning the shortened list.
+pub const LIST_REMOVE: u8 = 0x86;
+/// Clear `list`, leaving an empty list (same identity, length 0).
+pub const LIST_CLEAR: u8 = 0x87;
+/// Remove the first element of `list` equal to `val` (by value equality).
+pub const LIST_REMOVE_ITEM: u8 = 0x88;
 
 /// Invoke a host capability; the result arrives via a callback handler.
 pub const CALL_CAP: u8 = 0x90;

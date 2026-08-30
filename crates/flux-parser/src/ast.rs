@@ -16,7 +16,9 @@ pub use types::{
 
 pub use pattern::{LetPattern, MatchArm, MatchPattern, MatchPatternKind, Pattern};
 
-pub use expr::{BinOp, Block, BlockItem, Expr, ExprKind, LifecycleKind, StateDecl, StrPart};
+pub use expr::{
+    BinOp, Block, BlockItem, DerivedDecl, Expr, ExprKind, LifecycleKind, StateDecl, StrPart,
+};
 
 /// A call argument: positional or named.
 #[derive(Clone, Debug, PartialEq)]
@@ -66,6 +68,9 @@ pub enum Decl {
     Fn(FnDecl),
     /// `type Name = | A | B(Int)`.
     Type(TypeDecl),
+    /// `record Name { field: Ty, … }` — a product type whose fields are
+    /// addressed by name (distinct from the sum-type `type` declaration).
+    Record(RecordDecl),
     /// `trait Name[T] { … }`.
     Trait(TraitDecl),
     /// `capability Name { … }`.
@@ -84,6 +89,7 @@ impl Decl {
             Self::Component(decl) => decl.span,
             Self::Fn(decl) => decl.span,
             Self::Type(decl) => decl.span,
+            Self::Record(decl) => decl.span,
             Self::Trait(decl) => decl.span,
             Self::Capability(decl) => decl.span,
             Self::Const(decl) => decl.span,
@@ -212,5 +218,27 @@ pub struct Param {
     /// Default value, when the parameter is optional.
     pub default: Option<Expr>,
     /// Span of the parameter.
+    pub span: Span,
+}
+
+/// `record Name { field: Ty, … }` — a product (struct) type.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RecordDecl {
+    /// Record type name.
+    pub name: Ident,
+    /// Declared fields in source order.
+    pub fields: Vec<RecordField>,
+    /// Span of the whole declaration.
+    pub span: Span,
+}
+
+/// A single field of a [`RecordDecl`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct RecordField {
+    /// Field name.
+    pub name: Ident,
+    /// Declared field type.
+    pub ty: Type,
+    /// Span of the field declaration.
     pub span: Span,
 }

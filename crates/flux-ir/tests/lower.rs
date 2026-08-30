@@ -79,7 +79,10 @@ fn diff_from_empty_arena_is_nonempty() {
 }
 
 #[test]
-fn foreach_emits_empty_splice() {
+fn foreach_emits_populated_splice() {
+    // FLUX-072: ForEach lowers its body into a keyed splice instead of the
+    // old empty placeholder. The body is a `Text` leaf, so the splice carries
+    // one `(Key, NodeId)` pair keyed by the `key:` expression.
     let src = "compo List\n        state items: List[Int] = []\n        ForEach(items, key: fn(i) { i }) { item => Text(\"x\") }\n    ";
     let (ast, typed) = typed(src);
     let lowered = lower(&ast, &typed).expect("lower");
@@ -93,7 +96,9 @@ fn foreach_emits_empty_splice() {
             let children = v.children();
             assert_eq!(children.len(), 1, "ForEach has one child slot");
             match &children[0] {
-                Child::Splice { items } => assert!(items.is_empty(), "splice is empty"),
+                Child::Splice { items } => {
+                    assert!(!items.is_empty(), "splice is populated with the body node")
+                }
                 other => panic!("expected splice, got {other:?}"),
             }
         }

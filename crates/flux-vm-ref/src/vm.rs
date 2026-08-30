@@ -557,6 +557,10 @@ fn exec_tail(
                 let v = expect_bool(reg!(instr.u8(1)), instr.offset)?;
                 regs[usize::from(instr.u8(0))] = Value::Bool(!v);
             }
+            Opcode::BoolEq => {
+                let (x, y) = expect_bools(reg!(instr.u8(1)), reg!(instr.u8(2)), instr.offset)?;
+                regs[usize::from(instr.u8(0))] = Value::Bool(x == y);
+            }
             Opcode::StrIntern => {
                 regs[usize::from(instr.u8(0))] = Value::Str(instr.u32(1));
             }
@@ -641,6 +645,53 @@ fn exec_tail(
                 let mut items = a.clone();
                 items.extend(b.iter().cloned());
                 regs[usize::from(instr.u8(0))] = Value::List(items);
+            }
+            Opcode::ListInsert => {
+                let idx = usize::from(instr.u8(2));
+                let val = reg!(instr.u8(3));
+                let list = instr.u8(1);
+                match &mut regs[usize::from(list)] {
+                    Value::List(items) => {
+                        if idx > items.len() {
+                            return Err(VmError::at(VmErrorKind::IndexOutOfBounds, instr.offset));
+                        }
+                        items.insert(idx, val);
+                    }
+                    _ => return Err(VmError::at(VmErrorKind::TypeMismatch, instr.offset)),
+                }
+            }
+            Opcode::ListRemove => {
+                let idx = usize::from(instr.u8(2));
+                let list = instr.u8(1);
+                match &mut regs[usize::from(list)] {
+                    Value::List(items) => {
+                        if idx >= items.len() {
+                            return Err(VmError::at(VmErrorKind::IndexOutOfBounds, instr.offset));
+                        }
+                        items.remove(idx);
+                    }
+                    _ => return Err(VmError::at(VmErrorKind::TypeMismatch, instr.offset)),
+                }
+            }
+            Opcode::ListClear => {
+                let list = instr.u8(0);
+                if let Value::List(items) = &mut regs[usize::from(list)] {
+                    items.clear();
+                } else {
+                    return Err(VmError::at(VmErrorKind::TypeMismatch, instr.offset));
+                }
+            }
+            Opcode::ListRemoveItem => {
+                let list = instr.u8(0);
+                let val = reg!(instr.u8(1));
+                match &mut regs[usize::from(list)] {
+                    Value::List(items) => {
+                        if let Some(pos) = items.iter().position(|item| *item == val) {
+                            items.remove(pos);
+                        }
+                    }
+                    _ => return Err(VmError::at(VmErrorKind::TypeMismatch, instr.offset)),
+                }
             }
             Opcode::CallCap => {
                 let result_reg = instr.u8(0);

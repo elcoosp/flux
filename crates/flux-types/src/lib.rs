@@ -81,6 +81,13 @@ pub struct TypedAST {
     /// set so the compiler can resolve the form from the parse tree alone,
     /// without re-walking the type environment.
     pub constructors: HashSet<String>,
+    /// Records the resolved field **position** (0-based, declaration order) for
+    /// each `base.field` / `base?.field` expression, keyed by the expression's
+    /// `NodeId` (the same `compute_node_id` bridge the rest of lowering uses).
+    /// The bytecode emitter reads this to emit `GET_FIELD`/`SET_FIELD` with the
+    /// positional index the VM expects (records are stored as positional
+    /// `Vec<(PropIdx, Value)>`; FLUX-072).
+    pub field_indices: HashMap<NodeId, u16>,
 }
 
 impl TypedAST {
@@ -149,6 +156,7 @@ pub fn type_check(ast: &Ast) -> Result<TypedAST, TypeError> {
         types,
         instantiations: checker.instantiations,
         constructors: checker.env.variants.keys().cloned().collect(),
+        field_indices: checker.field_indices,
     })
 }
 

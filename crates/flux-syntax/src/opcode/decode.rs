@@ -47,6 +47,7 @@ impl Opcode {
             raw::AND_BOOL => Self::AndBool,
             raw::OR_BOOL => Self::OrBool,
             raw::NOT_BOOL => Self::NotBool,
+            raw::BOOL_EQ => Self::BoolEq,
             raw::STR_CONCAT => Self::StrConcat,
             raw::STR_INTERN => Self::StrIntern,
             raw::STR_EQ => Self::StrEq,
@@ -63,6 +64,10 @@ impl Opcode {
             raw::LIST_GET => Self::ListGet,
             raw::LIST_LEN => Self::ListLen,
             raw::LIST_CONCAT => Self::ListConcat,
+            raw::LIST_INSERT => Self::ListInsert,
+            raw::LIST_REMOVE => Self::ListRemove,
+            raw::LIST_CLEAR => Self::ListClear,
+            raw::LIST_REMOVE_ITEM => Self::ListRemoveItem,
             raw::CALL_CAP => Self::CallCap,
             raw::MATCH_TAG => Self::MatchTag,
             raw::EXTRACT_FIELD => Self::ExtractField,
@@ -129,6 +134,10 @@ impl Opcode {
             | Self::RecordEq
             | Self::ListGet
             | Self::ListConcat => width::REG_REG_REG,
+            Self::ListInsert => width::REG_REG_REG,
+            Self::ListRemove => width::REG_REG,
+            Self::ListClear => width::REG,
+            Self::ListRemoveItem => width::REG_REG,
             Self::ReadSignal | Self::WriteSignal | Self::CondJump | Self::CondJumpNot => {
                 width::REG_U32
             }
@@ -144,6 +153,7 @@ impl Opcode {
             Self::CallCap => width::CALL_CAP,
             Self::Await => width::AWAIT,
             Self::IsNull => width::REG_REG,
+            Self::BoolEq => width::REG_REG_REG,
         }
     }
 
@@ -201,6 +211,10 @@ impl Opcode {
             Self::ListGet => "LIST_GET",
             Self::ListLen => "LIST_LEN",
             Self::ListConcat => "LIST_CONCAT",
+            Self::ListInsert => "LIST_INSERT",
+            Self::ListRemove => "LIST_REMOVE",
+            Self::ListClear => "LIST_CLEAR",
+            Self::ListRemoveItem => "LIST_REMOVE_ITEM",
             Self::CallCap => "CALL_CAP",
             Self::MatchTag => "MATCH_TAG",
             Self::ExtractField => "EXTRACT_FIELD",
@@ -214,6 +228,7 @@ impl Opcode {
             Self::ToString => "TO_STRING",
             Self::Await => "AWAIT",
             Self::IsNull => "IS_NULL",
+            Self::BoolEq => "BOOL_EQ",
         }
     }
 }

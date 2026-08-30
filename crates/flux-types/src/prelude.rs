@@ -163,6 +163,7 @@ pub(crate) fn prelude(supply: &mut Supply) -> Env {
         "SafeArea",
         // FLUX-040 form primitives (PRD-N family).
         "Switch",
+        "Toggle",
         "Checkbox",
         "Slider",
         "Picker",

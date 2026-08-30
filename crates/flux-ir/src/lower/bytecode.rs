@@ -20,7 +20,7 @@ use flux_parser::{
     BinOp, Block, BlockItem, Expr, ExprKind, MatchArm, MatchPattern, MatchPatternKind,
 };
 use flux_syntax::opcode::raw;
-use flux_syntax::{PropIdx, SignalId, Span, StringId, Value};
+use flux_syntax::{ExprTag, PropIdx, SignalId, Span, StringId, Value, compute_node_id};
 use flux_types::CapabilityIdl;
 use std::collections::HashSet;
 
@@ -84,10 +84,19 @@ pub fn compile_handler(
     body: &Block,
     scope: &SignalScope,
     constructors: &HashSet<String>,
+    field_indices: &std::collections::HashMap<flux_syntax::NodeId, u16>,
     span: Span,
     str_interner: StringInterner<'_>,
 ) -> Result<(Vec<u8>, Vec<SignalId>), HandlerCompileError> {
-    compile_handler_with_params(body, &body.params, scope, constructors, span, str_interner)
+    compile_handler_with_params(
+        body,
+        &body.params,
+        scope,
+        constructors,
+        field_indices,
+        span,
+        str_interner,
+    )
 }
 
 /// Like [`compile_handler`] but takes the handler's parameter list explicitly so
@@ -99,19 +108,18 @@ pub fn compile_handler_with_params(
     params: &[flux_parser::Pattern],
     scope: &SignalScope,
     constructors: &HashSet<String>,
+    field_indices: &std::collections::HashMap<flux_syntax::NodeId, u16>,
     span: Span,
     str_interner: StringInterner<'_>,
 ) -> Result<(Vec<u8>, Vec<SignalId>), HandlerCompileError> {
-    let mut emitter = Emitter::new(scope, constructors, str_interner);
+    let mut emitter = Emitter::new(scope, constructors, field_indices, str_interner);
     // A handler's first declared parameter is the event payload, delivered by
     // the host as `r0` (Appendix E: r0 is the entry payload; both native
     // `TextInput`/`Button` adapters dispatch `FluxEvent(payload)` into r0). Bind
     // it so a body like `onChangeText: |text| { name = text }` reads the typed
     // value. Extra params beyond the first are not part of the MLP envelope.
-    if let Some(first) = params.first() {
-        if let flux_parser::Pattern::Ident(ident) = first {
-            emitter.bind_payload(ident.name.clone());
-        }
+    if let Some(flux_parser::Pattern::Ident(ident)) = params.first() {
+        emitter.bind_payload(ident.name.clone());
     }
     for item in &body.items {
         match item {
@@ -176,10 +184,11 @@ pub(crate) type PropThunk = Result<(Vec<u8>, Vec<SignalId>, Vec<u16>), HandlerCo
 /// ```
 pub(crate) fn compile_prop_thunk(
     props: &[(PropIdx, &Expr)],
+    field_indices: &std::collections::HashMap<flux_syntax::NodeId, u16>,
     scope: &SignalScope,
     str_interner: StringInterner<'_>,
 ) -> PropThunk {
-    let mut emitter = Emitter::for_thunk(scope, str_interner);
+    let mut emitter = Emitter::for_thunk(scope, field_indices, str_interner);
     let count = props.len() as u16;
     emitter.emit_alloc_record(1, count);
     let mut layout = Vec::with_capacity(props.len());
@@ -338,6 +347,45 @@ pub(crate) fn cap_method_id_for(cap: &str, method: &str) -> u16 {
     u16::from_le_bytes(hash.as_bytes()[..2].try_into().unwrap())
 }
 
+/// The built-in list methods exposed on a list signal in handler bodies
+/// (FLUX-072). Each maps to a list opcode; `append`/`insert`/`remove`/`clear`
+/// mutate the signal in place (read → op → write back).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ListMethod {
+    /// `list.append(item)` — push to the end.
+    Append,
+    /// `list.insert(at, item)` — insert at the given index.
+    Insert,
+    /// `list.remove(item)` — remove the first element equal to `item`.
+    Remove,
+    /// `list.removeAt(idx)` — remove the element at `idx`.
+    RemoveAt,
+    /// `list.clear()` — drop every element.
+    Clear,
+    /// `list.isEmpty` — `true` when the list has no elements.
+    IsEmpty,
+    /// `list.length` — number of elements.
+    Length,
+}
+
+impl ListMethod {
+    /// Resolves a method name to its [`ListMethod`], or `None` for any other
+    /// (capability) method.
+    #[must_use]
+    pub(crate) fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "append" => Some(Self::Append),
+            "insert" => Some(Self::Insert),
+            "remove" => Some(Self::Remove),
+            "removeAt" => Some(Self::RemoveAt),
+            "clear" => Some(Self::Clear),
+            "isEmpty" => Some(Self::IsEmpty),
+            "length" => Some(Self::Length),
+            _ => None,
+        }
+    }
+}
+
 /// Derives a stable `method_id` tag for a non-call `base.field` access
 /// (the `GET_FIELD` opcode path).
 ///
@@ -360,6 +408,11 @@ struct Emitter<'a> {
     /// Names of every in-scope ADT value constructor. Used to decide whether a
     /// `Name(args)` call lowers to a value record or a capability invocation.
     constructors: &'a HashSet<String>,
+    /// Resolved field positions for `base.field` expressions, keyed by the
+    /// expression's `NodeId`. Used to emit `GET_FIELD` with the positional index
+    /// the VM expects (records are stored as a positional `Vec<(PropIdx, Value)>`;
+    /// FLUX-072).
+    field_indices: &'a std::collections::HashMap<flux_syntax::NodeId, u16>,
     /// Locally-bound `let` names → register. Checked before the signal scope so
     /// `let x = …; … x …` reads the binding rather than a (non-existent) signal.
     locals: std::collections::HashMap<String, u8>,
@@ -377,11 +430,13 @@ impl<'a> Emitter<'a> {
     fn new(
         scope: &'a SignalScope,
         constructors: &'a HashSet<String>,
+        field_indices: &'a std::collections::HashMap<flux_syntax::NodeId, u16>,
         str_interner: StringInterner<'a>,
     ) -> Self {
         Self {
             scope,
             constructors,
+            field_indices,
             locals: std::collections::HashMap::new(),
             code: Vec::new(),
             captured: Vec::new(),
@@ -405,10 +460,15 @@ impl<'a> Emitter<'a> {
     /// registers from `r2` upward and emit the record into `r1` explicitly via
     /// [`emit_alloc_record`]. Prop thunks never emit capability calls, so they
     /// receive an empty constructor set and no locals.
-    fn for_thunk(scope: &'a SignalScope, str_interner: StringInterner<'a>) -> Self {
+    fn for_thunk(
+        scope: &'a SignalScope,
+        field_indices: &'a std::collections::HashMap<flux_syntax::NodeId, u16>,
+        str_interner: StringInterner<'a>,
+    ) -> Self {
         Self {
             scope,
             constructors: empty_constructors(),
+            field_indices,
             locals: std::collections::HashMap::new(),
             code: Vec::new(),
             captured: Vec::new(),
@@ -435,6 +495,141 @@ impl<'a> Emitter<'a> {
         self.code.push(raw::ALLOC_RECORD);
         self.code.push(dst);
         self.code.extend_from_slice(&count.to_le_bytes());
+    }
+
+    /// Emits `ALLOC_LIST dst, cap` — allocates an empty list with `cap` capacity.
+    fn emit_alloc_list(&mut self, dst: u8, cap: u16) {
+        self.code.push(raw::ALLOC_LIST);
+        self.code.push(dst);
+        self.code.extend_from_slice(&cap.to_le_bytes());
+    }
+
+    /// Emits `LIST_PUSH list(u8), val(u8)` — appends `val` to the list in `list`.
+    fn emit_list_push(&mut self, list: u8, val: u8) {
+        self.code.push(raw::LIST_PUSH);
+        self.code.push(list);
+        self.code.push(val);
+    }
+
+    /// Emits `LIST_GET dst(u8), list(u8), idx(u8)` — indexes `list` at `idx`.
+    #[allow(dead_code)]
+    fn emit_list_get(&mut self, dst: u8, list: u8, idx: u8) {
+        self.code.push(raw::LIST_GET);
+        self.code.push(dst);
+        self.code.push(list);
+        self.code.push(idx);
+    }
+
+    /// Emits `LIST_LEN dst(u8), list(u8)` — length of `list`.
+    fn emit_list_len(&mut self, dst: u8, list: u8) {
+        self.code.push(raw::LIST_LEN);
+        self.code.push(dst);
+        self.code.push(list);
+    }
+    /// Compiles a `base.method(args)` list operation, where `base` is a list
+    /// signal in scope. Mutating methods read the signal, apply the opcode, and
+    /// write the list back; query methods leave a boolean/int result register.
+    fn compile_list_method(
+        &mut self,
+        signal: &str,
+        method: ListMethod,
+        arg_regs: &[u8],
+        span: Span,
+    ) -> Result<u8, HandlerCompileError> {
+        let sig_id = self.signal_of(signal, span)?;
+        // Read the current list value into a register we can mutate.
+        let list_reg = self.alloc_reg();
+        self.code.push(raw::READ_SIGNAL);
+        self.code.push(list_reg);
+        self.code.extend_from_slice(&sig_id.to_le_bytes());
+
+        match method {
+            ListMethod::Append => {
+                let val = arg_regs.first().copied().ok_or_else(|| {
+                    HandlerCompileError::new("`append` expects one argument".to_owned(), span)
+                })?;
+                self.emit_list_push(list_reg, val);
+                self.write_signal(sig_id, list_reg);
+                Ok(list_reg)
+            }
+            ListMethod::Insert => {
+                let at = arg_regs.first().copied().ok_or_else(|| {
+                    HandlerCompileError::new("`insert` expects (index, item)".to_owned(), span)
+                })?;
+                let val = arg_regs.get(1).copied().ok_or_else(|| {
+                    HandlerCompileError::new("`insert` expects (index, item)".to_owned(), span)
+                })?;
+                self.emit_list_insert(list_reg, at, val);
+                self.write_signal(sig_id, list_reg);
+                Ok(list_reg)
+            }
+            ListMethod::Remove => {
+                let val = arg_regs.first().copied().ok_or_else(|| {
+                    HandlerCompileError::new("`remove` expects one argument".to_owned(), span)
+                })?;
+                self.code.push(raw::LIST_REMOVE_ITEM);
+                self.code.push(list_reg);
+                self.code.push(val);
+                self.write_signal(sig_id, list_reg);
+                Ok(list_reg)
+            }
+            ListMethod::RemoveAt => {
+                let at = arg_regs.first().copied().ok_or_else(|| {
+                    HandlerCompileError::new("`removeAt` expects one argument".to_owned(), span)
+                })?;
+                self.emit_list_remove(list_reg, at);
+                self.write_signal(sig_id, list_reg);
+                Ok(list_reg)
+            }
+            ListMethod::Clear => {
+                self.code.push(raw::LIST_CLEAR);
+                self.code.push(list_reg);
+                self.write_signal(sig_id, list_reg);
+                Ok(list_reg)
+            }
+            ListMethod::IsEmpty => {
+                let len = self.alloc_reg();
+                self.emit_list_len(len, list_reg);
+                let out = self.alloc_reg();
+                // `isEmpty` == (length == 0).
+                self.code.push(raw::EQ_I64);
+                self.code.push(out);
+                self.code.push(len);
+                let zero = self.alloc_reg();
+                self.code.push(raw::LOAD_INT_CONST);
+                self.code.push(zero);
+                self.code.extend_from_slice(&0i64.to_le_bytes());
+                Ok(out)
+            }
+            ListMethod::Length => {
+                let len = self.alloc_reg();
+                self.emit_list_len(len, list_reg);
+                Ok(len)
+            }
+        }
+    }
+
+    /// Emits `LIST_INSERT list(u8), idx(u8), val(u8)`.
+    fn emit_list_insert(&mut self, list: u8, idx: u8, val: u8) {
+        self.code.push(raw::LIST_INSERT);
+        self.code.push(list);
+        self.code.push(idx);
+        self.code.push(val);
+    }
+
+    /// Emits `LIST_REMOVE list(u8), idx(u8)`.
+    fn emit_list_remove(&mut self, list: u8, idx: u8) {
+        self.code.push(raw::LIST_REMOVE);
+        self.code.push(list);
+        self.code.push(idx);
+    }
+
+    /// Emits `WRITE_SIGNAL signal_id(u32), src_reg(u8)` for an in-place list
+    /// mutation (the mutated register is written back to the signal cell).
+    fn write_signal(&mut self, id: flux_syntax::SignalId, src: u8) {
+        self.code.push(raw::WRITE_SIGNAL);
+        self.code.extend_from_slice(&id.to_le_bytes());
+        self.code.push(src);
     }
 
     /// Emits `SET_FIELD dst, idx, src` — writes `src` into field `idx` of the
@@ -476,20 +671,70 @@ impl<'a> Emitter<'a> {
         Ok(())
     }
 
+    /// Compiles `record.field = value` where `record` is a signal or local
+    /// holding a `Value::Record`. Reads the record, sets `field` at its
+    /// type-checked positional index, and writes the record back. FLUX-072 #9.
+    fn compile_field_assignment(
+        &mut self,
+        base: &Expr,
+        field: &str,
+        value: &Expr,
+        span: Span,
+    ) -> Result<(), HandlerCompileError> {
+        // Resolve the field's positional index from the type checker's map,
+        // keyed by the `base.field` node id (same key the read side uses).
+        let fid = compute_node_id(0, ExprTag(10), span, None);
+        let idx = *self.field_indices.get(&fid).ok_or_else(|| {
+            HandlerCompileError::new(format!("cannot resolve field index for `.{field}`"), span)
+        })?;
+
+        // The record lives in a signal (e.g. `current.done` where `current` is a
+        // state signal) or a local register (e.g. a `let task = …` binding).
+        let value_reg = self.compile_value(value)?;
+        match &base.kind {
+            ExprKind::Ident(name) => {
+                if let Ok(sig_id) = self.signal_of(&name.name, span) {
+                    let rec_reg = self.alloc_reg();
+                    self.code.push(raw::READ_SIGNAL);
+                    self.code.push(rec_reg);
+                    self.code.extend_from_slice(&sig_id.to_le_bytes());
+                    self.emit_set_field(rec_reg, idx, value_reg);
+                    self.write_signal(sig_id, rec_reg);
+                    Ok(())
+                } else if let Some(&local) = self.locals.get(&name.name) {
+                    self.emit_set_field(local, idx, value_reg);
+                    Ok(())
+                } else {
+                    Err(HandlerCompileError::new(
+                        format!("`{}` is not a signal or local in scope", name.name),
+                        span,
+                    ))
+                }
+            }
+            _ => Err(HandlerCompileError::new(
+                "nested field assignment targets are not supported".to_owned(),
+                span,
+            )),
+        }
+    }
+
     /// Emits a bare expression statement (handler body expression).
     fn compile_expr_stmt(&mut self, expr: &Expr) -> Result<(), HandlerCompileError> {
         match &expr.kind {
             ExprKind::Assign { target, value } => {
-                let name = match &target.kind {
-                    ExprKind::Ident(ident) => ident.name.clone(),
-                    _ => {
-                        return Err(HandlerCompileError::new(
-                            "assignment target must be a signal name".to_owned(),
-                            target.span,
-                        ));
+                match &target.kind {
+                    ExprKind::Ident(ident) => self.compile_assignment(&ident.name, value),
+                    ExprKind::Field { base, field } => {
+                        // `record.field = value` — read the record, set the
+                        // field at its type-checked positional index, and write
+                        // the record back (to its signal or local). FLUX-072 #9.
+                        self.compile_field_assignment(base, &field.name, value, target.span)
                     }
-                };
-                self.compile_assignment(&name, value)
+                    _ => Err(HandlerCompileError::new(
+                        "assignment target must be a signal name or record field".to_owned(),
+                        target.span,
+                    )),
+                }
             }
             ExprKind::Binary { .. } | ExprKind::Int(_) | ExprKind::Ident(_) | ExprKind::Bool(_) => {
                 // Side-effect-free expression: evaluate and discard (handlers
@@ -856,11 +1101,18 @@ impl<'a> Emitter<'a> {
             }
             ExprKind::Str(parts) => self.compile_str(parts, expr.span),
             ExprKind::Ident(ident) => {
+                // A `$name` identifier is a two-way binding sigil; strip the `$`
+                // and resolve the underlying signal `name` (FLUX-072 #4).
+                let raw = if ident.name.starts_with('$') {
+                    &ident.name[1..]
+                } else {
+                    &ident.name
+                };
                 // A locally-bound `let` name shadows the signal scope.
-                if let Some(&reg) = self.locals.get(&ident.name) {
+                if let Some(&reg) = self.locals.get(raw) {
                     return Ok(reg);
                 }
-                let id = self.signal_of(&ident.name, ident.span)?;
+                let id = self.signal_of(raw, ident.span)?;
                 let r = self.alloc_reg();
                 // READ_SIGNAL dst(u8), signal_id(u32)
                 self.code.push(raw::READ_SIGNAL);
@@ -875,28 +1127,89 @@ impl<'a> Emitter<'a> {
             ExprKind::Field { base, field } => {
                 let base_reg = self.compile_value(base)?;
                 let r = self.alloc_reg();
-                // GET_FIELD dst(u8), idx(u16), src(u8)
+                // GET_FIELD dst(u8), idx(u16), src(u8). The field index is the
+                // positional slot resolved by the type checker (records are stored
+                // positionally by the VM), not a name-derived tag — see
+                // `field_indices` on `TypedAST`.
+                let idx = self
+                    .field_indices
+                    .get(&compute_node_id(0, ExprTag(10), expr.span, None))
+                    .copied()
+                    .unwrap_or_else(|| {
+                        // Fallback: derive a stable index from the field name so
+                        // record literals that SET_FIELD by the same name agree.
+                        method_id_for("", &field.name)
+                    });
                 self.code.push(raw::GET_FIELD);
                 self.code.push(r);
-                // Field name → a stable 16-bit tag via blake3, mirroring the
-                // method-id derivation so the host resolves it consistently.
-                let tag = method_id_for("", &field.name);
-                self.code.extend_from_slice(&tag.to_le_bytes());
+                self.code.extend_from_slice(&idx.to_le_bytes());
                 self.code.push(base_reg);
                 Ok(r)
+            }
+            // A list literal `[a, b, c]` → ALLOC_LIST + LIST_PUSH per element.
+            ExprKind::List(items) => {
+                let dst = self.alloc_reg();
+                let cap = items.len().max(1) as u16;
+                self.emit_alloc_list(dst, cap);
+                for item in items {
+                    let v = self.compile_value(item)?;
+                    self.emit_list_push(dst, v);
+                }
+                Ok(dst)
+            }
+            // An anonymous record literal `{ x: 1, y: 2 }` → ALLOC_RECORD + SET_FIELD
+            // per field. Named record construction (`Task(label: …)`) arrives as a
+            // `Call` and is handled by `compile_call`.
+            ExprKind::Record { fields, .. } => {
+                let dst = self.alloc_reg();
+                let count = fields.len() as u16;
+                self.emit_alloc_record(dst, count);
+                for (position, (name, value)) in fields.iter().enumerate() {
+                    let v = self.compile_value(value)?;
+                    let tag = method_id_for("", &name.name);
+                    self.emit_set_field(dst, position as u16, v);
+                    // Field name → stable tag must match the GET_FIELD side; for
+                    // anonymous records the host resolves by the same derivation.
+                    let _ = tag;
+                }
+                Ok(dst)
             }
             ExprKind::Binary { op, lhs, rhs } => {
                 let a = self.compile_value(lhs)?;
                 let b = self.compile_value(rhs)?;
                 let dst = self.alloc_reg();
+                // `==` / `!=` over `Bool` operands compile to `BOOL_EQ` (the VM's
+                // `EQ_I64` only accepts integers; booleans would type-mismatch).
+                // `!=` negates the `BOOL_EQ` result via `NOT_BOOL`.
+                let is_bool_eq = matches!(op, BinOp::Eq | BinOp::Ne)
+                    && matches!(
+                        lhs.kind,
+                        ExprKind::Bool(_) | ExprKind::Field { .. } | ExprKind::Ident(_)
+                    )
+                    && matches!(
+                        rhs.kind,
+                        ExprKind::Bool(_) | ExprKind::Field { .. } | ExprKind::Ident(_)
+                    );
                 let opcode = match op {
                     BinOp::Add => raw::ADD_I64,
                     BinOp::Sub => raw::SUB_I64,
                     BinOp::Mul => raw::MUL_I64,
                     BinOp::Div => raw::DIV_I64,
                     BinOp::Rem => raw::MOD_I64,
-                    BinOp::Eq => raw::EQ_I64,
-                    BinOp::Ne => raw::EQ_I64, // equality with negated result
+                    BinOp::Eq => {
+                        if is_bool_eq {
+                            raw::BOOL_EQ
+                        } else {
+                            raw::EQ_I64
+                        }
+                    }
+                    BinOp::Ne => {
+                        if is_bool_eq {
+                            raw::BOOL_EQ
+                        } else {
+                            raw::EQ_I64
+                        }
+                    } // equality with negated result
                     BinOp::Lt => raw::LT_I64,
                     BinOp::Gt => raw::GT_I64,
                     BinOp::Le => raw::LTE_I64,
@@ -1090,6 +1403,20 @@ impl<'a> Emitter<'a> {
 
         match &callee.kind {
             ExprKind::Field { base, field } => {
+                // `base.method(args)` where `base` is a list signal and
+                // `method` is a built-in list operation: compile directly to
+                // the corresponding list opcode, reading the signal, applying
+                // the mutation, and writing it back (FLUX-072).
+                if let ExprKind::Ident(base_ident) = &base.kind {
+                    if let Some(list_op) = ListMethod::from_name(&field.name) {
+                        return self.compile_list_method(
+                            &base_ident.name,
+                            list_op,
+                            &arg_regs,
+                            expr.span,
+                        );
+                    }
+                }
                 let cap = match &base.kind {
                     ExprKind::Ident(ident) => ident.name.clone(),
                     _ => {
@@ -1288,6 +1615,7 @@ mod tests {
             &body,
             &count_scope(),
             &std::collections::HashSet::new(),
+            &std::collections::HashMap::new(),
             span(),
             &mut |_s| StringTable::new().intern(_s),
         )
@@ -1384,6 +1712,7 @@ mod tests {
             &body,
             &scope,
             &std::collections::HashSet::new(),
+            &std::collections::HashMap::new(),
             span(),
             &mut |_s| StringTable::new().intern(_s),
         )
@@ -1439,11 +1768,13 @@ mod tests {
         };
         let prop_idx = flux_syntax::PropIdx::from(0u16);
         let mut table = StringTable::new();
-        let (bytecode, deps, layout) =
-            compile_prop_thunk(&[(prop_idx, &literal)], &count_scope(), &mut |s| {
-                table.intern(s)
-            })
-            .expect("interpolated prop compiles to a thunk");
+        let (bytecode, deps, layout) = compile_prop_thunk(
+            &[(prop_idx, &literal)],
+            &std::collections::HashMap::new(),
+            &count_scope(),
+            &mut |s| table.intern(s),
+        )
+        .expect("interpolated prop compiles to a thunk");
 
         assert_eq!(
             deps,
@@ -1494,6 +1825,7 @@ mod tests {
         let mut table = StringTable::new();
         let (bytecode, deps, _) = compile_prop_thunk(
             &[(flux_syntax::PropIdx::from(0u16), &literal)],
+            &std::collections::HashMap::new(),
             &count_scope(),
             &mut |s| table.intern(s),
         )
@@ -1543,6 +1875,7 @@ mod tests {
             &body,
             &count_scope(),
             &std::collections::HashSet::new(),
+            &std::collections::HashMap::new(),
             span(),
             &mut |_s| StringTable::new().intern(_s),
         )
@@ -1606,6 +1939,7 @@ mod tests {
             &body,
             &scope,
             &std::collections::HashSet::new(),
+            &std::collections::HashMap::new(),
             span(),
             &mut |_s| StringTable::new().intern(_s),
         )

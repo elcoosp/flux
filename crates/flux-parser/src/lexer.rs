@@ -70,6 +70,8 @@ pub enum TokenKind {
     Import,
     /// `type`.
     Type,
+    /// `record` — a product-type (struct) declaration.
+    Record,
     /// `trait`.
     Trait,
     /// `capability`.
@@ -109,6 +111,8 @@ pub enum TokenKind {
     EqEq,
     /// `!=` — inequality comparison.
     NotEq,
+    /// `!` — boolean negation prefix (desugared to `!= true` by the parser).
+    Not,
     /// `<` — less-than.
     Lt,
     /// `>` — greater-than.
@@ -216,6 +220,7 @@ pub fn keyword_kind(text: &str) -> Option<TokenKind> {
         "use" => TokenKind::Use,
         "import" => TokenKind::Import,
         "type" => TokenKind::Type,
+        "record" => TokenKind::Record,
         "trait" => TokenKind::Trait,
         "capability" => TokenKind::Capability,
         "state" => TokenKind::State,
@@ -403,6 +408,7 @@ impl<'s> Lexer<'s> {
             '=' if self.peek_at(1) == Some('=') => self.take(TokenKind::EqEq, 2),
             '=' => self.take(TokenKind::Eq, 1),
             '!' if self.peek_at(1) == Some('=') => self.take(TokenKind::NotEq, 2),
+            '!' => self.take(TokenKind::Not, 1),
             '<' if self.peek_at(1) == Some('=') => self.take(TokenKind::LtEq, 2),
             '<' => self.take(TokenKind::Lt, 1),
             '>' if self.peek_at(1) == Some('=') => self.take(TokenKind::GtEq, 2),

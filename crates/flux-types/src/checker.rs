@@ -36,6 +36,11 @@ enum CalleeShape {
         /// pin the generic parameters from concrete call-site arguments.
         props: Vec<(String, TcType)>,
     },
+    /// A record-type constructor: builds a `TcType::Record` from named fields.
+    Record {
+        /// Field name → type, in declaration order.
+        fields: Vec<(String, TcType)>,
+    },
 }
 
 /// A record of a generic instantiation discovered during checking.
@@ -61,6 +66,12 @@ pub struct Checker {
     pub types: HashMap<NodeId, TcType>,
     /// Every generic instantiation encountered.
     pub instantiations: Vec<GenericInstantiation>,
+    /// Resolved field position (0-based, declaration order) for each
+    /// `base.field` expression, keyed by the expression's `NodeId`. Mirrors the
+    /// `types` map but for the positional index the VM expects when emitting
+    /// `GET_FIELD`/`SET_FIELD` over a record stored as a positional
+    /// `Vec<(PropIdx, Value)>` (FLUX-072).
+    pub field_indices: HashMap<NodeId, u16>,
     /// Primitive scalar names.
     prims: std::collections::HashSet<String>,
     /// Generic parameter names in scope, mapped to their unification variable.
@@ -82,6 +93,7 @@ impl Checker {
             subst: HashMap::new(),
             types: HashMap::new(),
             instantiations: Vec::new(),
+            field_indices: HashMap::new(),
             prims,
             generics: HashMap::new(),
         }
@@ -236,7 +248,16 @@ impl Checker {
                 let base_ty = self.resolve(&base_ty);
                 match &base_ty {
                     TcType::Record(fields) => {
-                        if let Some((_, ty)) = fields.iter().find(|(n, _)| n == &field.name) {
+                        if let Some((pos, (_, ty))) = fields
+                            .iter()
+                            .enumerate()
+                            .find(|(_, (n, _))| n == &field.name)
+                        {
+                            // Record the resolved positional index so the
+                            // bytecode emitter can emit GET_FIELD with the slot
+                            // the VM expects (records are positional).
+                            let fid = compute_node_id(0, ExprTag(10), expr.span, None);
+                            self.field_indices.insert(fid, pos as u16);
                             Ok((**ty).clone())
                         } else {
                             Err(TypeError::new(
@@ -253,14 +274,42 @@ impl Checker {
                             )))
                         }
                     }
-                    // Opaque nominal types (platform/adapter types, ADTs,
-                    // functions, collections) expose an open, unchecked
-                    // surface: field access yields a fresh unification
-                    // variable so unknown methods/props on adapter types do
-                    // not reject otherwise well-formed programs (MLP scope).
+                    TcType::Named(name, _) => {
+                        // A named record type: resolve its fields from the
+                        // registered record constructor so field access (and
+                        // the bytecode field index) works through the nominal
+                        // type, not just the structural `Record` form.
+                        if let Some(Binding::Ctor(CtorKind::Record { fields })) =
+                            self.env.lookup(name)
+                        {
+                            if let Some((pos, (_, ty))) = fields
+                                .iter()
+                                .enumerate()
+                                .find(|(_, (n, _))| n == &field.name)
+                            {
+                                let fid = compute_node_id(0, ExprTag(10), expr.span, None);
+                                self.field_indices.insert(fid, pos as u16);
+                                Ok(ty.clone())
+                            } else {
+                                Err(TypeError::new(
+                                    format!("no field `{}` on record `{name}`", field.name),
+                                    field.span,
+                                )
+                                .with_hint(format!(
+                                    "record has fields: {}",
+                                    fields
+                                        .iter()
+                                        .map(|(n, _)| n.as_str())
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                )))
+                            }
+                        } else {
+                            Ok(self.fresh_ty())
+                        }
+                    }
                     TcType::Var(_)
                     | TcType::Constrained(_, _)
-                    | TcType::Named(_, _)
                     | TcType::Variant(_, _)
                     | TcType::Fn(_, _)
                     | TcType::List(_)
@@ -286,8 +335,7 @@ impl Checker {
                         // wrap the result back into `Option`.
                         let inner_ty = match &**inner {
                             TcType::Record(fields) => {
-                                if let Some((_, ty)) =
-                                    fields.iter().find(|(n, _)| n == &field.name)
+                                if let Some((_, ty)) = fields.iter().find(|(n, _)| n == &field.name)
                                 {
                                     (**ty).clone()
                                 } else {
@@ -317,10 +365,7 @@ impl Checker {
                             | TcType::Map(_, _) => self.fresh_ty(),
                             other => {
                                 return Err(TypeError::new(
-                                    format!(
-                                        "cannot access field `{}` on `{}`",
-                                        field.name, other
-                                    ),
+                                    format!("cannot access field `{}` on `{}`", field.name, other),
                                     field.span,
                                 )
                                 .with_hint(
@@ -625,6 +670,11 @@ impl Checker {
                                 props: props.clone(),
                             })
                         }
+                        Some(Binding::Ctor(CtorKind::Record { fields })) => {
+                            Some(CalleeShape::Record {
+                                fields: fields.clone(),
+                            })
+                        }
                         _ => None,
                     }
                 }
@@ -714,6 +764,41 @@ impl Checker {
                         // Component calls render; they do not produce a value
                         // Expression-level, so they type as `Unit`.
                         Ok(TcType::Unit)
+                    }
+                    Some(CalleeShape::Record { fields }) => {
+                        // Verify every supplied argument names a known field and
+                        // matches its declared type, then build the record type.
+                        for arg in args {
+                            let fname = match arg {
+                                flux_parser::Arg::Named { name, .. } => &name.name,
+                                flux_parser::Arg::Positional { .. } => {
+                                    return Err(TypeError::new(
+                                        "record construction requires named fields (`Task(label: …)`)".to_owned(),
+                                        span,
+                                    ));
+                                }
+                                #[allow(unreachable_patterns)]
+                                _ => {
+                                    return Err(TypeError::new(
+                                        "record construction requires named fields".to_owned(),
+                                        span,
+                                    ));
+                                }
+                            };
+                            let decl_ty = fields
+                                .iter()
+                                .find(|(n, _)| n == fname)
+                                .map(|(_, t)| t.clone());
+                            let Some(decl_ty) = decl_ty else {
+                                return Err(TypeError::new(
+                                    format!("`{fname}` is not a field of record `{name}`"),
+                                    span,
+                                ));
+                            };
+                            let arg_ty = self.infer(arg.value())?;
+                            let _ = self.expect(&decl_ty, &arg_ty, arg.value().span);
+                        }
+                        Ok(TcType::Named(name.clone(), Vec::new()))
                     }
                     _ => Err(TypeError::new(
                         format!("`{name}` is not a callable constructor"),
@@ -809,6 +894,14 @@ impl Checker {
     }
 
     fn lookup_value(&mut self, name: &str, span: Span) -> Result<TcType, TypeError> {
+        // A `$name` identifier is a two-way binding sigil: it resolves to the
+        // underlying signal `name` (the `$` is stripped for type checking;
+        // the write-back is emitted by the lowering pass). FLUX-072 #4.
+        if let Some(bare) = name.strip_prefix('$') {
+            if let Some(ty) = self.try_lookup_value(bare) {
+                return Ok(ty);
+            }
+        }
         match self.env.lookup(name) {
             Some(Binding::Mono(ty)) => Ok(ty.clone()),
             Some(Binding::Poly(scheme)) => {
@@ -828,6 +921,17 @@ impl Checker {
                         .to_owned(),
                 ),
             ),
+        }
+    }
+
+    /// Non-failing variant of [`Self::lookup_value`]: returns the type of
+    /// `name` if bound, without producing a type error. Used to resolve the
+    /// `$name` two-way binding sigil. FLUX-072 #4.
+    fn try_lookup_value(&self, name: &str) -> Option<TcType> {
+        match self.env.lookup(name) {
+            Some(Binding::Mono(ty)) => Some(ty.clone()),
+            Some(Binding::Poly(scheme)) => Some(instantiate(scheme, &mut self.supply.clone())),
+            _ => None,
         }
     }
 
@@ -979,6 +1083,20 @@ impl Checker {
                         .insert(decl.name.name.clone(), Binding::Mono(resolved));
                     TcType::Unit
                 }
+                flux_parser::BlockItem::Derived(decl) => {
+                    // A derived signal is a read-only computed binding: it reads
+                    // like a signal but re-derives from its sources. Type it as
+                    // the inferred body type and bind it into scope (FLUX-072 #12).
+                    let init_ty = self.infer(&decl.init)?;
+                    if let Some(decl_ty) = &decl.ty {
+                        let expected = self.conv_ty(decl_ty);
+                        self.expect(&expected, &init_ty, decl.init.span)?;
+                    }
+                    let resolved = init_ty.apply(&self.subst);
+                    self.env
+                        .insert(decl.name.name.clone(), Binding::Mono(resolved));
+                    TcType::Unit
+                }
                 flux_parser::BlockItem::Prop { .. } => TcType::Unit,
                 flux_parser::BlockItem::Expr(expr) => self.infer(expr)?,
                 _ => TcType::Unit,
@@ -1090,6 +1208,22 @@ pub fn collect_adts(env: &mut Env, ast: &Ast) {
                     })
                     .collect();
                 env.register_adt(&type_decl.name.name, AdtDef { params, variants });
+            }
+            Decl::Record(rec) => {
+                let fields: Vec<(String, TcType)> = rec
+                    .fields
+                    .iter()
+                    .map(|f| {
+                        (
+                            f.name.name.clone(),
+                            TcType::from_surface(&f.ty, &primitives()),
+                        )
+                    })
+                    .collect();
+                env.insert(
+                    rec.name.name.clone(),
+                    Binding::Ctor(CtorKind::Record { fields }),
+                );
             }
             // User-defined components are callable constructors in the same
             // way as the prelude adapters; generic params make them
