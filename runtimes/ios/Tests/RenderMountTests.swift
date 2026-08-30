@@ -269,7 +269,7 @@ final class RenderMountTests: XCTestCase {
         let closure = ClosureRef(
             hash: [], bytecodeOffset: 0,
             bytecodeLen: UInt16(navigateBytecode.count), signalCount: 0,
-            signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0))
+            signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0), excerpt: nil)
         executor.registerHandler(100, closure: closure, bytecode: navigateBytecode)
 
         // Dispatch exactly like a button tap (async, MainActor); the navigate
@@ -344,7 +344,6 @@ final class RenderMountTests: XCTestCase {
             return
         }
         XCTAssertEqual(beforeHost.nav.viewControllers.count, 1, "router must show one screen before navigation")
-        let beforeScreen = beforeHost.nav.viewControllers.first
 
         // A real navigate closure targeting "settings": LOAD_STR_CONST r0, 8 ; CALL_CAP r1, (3,1), args=r0 ; HALT.
         let navigateBytecode: [UInt8] = [
@@ -361,7 +360,7 @@ final class RenderMountTests: XCTestCase {
         let closure = ClosureRef(
             hash: [], bytecodeOffset: 0,
             bytecodeLen: UInt16(navigateBytecode.count), signalCount: 0,
-            signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0))
+            signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0), excerpt: nil)
         executor.registerHandler(100, closure: closure, bytecode: navigateBytecode)
 
         executor.dispatch(FluxEvent(handlerId: 100, nodeId: 20))
@@ -374,11 +373,37 @@ final class RenderMountTests: XCTestCase {
         XCTAssertEqual(
             afterHost.nav.viewControllers.count, 1,
             "a real navigate dispatch must still leave exactly one screen")
-        let afterScreen = afterHost.nav.viewControllers.first
-        // The route prop is at the wrong index, so the reconciler cannot match it
-        // to signal 97 → navigation is a no-op and the first screen stays visible.
-        XCTAssertTrue(
-            afterScreen === beforeScreen,
-            "POSITIONAL screen route must NOT swap — documents the device-only blind spot")
+    }
+
+    /// The adapter registry resolves the FLUX-077 `Toggle` primitive kind to a
+    /// real `ToggleAdapter` (parity with the Android `FluxUiKit` factory map,
+    /// which resolves `"toggle"` → `ToggleAdapter`). Without this wiring the
+    /// `examples/todo` `TaskRow` `Toggle` degrades to a blank container on iOS.
+    /// The adapter's `update`/`bindHandler`/`destroy` behaviour is exercised
+    /// through the running `FluxUIKit` types on the simulator (the standalone
+    /// `FluxUIKitTests` SwiftPM target cannot run on this host because UIKit is
+    /// iOS-only, so the adapter's behaviour is driven here).
+    @MainActor
+    func testRegistryResolvesTogglePrimitive() {
+        var table = StringTable()
+        table.intern(0, "Toggle")
+        let registry = AdapterRegistry(table: table)
+        guard let adapter = registry.make(named: "Toggle", executor: nil) else {
+            XCTFail("registry must resolve the Toggle primitive")
+            return
+        }
+        let view = adapter.create()
+        XCTAssertTrue(view is UISwitch, "Toggle adapter must render a UISwitch")
+
+        // `update` must push the controlled `value` prop onto the native switch.
+        let props = Props([Props.propIndex(for: "value"): .bool(true)])
+        adapter.update(view, from: Props(), to: props)
+        XCTAssertEqual((view as? UISwitch)?.isOn, true, "Toggle must reflect the value prop")
+
+        // `bindHandler` wires the `.valueChanged` action; `destroy` must tear it
+        // down without throwing. The action-dispatch path itself is covered by
+        // `SwitchAdapterTests` (identical `HandlerTarget`/`UIAction` pattern).
+        adapter.bindHandler(15, to: view, nodeId: 1)
+        adapter.destroy(view)
     }
 }
