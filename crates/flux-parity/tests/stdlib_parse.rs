@@ -67,9 +67,14 @@ fn all_stdlib_files_parse() {
 fn required_primitive_declarations_exist() {
     let dir = stdlib_dir();
     for name in [
-        "stack", "grid", "spacer", "safearea", // FLUX-037
-        "modal", "sheet", "dialog",  // FLUX-038
-        "animate", // FLUX-042
+        "stack",
+        "grid",
+        "spacer",
+        "safearea", // FLUX-037
+        "modal",
+        "sheet",
+        "dialog",     // FLUX-038
+        "animate",    // FLUX-042
         "scrollview", // FLUX-056 (PRD-N `ScrollView`)
     ] {
         let path = dir.join(format!("{name}.flux"));
