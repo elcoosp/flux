@@ -395,6 +395,8 @@ public struct AdapterRegistry {
             "TextArea": { AnyFluxAdapter(TextAreaAdapter(executor: $0)) },
             // FLUX-041 gesture primitive (PRD-N family).
             "Gesture": { AnyFluxAdapter(GestureAdapter(executor: $0)) },
+            // FLUX-056 `ScrollView` (PRD-N family).
+            "ScrollView": { AnyFluxAdapter(ScrollViewAdapter(executor: $0)) },
         ]
         self.table = table
     }

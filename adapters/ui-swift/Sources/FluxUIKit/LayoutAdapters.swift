@@ -28,6 +28,8 @@ enum FluxRecordedProp {
     static let flex = "flex"
     /// `SafeArea` inset edges (Android `PROP_EDGES` = `edges`).
     static let edges = "edges"
+    /// `ScrollView` scroll axis (Android `PROP_ORIENTATION` = `orientation`).
+    static let orientation = "orientation"
     /// `Modal`/`Sheet`/`Dialog` onDismiss handler id (Android `PROP_ON_DISMISS`).
     static let onDismiss = "onDismiss"
     /// `Animate` signal handler id (Android `PROP_SIGNAL`).
