@@ -8,7 +8,10 @@
 //! the pure rendering shape.
 
 /// Severity of a log record (mirrors `tracing`'s `Level` without depending on it).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+///
+/// Ordered by severity (low→high) so a level filter like `Info` keeps every
+/// record at `Info` or above and drops `Debug`/`Trace` noise.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LogLevel {
     /// Trace-level diagnostics.
     Trace,
@@ -118,6 +121,11 @@ impl LogBuffer {
     #[must_use]
     pub fn snapshot(&self) -> Vec<LogEntry> {
         self.entries.clone()
+    }
+
+    /// Removes every retained record, leaving the buffer empty.
+    pub fn clear(&mut self) {
+        self.entries.clear();
     }
 }
 

@@ -13,6 +13,7 @@ use gpui::{
     div, prelude::*, px, AnyElement, ClickEvent, Context, ElementId, InteractiveElement,
     IntoElement, ParentElement, Render, Styled, Window,
 };
+use gpui_component::ActiveTheme as _;
 
 use crate::row::{empty_row, into_any, kv_row, rows_column};
 use crate::state::DevToolsState;
@@ -47,6 +48,7 @@ impl SignalGraphView {
         let readers: std::collections::HashMap<SignalId, Vec<EffectId>> =
             live.signal_edges.iter().cloned().collect();
 
+        let colors = cx.theme();
         let mut rows: Vec<AnyElement> = Vec::new();
         for (id, value) in live.signals.iter() {
             let is_selected = selected == Some(*id);
@@ -55,12 +57,12 @@ impl SignalGraphView {
                 .px(crate::row::ROW_PAD_X)
                 .py(crate::row::ROW_PAD_Y)
                 .border_b(px(1.0))
-                .border_color(gpui::white().opacity(0.08))
+                .border_color(colors.border)
                 .flex()
                 .flex_row()
                 .items_center()
                 .justify_between()
-                .hover(|s| s.bg(gpui::white().opacity(0.06)))
+                .hover(|s| s.bg(colors.accent.opacity(0.25)))
                 .cursor_pointer()
                 .on_click({
                     let id = *id;
@@ -74,11 +76,10 @@ impl SignalGraphView {
                     }
                 });
             if is_selected {
-                row = row.bg(gpui::rgb(0x2d_6c_df).opacity(0.22));
+                row = row.bg(colors.primary.opacity(0.22));
             }
             rows.push(into_any(
-                row.child(format!("sig#{id}"))
-                    .child(value_label(value)),
+                row.child(format!("sig#{id}")).child(value_label(value)),
             ));
 
             // When selected, render the dependency edges as indented readers.

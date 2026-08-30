@@ -9,8 +9,8 @@ use flux_perf_harness::MetricRecord;
 use flux_syntax::SignalId;
 
 use crate::time_travel::{
-    reconstruct_state, LogBuffer, LogEntry, NetworkLog, NetworkRecord, ReconstructedState,
-    TimelineBuffer, ViewFrame,
+    reconstruct_state, LogBuffer, LogEntry, LogLevel, NetworkLog, NetworkRecord,
+    ReconstructedState, TimelineBuffer, ViewFrame,
 };
 
 /// Snapshot of the VM register/instruction view.
@@ -202,6 +202,9 @@ pub struct DevToolsState {
     /// pane is removed from the resizable layout so its column/row space is
     /// reclaimed by the remaining panes. Defaults to all-visible.
     pub pane_hidden: RwLock<PaneTargetSet>,
+    /// Optional minimum level for the log viewer (roadmap §5 quick win: a
+    /// `Popover` lets the user hide noisier levels). `None` shows everything.
+    pub log_level_filter: RwLock<Option<LogLevel>>,
 }
 
 /// Identifies one of the six debugger panes, for keyboard-driven visibility
@@ -267,6 +270,7 @@ impl DevToolsState {
             scrub_index: RwLock::new(None),
             selected_signal: RwLock::new(None),
             pane_hidden: RwLock::new(PaneTargetSet::all_visible()),
+            log_level_filter: RwLock::new(None),
         }
     }
 
@@ -521,6 +525,36 @@ impl DevToolsState {
     #[must_use]
     pub fn log_snapshot(&self) -> Vec<LogEntry> {
         self.logs.read().snapshot()
+    }
+
+    /// The active log-level filter, or `None` if all levels are shown.
+    #[must_use]
+    pub fn log_level_filter(&self) -> Option<LogLevel> {
+        *self.log_level_filter.read()
+    }
+
+    /// Sets the minimum log level to display (`None` shows every level).
+    pub fn set_log_level_filter(&self, level: Option<LogLevel>) {
+        *self.log_level_filter.write() = level;
+    }
+
+    /// The log snapshot after applying the active level filter.
+    #[must_use]
+    pub fn filtered_log_snapshot(&self) -> Vec<LogEntry> {
+        let filter = *self.log_level_filter.read();
+        match filter {
+            None => self.log_snapshot(),
+            Some(min) => self
+                .log_snapshot()
+                .into_iter()
+                .filter(|e| e.level >= min)
+                .collect(),
+        }
+    }
+
+    /// Empties the retained log buffer (used by the "Clear logs" dialog).
+    pub fn clear_logs(&self) {
+        self.logs.write().clear();
     }
 
     /// Records an outbound HTTP request into the network inspector log (FLUX-060).
