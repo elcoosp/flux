@@ -115,10 +115,13 @@ change. Both kits remain adapter **contract version 1**, and the props contract
   fixtures still use brace syntax. See §3.6 before writing any `.flux` test
   source.
 * **CLI v0.1 shipped:** `init`, `dev`, `build`, `doc`. `flux build` emits
-  generated sources under `platforms/<platform>/Generated/` and **detects**
-  `xcodebuild`/`gradle` but does not invoke them — it logs a manual build
-  command and a warning when the toolchain is absent (`build.rs`); it is not an
-  error. The new renderer (ADR-0041) emits SwiftUI/Kotlin-Jetpack sources, not
+  generated sources under `platforms/<platform>/Generated/` and **invokes** the
+  native toolchain when present — it emits generated sources first, then spawns
+  `xcodebuild` (cwd `./runtimes/ios`, `-project FluxApp.xcodeproj`) / `./gradlew`
+  from the repo root and FAILS CLOSED on a non-zero exit (release gate, FLUX-068).
+  When the toolchain is absent it logs the exact manual build command and a
+  warning (emit-only fallback, non-fatal); it is not an error. The new renderer
+  (ADR-0041) emits SwiftUI/Kotlin-Jetpack sources, not
   imperative UIKit/Android-View text.
 * **ADRs referenced by code:** 0027 (R-graph threading, lifecycle, node-ID
   bridge), 0029 (Appendix B grammar repairs), 0041 (gpui DevTools UI),
@@ -389,7 +392,7 @@ OTA/production path this fallback is forbidden — canonicality is absolute.
 `flux init <name>` · `flux dev [--root] [--ws-host] [--ws-port] [--http-port]`
 (defaults 7331/7332; `--ws-host 0.0.0.0` exposes the server to physical devices
 on the LAN) · `flux build --platform ios|android [--root]` (emits
-`platforms/<platform>/Generated/`; native toolchains detected, not yet invoked)
+`platforms/<platform>/Generated/`; native toolchains invoked when present (FLUX-068), emit-only fallback when absent)
 · `flux doc` (stdlib JSON schema from `stdlib/`). Project config:
 `flux.toml` (`[project] name/entry`, `[dev] ws_port/http_port`); ignore file:
 `.fluxignore`.
