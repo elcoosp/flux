@@ -1,6 +1,6 @@
 ---
 id: FLUX-077
-status: todo
+status: done   # iOS kit reaches full parity with Android for the FLUX-077 set: Stack/Grid/Spacer/SafeArea/Modal/Sheet/Dialog/Animate (degraded container form, present since af47415, wired in AdapterKit.swift:377-386) + Toggle (added 2026-08-30, both kits). Verified: `xcodebuild build -scheme FluxApp` compiles FluxUIKit (all 9 adapters); RenderMountTests green incl. testRegistryResolvesTogglePrimitive; `:adapters:ui-kotlin:test` green.
 lane: LANE-N
 phase: "Phase 2"
 blocked_by:
@@ -16,6 +16,35 @@ source: FLUX-037 / FLUX-038 / FLUX-042 parity gate (AGENTS.md — a primitive ne
 related_adrs:
   - ADR-0047
 ---
+
+> **Closure note (2026-08-30):** The issue's premise was partly inaccurate.
+> When picked up, the eight `Stack`/`Grid`/`Spacer`/`SafeArea`/`Modal`/`Sheet`/
+> `Dialog`/`Animate` adapters **already existed** in `adapters/ui-swift`
+> (committed in `af47415`, the todo-render agent's FLUX-037/038/042 pass) and
+> were already at parity with Android: both kits degrade those eight to a plain
+> container carrying children, gated on the ADR-0048 iOS dev-tier convergence
+> decision (AGENTS.md §0.2 — a SwiftUI rewrite is explicitly out of scope, so
+> the degraded form is the *correct* unified-tier mapping, not a stub to fix).
+> The genuine gap was **`Toggle`**: it was used by `examples/todo` and seeded in
+> the Rust prelude + codegen (`swift_view: "Toggle"`), but had **no adapter on
+> either platform** — so the todo `TaskRow` degraded to a blank container on iOS.
+> This issue therefore delivered `Toggle` to *both* kits (Android was also
+> missing it), with identical prop contracts (`value` / `onValueChange` /
+> `enabled`), FNV-1a name-derived prop indices mirrored on both sides, per-node
+> factories (FLUX-007), and weakly-held executor dispatch. iOS now reaches full
+> parity with Android for the FLUX-077 primitive set, and `examples/todo`
+> renders its toggle. Tests: `ToggleAdapterTests` (SwiftPM `FluxUIKit` suite) +
+> `testRegistryResolvesTogglePrimitive` (runtime `FluxAppTests`, drives the real
+> `UISwitch` on the simulator); Android `FormGestureAdapterTest` got `toggle`
+> cases + a registry-resolution assertion.
+>
+> Verification: `./gradlew :adapters:ui-kotlin:test` green (incl. new Toggle
+> cases); `xcodebuild test -scheme FluxApp` green for `RenderMountTests` (incl.
+> the new registry test). Two pre-existing, unrelated breaks were left
+> untouched: `:runtimes:android:host` `FrameDeserializer.kt:464` (compile), and
+> `runtimes/ios/Tests/RenderPerfHarnessTests.swift:106` (`let children`); plus a
+> `CapabilityRoundTripTests.testHttpGetJsonResolvesToRecordViaResolver` JSON
+> fixture failure. Those are out of scope for this issue.
 
 # FLUX-077: iOS adapter parity for FLUX-037 layout + FLUX-038 overlay + FLUX-042 animation primitives
 
