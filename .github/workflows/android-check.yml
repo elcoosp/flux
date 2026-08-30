@@ -158,6 +158,11 @@ jobs:
         # FLUX-083: expose the shared wire fixture dir so the Kotlin decoder test
         # `rejects the shared FLUX-083 unsupported-version fixture` runs against the
         # committed `unsupported-version.bin` (cross-language lockstep with Rust/Swift).
+        # FLUX-089: also run the pure-JVM `:host` VM suite, which includes
+        # `IsaConformanceVmTest` — the Kotlin half of the tri-platform parity-mutation
+        # gate that runs every frozen golden ISA vector (tests/isa-vectors, shared with
+        # the Rust oracle and the Swift VM) through `FluxBytecodeVM`. `cargo-mutants`
+        # is Rust-only and cannot catch a Kotlin-VM divergence; this job does.
         env:
           FLUX_WIRE_FIXTURES: fixtures/wire
-        run: ./gradlew :adapters:ui-kotlin:test :runtimes:android:app:test --no-daemon
+        run: ./gradlew :adapters:ui-kotlin:test :runtimes:android:host:test :runtimes:android:app:test --no-daemon

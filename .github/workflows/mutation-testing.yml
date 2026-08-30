@@ -13,6 +13,17 @@ name: mutation-testing
 # tree. Once the surviving-mutant set is triaged, flip `continue-on-error: false` to
 # promote it to a hard gate. We keep it non-blocking now so a transient mutant count does
 # not red the whole pipeline during the triage window.
+#
+# NOTE (FLUX-089): `cargo-mutants` is a Rust-only tool, so it covers the Rust oracle
+# (`flux-vm-ref`) and `flux-differ` but CANNOT catch a divergence in the two host VMs.
+# The tri-platform parity half lives in the host check workflows:
+#   * Kotlin VM  → `.github/workflows/android-check.yml` (`:runtimes:android:host:test`,
+#     which runs `IsaConformanceVmTest` over every frozen golden vector in
+#     `tests/isa-vectors/`).
+#   * Swift VM   → `.github/workflows/ios-check.yml` (`xcodebuild test -scheme FluxApp`,
+#     which runs `ISAConformanceTests` over the same shared vectors).
+# Both run the SAME 74 vectors the Rust oracle runs, so a host-VM drift is caught there,
+# not here. This job remains the Rust-oracle mutation gate.
 
 on:
   push:
