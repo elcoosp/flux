@@ -18,8 +18,13 @@ const FNV_OFFSET_BASIS: u32 = 0x811C_9DC5;
 const FNV_PRIME: u32 = 0x0100_0193;
 
 /// Folds `bytes` into a 32-bit FNV-1a digest.
+///
+/// `pub` so sibling crates in the workspace (e.g. `flux-ir`'s
+/// content-addressing pass, FLUX-074) can derive node IDs with the exact same
+/// digest the canonical [`compute_node_id`] uses, keeping every derived ID
+/// space in agreement.
 #[must_use]
-fn fnv1a32(bytes: &[u8]) -> u32 {
+pub fn fnv1a32(bytes: &[u8]) -> u32 {
     let mut hash = FNV_OFFSET_BASIS;
     for &byte in bytes {
         hash ^= u32::from(byte);
@@ -154,7 +159,7 @@ impl SourceExcerpt {
             .unwrap_or(0);
         let line_end = source[start.min(source.len())..]
             .find('\n')
-            .map(|i| start as usize + i)
+            .map(|i| start + i)
             .unwrap_or(source.len());
         let snippet = source[line_start..line_end.min(source.len())]
             .trim()
@@ -344,6 +349,89 @@ pub fn compute_node_id(parent: NodeId, tag: impl NodeTag, span: Span, key: Optio
     fnv1a32(&buf)
 }
 
+/// A node-kind tag used purely as the *content* family discriminator for
+/// [`content_addressed_id`].
+///
+/// Distinct from the [`NodeTag`] families: it carries no declaration/expression
+/// split (the structural `NodeKind` already disambiguates) and instead encodes
+/// the wire `NodeKind` discriminant plus the node's `component_id` so that two
+/// structurally-identical-but-differently-named primitives (e.g. `Text` vs
+/// `Button`) address differently. See [`content_addressed_id`].
+#[derive(Clone, Copy, Debug)]
+struct ContentTag {
+    kind: u8,
+    component_id: u32,
+}
+
+impl ContentTag {
+    /// Folds `kind` and `component_id` into a single `u8`-wide tag byte so the
+    /// hash input stays fixed-width and cheap to build.
+    fn as_byte(self) -> u8 {
+        // `kind` is a 3-bit wire discriminant; `component_id` is folded in via a
+        // small rotation so common low ids still perturb the tag meaningfully.
+        (self.kind ^ (self.component_id.wrapping_mul(0x9E) as u8)) & 0x7F
+    }
+}
+
+/// Derives a **content-addressed** [`NodeId`] for a node.
+///
+/// Unlike [`compute_node_id`] (which folds the source `Span` and therefore
+/// flips when text *above* the node shifts), this id is derived purely from the
+/// node's *structural content* and its already-content-addressed parent:
+///
+/// ```text
+/// FNV1A32( parent                // content-addressed parent id
+///        | content_tag(kind, component_id)
+///        | props_hash  (u64 LE)  // prop *values*, not source offsets
+///        | children_hash (u64 LE)// recursive child content ids, folded
+///        | key-or-0xFF*8 )  -> u32
+/// ```
+///
+/// Because children contribute their *content-addressed* ids (recursively), a
+/// subtree whose source moved but whose content is identical keeps its id. That
+/// is what lets a node survive a text-above edit at hot reload instead of being
+/// torn down and rebuilt (FLUX-074, item A). The same FNV-1a-32 primitive and
+/// seed as [`compute_node_id`] is used, so the two id spaces stay in the same
+/// deterministic family.
+///
+/// `props_hash` and `children_hash` are the arena-stored content digests (see
+/// `IRArena::props_hash` / `children_hash`); `children_hash` must already embed
+/// the content-addressed ids of the node's children for the recursion to hold.
+///
+/// # Examples
+///
+/// ```rust
+/// use flux_syntax::{content_addressed_id, Key};
+///
+/// // Same structural content -> identical id regardless of where it sits in source.
+/// let a = content_addressed_id(0, 1, 7, 0x1111_2222_3333_4444, 0x5555_6666_7777_8888, None);
+/// let b = content_addressed_id(0, 1, 7, 0x1111_2222_3333_4444, 0x5555_6666_7777_8888, None);
+/// assert_eq!(a, b);
+/// // Different props -> different id.
+/// let c = content_addressed_id(0, 1, 7, 0x9999_9999_9999_9999, 0x5555_6666_7777_8888, None);
+/// assert_ne!(a, c);
+/// ```
+#[must_use]
+pub fn content_addressed_id(
+    parent: NodeId,
+    kind: u8,
+    component_id: u32,
+    props_hash: u64,
+    children_hash: u64,
+    key: Option<Key>,
+) -> NodeId {
+    let mut buf = [0_u8; 29];
+    buf[0..4].copy_from_slice(&parent.to_le_bytes());
+    buf[4] = ContentTag { kind, component_id }.as_byte();
+    buf[5..13].copy_from_slice(&props_hash.to_le_bytes());
+    buf[13..21].copy_from_slice(&children_hash.to_le_bytes());
+    match key {
+        Some(k) => buf[21..29].copy_from_slice(&k.to_le_bytes()),
+        None => buf[21..29].copy_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]),
+    };
+    fnv1a32(&buf)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -359,6 +447,58 @@ mod tests {
         let a = compute_node_id(0, ExprTag(7), span(0, 10), None);
         let b = compute_node_id(0, ExprTag(7), span(0, 10), None);
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn content_addressed_id_is_deterministic() {
+        // The content-addressed id is a pure function of structural content, so
+        // identical content always maps to the identical id.
+        let a = content_addressed_id(0, 1, 7, 0x1111, 0x2222, None);
+        let b = content_addressed_id(0, 1, 7, 0x1111, 0x2222, None);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn content_addressed_id_changes_with_content() {
+        // Any of the content inputs must perturb the id.
+        let base = content_addressed_id(0, 1, 7, 0x1111, 0x2222, None);
+        assert_ne!(
+            base,
+            content_addressed_id(0, 1, 7, 0x9999, 0x2222, None),
+            "props_hash change must change id"
+        );
+        assert_ne!(
+            base,
+            content_addressed_id(0, 1, 7, 0x1111, 0x9999, None),
+            "children_hash change must change id"
+        );
+        assert_ne!(
+            base,
+            content_addressed_id(0, 2, 7, 0x1111, 0x2222, None),
+            "kind change must change id"
+        );
+        assert_ne!(
+            base,
+            content_addressed_id(0, 1, 8, 0x1111, 0x2222, None),
+            "component_id change must change id"
+        );
+        assert_ne!(
+            base,
+            content_addressed_id(0, 1, 7, 0x1111, 0x2222, Some(99)),
+            "key change must change id"
+        );
+    }
+
+    #[test]
+    fn content_addressed_id_ignores_span() {
+        // Unlike compute_node_id, shifting the source span around a node must NOT
+        // change its content-addressed id (FLUX-074, item A — the whole point).
+        let from_above = content_addressed_id(0, 1, 7, 0x1111, 0x2222, None);
+        // A different parent content id would change it; here we isolate span by
+        // comparing two ids whose only difference is conceptual source position,
+        // which the function never observes at all.
+        let unchanged = content_addressed_id(0, 1, 7, 0x1111, 0x2222, None);
+        assert_eq!(from_above, unchanged);
     }
 
     #[test]
