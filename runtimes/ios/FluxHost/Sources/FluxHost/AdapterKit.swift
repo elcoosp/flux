@@ -397,6 +397,8 @@ public struct AdapterRegistry {
             "Gesture": { AnyFluxAdapter(GestureAdapter(executor: $0)) },
             // FLUX-056 `ScrollView` (PRD-N family).
             "ScrollView": { AnyFluxAdapter(ScrollViewAdapter(executor: $0)) },
+            // FLUX-048 `WebHost` (sandboxed native web view; see `FluxUIKit.WebHostView`).
+            "WebHost": { AnyFluxAdapter(WebHostView(executor: $0)) },
         ]
         self.table = table
     }

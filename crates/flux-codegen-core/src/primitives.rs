@@ -352,17 +352,6 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
         presentation: None,
     },
     PrimitiveSpec {
-        flux_name: "Switch",
-        node_kind: NodeKind::Primitive,
-        kind: PrimitiveKind::Other,
-        kotlin_view: "Switch",
-        swift_view: "Switch",
-        primary_prop: None,
-        handler_prop: None,
-        label_prop: None,
-        presentation: None,
-    },
-    PrimitiveSpec {
         flux_name: "Router",
         node_kind: NodeKind::Router,
         kind: PrimitiveKind::Router,
@@ -473,6 +462,21 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
         swift_view: "Toggle",
         primary_prop: Some("value"),
         handler_prop: Some("onChange"),
+        label_prop: None,
+        presentation: None,
+    },
+    PrimitiveSpec {
+        flux_name: "Toggle",
+        node_kind: NodeKind::Primitive,
+        kind: PrimitiveKind::Leaf,
+        // FLUX-077 two-state data-driven control. Mirrors the dev `ToggleAdapter`
+        // contract exactly: `value` + `onValueChange` (the `Toggle` comp emits
+        // `onValueChange`, distinct from `Switch`'s `onChange` — see
+        // `adapters/ui-kotlin/.../ToggleAdapter.kt` and `SwitchAdapter.kt`).
+        kotlin_view: "Toggle",
+        swift_view: "Toggle",
+        primary_prop: Some("value"),
+        handler_prop: Some("onValueChange"),
         label_prop: None,
         presentation: None,
     },
@@ -831,5 +835,17 @@ const HOST_ADAPTERS: &[HostAdapterSpec] = &[
         flux_name: "ScrollView",
         kotlin_adapter: Some("ScrollViewAdapter"),
         swift_adapter: Some("ScrollViewAdapter"),
+    },
+    // --- FLUX-048 `WebHost` (PRD-N family) ---
+    // Sandboxed native web view (cap 12 `WebView.load` writes the `src` into
+    // signal 82; the adapter reads the same `src` prop — AGENTS.md §3.2). The
+    // adapter classes exist on both hosts (`WebViewAdapter` on Kotlin,
+    // `WebHostView` on Swift) but were never registered in the kit maps, so the
+    // dev VM could not instantiate them. Registering here wires them into both
+    // kits (the parity guard enforces it) so a `WebHost` node renders.
+    HostAdapterSpec {
+        flux_name: "WebHost",
+        kotlin_adapter: Some("WebViewAdapter"),
+        swift_adapter: Some("WebHostView"),
     },
 ];

@@ -39,6 +39,7 @@ fn registry_covers_every_prelude_primitive() {
         "ScrollView",
         // FLUX-040 form primitives (PRD-N family).
         "Switch",
+        "Toggle",
         "Checkbox",
         "Slider",
         "Picker",
@@ -91,6 +92,7 @@ fn registry_has_no_unknown_entries() {
         "ScrollView",
         // FLUX-040 form primitives (PRD-N family).
         "Switch",
+        "Toggle",
         "Checkbox",
         "Slider",
         "Picker",

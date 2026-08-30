@@ -53,6 +53,8 @@ public object FluxUiKit {
             GestureAdapter.KIND to FluxAdapterFactory(GestureAdapter::create),
             // FLUX-056 `ScrollView` (PRD-N family).
             ScrollViewAdapter.KIND to FluxAdapterFactory(ScrollViewAdapter::create),
+            // FLUX-048 `WebHost` (sandboxed native web view; see `WebViewAdapter`).
+            WebViewAdapter.KIND to FluxAdapterFactory(WebViewAdapter::create),
         )
 
     /** Returns the factory registered for [kind], or `null`. */
