@@ -12,6 +12,7 @@ import org.msgpack.core.MessagePack
 import org.msgpack.core.MessagePacker
 import org.msgpack.core.MessageUnpacker
 import java.io.File
+import java.io.IOException
 
 /**
  * A persistence backend for stateful capabilities (e.g. `Storage`), injected
@@ -75,6 +76,24 @@ public class FileStorageBackend(
 
     private fun file(key: UInt): File = File(dir, "flux.storage.$key.mp")
 
+    /** A per-`put` temp file under [dir]; `renameTo` makes the swap atomic. */
+    private fun tempFile(key: UInt): File = File(dir, "flux.storage.$key.mp.tmp-${System.nanoTime()}")
+
+    /**
+     * Reads and decodes [f]; on any decode failure deletes the corrupt file and
+     * returns `null` (mirrors the iOS `try?`-to-`nil` contract so a torn entry is
+     * treated as absent rather than crashing capability dispatch).
+     */
+    private fun decodeOrNull(f: File): FluxValue? {
+        if (!f.exists()) return null
+        return try {
+            MessagePack.newDefaultUnpacker(f.inputStream()).use { unpacker -> unpacker.fluxUnpack() }
+        } catch (_: Exception) {
+            f.delete()
+            null
+        }
+    }
+
     override fun put(
         key: UInt,
         value: FluxValue?,
@@ -84,26 +103,34 @@ public class FileStorageBackend(
             f.delete()
             return
         }
-        MessagePack.newDefaultPacker(f.outputStream()).use { packer ->
-            packer.fluxPack(value)
+        // Write to a temp file, then atomically rename it over the destination.
+        // A crash mid-write (OOM kill, `adb reboot`, low-battery kill) leaves at
+        // most a stray `.tmp-*` file, never a truncated `.mp` the next `get`
+        // would try to decode (FLUX-080).
+        val tmp = tempFile(key)
+        try {
+            MessagePack.newDefaultPacker(tmp.outputStream()).use { packer ->
+                packer.fluxPack(value)
+            }
+        } catch (e: IOException) {
+            tmp.delete()
+            throw e
+        }
+        val renamed = tmp.renameTo(f)
+        if (!renamed) {
+            tmp.delete()
+            throw IOException("failed to atomically publish storage entry for key $key")
         }
     }
 
-    override fun get(key: UInt): FluxValue? {
-        val f = file(key)
-        if (!f.exists()) return null
-        MessagePack.newDefaultUnpacker(f.inputStream()).use { unpacker ->
-            return unpacker.fluxUnpack()
-        }
-    }
+    override fun get(key: UInt): FluxValue? = decodeOrNull(file(key))
 
     override fun entries(): Map<UInt, FluxValue> {
         val result = LinkedHashMap<UInt, FluxValue>()
         dir.listFiles { _, name -> name.startsWith("flux.storage.") && name.endsWith(".mp") }?.forEach { f ->
             val key = f.name.removePrefix("flux.storage.").removeSuffix(".mp").toUIntOrNull() ?: return@forEach
-            MessagePack.newDefaultUnpacker(f.inputStream()).use { unpacker ->
-                result[key] = unpacker.fluxUnpack()
-            }
+            val value = decodeOrNull(f) ?: return@forEach
+            result[key] = value
         }
         return result
     }
