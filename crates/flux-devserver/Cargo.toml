@@ -22,11 +22,11 @@ thiserror.workspace = true
 bytes.workspace = true
 parking_lot.workspace = true
 futures-util.workspace = true
+flux-perf-harness.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true
 criterion.workspace = true
-flux-perf-harness.workspace = true
 
 [[bench]]
 name = "pipeline_large"

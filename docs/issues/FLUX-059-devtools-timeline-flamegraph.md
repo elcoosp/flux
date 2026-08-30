@@ -41,19 +41,20 @@ emitting telemetry event variant lands") is resolved. FLUX-059 now:
   count / lane count / over-budget count. Empty until the first `PerfRecord`
   arrives (honest empty state, no fabricated bars).
 
-### What is NOT done (and why)
+### Broadcast follow-up (DONE)
 
-- **The dev server does not yet broadcast `PerfRecord` frames.** The wire variant
-  and DevTools ingestion exist and are unit-tested, but `flux-devserver` still
-  emits only the VM/signal/view/network telemetry — no caller constructs
-  `TelemetryEvent::perf_record(record.to_json())` and sends it on `:7333` yet.
-  That bridge is a small, isolated follow-up in `flux-devserver` (it already
-  depends on both `flux-ir-serde` and `flux-perf-harness`). Until it lands, the
-  flamegraph renders from whatever `PerfRecord` stream a broadcaster sends.
-- **Verification note:** `cargo test -p flux-devtools-ui --lib` passes (45/45,
-  incl. the 8 FLUX-059 flamegraph/ingest tests) once the workspace tree is green.
-  The only blocker at landing was concurrent in-flight breakage in
-  `crates/flux-ir/src/lower/mod.rs` (another agent's LANE work, outside this issue's
+- **`flux-devserver` now broadcasts `PerfRecord` frames.** `Pipeline::perf_records()`
+  builds the server-side `Save → pixels` breakdown from the real per-compile
+  `PhaseTimings` (parse+type_check+lower+diff+serialize → `MetricKind::SaveToPhoton`;
+  serialize alone → `MetricKind::PatchRoundTrip`) with the lowered node count as
+  `tree_size`, `Scenario::LoopbackE2e`. `compile_and_broadcast` (watcher hot path) and
+  `initial_compile` both broadcast each record as `TelemetryEvent::perf_record(json)`
+  via `DevToolsRouter::route_telemetry` on `:7333`, so the flamegraph fills from the
+  first compile. `flux-perf-harness` promoted from dev-dep to a regular dep of
+  `flux-devserver`. Tests: `pipeline::tests::perf_records_*` +
+  `debug_bridge::tests::router_broadcasts_perf_record_to_subscribers`.
+
+### Verification note
   scope) which broke `flux-ir`, a transitive dep of `flux-devtools-ui`. Independent
   layers also green: `flux-perf-harness` tests green; `flux-ir-serde` (wire variant +
   round-trip tests) clippy-clean + all suites green. No fabricated green.

@@ -44,6 +44,7 @@ use std::time::Instant;
 use flux_ir::{IRArena, LoweredIr, lower};
 use flux_ir_serde::{Frame, InitFrame, NodeSignalMeta};
 use flux_parser::Ast;
+use flux_perf_harness::{LatencyMs, MetricKind, MetricRecord, MetricSample, Scenario};
 use flux_syntax::{FileId, Patch, SignalId, SourceExcerpt, StringId, Value};
 
 use crate::dispatch::{DependencyIndex, DispatchReport, NodeSignalDeps, emit_minimal_updates};
@@ -161,6 +162,43 @@ impl Pipeline {
     #[must_use]
     pub fn timings(&self) -> PhaseTimings {
         self.timings
+    }
+
+    /// Builds the render-perf [`MetricRecord`]s captured during the most recent
+    /// compile so the dev server can broadcast them to DevTools as `PerfRecord`
+    /// telemetry (FLUX-059 / PRD-J).
+    ///
+    /// The records describe the server-side half of the spec's `Save → pixels`
+    /// budget (§3.10): the full pipeline (parse + type check + lower + diff +
+    /// serialize) is reported as `Scenario::LoopbackE2e` / `MetricKind::SaveToPhoton`,
+    /// and the patch-serialization leg alone as `MetricKind::PatchRoundTrip`.
+    /// `tree_size` is the lowered node count (`lower_count`), giving the flamegraph
+    /// the same tree-size axis the harness uses. Returns empty until a compile has
+    /// recorded timings (i.e. before the first successful compile).
+    #[must_use]
+    pub fn perf_records(&self) -> Vec<MetricRecord> {
+        let t = self.timings;
+        if t == PhaseTimings::default() {
+            return Vec::new();
+        }
+        let tree_size = self.lower_count;
+        let total_ms =
+            (t.parse + t.type_check + t.lower + t.diff + t.serialize).as_secs_f64() * 1000.0;
+        let serialize_ms = t.serialize.as_secs_f64() * 1000.0;
+        vec![
+            MetricRecord::new(
+                Scenario::LoopbackE2e,
+                MetricKind::SaveToPhoton,
+                tree_size,
+                vec![MetricSample::latency(LatencyMs::from_raw(total_ms))],
+            ),
+            MetricRecord::new(
+                Scenario::LoopbackE2e,
+                MetricKind::PatchRoundTrip,
+                tree_size,
+                vec![MetricSample::latency(LatencyMs::from_raw(serialize_ms))],
+            ),
+        ]
     }
 
     /// Interns `text` on behalf of a host and returns its canonical
@@ -617,14 +655,11 @@ impl Pipeline {
         for c in &closures {
             arena.add_closure(c.clone());
         }
-        // Re-key the merged wire tree to **content-addressed** ids (FLUX-074, item
-        // A). This makes a node's id depend on its structural content rather than its
-        // source span, so a text-above edit no longer flips ids and the differ's
-        // state-preserving `Reattach` keeps the host's view instances alive across hot
-        // reload. The ADR-0027 signal-graph side-tables inside `arena` are re-keyed by
-        // `content_address` itself; the pipeline's *external* `prop_thunks` table is
-        // keyed by the same node ids, so it must be remapped in lockstep from the
-        // returned old→new map.
+        // Re-key the merged tree to content-addressed ids (FLUX-074, item A).
+        // The wire path consumes ids as opaque u32; only *which* u32 each node
+        // gets changes. `content_address` itself; the pipeline's *external*
+        // `prop_thunks` table is keyed by the same node ids, so it must be
+        // remapped in lockstep from the returned old→new map.
         let remap = arena.content_address();
         prop_thunks = prop_thunks
             .into_iter()
@@ -1227,5 +1262,43 @@ mod tests {
             "use theme should resolve theme.flux from the package root: {:?}",
             typed.err()
         );
+    }
+
+    #[test]
+    fn perf_records_empty_before_first_compile() {
+        // `perf_records` must not fabricate data before a compile has recorded
+        // timings (no fake flamegraph bars before the server has measured).
+        let mut pipeline = Pipeline::new(".", false);
+        pipeline.set_source(
+            Path::new("/tmp/perf_test/main.flux"),
+            "compo Hello\n  Button(text: \"hi\")\n".to_owned(),
+        );
+        assert!(pipeline.perf_records().is_empty());
+    }
+
+    #[test]
+    fn perf_records_reports_save_to_photon_and_patch_round_trip() {
+        // After a real compile, `perf_records` emits the server-side Save→pixels
+        // breakdown the DevTools flamegraph consumes (FLUX-059 / PRD-J): the full
+        // pipeline as SaveToPhoton and the serialize leg as PatchRoundTrip.
+        let mut pipeline = Pipeline::new(".", false);
+        pipeline.set_source(
+            Path::new("/tmp/perf_test/main.flux"),
+            "compo Hello\n  Button(text: \"hi\")\n".to_owned(),
+        );
+        pipeline.compile().expect("compiles");
+        let records = pipeline.perf_records();
+        assert_eq!(records.len(), 2);
+        let kinds: Vec<_> = records.iter().map(|r| r.kind).collect();
+        assert!(kinds.contains(&MetricKind::SaveToPhoton));
+        assert!(kinds.contains(&MetricKind::PatchRoundTrip));
+        // Every record is a valid, parseable MetricRecord document.
+        for rec in &records {
+            assert!(rec.scenario == Scenario::LoopbackE2e);
+            let json = rec.to_json().expect("serialize");
+            let back = MetricRecord::from_json(&json).expect("round-trip");
+            assert_eq!(rec, &back);
+            assert!(!rec.samples.is_empty(), "a record must carry a sample");
+        }
     }
 }

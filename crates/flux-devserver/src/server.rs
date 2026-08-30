@@ -203,12 +203,27 @@ async fn bind_http(
 
 /// Compiles once at start-up so the first `Hello` can be answered immediately.
 fn initial_compile(shared: &Arc<Shared>) {
-    let mut pipeline = shared.pipeline.lock();
-    match pipeline.compile() {
-        Ok(_) => tracing::info!("initial compile succeeded"),
-        Err(diagnostic) => {
-            tracing::warn!(%diagnostic, "initial compile failed; serving no tree until fixed");
+    let perf_json = {
+        let mut pipeline = shared.pipeline.lock();
+        match pipeline.compile() {
+            Ok(_) => tracing::info!("initial compile succeeded"),
+            Err(diagnostic) => {
+                tracing::warn!(%diagnostic, "initial compile failed; serving no tree until fixed");
+            }
         }
+        // Capture the render-perf records from the initial compile so DevTools
+        // shows the flamegraph even before the first file edit (FLUX-059).
+        pipeline
+            .perf_records()
+            .into_iter()
+            .filter_map(|r| r.to_json().ok())
+            .collect::<Vec<String>>()
+    };
+    for json in &perf_json {
+        shared
+            .devtools_router
+            .lock()
+            .route_telemetry(&flux_ir_serde::TelemetryEvent::perf_record(json.clone()));
     }
 }
 

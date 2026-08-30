@@ -134,17 +134,26 @@ fn reload(pending: &mut Vec<PathBuf>, shared: &Arc<Shared>) {
 /// On a compile failure an `Error` frame is shipped and the previous good tree
 /// is retained — no `Delta` is produced (spec §D.12.3).
 pub(crate) fn compile_and_broadcast(shared: &Arc<Shared>) -> bool {
-    let outcome = {
+    let (outcome, perf_json) = {
         let mut pipeline = shared.pipeline.lock();
-        match pipeline.compile() {
+        let outcome = match pipeline.compile() {
             Ok(compiled) => Ok(compiled),
             Err(diagnostic) => {
                 tracing::warn!(%diagnostic, "compile failed; retaining previous tree");
                 Err(pipeline.error_frame(&diagnostic))
             }
-        }
+        };
+        // Capture the render-perf records from the compile that just ran so they can
+        // be broadcast to DevTools as `PerfRecord` telemetry (FLUX-059), independent
+        // of whether the frame itself shipped.
+        let perf_json: Vec<String> = pipeline
+            .perf_records()
+            .into_iter()
+            .filter_map(|r| r.to_json().ok())
+            .collect();
+        (outcome, perf_json)
     };
-    match outcome {
+    let sent = match outcome {
         Ok(Compiled::Init(frame)) => {
             shared.broadcast(frame);
             true
@@ -158,7 +167,16 @@ pub(crate) fn compile_and_broadcast(shared: &Arc<Shared>) -> bool {
             true
         }
         Ok(Compiled::Unchanged) => false,
+    };
+    // Broadcast the render-perf records to every subscribed DevTools client. These
+    // are best-effort: a disconnected client is pruned by `route_telemetry`.
+    for json in &perf_json {
+        shared
+            .devtools_router
+            .lock()
+            .route_telemetry(&flux_ir_serde::TelemetryEvent::perf_record(json.clone()));
     }
+    sent
 }
 
 /// Whether `event` is a content-affecting change (create / modify / remove).

@@ -356,6 +356,28 @@ mod tests {
     }
 
     #[test]
+    fn router_broadcasts_perf_record_to_subscribers() {
+        // A `PerfRecord` telemetry event (FLUX-059) must route to subscribers just
+        // like any other telemetry event, so DevTools can render it as a flamegraph
+        // lane. The record JSON is carried verbatim.
+        let (host_tx, _host_rx) = mpsc::unbounded_channel();
+        let mut router = DevToolsRouter::new(SourceMap::default(), host_tx);
+        let mut rx = router.subscribe_devtools();
+        let json = "{\"scenario\":\"loopback-e2e\",\"kind\":\"save-to-photon\",\"tree_size\":50,\"samples\":[{\"latency\":42.0}]}";
+        assert_eq!(
+            router.route_telemetry(&TelemetryEvent::perf_record(json)),
+            1
+        );
+        let got = rx.try_recv().expect("perf record delivered");
+        match got {
+            EnrichedTelemetryEvent::PerfRecord { json: delivered } => {
+                assert_eq!(delivered, json);
+            }
+            _ => panic!("expected PerfRecord"),
+        }
+    }
+
+    #[test]
     fn source_map_from_empty_ir_is_empty() {
         // A freshly defaulted map resolves nothing.
         let map = SourceMap::default();

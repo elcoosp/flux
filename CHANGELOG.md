@@ -469,11 +469,16 @@ The entries below land the work committed since the changelog was last updated
   - Tests: `perf_record::flame_rows` (empty state, over/under budget, latest-wins
     dedup, distinct lanes) + `state::ingest_perf_record` +
     `state::handle_telemetry_perf_record_event_feeds_flamegraph`.
-- **Follow-up (not in this issue):** `flux-devserver` does not yet *broadcast*
-  `PerfRecord` frames — the wire variant + DevTools ingestion are done and tested,
-  but no caller in `flux-devserver` constructs `TelemetryEvent::perf_record(...)`
-  and sends it on `:7333` yet. Small, isolated follow-up (server already depends on
-  both `flux-ir-serde` and `flux-perf-harness`).
+- **Follow-up (DONE):** `flux-devserver` now *broadcasts* `PerfRecord` frames.
+  `Pipeline::perf_records()` builds the server-side `Save → pixels` breakdown from
+  the real per-compile `PhaseTimings` (parse+type_check+lower+diff+serialize →
+  `MetricKind::SaveToPhoton`; serialize alone → `MetricKind::PatchRoundTrip`) with the
+  lowered node count as `tree_size`, `Scenario::LoopbackE2e`. `compile_and_broadcast`
+  (watcher hot path) and `initial_compile` both broadcast each record as
+  `TelemetryEvent::perf_record(json)` via `DevToolsRouter::route_telemetry` on `:7333`,
+  so the flamegraph fills from the first compile, not just after an edit. `flux-perf-harness`
+  promoted from dev-dep to a regular dependency of `flux-devserver`. Tests:
+  `pipeline::tests::perf_records_*` + `debug_bridge::tests::router_broadcasts_perf_record_to_subscribers`.
 - **Verification note:** `cargo test -p flux-devtools-ui --lib` passes (45/45,
   incl. the 8 FLUX-059 flamegraph/ingest tests) once the workspace tree is green —
   the earlier block was concurrent in-flight breakage in `crates/flux-ir/src/lower/mod.rs`
