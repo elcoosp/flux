@@ -60,3 +60,54 @@ jobs:
           name: criterion-baseline
           path: target/criterion
           retention-days: 30
+
+  save-photon:
+    name: save→photon e2e (loopback LANE-H)
+    runs-on: macos-14
+    # FLUX-073 telemetry: drives a real DevServer + headless loopback WebSocket
+    # client, edits a synthetic app 60× per tree size, and reports p50/p99 +
+    # a JSON MetricRecord. Cheap (~30s for two tree sizes) so it runs on every
+    # event; the gate is non-blocking until a regression trips `passed=false`.
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install nightly toolchain
+        run: |
+          rustup toolchain install nightly --profile minimal
+          rustup default nightly
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run save→photon loopback bench
+        # `profile.bench.strip=none` avoids the macOS rust-objcopy SIGABRT
+        # warning that would otherwise fail under `-D warnings`.
+        run: |
+          cargo bench -p flux-devserver --bench save_photon \
+            --config 'profile.bench.strip="none"' | tee save-photon.log
+
+      - name: Extract metric records
+        run: |
+          grep 'LANE-H record json:' save-photon.log \
+            | sed 's/^.*LANE-H record json: //' > save-photon-metrics.jsonl
+          echo "Extracted $(wc -l < save-photon-metrics.jsonl) records:"
+
+      - name: Gate assertion
+        # FLUX-073 budget gate: fail the job only if the harness itself reports
+        # a missed ceiling (observed_p95 > 250 ms). Normal telemetry is uploaded
+        # regardless via the always() step below.
+        run: |
+          if grep -q 'LANE-H gate: passed=false' save-photon.log; then
+            echo "::error::save→photon gate FAILED — see save-photon.log"
+            exit 1
+          fi
+
+      - name: Upload metric records
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flux-save-photon-metrics
+          path: |
+            save-photon-metrics.jsonl
+            save-photon.log
+          retention-days: 30

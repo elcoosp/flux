@@ -2216,6 +2216,7 @@ dependencies = [
  "flux-ir",
  "flux-ir-serde",
  "flux-parser",
+ "flux-perf-harness",
  "flux-syntax",
  "flux-types",
  "futures-util",
@@ -2294,6 +2295,7 @@ name = "flux-lsp"
 version = "0.1.0"
 dependencies = [
  "async-lsp",
+ "flux-codegen-core",
  "flux-ir",
  "flux-parser",
  "flux-syntax",

@@ -13,7 +13,7 @@ use crate::metric::{LatencyMs, MetricKind, MetricRecord};
 #[derive(Clone, Copy, Debug)]
 pub struct Budgets {
     /// Per-kind p95 ceiling in milliseconds.
-    ceilings: [(MetricKind, f64); 7],
+    ceilings: [(MetricKind, f64); 8],
 }
 
 impl Budgets {
@@ -31,6 +31,11 @@ impl Budgets {
                 (MetricKind::VmDispatch, 2.0),
                 (MetricKind::DevColdStart, 200.0),
                 (MetricKind::ReleaseColdStart, 500.0),
+                // FLUX-073 loopback save→photon. Generous starting ceiling; the
+                // harness records the first measured baseline and we tighten
+                // toward the §3.10 "Save → pixels < 100 ms" target as the
+                // watcher/debounce contribution is measured and reduced.
+                (MetricKind::SaveToPhoton, 250.0),
             ],
         }
     }

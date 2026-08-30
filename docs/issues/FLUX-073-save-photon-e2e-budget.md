@@ -81,3 +81,72 @@ stall from a watcher or WiFi hiccup is indistinguishable from green §3.10 numbe
 - `AGENTS.md` §3.10 names save→photon as the headline budget with a stated target.
 - CI runs it (blocking or telemetry) on a fixed runner; first measured numbers are
   recorded in the issue as the baseline to tighten against.
+
+## Implementation (2026-08-29)
+
+**What landed (LANE-H, FLUX-073):**
+
+- `flux-perf-harness` schema extended: new `Scenario::LoopbackE2e` (the real
+  dev server + headless loopback WebSocket client, no device) and new
+  `MetricKind::SaveToPhoton`; `MetricRecord::p99()` added; `Budgets::v1()` gained a
+  `SaveToPhoton` p95 ceiling of **250 ms** (generous starting point — tighten
+  toward the spec's `< 100 ms` as the watcher/debounce contribution is reduced).
+- `crates/flux-devserver/tests/save_to_photon.rs` — the authoritative e2e test.
+  Drives `DevServer::start` + a persistent loopback `tungstenite` client, edits a
+  synthetic `Counter`/`Column`/`Text`/`Button` fixture 60x per tree size, asserts a
+  `Delta` frame arrives for every save, and reports p50/p99 + a JSON `MetricRecord`.
+  The edit varies the `Button`'s `onPress` increment constant: that is the only
+  edit the differencer detects as a `Delta` over a stable-size tree (a `Text` `text`
+  edit lives inside a prop thunk the node-level prop hash does not capture, and
+  literal layout props like `gap` are likewise not in the diff — only a handler-body
+  change reliably ships a frame). The baseline uses a sentinel increment value no
+  edit takes, so the first edit is never identical to the baseline.
+- `crates/flux-devserver/benches/save_photon.rs` — the CI telemetry bench (same
+  harness, `harness = false`). Prints p50/p99 + JSON and the gate verdict.
+
+**Measured loopback baseline** (`debounce` = 10 ms; the production default is 50 ms,
+so real-world numbers will be higher — the debounce window is the dominant,
+cheapest-to-fix cost):
+
+| Tree size | samples | p50 | p99 | gate (p95 <= 250 ms) |
+|---|---|---|---|---|
+| 50-node | 60 | ~ 43 ms | ~ 45 ms | pass |
+| ~1k-node | 60 | ~ 46 ms | ~ 50 ms | pass |
+
+Both sit well inside the 250 ms ceiling. The loopback path excludes WiFi RTT,
+on-device decode, signal re-eval, view mutation, layout and raster — until a
+physical-device / simulator runner exists this is the honest baseline to tighten
+against, not the LAN number.
+
+**Out of scope / follow-ups:** a fixed-runner CI job (blocking or telemetry) to run
+`benches/save_photon.rs` on every push; a `Scenario::{IosLanE2e, AndroidLanE2e}` once
+a device runner exists; tightening `DEFAULT_DEBOUNCE` and confirming the resulting
+loopback tail.
+
+**Note:** a pre-existing compile break in `flux-ir-serde/src/telemetry.rs`
+(`ViewMutation` gained a `component_name` field but the decoder/`EnrichedTelemetryEvent`
+match arms were not updated) blocked the whole workspace build; it was fixed as part
+of landing this harness (decoder reads + returns `component_name`; enrich match
+passes it through).
+
+## CI wiring (2026-08-29)
+
+A dedicated `save-photon` job was added to `.github/workflows/benchmarks.yml`
+(the FLUX-073 LANE-H telemetry runner). It:
+- runs on the fixed `macos-14` runner with the nightly toolchain (matches the
+  existing `bench` job and the harness's edition-2024 / nightly requirement);
+- runs `cargo bench -p flux-devserver --bench save_photon` with
+  `--config 'profile.bench.strip="none"'` (avoids the macOS `rust-objcopy`
+  SIGABRT warning that would otherwise trip the workflow's `-D warnings`);
+- extracts the `LANE-H record json:` lines into `save-photon-metrics.jsonl`;
+- **hard-fails only** if the harness prints `LANE-H gate: passed=false`
+  (observed p95 > 250 ms ceiling) — otherwise it is non-blocking telemetry;
+- uploads `save-photon-metrics.jsonl` + `save-photon.log` as the
+  `flux-save-photon-metrics` artifact (30-day retention).
+
+Unlike the existing `bench` criterion job (gated to non-PR events for cost), the
+`save-photon` job runs on every push **and** every PR because the loopback run is
+cheap (~30 s for two tree sizes) — this is exactly the "fixed-runner telemetry"
+follow-up called out in Acceptance. A physical-device / simulator runner
+(`Scenario::{IosLanE2e, AndroidLanE2e}`) remains a follow-up once such a runner
+exists; until then the loopback numbers are the recorded baseline.

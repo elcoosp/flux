@@ -42,6 +42,7 @@ flux-devserver = { path = "crates/flux-devserver" }
 flux-codegen-swift = { path = "crates/flux-codegen-swift" }
 flux-codegen-kotlin = { path = "crates/flux-codegen-kotlin" }
 flux-codegen-core = { path = "crates/flux-codegen-core" }
+flux-perf-harness = { path = "crates/flux-perf-harness" }
 
 flux-devtools-ui = { path = "crates/flux-devtools-ui" }
 flux-lsp = { path = "crates/flux-lsp" }

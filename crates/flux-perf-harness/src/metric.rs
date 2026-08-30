@@ -95,6 +95,12 @@ pub enum Scenario {
     AndroidDeclarativeDev,
     /// Android, release codegen path.
     AndroidRelease,
+    /// **FLUX-073:** the loopback harness — a real dev server plus a headless
+    /// WebSocket client on `127.0.0.1`, exercising the full `notify` → compile →
+    /// wire → apply path with no native device. The honest baseline to tighten
+    /// against until a physical-device runner exists (then add `IosLanE2e` /
+    /// `AndroidLanE2e` scenarios).
+    LoopbackE2e,
 }
 
 /// A kind of measurement, mirroring PRD-J's instrumented signals.
@@ -115,6 +121,11 @@ pub enum MetricKind {
     DevColdStart,
     /// Release cold start: process launch → first rendered frame.
     ReleaseColdStart,
+    /// **FLUX-073:** loopback save→photon end-to-end latency — `notify` event
+    /// to a host applying the final patch, measured on a real dev server plus a
+    /// headless loopback WebSocket client (no device). The headline "does hot
+    /// reload feel instant?" number from the spec's `Save → pixels` budget.
+    SaveToPhoton,
 }
 
 /// A complete, aggregated performance record for one `(scenario, kind)` pair.
@@ -161,6 +172,12 @@ impl MetricRecord {
     #[must_use]
     pub fn p95(&self) -> Option<LatencyMs> {
         percentile(&self.samples, 0.95)
+    }
+
+    /// The p99 latency (FLUX-073 headline tail number). `None` when empty.
+    #[must_use]
+    pub fn p99(&self) -> Option<LatencyMs> {
+        percentile(&self.samples, 0.99)
     }
 
     /// The mean latency. `None` when there are no samples.

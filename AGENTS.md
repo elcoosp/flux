@@ -396,6 +396,19 @@ on the LAN) · `flux build --platform ios|android [--root]` (emits
 
 ### 3.10 Performance Budgets
 
+The **headline budget is `Save → pixels` (save→photon)**: the wall-clock from a
+`.flux` save to the host applying the final patch. This is the number a developer
+actually feels during hot reload — every per-stage micro-budget below exists only
+to localize *where* a regression in it lives. The end-to-end number is measured by
+the LANE-H harness (`crates/flux-devserver/tests/save_to_photon.rs` and
+`benches/save_photon.rs`): it drives a real `DevServer` plus a headless loopback
+WebSocket client, edits a fixture N >= 50 times per tree size, and reports p50/p99
+plus a JSON `MetricRecord` (schema in `crates/flux-perf-harness`, gated via
+`Budgets::v1()`). That loopback baseline excludes WiFi RTT, on-device decode,
+signal re-eval, view mutation, layout and raster — until a physical-device /
+simulator runner exists, treat the loopback numbers as the honest baseline to
+tighten against, not the LAN number.
+
 | Operation | Budget | How to verify |
 |---|---|---|
 | Parse 500-line file | < 5 ms | `cargo bench` |
@@ -405,7 +418,17 @@ on the LAN) · `flux build --platform ios|android [--root]` (emits
 | VM eval 50-instruction handler | < 2 ms | `XCTest measure` / JUnit benchmark |
 | Signal propagation (10 dirty cells) | < 1 ms | same |
 | Native view mutation (single update) | < 3 ms | same — under the unified tier this is measured as *observable props write → next composed frame* for a ~50-node subtree |
-| Save → pixels (end-to-end) | < 100 ms | integration benchmark |
+| **Save → pixels (loopback e2e, 50-node)** | **< 100 ms (p99)** | `crates/flux-devserver/tests/save_to_photon.rs` + `benches/save_photon.rs` — LANE-H |
+| **Save → pixels (loopback e2e, ~1k-node)** | **< 100 ms (p99)** | same — LANE-H |
+
+**Measured loopback baseline (FLUX-073, `debounce` = 10 ms, 2026-08-29):**
+50-node p50 ≈ 43 ms / p99 ≈ 45 ms; ~1k-node p50 ≈ 46 ms / p99 ≈ 50 ms. Both sit
+well inside the 250 ms `SaveToPhoton` gate ceiling (the generous starting ceiling
+per `Budgets::v1()`); tighten toward the §3.10 `< 100 ms` target as the
+watcher/debounce contribution is measured and reduced. The dominant loopback cost
+is the `notify` debounce window (`DEFAULT_DEBOUNCE` = 50 ms) plus the
+`spawn_blocking` WS round-trip — measure the debounce contribution first, it alone
+is the cheapest, highest-leverage knob.
 
 If you exceed a budget, profile (`cargo bench -- --profile-time=5` /
 Instruments / Android Profiler) before submitting.

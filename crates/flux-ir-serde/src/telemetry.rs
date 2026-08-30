@@ -122,6 +122,8 @@ pub enum TelemetryEvent {
         mutation_kind: u8,
         /// New layout frame when the mutation carries one.
         frame: Option<Rect>,
+        /// Resolved component/adapter name (e.g. `Row`, `Button`), for DevTools labels.
+        component_name: String,
     },
     /// Emitted when a handler starts or finishes.
     HandlerInvocation {
@@ -187,6 +189,7 @@ impl TelemetryEvent {
                 parent_id,
                 mutation_kind,
                 frame,
+                component_name,
             } => {
                 w.u8(EVENT_VIEW_MUTATION);
                 w.u32(*node_id);
@@ -200,6 +203,9 @@ impl TelemetryEvent {
                     }
                     None => w.u8(0),
                 }
+                let name_bytes = component_name.as_bytes();
+                w.u32(name_bytes.len() as u32);
+                w.bytes(name_bytes);
             }
             TelemetryEvent::HandlerInvocation {
                 handler_id,
@@ -273,12 +279,16 @@ impl TelemetryEvent {
                     0 => None,
                     _ => Some(Rect::decode(&mut inner)?),
                 };
+                let name_len = inner.u32("view_mutation.name.len")? as usize;
+                let name_raw = inner.bytes(name_len, "view_mutation.name")?;
+                let component_name = String::from_utf8_lossy(name_raw).into_owned();
                 Ok(TelemetryEvent::ViewMutation {
                     node_id,
                     native_view_id,
                     parent_id,
                     mutation_kind,
                     frame,
+                    component_name,
                 })
             }
             EVENT_HANDLER_INVOCATION => {
@@ -703,6 +713,8 @@ pub enum EnrichedTelemetryEvent {
         frame: Option<Rect>,
         /// `.flux` source span of the node, if resolvable.
         source_span: Option<Span>,
+        /// Resolved component/adapter name (e.g. `Row`, `Button`), for DevTools labels.
+        component_name: String,
     },
     /// A handler invocation, enriched with the handler's source span.
     HandlerInvocation {
@@ -763,6 +775,7 @@ impl EnrichedTelemetryEvent {
                 mutation_kind,
                 frame,
                 source_span,
+                component_name,
             } => {
                 w.u8(EVENT_VIEW_MUTATION);
                 w.u32(*node_id);
@@ -777,6 +790,9 @@ impl EnrichedTelemetryEvent {
                     None => w.u8(0),
                 }
                 encode_optional_span(w, *source_span);
+                let name_bytes = component_name.as_bytes();
+                w.u32(name_bytes.len() as u32);
+                w.bytes(name_bytes);
             }
             EnrichedTelemetryEvent::HandlerInvocation {
                 handler_id,
@@ -854,6 +870,9 @@ impl EnrichedTelemetryEvent {
                     _ => Some(Rect::decode(&mut inner)?),
                 };
                 let source_span = decode_optional_span(&mut inner)?;
+                let name_len = inner.u32("enriched.view_mutation.name.len")? as usize;
+                let name_raw = inner.bytes(name_len, "enriched.view_mutation.name")?;
+                let component_name = String::from_utf8_lossy(name_raw).into_owned();
                 Ok(EnrichedTelemetryEvent::ViewMutation {
                     node_id,
                     native_view_id,
@@ -861,6 +880,7 @@ impl EnrichedTelemetryEvent {
                     mutation_kind,
                     frame,
                     source_span,
+                    component_name,
                 })
             }
             EVENT_HANDLER_INVOCATION => {
@@ -926,6 +946,7 @@ pub fn enrich_telemetry(event: TelemetryEvent) -> EnrichedTelemetryEvent {
             parent_id,
             mutation_kind,
             frame,
+            component_name,
         } => EnrichedTelemetryEvent::ViewMutation {
             node_id,
             native_view_id,
@@ -933,6 +954,7 @@ pub fn enrich_telemetry(event: TelemetryEvent) -> EnrichedTelemetryEvent {
             mutation_kind,
             frame,
             source_span: None,
+            component_name,
         },
         TelemetryEvent::HandlerInvocation {
             handler_id,

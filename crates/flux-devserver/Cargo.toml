@@ -26,6 +26,7 @@ futures-util.workspace = true
 [dev-dependencies]
 tokio.workspace = true
 criterion.workspace = true
+flux-perf-harness.workspace = true
 
 [[bench]]
 name = "pipeline_large"
@@ -37,4 +38,8 @@ harness = false
 
 [[bench]]
 name = "signal_propagation"
+harness = false
+
+[[bench]]
+name = "save_photon"
 harness = false
