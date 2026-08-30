@@ -18,8 +18,10 @@ pub type Registers = Box<[Value; 16]>;
 /// A native view node in the live component tree.
 ///
 /// Carries enough to rebuild the parent/child hierarchy on the DevTools side:
-/// the node id, its parent's id, and the optional layout [`Rect`] (the host may
-/// know the node exists but be unable to measure geometry — see ADR-0048).
+/// the node id, its parent's id, the optional layout [`Rect`] (the host may
+/// know the node exists but be unable to measure geometry — see ADR-0048), and
+/// the component name the host resolved for the node (so the tree shows
+/// human-readable component labels instead of bare node ids).
 #[derive(Clone, Debug, PartialEq)]
 pub struct ViewFrame {
     /// IR node backing the native view.
@@ -28,6 +30,9 @@ pub struct ViewFrame {
     pub parent_id: NodeId,
     /// Layout rectangle, or `None` when the host cannot measure it.
     pub frame: Option<Rect>,
+    /// Resolved component name (e.g. `Column`, `Button`), if the host reported
+    /// one. `None` for nodes whose name the host did not transmit.
+    pub component_name: Option<String>,
 }
 
 /// Reconstructed DevTools state for a single timeline position.
@@ -122,6 +127,7 @@ pub fn reconstruct_state(
                 parent_id,
                 frame,
                 mutation_kind,
+                component_name,
                 ..
             } => {
                 if *mutation_kind == 1 {
@@ -133,10 +139,13 @@ pub fn reconstruct_state(
                     // when the host cannot measure geometry (the host crate is
                     // Android-free and drives in-memory adapter views); we still
                     // track the node so the component tree shows the live graph.
+                    // The component name travels with the event so the tree reads
+                    // as `Column`/`Button`/… instead of bare node ids.
                     let entry = ViewFrame {
                         node_id: *node_id,
                         parent_id: *parent_id,
-                        frame: frame.clone(),
+                        frame: *frame,
+                        component_name: Some(component_name.clone()),
                     };
                     if let Some(existing) = state
                         .view_frames

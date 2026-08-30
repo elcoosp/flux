@@ -87,7 +87,7 @@ enum FrameDeserializer {
     /// Decodes an `Init` frame (Appendix D §D.12.2).
     private static func decodeInit(_ r: inout ByteReader, version: UInt8) throws -> FluxFrame {
         #if DEBUG
-        let dbg: (String, Int) -> Void = { print("[DEC] \($0) off=\($1)") }
+        let dbg: (String, Int) -> Void = { _, _ in }
         #else
         let dbg: (String, Int) -> Void = { _, _ in }
         #endif

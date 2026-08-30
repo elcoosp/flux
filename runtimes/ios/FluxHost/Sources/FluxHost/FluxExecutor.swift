@@ -284,12 +284,7 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
     @discardableResult
     public func applyFrame(_ bytes: Data) throws -> [UInt32] {
         #if DEBUG
-        if bytes.count > 6, bytes[5] == 0x02 {
-            let hex = bytes.map { String(format: "%02x", $0) }.joined(separator: " ")
-            if let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
-                let _ = try? hex.write(to: docs.appendingPathComponent("flux_init_dump.txt"), atomically: true, encoding: .utf8)
-            }
-        }
+        // Decode and apply the frame (see below). No debug dump retained.
         #endif
         let frame = try FrameDeserializer.decode([UInt8](bytes))
         return apply(frame)

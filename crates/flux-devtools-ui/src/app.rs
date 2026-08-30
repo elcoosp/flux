@@ -214,12 +214,11 @@ pub fn run_app() -> anyhow::Result<()> {
     rt.spawn(async move {
         match connect(&format!("127.0.0.1:{DEFAULT_DEVTOOLS_PORT}")).await {
             Ok(stream) => {
-                eprintln!("[DT-CONN] connected to dev server 7333");
                 if let Err(e) = run_ingest_loop(stream, ingest_state).await {
-                    eprintln!("[DT-CONN] ingest loop ended: {e}");
+                    eprintln!("DevTools ingest loop ended: {e}");
                 }
             }
-            Err(e) => eprintln!("[DT-CONN] FAILED to connect to dev server: {e}"),
+            Err(e) => eprintln!("DevTools failed to connect to dev server: {e}"),
         }
     });
 

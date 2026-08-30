@@ -66,53 +66,61 @@ public enum TelemetryEvent {
     /// the batch frame already carries `event_count`, so each event is written
     /// verbatim and decoded directly by `TelemetryEvent::decode_from`.
     func encode(into data: inout Data) {
+        // Appendix D §D.12: every telemetry event is length-prefixed with a
+        // `u32` (little-endian) covering the tag and all fields that follow, so
+        // the decoder can skip an unknown event cleanly. Mirror the Rust
+        // `TelemetryEvent::encode_into` layout exactly (tag + fields, then the
+        // 4-byte length prefix).
+        var body = Data()
         switch self {
         case let .vmStep(offset, opcode, registers, gas):
-            data.append(0x01)
-            data.append(contentsOf: offset.bytesLE())
-            data.append(opcode)
+            body.append(0x01)
+            body.append(contentsOf: offset.bytesLE())
+            body.append(opcode)
             for reg in registers.prefix(16) {
-                encodeValue(reg, into: &data)
+                encodeValue(reg, into: &body)
             }
-            data.append(contentsOf: gas.bytesLE())
+            body.append(contentsOf: gas.bytesLE())
         case let .signalWrite(id, oldV, newV, effects):
-            data.append(0x02)
-            data.append(contentsOf: id.bytesLE())
-            encodeValue(oldV, into: &data)
-            encodeValue(newV, into: &data)
-            data.append(contentsOf: UInt16(effects.count).bytesLE())
+            body.append(0x02)
+            body.append(contentsOf: id.bytesLE())
+            encodeValue(oldV, into: &body)
+            encodeValue(newV, into: &body)
+            body.append(contentsOf: UInt16(effects.count).bytesLE())
             for effect in effects {
-                data.append(contentsOf: effect.bytesLE())
+                body.append(contentsOf: effect.bytesLE())
             }
         case let .viewMutation(node, native, parent, kind, frame, name):
-            data.append(0x03)
-            data.append(contentsOf: node.bytesLE())
-            data.append(contentsOf: native.bytesLE())
-            data.append(contentsOf: parent.bytesLE())
-            data.append(kind)
+            body.append(0x03)
+            body.append(contentsOf: node.bytesLE())
+            body.append(contentsOf: native.bytesLE())
+            body.append(contentsOf: parent.bytesLE())
+            body.append(kind)
             if let rect = frame {
-                data.append(0x01)
-                data.append(contentsOf: rect.x.bitPattern.bytesLE())
-                data.append(contentsOf: rect.y.bitPattern.bytesLE())
-                data.append(contentsOf: rect.width.bitPattern.bytesLE())
-                data.append(contentsOf: rect.height.bitPattern.bytesLE())
+                body.append(0x01)
+                body.append(contentsOf: rect.x.bitPattern.bytesLE())
+                body.append(contentsOf: rect.y.bitPattern.bytesLE())
+                body.append(contentsOf: rect.width.bitPattern.bytesLE())
+                body.append(contentsOf: rect.height.bitPattern.bytesLE())
             } else {
-                data.append(0x00)
+                body.append(0x00)
             }
             let nameBytes = Data(name.utf8)
-            data.append(contentsOf: UInt32(nameBytes.count).bytesLE())
-            data.append(nameBytes)
+            body.append(contentsOf: UInt32(nameBytes.count).bytesLE())
+            body.append(nameBytes)
         case let .handlerInvocation(handler, isStart, gas):
-            data.append(0x04)
-            data.append(contentsOf: handler.bytesLE())
-            data.append(isStart ? 1 : 0)
+            body.append(0x04)
+            body.append(contentsOf: handler.bytesLE())
+            body.append(isStart ? 1 : 0)
             if let g = gas {
-                data.append(0x01)
-                data.append(contentsOf: g.bytesLE())
+                body.append(0x01)
+                body.append(contentsOf: g.bytesLE())
             } else {
-                data.append(0x00)
+                body.append(0x00)
             }
         }
+        data.append(contentsOf: UInt32(body.count).bytesLE())
+        data.append(body)
     }
 
     /// Encodes this event into a full `Telemetry` frame (Appendix D §D.12).
@@ -278,7 +286,6 @@ func fluxTrace(_ line: String) {
 ///
 /// Safe to call when no dev server is running: `send` simply drops frames.
 public func fluxDevtoolsConnect(send: @escaping (Data) -> Void) {
-    os_log(.fault, "RTFLUXTELE CONNECT_CALLED")
     let bridge = TelemetryBridge()
     fluxDevtoolsSetSink(bridge)
     bridge.onFlush = { frame in

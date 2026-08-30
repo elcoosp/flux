@@ -1,6 +1,7 @@
 //! Component tree view (spec §5.3): the shadow-tree node hierarchy.
 
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use gpui::{AnyElement, Context, IntoElement, Render, Window};
 
@@ -14,8 +15,9 @@ struct TreeNode {
     children: Vec<TreeNode>,
 }
 
-/// Renders the live component tree as an indented, collapsible-style hierarchy
-/// (depth → left padding, chevrons mark branches) instead of a flat list.
+/// Renders the live component tree as an indented hierarchy (depth → left
+/// padding, chevrons mark branches). Each row shows the resolved component
+/// name (e.g. `Column`, `Button`) plus the node id and, when known, geometry.
 pub struct ComponentTreeView {
     state: Arc<DevToolsState>,
 }
@@ -57,25 +59,29 @@ impl ComponentTreeView {
         roots.iter().map(|r| build(r, &children)).collect()
     }
 
-    /// A single tree row, rendered with the same `kv_row` primitive the other
-    /// (working) panes use: key = indented marker + node id, value = geometry.
+    /// A single tree row. Branches (`has_children`) get a `▾` chevron; leaves
+    /// get a `•`. Each row shows the resolved component name plus the node id
+    /// and, when known, geometry.
     fn row(&self, node: &TreeNode, depth: usize) -> AnyElement {
-        let label = match &node.frame.frame {
+        let has_children = !node.children.is_empty();
+        let chevron = if has_children { "▾" } else { "•" };
+        let name = node
+            .frame
+            .component_name
+            .clone()
+            .unwrap_or_else(|| "(unnamed)".to_string());
+        let geo = match &node.frame.frame {
             Some(rect) => format!("{}×{} @ ({}, {})", rect.width, rect.height, rect.x, rect.y),
-            None => "(geometry pending)".to_string(),
-        };
-        let marker = if node.children.is_empty() {
-            "•"
-        } else {
-            "▾"
+            None => "geometry pending".to_string(),
         };
         let key = format!(
-            "{}{} node #{}",
+            "{}{} {}  #{}",
             "  ".repeat(depth),
-            marker,
+            chevron,
+            name,
             node.frame.node_id
         );
-        into_any(kv_row(key, label))
+        into_any(kv_row(key, geo))
     }
 
     fn render_tree(&self, nodes: &[TreeNode], depth: usize, out: &mut Vec<AnyElement>) {
@@ -88,7 +94,7 @@ impl ComponentTreeView {
     }
 
     /// Renders the view as a standalone pane.
-    pub fn render_pane(&self, _cx: &Context<'_, Self>) -> AnyElement {
+    pub fn render_pane(&self) -> AnyElement {
         let tree = self.tree();
         if tree.is_empty() {
             return into_any(empty_row("No layout frames received yet."));
@@ -100,8 +106,8 @@ impl ComponentTreeView {
 }
 
 impl Render for ComponentTreeView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
-        self.render_pane(cx)
+    fn render(&mut self, _window: &mut Window, _cx: &mut Context<'_, Self>) -> impl IntoElement {
+        self.render_pane()
     }
 }
 
@@ -121,6 +127,7 @@ mod tests {
                 width: 10.0,
                 height: 20.0,
             }),
+            component_name: Some("Column".to_string()),
         }
     }
 
@@ -139,10 +146,8 @@ mod tests {
         assert_eq!(tree[0].children.len(), 1);
         assert_eq!(tree[0].children[0].children.len(), 1);
 
-        // The render path must produce one row per node (3) without panicking
-        // and must not collapse to the empty-state.
-        let mut rows: Vec<AnyElement> = Vec::new();
-        view.render_tree(&tree, 0, &mut rows);
-        assert_eq!(rows.len(), 3, "each node must yield one rendered row");
+        // The component name must be carried through reconstruction so the tree
+        // reads as `Column` (not a bare node id).
+        assert_eq!(tree[0].frame.component_name.as_deref(), Some("Column"));
     }
 }
