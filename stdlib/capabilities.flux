@@ -33,6 +33,7 @@ capability Storage {
   fn setItem(key: String, value: Data) -> Unit
   fn getItem(key: String) -> Option[Data]
   fn removeItem(key: String) -> Unit
+  fn devReferenceAsync() -> Data
 }
 
 capability Router {
