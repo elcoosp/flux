@@ -9,7 +9,7 @@ use gpui::{
     Render, StyleRefinement, Styled, Window, px,
 };
 use gpui_component::{
-    Root, Theme, TitleBar, Icon, IconName, badge::Badge, group_box::GroupBox,
+    Root, Theme, TitleBar, badge::Badge, group_box::GroupBox,
     resizable::{h_resizable, resizable_panel, v_resizable},
     scroll::ScrollableElement, status_bar::StatusBar,
 };
@@ -24,8 +24,8 @@ use crate::views::{
 use crate::wire_client::{DEFAULT_DEVTOOLS_PORT, connect, run_ingest_loop};
 
 /// A single DevTools pane: a themed, titled, scrollable surface built on
-/// gpui-component's [`GroupBox`] (outline variant → bordered + radius via the
-/// active theme), with an `IconName` next to a bold title and a vertically
+/// gpui-component's [`GroupBox`] (Normal variant → square `border_1`, no radius,
+/// no padding), with a bold title flush to the left edge and a vertically
 /// scrollable body.
 ///
 /// **Why a macro (not a function):** gpui-component's `Scrollable` keys its
@@ -39,7 +39,7 @@ use crate::wire_client::{DEFAULT_DEVTOOLS_PORT, connect, run_ingest_loop};
 /// grow (`content_style.flex_grow = 1`), so the scroll viewport has a real
 /// height and a visible vertical scrollbar renders.
 macro_rules! devtools_pane {
-    ($title:expr, $icon:expr, $view:expr, $colors:expr) => {{
+    ($title:expr, $view:expr, $colors:expr) => {{
         let title: &'static str = $title;
         let mut content_style = StyleRefinement::default();
         content_style.flex_grow = Some(1.0);
@@ -54,8 +54,8 @@ macro_rules! devtools_pane {
                     .flex()
                     .flex_row()
                     .items_center()
-                    .gap(px(6.))
-                    .child(Icon::new($icon).size_4().text_color($colors.foreground))
+                    .pt(px(6.))
+                    .pl(px(8.))
                     .child(
                         gpui::div()
                             .text_sm()
@@ -225,18 +225,18 @@ impl Render for DevToolsRoot {
                             .size(px(380.))
                             .child(
                                 v_resizable("devtools-left")
-                                    .child(devtools_pane!("Component Tree", IconName::Inspector, self.tree.clone(), colors))
-                                    .child(devtools_pane!("Logs", IconName::File, self.logs.clone(), colors))
-                                    .child(devtools_pane!("Network", IconName::Network, self.net.clone(), colors)),
+                                    .child(devtools_pane!("Component Tree", self.tree.clone(), colors))
+                                    .child(devtools_pane!("Logs", self.logs.clone(), colors))
+                                    .child(devtools_pane!("Network", self.net.clone(), colors)),
                             ),
                     )
                     .child(
                         resizable_panel()
                             .child(
                                 v_resizable("devtools-right")
-                                    .child(devtools_pane!("VM Inspector", IconName::Cpu, self.vm.clone(), colors))
-                                    .child(devtools_pane!("Signals", IconName::Bot, self.signals.clone(), colors))
-                                    .child(devtools_pane!("Timeline", IconName::ChartPie, self.timeline.clone(), colors)),
+                                    .child(devtools_pane!("VM Inspector", self.vm.clone(), colors))
+                                    .child(devtools_pane!("Signals", self.signals.clone(), colors))
+                                    .child(devtools_pane!("Timeline", self.timeline.clone(), colors)),
                             ),
                     ),
             )
