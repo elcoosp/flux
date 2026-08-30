@@ -4,11 +4,11 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use gpui::{
-    prelude::*, px, AnyElement, ClickEvent, Context, ElementId, Entity, InteractiveElement,
-    IntoElement, Render, Window,
+    prelude::*, px, AnyElement, ClickEvent, Context, ElementId, Entity, Focusable,
+    InteractiveElement, IntoElement, Render, Window,
 };
-use gpui_component::ActiveTheme as _;
 use gpui_component::input::{Input, InputEvent, InputState};
+use gpui_component::ActiveTheme as _;
 
 use crate::row::{empty_row, into_any, kv_row, rows_column};
 use crate::state::DevToolsState;
@@ -68,6 +68,26 @@ impl ComponentTreeView {
             self.collapsed.iter().collect::<Vec<_>>()
         );
         cx.notify();
+    }
+
+    /// Focuses the component-tree search box. Safe to call before the search
+    /// input has been lazily created: it triggers one render (which builds the
+    /// `InputState`) and then focuses it on the following frame.
+    pub fn focus_search(&self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if self.search.is_none() {
+            // Force the search box into existence, then focus next frame.
+            cx.notify();
+            let this = cx.entity();
+            window.defer(cx, move |window, cx| {
+                this.update(cx, |this, cx| {
+                    if let Some(input) = this.search.as_ref() {
+                        input.focus_handle(cx).focus(window, cx);
+                    }
+                });
+            });
+        } else if let Some(input) = self.search.as_ref() {
+            input.focus_handle(cx).focus(window, cx);
+        }
     }
 
     /// Collapses or expands every branch in the tree (used by the header
@@ -162,7 +182,13 @@ impl ComponentTreeView {
     /// flips with the collapsed state; leaves get a `•`. Clicking a branch row
     /// (closure captures the node id + this entity) toggles its children. Hover
     /// tints the row with the theme's `muted` color.
-    fn row(&self, node: &TreeNode, depth: usize, this: Entity<Self>, cx: &Context<'_, Self>) -> AnyElement {
+    fn row(
+        &self,
+        node: &TreeNode,
+        depth: usize,
+        this: Entity<Self>,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
         let has_children = !node.children.is_empty();
         let is_collapsed = self.collapsed.contains(&node.frame.node_id);
         let chevron = if !has_children {
@@ -178,7 +204,10 @@ impl ComponentTreeView {
             .clone()
             .unwrap_or_else(|| "(unnamed)".to_string());
         let geo = match &node.frame.frame {
-            Some(rect) => format!("{}×{} @ ({}, {})", rect.width, rect.height, rect.x, rect.y),
+            Some(rect) => format!(
+                "{:.2}×{:.2} @ ({:.2}, {:.2})",
+                rect.width, rect.height, rect.x, rect.y
+            ),
             None => "geometry pending".to_string(),
         };
         let key = format!(
@@ -232,9 +261,7 @@ impl ComponentTreeView {
         // here, which `new` doesn't have). Subscribe once so typing updates the
         // filter query and repaints.
         if self.search.is_none() {
-            let input = cx.new(|cx| {
-                InputState::new(window, cx).placeholder("Search components…")
-            });
+            let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search components…"));
             let input_for_sub = input.clone();
             self._search_sub = Some(cx.subscribe(
                 &input,
@@ -274,9 +301,7 @@ impl ComponentTreeView {
             .flex_row()
             .items_center()
             .mt(px(6.))
-            .child(
-                Input::new(self.search.as_ref().unwrap()),
-            );
+            .child(Input::new(self.search.as_ref().unwrap()));
         // Header with a real button (proves the click path works independent of
         // row-level hit-testing) that collapses/expands every branch at once.
         let header = gpui::div()
@@ -293,7 +318,15 @@ impl ComponentTreeView {
                     .h_auto()
                     .text_sm()
                     .on_click(move |_event: &ClickEvent, _window, cx| {
-                        this.update(cx, |this, cx| this.toggle_all(cx));
+                        // Defer the state mutation: the click handler runs while
+                        // this entity is already mid-update, so a direct
+                        // re-entrant `update` would panic and blank the pane
+                        // (the button "disappears"). `App::defer` runs it after
+                        // the current event settles — the safe gpui pattern.
+                        let this = this.clone();
+                        cx.defer(move |cx| {
+                            this.update(cx, |this, cx| this.toggle_all(cx));
+                        });
                     }),
             );
         let mut content: Vec<AnyElement> = Vec::new();

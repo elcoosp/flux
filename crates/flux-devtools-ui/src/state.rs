@@ -9,8 +9,8 @@ use flux_perf_harness::MetricRecord;
 use flux_syntax::SignalId;
 
 use crate::time_travel::{
-    LogBuffer, LogEntry, NetworkLog, NetworkRecord, ReconstructedState, TimelineBuffer, ViewFrame,
-    reconstruct_state,
+    reconstruct_state, LogBuffer, LogEntry, NetworkLog, NetworkRecord, ReconstructedState,
+    TimelineBuffer, ViewFrame,
 };
 
 /// Snapshot of the VM register/instruction view.
@@ -198,6 +198,56 @@ pub struct DevToolsState {
     /// The signal node currently selected in the signal graph (None = none).
     /// Selecting reveals the effect ids that re-run when the signal changes.
     pub selected_signal: RwLock<Option<SignalId>>,
+    /// Per-pane visibility toggled by keyboard shortcuts (roadmap §3). A hidden
+    /// pane is removed from the resizable layout so its column/row space is
+    /// reclaimed by the remaining panes. Defaults to all-visible.
+    pub pane_hidden: RwLock<PaneTargetSet>,
+}
+
+/// Identifies one of the six debugger panes, for keyboard-driven visibility
+/// toggles and focus targeting.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PaneTarget {
+    /// VM Inspector pane.
+    Vm,
+    /// Signals pane.
+    Signals,
+    /// Timeline pane.
+    Timeline,
+    /// Component Tree pane.
+    Tree,
+    /// Logs pane.
+    Logs,
+    /// Network pane.
+    Network,
+}
+
+/// A compact set of [`PaneTarget`]s (one bit per pane) stored behind a lock so
+/// keyboard handlers can flip visibility without per-field locks.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PaneTargetSet {
+    /// Bitmask of hidden panes (`1 << target as u8`).
+    hidden: u8,
+}
+
+impl PaneTargetSet {
+    /// All six panes visible.
+    #[must_use]
+    pub fn all_visible() -> Self {
+        Self { hidden: 0 }
+    }
+
+    /// Flips the visibility of `target`; returns the new visibility.
+    pub fn toggle(&mut self, target: PaneTarget) -> bool {
+        self.hidden ^= 1 << (target as u8);
+        self.is_visible(target)
+    }
+
+    /// `true` when `target` is currently visible.
+    #[must_use]
+    pub fn is_visible(&self, target: PaneTarget) -> bool {
+        (self.hidden & (1 << (target as u8))) == 0
+    }
 }
 
 impl DevToolsState {
@@ -216,6 +266,7 @@ impl DevToolsState {
             perf_records: RwLock::new(Vec::new()),
             scrub_index: RwLock::new(None),
             selected_signal: RwLock::new(None),
+            pane_hidden: RwLock::new(PaneTargetSet::all_visible()),
         }
     }
 
@@ -248,6 +299,19 @@ impl DevToolsState {
         } else {
             *selected = Some(id);
         }
+    }
+
+    /// `true` when the given pane is currently visible.
+    #[must_use]
+    pub fn is_pane_visible(&self, target: PaneTarget) -> bool {
+        self.pane_hidden.read().is_visible(target)
+    }
+
+    /// Flips the visibility of `target` and returns whether it is now visible.
+    /// Panes hidden this way are dropped from the resizable layout so their
+    /// space is reclaimed by the remaining panes.
+    pub fn toggle_pane(&self, target: PaneTarget) -> bool {
+        self.pane_hidden.write().toggle(target)
     }
 
     /// Records the identity of the host now streaming telemetry.
@@ -543,6 +607,21 @@ mod tests {
         // Selecting the same signal again deselects it.
         state.toggle_signal_selection(12);
         assert_eq!(state.selected_signal(), None);
+    }
+
+    #[test]
+    fn toggle_pane_flips_visibility_and_reports_new_state() {
+        let state = DevToolsState::new();
+        // Every pane starts visible.
+        assert!(state.is_pane_visible(PaneTarget::Tree));
+        // Hiding a pane reports it as not visible.
+        assert!(!state.toggle_pane(PaneTarget::Tree));
+        assert!(!state.is_pane_visible(PaneTarget::Tree));
+        // Other panes are unaffected.
+        assert!(state.is_pane_visible(PaneTarget::Logs));
+        // Toggling again restores visibility.
+        assert!(state.toggle_pane(PaneTarget::Tree));
+        assert!(state.is_pane_visible(PaneTarget::Tree));
     }
 
     #[test]

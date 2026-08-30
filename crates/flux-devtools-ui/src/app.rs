@@ -5,8 +5,8 @@ use std::sync::Arc;
 use anyhow::Context as _;
 use gpui::prelude::*;
 use gpui::{
-    AnyView, App, AppContext, Context, ElementId, Entity, FontWeight, IntoElement, ParentElement,
-    Render, StyleRefinement, Styled, Window, px,
+    Action, AnyView, App, AppContext, Context, ElementId, Entity, FontWeight, IntoElement,
+    KeyBinding, ParentElement, Render, StyleRefinement, Styled, Window, px,
 };
 use gpui_component::{ThemeMode, WindowExt};
 use gpui_component::{
@@ -18,7 +18,7 @@ use gpui_component::{
 
 use gpui_platform::application;
 
-use crate::state::{DevToolsState, HostInfo};
+use crate::state::{DevToolsState, HostInfo, PaneTarget};
 use crate::views::{
     ComponentTreeView, LogViewerView, NetworkInspectorView, SignalGraphView, TimelineView,
     VmInspectorView,
@@ -47,6 +47,8 @@ macro_rules! devtools_pane {
         content_style.flex_grow = Some(1.0);
         GroupBox::new()
             .flex_1()
+            .h_full()
+            .min_h(px(0.))
             .min_w(px(0.))
             .border_1()
             .border_color($colors.border)
@@ -77,6 +79,39 @@ macro_rules! devtools_pane {
             )
             .into_any_element()
     }};
+}
+
+/// Keyboard action: step the time-travel scrubber to the previous timeline
+/// event. Bound to `cmd-[` (macOS) / `ctrl-[` (others).
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = flux_devtools, no_json)]
+pub struct StepBack;
+
+/// Keyboard action: step the time-travel scrubber to the next timeline event.
+/// Bound to `cmd-]` (macOS) / `ctrl-]` (others).
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = flux_devtools, no_json)]
+pub struct StepForward;
+
+/// Keyboard action: jump the scrubber back to the live edge. Bound to `cmd-\`
+/// (macOS) / `ctrl-\` (others).
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = flux_devtools, no_json)]
+pub struct JumpToLive;
+
+/// Keyboard action: focus the component-tree search box. Bound to `cmd-f`
+/// (macOS) / `ctrl-f` (others).
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = flux_devtools, no_json)]
+pub struct FocusSearch;
+
+/// Keyboard action: toggle a debugger pane's visibility. One variant per pane;
+/// the [`PaneTarget`] payload selects which. Bound to `cmd-1..6`.
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = flux_devtools, no_json)]
+pub struct TogglePane {
+    /// Which pane to toggle.
+    pub target: PaneTarget,
 }
 
 /// The root DevTools window, owning the shared [`DevToolsState`] and the four
@@ -110,17 +145,92 @@ impl DevToolsRoot {
         // changes), which re-reads the shared state and repaints every pane. This
         // avoids any cross-thread `AsyncApp` capture (which this pinned gpui
         // version's spawn trait rejects) and keeps the views live without polling.
+        let vm = cx.new(|_| VmInspectorView::new(state.clone()));
+        let signals = cx.new(|_| SignalGraphView::new(state.clone()));
+        let tree = cx.new(|_| ComponentTreeView::new(state.clone()));
+        let timeline = cx.new(|cx| TimelineView::new(state.clone(), cx));
+        let logs = cx.new(|_| LogViewerView::new(state.clone()));
+        let net = cx.new(|_| NetworkInspectorView::new(state.clone()));
+        // Clone of `tree` for the keyboard handler below (the original is moved
+        // into `Self` and thus no longer accessible here).
+        let tree_for_focus = tree.clone();
+        // The root entity, captured by the global action handlers so they can
+        // reach shared state without re-entering the view during an event.
+        let root = cx.entity();
+
+        // Register keyboard shortcuts (roadmap §3). Bindings are global; the
+        // handlers below react to the dispatched actions and mutate shared
+        // state, then repaint. Time-travel shortcuts step/jump the scrubber;
+        // `cmd-f` focuses the component-tree search; `cmd-1..6` toggle panes.
+        let cmd = if cfg!(target_os = "macos") { "cmd-" } else { "ctrl-" };
+        cx.bind_keys(vec![
+            KeyBinding::new(&format!("{cmd}["), StepBack, None),
+            KeyBinding::new(&format!("{cmd}]"), StepForward, None),
+            KeyBinding::new(&format!("{cmd}\\"), JumpToLive, None),
+            KeyBinding::new(&format!("{cmd}f"), FocusSearch, None),
+            KeyBinding::new(&format!("{cmd}1"), TogglePane { target: PaneTarget::Tree }, None),
+            KeyBinding::new(&format!("{cmd}2"), TogglePane { target: PaneTarget::Logs }, None),
+            KeyBinding::new(&format!("{cmd}3"), TogglePane { target: PaneTarget::Network }, None),
+            KeyBinding::new(&format!("{cmd}4"), TogglePane { target: PaneTarget::Vm }, None),
+            KeyBinding::new(&format!("{cmd}5"), TogglePane { target: PaneTarget::Signals }, None),
+            KeyBinding::new(&format!("{cmd}6"), TogglePane { target: PaneTarget::Timeline }, None),
+        ]);
+        // Time-travel stepping: read the current scrub index (None = live edge)
+        // and step within the timeline bounds.
+        let root_step_back = root.clone();
+        App::on_action(cx, move |_: &StepBack, cx: &mut App| {
+            let state = root_step_back.read(cx).state.clone();
+            let len = state.timeline_len();
+            if len == 0 {
+                return;
+            }
+            let cur = state.scrub_index().unwrap_or(len - 1);
+            let next = cur.saturating_sub(1);
+            state.set_scrub_index(Some(next));
+        });
+        let root_step_fwd = root.clone();
+        App::on_action(cx, move |_: &StepForward, cx: &mut App| {
+            let state = root_step_fwd.read(cx).state.clone();
+            let len = state.timeline_len();
+            if len == 0 {
+                return;
+            }
+            let cur = state.scrub_index().unwrap_or(len - 1);
+            let next = (cur + 1).min(len - 1);
+            state.set_scrub_index(Some(next));
+        });
+        let root_jump = root.clone();
+        App::on_action(cx, move |_: &JumpToLive, cx: &mut App| {
+            let state = root_jump.read(cx).state.clone();
+            state.set_scrub_index(None);
+        });
+        // Focus the component-tree search box.
+        App::on_action(cx, move |_: &FocusSearch, cx: &mut App| {
+            if let Some(window) = cx.active_window() {
+                let tree = tree_for_focus.clone();
+                let _ = window.update(cx, move |_, window, cx| {
+                    tree.update(cx, |tree, cx| tree.focus_search(window, cx));
+                });
+            }
+        });
+        // Toggle pane visibility (cmd-1..6).
+        let root_toggle = root.clone();
+        App::on_action(cx, move |action: &TogglePane, cx: &mut App| {
+            let state = root_toggle.read(cx).state.clone();
+            state.toggle_pane(action.target);
+        });
+
         Self {
             state: state.clone(),
             last_len: 0,
             last_host: None,
             connect_notified: false,
-            vm: cx.new(|_| VmInspectorView::new(state.clone())),
-            signals: cx.new(|_| SignalGraphView::new(state.clone())),
-            tree: cx.new(|_| ComponentTreeView::new(state.clone())),
-            timeline: cx.new(|cx| TimelineView::new(state.clone(), cx)),
-            logs: cx.new(|_| LogViewerView::new(state.clone())),
-            net: cx.new(|_| NetworkInspectorView::new(state.clone())),
+            vm,
+            signals,
+            tree,
+            timeline,
+            logs,
+            net,
         }
     }
 
@@ -272,7 +382,9 @@ impl Render for DevToolsRoot {
             //    draggable vertical splitter, each column a vertical resizable
             //    stack of three panes. Users can now resize to prioritise what
             //    matters instead of a fixed 3×2 grid. Each pane gets a small
-            //    margin so the workspace breathes (gap between panes). ──
+            //    margin so the workspace breathes (gap between panes). Panes can
+            //    be hidden via keyboard shortcuts (roadmap §3); hidden panes are
+            //    dropped from the layout so the remaining ones reclaim the space. ──
             .child(
                 h_resizable("devtools-workspace")
                     .child(
@@ -280,18 +392,30 @@ impl Render for DevToolsRoot {
                             .size(px(380.))
                             .child(
                                 v_resizable("devtools-left")
-                                    .child(gpui::div().m(px(4.)).child(devtools_pane!("Component Tree", self.tree.clone(), colors)).into_any_element())
-                                    .child(gpui::div().m(px(4.)).child(devtools_pane!("Logs", self.logs.clone(), colors)).into_any_element())
-                                    .child(gpui::div().m(px(4.)).child(devtools_pane!("Network", self.net.clone(), colors)).into_any_element()),
+                                    .when(self.state.is_pane_visible(PaneTarget::Tree), |this| {
+                                        this.child(gpui::div().m(px(4.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("Component Tree", self.tree.clone(), colors)).into_any_element())
+                                    })
+                                    .when(self.state.is_pane_visible(PaneTarget::Logs), |this| {
+                                        this.child(gpui::div().m(px(4.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("Logs", self.logs.clone(), colors)).into_any_element())
+                                    })
+                                    .when(self.state.is_pane_visible(PaneTarget::Network), |this| {
+                                        this.child(gpui::div().m(px(4.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("Network", self.net.clone(), colors)).into_any_element())
+                                    }),
                             ),
                     )
                     .child(
                         resizable_panel()
                             .child(
                                 v_resizable("devtools-right")
-                                    .child(gpui::div().m(px(4.)).child(devtools_pane!("VM Inspector", self.vm.clone(), colors)).into_any_element())
-                                    .child(gpui::div().m(px(4.)).child(devtools_pane!("Signals", self.signals.clone(), colors)).into_any_element())
-                                    .child(gpui::div().m(px(4.)).child(devtools_pane!("Timeline", self.timeline.clone(), colors)).into_any_element()),
+                                    .when(self.state.is_pane_visible(PaneTarget::Vm), |this| {
+                                        this.child(gpui::div().m(px(4.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("VM Inspector", self.vm.clone(), colors)).into_any_element())
+                                    })
+                                    .when(self.state.is_pane_visible(PaneTarget::Signals), |this| {
+                                        this.child(gpui::div().m(px(4.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("Signals", self.signals.clone(), colors)).into_any_element())
+                                    })
+                                    .when(self.state.is_pane_visible(PaneTarget::Timeline), |this| {
+                                        this.child(gpui::div().m(px(4.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("Timeline", self.timeline.clone(), colors)).into_any_element())
+                                    }),
                             ),
                     ),
             )
