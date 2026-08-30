@@ -72,3 +72,42 @@ bash scripts/release-gate/check-contract-freeze.sh
 # pin to a release tag (optional), then run on that ref
 bash scripts/release-gate/check-contract-freeze.sh --strict-manifest
 ```
+
+## Reusable pattern (for future release gates in this repo)
+
+This gate is the template for any "aggregate N existing component gates behind
+one status check" CI task. Two gotchas that are not caught by `yaml` lint:
+
+1. **A reusable callee must declare `on: workflow_call:`.** A workflow called
+   via `jobs.<name>.uses: ./.github/workflows/<callee>.yml` fails the caller at
+   *dispatch* ("workflow does not have a workflow_call trigger") unless the
+   callee's `on:` block includes `workflow_call:`. Add it **additively** so the
+   callee still runs standalone on push/PR — do not replace its other triggers.
+2. **PyYAML coerces the `on:` key to boolean `True`.** When validating workflow
+   YAML locally with `yaml.safe_load`, read triggers via `doc.get(True) or
+   doc.get("on")` — `doc.get("on")` returns `None`. GitHub's own parser is fine.
+
+Local validation recipe (run before committing a new umbrella workflow):
+
+```python
+import yaml
+callees = ["rust-check.yml","ios-check.yml","android-check.yml","compat-matrix.yml",
+           "perf-harness.yml","wire-fuzz.yml","benchmarks.yml"]
+rg = yaml.safe_load(open(".github/workflows/release-gate.yml"))
+on = rg.get(True) or rg.get("on")            # PyYAML coerces `on` key -> True
+assert "push" in on and "pull_request" in on
+for f in callees:
+    d = yaml.safe_load(open(f".github/workflows/{f}"))
+    o = d.get(True) or d.get("on")
+    assert "workflow_call" in o, f"{f} missing workflow_call"
+used = {j["uses"] for j in rg["jobs"].values() if "uses" in j}
+for f in callees:
+    assert f"./.github/workflows/{f}" in used
+print("ALL CALLEES REFERENCED + workflow_call present: OK")
+```
+
+The contract-freeze script itself is the template for a frozen-constant gate: a
+`docs/.../contract-versions.toml` manifest is the single source of truth, and a
+bash script greps each implementation site for its literal and compares. Prove
+it BOTH ways before committing — run green, then `sed -i` bump one site and
+assert FAIL, restore, re-confirm green.
