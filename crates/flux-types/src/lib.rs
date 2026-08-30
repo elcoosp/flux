@@ -58,6 +58,14 @@ pub use scheme::{Scheme, Supply, generalise, instantiate};
 pub use unify::{UnifyError, unify};
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+
+/// Resolves a module name (the first `use` segment, e.g. `theme`) to its source
+/// text. The dev server wires this to the package root on disk so
+/// `use theme` resolves `theme.flux` (or `theme/main.flux`). `Send + Sync` so it
+/// can be shared with the sub-checkers the type checker spins up for transitive
+/// `use`s.
+pub type ModuleLoader = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 /// A type-checked syntax tree.
 ///
@@ -116,27 +124,27 @@ impl TypedAST {
 
 /// Type-checks `ast`, returning a [`TypedAST`] on success.
 ///
-/// The check is bidirectional with let-polymorphism and records every generic
-/// instantiation for monomorphization. ADTs are collected first so they are
-/// visible to later declarations, then each declaration is checked in turn.
-///
-/// # Errors
-///
-/// Returns the first [`TypeError`] encountered, with a [`Span`] pointing at the
-/// offending source.
-///
-/// # Examples
-///
-/// ```rust
-/// use flux_types::type_check;
-/// use flux_parser::parse;
-///
-/// let ast = parse("fn inc(x: Int) -> Int { x + 1 }", 0, "f.flux").unwrap();
-/// let typed = type_check(&ast).unwrap();
-/// assert_eq!(typed.instantiations.len(), 0);
-/// ```
+/// `use` directives are rejected (actionable error) because there is no module
+/// loader wired in — use [`type_check_with_loader`] when module resolution from
+/// the package root is required (the dev server uses that entry point).
 pub fn type_check(ast: &Ast) -> Result<TypedAST, TypeError> {
-    let mut checker = Checker::new();
+    type_check_with_loader(ast, None)
+}
+
+/// Type-checks `ast` with an optional module loader.
+///
+/// `loader` maps a module name (from `use theme`) to its source text. When `None`,
+/// `use` is rejected. The dev server passes a loader that reads `<name>.flux` (or
+/// `<name>/main.flux`) from the package root so cross-file `use` resolves
+/// end-to-end (FLUX module system).
+pub fn type_check_with_loader(
+    ast: &Ast,
+    loader: Option<ModuleLoader>,
+) -> Result<TypedAST, TypeError> {
+    let mut checker = match loader {
+        Some(loader) => Checker::with_loader(loader),
+        None => Checker::new(),
+    };
     collect_adts(&mut checker.env, ast);
 
     let mut types = HashMap::new();

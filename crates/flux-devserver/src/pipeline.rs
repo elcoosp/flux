@@ -38,6 +38,7 @@ struct TreeCompilation {
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Instant;
 
 use flux_ir::{IRArena, LoweredIr, lower};
@@ -47,7 +48,7 @@ use flux_syntax::{FileId, Patch, SignalId, SourceExcerpt, StringId, Value};
 
 use crate::dispatch::{DependencyIndex, DispatchReport, NodeSignalDeps, emit_minimal_updates};
 use crate::error::Diagnostic;
-use flux_types::{CompileError, FluxError};
+use flux_types::{CompileError, FluxError, ModuleLoader};
 use host_strings::HostStrings;
 use tree::{display_path, flatten_extra_nodes, merge_arenas, root_node};
 
@@ -579,6 +580,26 @@ impl Pipeline {
         })
     }
 
+    /// Builds a module loader that resolves `use theme` to a file under the
+    /// package root: `<root>/theme.flux`, then `<root>/theme/main.flux`.
+    ///
+    /// The loader is `Send + Sync` so it can be shared with the sub-checkers the
+    /// type checker spins up for transitive `use`s.
+    fn module_loader(&self) -> ModuleLoader {
+        let root = self.root.clone();
+        Arc::new(move |name: &str| {
+            let direct = root.join(format!("{name}.flux"));
+            if direct.is_file() {
+                return std::fs::read_to_string(&direct).ok();
+            }
+            let nested = root.join(name).join("main.flux");
+            if nested.is_file() {
+                return std::fs::read_to_string(&nested).ok();
+            }
+            None
+        })
+    }
+
     /// Compiles one file through parse → type check → lower.
     ///
     /// Returns the lowered IR and the original parsed AST (the AST is needed by
@@ -595,8 +616,9 @@ impl Pipeline {
         self.timings.parse = started.elapsed();
 
         let started = Instant::now();
-        let typed =
-            flux_types::type_check(&ast).map_err(|e| Diagnostic::from(FluxError::from(e)))?;
+        let loader = self.module_loader();
+        let typed = flux_types::type_check_with_loader(&ast, Some(loader))
+            .map_err(|e| Diagnostic::from(FluxError::from(e)))?;
         self.timings.type_check = started.elapsed();
 
         let started = Instant::now();
@@ -992,6 +1014,44 @@ mod tests {
             delta_frame.strings.len(),
             init_string_count,
             "Delta ships the full table (positional ids are per-compile, not content-stable)"
+        );
+    }
+
+    #[test]
+    fn use_resolves_module_from_package_root_on_disk() {
+        use flux_types::type_check_with_loader;
+        use std::sync::Arc;
+
+        let dir = std::env::temp_dir().join(format!("flux_use_test_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        std::fs::write(
+            dir.join("theme.flux"),
+            "compo Button(label: String)\n  Text(label)\n",
+        )
+        .expect("write theme.flux");
+        let entry = "use theme\n\ncompo Main()\n  Button(label: \"hi\")\n";
+
+        // Mirror the dev server's package-root loader: `<root>/<name>.flux`.
+        let root = dir.clone();
+        let loader: Arc<dyn Fn(&str) -> Option<String> + Send + Sync> = Arc::new(move |name: &str| {
+            let direct = root.join(format!("{name}.flux"));
+            if direct.is_file() {
+                return std::fs::read_to_string(&direct).ok();
+            }
+            let nested = root.join(name).join("main.flux");
+            if nested.is_file() {
+                return std::fs::read_to_string(&nested).ok();
+            }
+            None
+        });
+
+        let ast = flux_parser::parse(entry, 0, "main").expect("entry parses");
+        let typed = type_check_with_loader(&ast, Some(loader));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            typed.is_ok(),
+            "use theme should resolve theme.flux from the package root: {:?}",
+            typed.err()
         );
     }
 }

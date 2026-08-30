@@ -8,6 +8,7 @@
 //! annotations and calls). `let`-bound names are generalised (let-polymorphism)
 //! via [`crate::scheme`].
 
+use crate::ModuleLoader;
 use crate::env::{AdtDef, Binding, CtorKind, Env, VariantDef};
 use crate::error::TypeError;
 use crate::exhaust::check_exhaustive;
@@ -16,9 +17,12 @@ use crate::prelude::{prelude, primitives};
 use crate::scheme::{Supply, generalise, instantiate};
 use crate::traits::{admits_arithmetic, admits_equality, check_trait_bound};
 use crate::unify::{UnifyError, unify_into};
-use flux_parser::{Ast, BinOp, Decl, Expr, ExprKind, Ident, LetPattern, Param, Pattern, Type};
+use flux_parser::{
+    Ast, BinOp, Decl, Expr, ExprKind, Ident, LetPattern, Param, Pattern, Type, UseDecl,
+};
 use flux_syntax::{ExprTag, NodeId, NodeTag, Span};
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 /// A resolved callee shape, owned so it outlives any `self.env` borrow.
 #[derive(Clone)]
@@ -57,7 +61,7 @@ pub struct GenericInstantiation {
 }
 
 /// The type checker state threaded through a single [`type_check`](crate::type_check) run.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct Checker {
     pub(crate) env: Env,
     supply: Supply,
@@ -78,6 +82,26 @@ pub struct Checker {
     /// Consulted by [`Self::conv_ty`] so a surface `T` resolves to the bound
     /// variable rather than an unresolved `Named("T", [])`.
     generics: std::collections::HashMap<String, TcType>,
+    /// Optional module loader. When `Some`, a `use theme` directive asks it for
+    /// the source of module `theme` (the dev server wires this to the package
+    /// root on disk); the loaded module's exports are merged into this environment.
+    /// When `None`, `use` is rejected with an actionable error.
+    module_loader: Option<ModuleLoader>,
+    /// Modules currently being resolved, shared across the whole `use` tree
+    /// (the sub-checkers spun up for transitive `use`s hold the same `Arc`) so a
+    /// cycle (`a` uses `b` uses `a`) is detected instead of recursing forever.
+    modules_loading: Arc<Mutex<std::collections::HashSet<String>>>,
+}
+
+impl std::fmt::Debug for Checker {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Checker")
+            .field("env", &self.env)
+            .field("generics", &self.generics)
+            .field("modules_loading", &self.modules_loading)
+            .field("module_loader", &self.module_loader.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 impl Checker {
@@ -96,7 +120,23 @@ impl Checker {
             field_indices: HashMap::new(),
             prims,
             generics: HashMap::new(),
+            module_loader: None,
+            modules_loading: Arc::new(Mutex::new(std::collections::HashSet::new())),
         }
+    }
+
+    /// Creates a checker preloaded with the prelude and a module loader.
+    ///
+    /// The loader maps a module name (the first `use` segment, e.g. `theme`) to
+    /// its source text. The dev server wires this to the package root on disk so
+    /// `use theme` resolves `theme.flux` (or `theme/main.flux`) from there. The
+    /// same loader is shared with sub-checkers so a module's own `use`s resolve
+    /// transitively.
+    #[must_use]
+    pub fn with_loader(loader: ModuleLoader) -> Self {
+        let mut checker = Self::new();
+        checker.module_loader = Some(loader);
+        checker
     }
 
     /// Records the inferred type for `span` under the standard structural node id.
@@ -1332,6 +1372,170 @@ fn rewrite_named_to_var(ty: &mut TcType, name: &str, var: &TcType) {
     }
 }
 
+/// Resolves a `use` directive by loading the named module, type-checking it in
+/// an isolated sub-checker (so the module's own `use`s recurse), and merging its
+/// exported bindings into this environment.
+///
+/// Forms:
+/// * `use theme` — load `theme` and bring every export into scope directly
+///   (so `Widget` from the module is usable as `Widget`).
+/// * `use theme::*` — same as above: bring every export into scope.
+/// * `use theme::red` — bring only the `red` export into scope.
+///
+/// The module name is also bound as a namespace (`theme.red` works too) by
+/// recording the module's exports under the dotted `theme.<name>` path.
+///
+/// # Errors
+///
+/// Returns a [`TypeError`] when no loader is configured (pure `type_check`,
+/// no filesystem), the module is unknown to the loader, the module source fails
+/// to parse, or its type-check fails. Cycles (`a` uses `b` uses `a`) are
+/// rejected rather than recursed forever.
+impl Checker {
+    fn resolve_use(
+        &mut self,
+        use_decl: &UseDecl,
+        span: Span,
+    ) -> Result<(NodeId, TcType), TypeError> {
+        let loader = self.module_loader.as_ref().ok_or_else(|| {
+            TypeError::new("module resolution is not available in this context", span).with_hint(
+                "this build has no module loader; `use` can only resolve modules \
+                 when the dev server (or a build with package-root access) provides one"
+                    .to_owned(),
+            )
+        })?;
+
+        let module_name = use_decl
+            .segments
+            .first()
+            .map(|s| s.name.clone())
+            .unwrap_or_default();
+
+        if !self
+            .modules_loading
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(module_name.clone())
+        {
+            return Err(
+                TypeError::new(format!("cyclic `use` of module `{module_name}`"), span)
+                    .with_hint("modules must not form an import cycle".to_owned()),
+            );
+        }
+        let _guard = ModuleLoadGuard {
+            name: module_name.clone(),
+            set: Arc::clone(&self.modules_loading),
+        };
+
+        let source = loader(&module_name).ok_or_else(|| {
+            TypeError::new(format!("cannot resolve module `{module_name}`"), span).with_hint(
+                format!(
+                    "no module source was found for `{module_name}`; check it exists at the \
+             package root (e.g. `{module_name}.flux` or `{module_name}/main.flux`)"
+                ),
+            )
+        })?;
+
+        let ast = flux_parser::parse(&source, 0, &module_name).map_err(|e| {
+            TypeError::new(format!("module `{module_name}` failed to parse: {e}"), span)
+        })?;
+
+        // Type-check the module in an isolated checker that shares the loader AND
+        // the in-progress set so the module's own `use`s resolve transitively and
+        // cycles are detected even across the recursion.
+        let mut sub = Checker::with_loader(Arc::clone(loader));
+        sub.modules_loading = Arc::clone(&self.modules_loading);
+        // Collect ADTs first (mirrors `type_check`), then check every declaration.
+        collect_adts(&mut sub.env, &ast);
+        for decl in &ast.decls {
+            check_decl(&mut sub, decl)?;
+        }
+        // Collect the module's exported bindings: for each top-level declaration that
+        // introduces a name (component, fn, record, type, trait, capability, or a
+        // module-level const `Color.red`), look it up in the submodule's environment.
+        let exports: std::collections::HashMap<String, Binding> = ast
+            .decls
+            .iter()
+            .filter_map(export_name)
+            .filter_map(|name| sub.env.lookup(&name).map(|b| (name, b.clone())))
+            .collect();
+
+        if use_decl.glob {
+            for (name, binding) in &exports {
+                self.env.insert(name.clone(), binding.clone());
+            }
+        } else if use_decl.segments.len() == 2 {
+            // `use theme::red` — bring only `red` (the last segment).
+            let wanted = &use_decl.segments[1].name;
+            let binding = exports
+                .get(wanted)
+                .or_else(|| exports.get(&format!("{module_name}.{wanted}")))
+                .ok_or_else(|| {
+                    TypeError::new(
+                        format!("module `{module_name}` has no export `{wanted}`"),
+                        span,
+                    )
+                    .with_hint("use `use theme::*` to bring every export into scope".to_owned())
+                })?;
+            self.env.insert(wanted.clone(), binding.clone());
+        } else {
+            // `use theme` — bring every export into scope directly, and also record
+            // them under the `theme.` namespace so dotted access works.
+            for (name, binding) in &exports {
+                self.env.insert(name.clone(), binding.clone());
+                self.env
+                    .insert(format!("{module_name}.{name}"), binding.clone());
+            }
+        }
+
+        Ok((
+            compute_node_id(0, decl_tag(&Decl::Use(use_decl.clone())), span, None),
+            TcType::Unit,
+        ))
+    }
+}
+
+/// RAII guard that removes a module from the in-progress set on scope exit, even
+/// when resolution returns early via `?`.
+struct ModuleLoadGuard {
+    name: String,
+    set: Arc<Mutex<std::collections::HashSet<String>>>,
+}
+
+impl Drop for ModuleLoadGuard {
+    fn drop(&mut self) {
+        self.set
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.name);
+    }
+}
+
+/// Returns the export name a top-level declaration introduces into a module's
+/// environment, if it is exported by `use`. Components, functions, records,
+/// `type` ADTs, traits, and capabilities export their declared name; a
+/// module-level const `Color.red` exports its dotted path. `use`/`import`
+/// directives and `trait`/`capability` are not re-exported.
+fn export_name(decl: &Decl) -> Option<String> {
+    match decl {
+        Decl::Component(c) => Some(c.name.name.clone()),
+        Decl::Fn(f) => Some(f.name.text.clone()),
+        Decl::Record(r) => Some(r.name.name.clone()),
+        Decl::Type(t) => Some(t.name.name.clone()),
+        Decl::Trait(t) => Some(t.name.name.clone()),
+        Decl::Capability(c) => Some(c.name.name.clone()),
+        Decl::Const(c) => Some(
+            c.path
+                .iter()
+                .map(|id| id.name.clone())
+                .collect::<Vec<_>>()
+                .join("."),
+        ),
+        Decl::Use(_) => None,
+        _ => None,
+    }
+}
+
 /// Checks a single top-level declaration's signature and body.
 ///
 /// Components and functions are checked after ADTs are collected. Returns the
@@ -1422,9 +1626,7 @@ pub fn check_decl(checker: &mut Checker, decl: &Decl) -> Result<(NodeId, TcType)
         Decl::Trait(_) | Decl::Capability(_) => {
             Ok((compute_node_id(0, decl_tag(decl), span, None), TcType::Unit))
         }
-        Decl::Import(_) | Decl::Use(_) => {
-            Ok((compute_node_id(0, decl_tag(decl), span, None), TcType::Unit))
-        }
+        Decl::Use(use_decl) => checker.resolve_use(use_decl, span),
         Decl::Const(const_binding) => {
             // Module-level associated constant, e.g. `Color.red = RGB(1.0, 0.0, 0.0)`.
             // It is stored under its dotted path so that a later `Color.red`
@@ -1443,5 +1645,131 @@ pub fn check_decl(checker: &mut Checker, decl: &Decl) -> Result<(NodeId, TcType)
             Ok((id, value_ty))
         }
         _ => Ok((compute_node_id(0, decl_tag(decl), span, None), TcType::Unit)),
+    }
+}
+
+#[cfg(test)]
+mod use_resolution_tests {
+    use super::*;
+    use crate::{type_check, type_check_with_loader};
+    use std::collections::HashMap;
+
+    /// Builds a loader over an in-memory map of module name -> source.
+    fn mem_loader(
+        map: HashMap<String, String>,
+    ) -> Arc<dyn Fn(&str) -> Option<String> + Send + Sync> {
+        Arc::new(move |name: &str| map.get(name).cloned())
+    }
+
+    #[test]
+    fn use_theme_brings_exports_into_scope() {
+        let mut modules = HashMap::new();
+        modules.insert(
+            "theme".to_owned(),
+            "compo Button(label: String)\n  Text(label)\n".to_owned(),
+        );
+        let entry = "use theme\n\ncompo Main()\n  Button(label: \"hi\")\n";
+        let ast = flux_parser::parse(entry, 0, "main").expect("entry parses");
+        let typed = type_check_with_loader(&ast, Some(mem_loader(modules)));
+        assert!(
+            typed.is_ok(),
+            "use theme should resolve and Button should be in scope: {:?}",
+            typed.err()
+        );
+    }
+
+    #[test]
+    fn use_theme_star_is_equivalent() {
+        let mut modules = HashMap::new();
+        modules.insert(
+            "theme".to_owned(),
+            "compo Button(label: String)\n  Text(label)\n".to_owned(),
+        );
+        let entry = "use theme::*\n\ncompo Main()\n  Button(label: \"hi\")\n";
+        let ast = flux_parser::parse(entry, 0, "main").expect("entry parses");
+        let typed = type_check_with_loader(&ast, Some(mem_loader(modules)));
+        assert!(
+            typed.is_ok(),
+            "use theme::* should bring exports in: {:?}",
+            typed.err()
+        );
+    }
+
+    #[test]
+    fn use_theme_red_brings_only_that_member() {
+        let mut modules = HashMap::new();
+        modules.insert(
+            "theme".to_owned(),
+            "compo Button(label: String)\n  Text(label)\n\ncompo Panel()\n  Text(\"x\")\n"
+                .to_owned(),
+        );
+        // `use theme::Button` should expose Button but NOT Panel.
+        let entry = "use theme::Button\n\ncompo Main()\n  Button(label: \"hi\")\n";
+        let ast = flux_parser::parse(entry, 0, "main").expect("entry parses");
+        assert!(type_check_with_loader(&ast, Some(mem_loader(modules.clone()))).is_ok());
+
+        let entry_panel = "use theme::Button\n\ncompo Main()\n  Panel()\n";
+        let ast_panel = flux_parser::parse(entry_panel, 0, "main").expect("entry parses");
+        assert!(
+            type_check_with_loader(&ast_panel, Some(mem_loader(modules))).is_err(),
+            "use theme::Button must NOT expose Panel"
+        );
+    }
+
+    #[test]
+    fn use_unknown_module_is_actionable_error() {
+        let entry = "use missing\n\ncompo Main()\n  Text(\"x\")\n";
+        let ast = flux_parser::parse(entry, 0, "main").expect("entry parses");
+        let result = type_check_with_loader(&ast, Some(mem_loader(HashMap::new())));
+        assert!(result.is_err(), "unknown module must error");
+    }
+
+    #[test]
+    fn use_without_loader_is_rejected() {
+        // `type_check` (no loader) must reject `use` rather than silently no-op.
+        let entry = "use theme\n\ncompo Main()\n  Text(\"x\")\n";
+        let ast = flux_parser::parse(entry, 0, "main").expect("entry parses");
+        assert!(
+            type_check(&ast).is_err(),
+            "use without a module loader must be rejected with an actionable error"
+        );
+    }
+
+    #[test]
+    fn use_transitive_resolves_nested_modules() {
+        let mut modules = HashMap::new();
+        modules.insert(
+            "base".to_owned(),
+            "compo Button(label: String)\n  Text(label)\n".to_owned(),
+        );
+        modules.insert(
+            "theme".to_owned(),
+            "use base\n\ncompo Panel()\n  Button(label: \"hi\")\n".to_owned(),
+        );
+        let entry = "use theme\n\ncompo Main()\n  Panel()\n";
+        let ast = flux_parser::parse(entry, 0, "main").expect("entry parses");
+        let typed = type_check_with_loader(&ast, Some(mem_loader(modules)));
+        assert!(
+            typed.is_ok(),
+            "transitive use (theme -> base) should resolve: {:?}",
+            typed.err()
+        );
+    }
+
+    #[test]
+    fn use_cycle_is_rejected() {
+        let mut modules = HashMap::new();
+        modules.insert(
+            "a".to_owned(),
+            "use b\n\ncompo A()\n  Text(\"x\")\n".to_owned(),
+        );
+        modules.insert(
+            "b".to_owned(),
+            "use a\n\ncompo B()\n  Text(\"x\")\n".to_owned(),
+        );
+        let entry = "use a\n\ncompo Main()\n  Text(\"x\")\n";
+        let ast = flux_parser::parse(entry, 0, "main").expect("entry parses");
+        let result = type_check_with_loader(&ast, Some(mem_loader(modules)));
+        assert!(result.is_err(), "cyclic use must be rejected");
     }
 }

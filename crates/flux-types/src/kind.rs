@@ -338,7 +338,6 @@ pub(crate) fn compute_node_id(
 #[must_use]
 pub(crate) fn decl_tag(decl: &Decl) -> DeclTag {
     match decl {
-        Decl::Import(_) => DeclTag(1),
         Decl::Use(_) => DeclTag(2),
         Decl::Component(_) => DeclTag(3),
         Decl::Fn(_) => DeclTag(4),
