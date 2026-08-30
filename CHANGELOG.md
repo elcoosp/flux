@@ -6,6 +6,35 @@ from `/docs/agents-boundaries-contract.md` Part 2.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Codegen + dev-host parity (flux-codegen-core, flux-parity, flux-syntax, flux-types, runtimes/ios) — `[verified]`
+- **FLUX-078 — codegen-driven native glue + parity guards.** The dev-host adapter
+  registries (`FluxUiKit.adapters`, `AdapterKit.AdapterRegistry`), host VM opcode
+  tables (`Opcode.kt`, `OpCodes.swift`), and capability registries
+  (`CapabilityRegistry`) were hand-ported duplicates of the authoritative Rust
+  tables and had drifted, shipping silent on-device faults (FLUX-053 `IS_NULL`,
+  FLUX-072 `LIST_*`).
+  - `flux-codegen-core/src/native_gen.rs` (new) emits the exact registry/table text
+    from `HostAdapterSpec` (new, in `primitives.rs`), `Opcode::ALL`, and
+    `CAPABILITY_IDL` — the single source of truth for the dev-host wiring.
+  - `flux-parity/tests/native_kit_parity.rs` (new) parses the checked-in native
+    files (`include_str!`, no toolchain) and asserts they match the generated
+    output: adapters/capabilities per platform, opcodes by equality against
+    `Opcode::ALL`. Future drift fails `cargo nextest` before it reaches a device.
+  - Drift the guards caught and was fixed at source: `flux-syntax::opcode::Opcode::ALL`
+    extended to include the 4 `LIST_*` opcodes (was stale `57 → 61`; `flux-vm-ref`
+    already handled them); `runtimes/ios/.../OpCodes.swift` gained `isNull` (`0xD1`);
+    `CAPABILITY_IDL` gained the deterministic `(2, 99)` `Storage.devReferenceAsync`
+    method (iOS had hand-assigned the id, violating ADR-0045).
+  - ADR-0058 records the decision. Verification: `cargo nextest -p flux-codegen-core
+    -p flux-parity` green (10 + 6 parity tests); `swiftc -parse` on the edited
+    `OpCodes.swift` clean.
+  - Scope note: the generator derives the registry/table *wiring* only; the
+    per-platform adapter *bodies* remain hand-written (genuinely platform-specific).
+    Build-time emission into the native dirs is intentionally out of scope
+    (parallel ownership + unverifiable native compilation).
+
 ## 2026-08-29 — Flux syntax highlighting: grammar rebuild + compiler-driven LSP tokens
 
 ### Docs site + LSP (flux-lsp, flux-parser) — `[verified]`

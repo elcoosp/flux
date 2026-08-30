@@ -108,6 +108,14 @@ pub const CAPABILITY_IDL: &[CapabilityIdl] = &[
                 name: "removeItem",
                 id: 3,
             },
+            // --- FLUX-078: the iOS host registers a `(2, 99)` reference async
+            // capability (ADR-0045 result-cell demo). It was hand-assigned on the
+            // host and never declared here, so its id was non-deterministic.
+            // Declare it deterministically so both hosts and the server agree.
+            MethodIdl {
+                name: "devReferenceAsync",
+                id: 99,
+            },
         ],
     },
     CapabilityIdl {

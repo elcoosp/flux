@@ -84,7 +84,7 @@ pub struct DesignToken {
 /// literals. Mirrors `PRIMITIVES`: one declarative table, two backends reading
 /// it. A test asserts both backends emit every token's name.
 pub fn theme_tokens() -> &'static [DesignToken] {
-    &TOKENS
+    TOKENS
 }
 
 /// The design-token table — color / spacing / typography scales.
@@ -609,5 +609,199 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
         handler_prop: None,
         label_prop: None,
         presentation: None,
+    },
+];
+
+/// Intent for a single built-in primitive's **dev-host adapter** (FLUX-078).
+///
+/// The release codegen path is fully data-driven from [`PRIMITIVES`]
+/// (ADR-0047): one table row drives both Kotlin + Swift emitters. The dev-host
+/// adapter kits (`adapters/ui-kotlin`, `adapters/ui-swift`) are the remaining
+/// hand-maintained half — each primitive that needs a live dev-render adapter
+/// carries one hand-written adapter class per platform, and both kits register
+/// it in a name→factory map. [`HostAdapterSpec`] is the *single source of truth*
+/// for that registration: it records, per primitive, the adapter class name the
+/// kit generates for each platform, and [`crate::native_gen`] emits the
+/// registry blocks (Kotlin `FluxUiKit.adapters` map, iOS `AdapterKit.AdapterRegistry`)
+/// from it. A [`flux-parity`] guard fails if a checked-in kit drifts from this
+/// table, so the two hosts can never silently desync again (the FLUX-040 /
+/// FLUX-076 class of bug).
+///
+/// Only primitives with an actual hand-written adapter appear here. Structural
+/// and control-flow forms (`CupertinoButton`, `MaterialButton`, `ForEach`,
+/// `Provider`, `When`) lower to existing nodes and have no dedicated adapter, so
+/// they are intentionally absent — the generator skips them, matching the
+/// checked-in kits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A primitive's dev-host adapter wiring — the single source of truth that the
+/// codegen-driven native glue (`flux_codegen_core::native_gen`) and the parity
+/// guard (`flux-parity/tests/native_kit_parity.rs`) compare the checked-in
+/// `FluxUiKit.adapters` / `AdapterKit.AdapterRegistry` maps against (FLUX-078).
+///
+/// `kotlin_adapter` / `swift_adapter` are `Option<&str>` because a primitive may
+/// be registered on only one host (e.g. `Container` is Kotlin-only: the iOS kit
+/// routes unknown component names through its reconciler container fallback, so
+/// it has no `ContainerAdapter` in `byName`). `None` on a platform means the
+/// generator emits nothing for that platform and the guard does not require it.
+pub struct HostAdapterSpec {
+    /// The Flux surface name (must match a [`PRIMITIVES`] `flux_name`).
+    pub flux_name: &'static str,
+    /// The Kotlin adapter class name the kit registers (e.g. `TextAdapter`), or
+    /// `None` if the Kotlin kit does not register a dedicated adapter.
+    pub kotlin_adapter: Option<&'static str>,
+    /// The Swift adapter class name the kit registers (e.g. `TextAdapter`), or
+    /// `None` if the Swift kit does not register a dedicated adapter.
+    pub swift_adapter: Option<&'static str>,
+}
+
+impl HostAdapterSpec {
+    /// Looks up a host-adapter spec by Flux surface name.
+    #[must_use]
+    pub fn by_name(name: &str) -> Option<&'static HostAdapterSpec> {
+        HOST_ADAPTERS.iter().find(|a| a.flux_name == name)
+    }
+
+    /// Every host-adapter spec, in source order.
+    #[must_use]
+    pub fn all() -> &'static [HostAdapterSpec] {
+        HOST_ADAPTERS
+    }
+}
+
+/// The dev-host adapter registry — single source of truth for the name→adapter
+/// wiring in both kits (FLUX-078).
+///
+/// Kept in lockstep with `PRIMITIVES` by the `host_adapters_cover_primitives`
+/// parity test (a missing adapter for a primitive that should have one is a
+/// build failure), and with the checked-in `FluxUiKit.adapters` /
+/// `AdapterKit.AdapterRegistry` maps by the `host_kits_match_generated` parity
+/// test. Rows were taken verbatim from the two kits' registry blocks
+/// (`adapters/ui-kotlin/src/main/kotlin/dev/flux/ui/FluxUiKit.kt`,
+/// `runtimes/ios/FluxHost/Sources/FluxHost/AdapterKit.swift`).
+const HOST_ADAPTERS: &[HostAdapterSpec] = &[
+    HostAdapterSpec {
+        flux_name: "Text",
+        kotlin_adapter: Some("TextAdapter"),
+        swift_adapter: Some("TextAdapter"),
+    },
+    HostAdapterSpec {
+        flux_name: "Image",
+        kotlin_adapter: Some("ImageAdapter"),
+        swift_adapter: Some("ImageAdapter"),
+    },
+    HostAdapterSpec {
+        flux_name: "Button",
+        kotlin_adapter: Some("ButtonAdapter"),
+        swift_adapter: Some("ButtonAdapter"),
+    },
+    HostAdapterSpec {
+        flux_name: "Column",
+        kotlin_adapter: Some("ColumnAdapter"),
+        swift_adapter: Some("ColumnAdapter"),
+    },
+    HostAdapterSpec {
+        flux_name: "Row",
+        kotlin_adapter: Some("RowAdapter"),
+        swift_adapter: Some("RowAdapter"),
+    },
+    HostAdapterSpec {
+        flux_name: "TextInput",
+        kotlin_adapter: Some("TextInputAdapter"),
+        swift_adapter: Some("TextInputAdapter"),
+    },
+    HostAdapterSpec {
+        flux_name: "Router",
+        kotlin_adapter: Some("RouterAdapter"),
+        swift_adapter: Some("RouterAdapter"),
+    },
+    HostAdapterSpec {
+        flux_name: "Screen",
+        kotlin_adapter: Some("ScreenAdapter"),
+        swift_adapter: Some("ScreenAdapter"),
+    },
+    HostAdapterSpec {
+        flux_name: "Stack",
+        kotlin_adapter: Some("StackAdapter"),
+        swift_adapter: Some("StackAdapter"),
+    },
+    HostAdapterSpec {
+        flux_name: "Grid",
+        kotlin_adapter: Some("GridAdapter"),
+        swift_adapter: Some("GridAdapter"),
+    },
+    HostAdapterSpec {
+        flux_name: "Spacer",
+        kotlin_adapter: Some("SpacerAdapter"),
+        swift_adapter: Some("SpacerAdapter"),
+    },
+    HostAdapterSpec {
+        flux_name: "SafeArea",
+        kotlin_adapter: Some("SafeAreaAdapter"),
+        swift_adapter: Some("SafeAreaAdapter"),
+    },
+    HostAdapterSpec {
+        flux_name: "Container",
+        kotlin_adapter: Some("ContainerAdapter"),
+        swift_adapter: None,
+    },
+    HostAdapterSpec {
+        flux_name: "Modal",
+        kotlin_adapter: Some("ModalAdapter"),
+        swift_adapter: Some("ModalAdapter"),
+    },
+    HostAdapterSpec {
+        flux_name: "Sheet",
+        kotlin_adapter: Some("SheetAdapter"),
+        swift_adapter: Some("SheetAdapter"),
+    },
+    HostAdapterSpec {
+        flux_name: "Dialog",
+        kotlin_adapter: Some("DialogAdapter"),
+        swift_adapter: Some("DialogAdapter"),
+    },
+    HostAdapterSpec {
+        flux_name: "Animate",
+        kotlin_adapter: Some("AnimateAdapter"),
+        swift_adapter: Some("AnimateAdapter"),
+    },
+    HostAdapterSpec {
+        flux_name: "Switch",
+        kotlin_adapter: Some("SwitchAdapter"),
+        swift_adapter: Some("SwitchAdapter"),
+    },
+    HostAdapterSpec {
+        flux_name: "Toggle",
+        kotlin_adapter: Some("ToggleAdapter"),
+        swift_adapter: Some("ToggleAdapter"),
+    },
+    HostAdapterSpec {
+        flux_name: "Checkbox",
+        kotlin_adapter: Some("CheckboxAdapter"),
+        swift_adapter: Some("CheckboxAdapter"),
+    },
+    HostAdapterSpec {
+        flux_name: "Slider",
+        kotlin_adapter: Some("SliderAdapter"),
+        swift_adapter: Some("SliderAdapter"),
+    },
+    HostAdapterSpec {
+        flux_name: "Picker",
+        kotlin_adapter: Some("PickerAdapter"),
+        swift_adapter: Some("PickerAdapter"),
+    },
+    HostAdapterSpec {
+        flux_name: "DatePicker",
+        kotlin_adapter: Some("DatePickerAdapter"),
+        swift_adapter: Some("DatePickerAdapter"),
+    },
+    HostAdapterSpec {
+        flux_name: "TextArea",
+        kotlin_adapter: Some("TextAreaAdapter"),
+        swift_adapter: Some("TextAreaAdapter"),
+    },
+    HostAdapterSpec {
+        flux_name: "Gesture",
+        kotlin_adapter: Some("GestureAdapter"),
+        swift_adapter: Some("GestureAdapter"),
     },
 ];

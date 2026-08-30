@@ -89,6 +89,11 @@ enum Opcode: UInt8, CaseIterable, Equatable {
 
     case toString = 0xD0
 
+    // --- FLUX-053: `IS_NULL` was added to the Rust oracle + compiler but the
+    // iOS host VM lacked it, so optional-field short-circuiting (`?.`) hit an
+    // unknown-opcode branch on device. Mirror flux-vm-ref here.
+    case isNull = 0xD1
+
     /// Suspends the VM, capturing the continuation (ADR-0044, MLP v2 first-class async).
     /// `AWAIT resultReg(u8), futureReg(u8)`: the handler parks after this instruction;
     /// the executor resumes it via `FluxBytecodeVM.resume`, which deposits the resolved
@@ -157,6 +162,7 @@ enum Opcode: UInt8, CaseIterable, Equatable {
         case .mov: "MOV"
         case .gasCheck: "GAS_CHECK"
         case .toString: "TO_STRING"
+        case .isNull: "IS_NULL"
         case .await: "AWAIT"
         }
     }
@@ -187,6 +193,7 @@ enum Opcode: UInt8, CaseIterable, Equatable {
         case .gasCheck: 4
         case .getField, .setField, .extractField: 4
         case .matchTag: 9
+        case .isNull: 2
         case .callCap: 8
         case .await: 2
         }

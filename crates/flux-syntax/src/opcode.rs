@@ -172,7 +172,7 @@ impl Opcode {
     /// Every opcode defined by Appendix E §E.1, in ascending byte order.
     ///
     /// Useful for exhaustive conformance tests and disassembler tables.
-    pub const ALL: [Self; 57] = [
+    pub const ALL: [Self; 61] = [
         Self::Halt,
         Self::Nop,
         Self::ReadSignal,
@@ -217,6 +217,14 @@ impl Opcode {
         Self::ListGet,
         Self::ListLen,
         Self::ListConcat,
+        // --- FLUX-072: dynamic-list mutation opcodes. These were implemented in
+        // `flux-vm-ref` and ported to both host VMs, but `ALL` was never extended
+        // to include them — so `ALL` (the canonical opcode contract) was stale
+        // and drifted from the hosts. Re-added here (FLUX-078).
+        Self::ListInsert,
+        Self::ListRemove,
+        Self::ListClear,
+        Self::ListRemoveItem,
         Self::CallCap,
         Self::MatchTag,
         Self::ExtractField,
