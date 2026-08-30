@@ -104,6 +104,25 @@ class FrameBuilder {
         return this
     }
 
+    // ADR-0027 (FA-IRWIRE) signal-metadata section: per-node signal dependencies
+    // the reconciler uses to scope `reconcileDirty` (R1). Shape mirrors
+    // `FrameDeserializer.decodeSignalMetaSection`: u16 count, then per node
+    // (u32 id, u16 depCount, u32 deps..., u8 thunkPresent=0, u16 layoutCount=0).
+    // Used by the render-perf harness (FLUX-066) to build fixture trees whose
+    // nodes genuinely depend on a written signal so `reconcileDirty` does real
+    // work (timing 0 ms on an empty dirty set would be a meaningless baseline).
+    private val signalMetas = ArrayList<Pair<UInt, Pair<List<UInt>, UInt?>>>()
+
+    /** Adds a signal-dependency entry `(nodeId -> dep signal ids)` to the section. */
+    fun signalMetaEntry(
+        nodeId: UInt,
+        deps: List<UInt>,
+        itemSlot: UInt? = null,
+    ): FrameBuilder {
+        signalMetas.add(nodeId to (deps to itemSlot))
+        return this
+    }
+
     // ── Init sections ─────────────────────────────────────────────────────
 
     /** Appends a node. The first node written becomes the root. */
@@ -319,8 +338,29 @@ class FrameBuilder {
         }
         // handler section: blob (u32 len + bytes) + u16 count + HandlerDefs.
         writeHandlerSection(out)
-        // ADR-0027 signal_meta presence marker: 0 = none for fixtures.
-        out.write(0)
+        // ADR-0027 signal_meta presence marker + section (mirrors the decoder's
+        // `marker != 0 -> decodeSignalMetaSection` contract).
+        if (signalMetas.isEmpty()) {
+            out.write(0)
+        } else {
+            out.write(1)
+            u16(out, signalMetas.size)
+            for ((nodeId, depsItemSlot) in signalMetas) {
+                val (deps, itemSlot) = depsItemSlot
+                u32(out, nodeId.toInt())
+                u16(out, deps.size)
+                for (d in deps) u32(out, d.toInt())
+                out.write(0) // thunkPresent = 0 (no prop thunk in fixtures)
+                u16(out, 0) // layoutCount = 0
+                // FLUX-072 / ADR-0050: trailing per-ForEach item_slot.
+                if (itemSlot != null) {
+                    out.write(1)
+                    u32(out, itemSlot.toInt())
+                } else {
+                    out.write(0)
+                }
+            }
+        }
     }
 
     private fun buildDelta(out: ByteArrayOutputStream) {
@@ -434,9 +474,25 @@ class FrameBuilder {
         u16(b, ref.bytecodeLen.toInt())
         u16(b, ref.signals.size)
         for (s in ref.signals) u32(b, s.toInt())
-        u32(b, 0)
-        u32(b, 0)
-        u32(b, 0) // span file/start/end
+        // Span (ADR-0057 layout): fileId, byteStart, byteEnd. Nullable on the
+        // model, but the wire always carries a span slot; encode 0 when absent.
+        u32(b, (ref.span?.fileId ?: 0u).toInt())
+        u32(b, (ref.span?.start ?: 0u).toInt())
+        u32(b, (ref.span?.end ?: 0u).toInt())
+        // ADR-0057 server-computed source excerpt: 1-byte flag, then when set
+        // fileId u32, byteStart u32, byteEnd u32, line u16, col u16, snippet.
+        val ex = ref.excerpt
+        if (ex != null) {
+            u8(b, 1)
+            u32(b, ex.fileId.toInt())
+            u32(b, ex.byteStart.toInt())
+            u32(b, ex.byteEnd.toInt())
+            u16(b, ex.line.toInt())
+            u16(b, ex.col.toInt())
+            encodeStr(b, ex.snippet)
+        } else {
+            u8(b, 0)
+        }
     }
 
     private fun encodeStr(

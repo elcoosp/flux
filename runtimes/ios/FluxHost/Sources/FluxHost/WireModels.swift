@@ -22,6 +22,19 @@ enum Patch: Equatable, Sendable {
     case reattach(old: UInt32, new: UInt32, node: ShadowNode)
 }
 
+/// A server-computed source excerpt (ADR-0057) carried on the wire: the interned
+/// file id plus the cited line/column, byte range, and the offending source line.
+/// The host resolves `fileId` against the frame's `source_map` to a path at
+/// presentation time (see `FluxError.FluxErrorExcerpt` for the presentation shape).
+struct WireErrorExcerpt: Equatable, Sendable {
+    let fileId: UInt32
+    let byteStart: UInt32
+    let byteEnd: UInt32
+    let line: UInt32
+    let column: UInt32
+    let snippet: String
+}
+
 /// A handler definition (Appendix D §D.8): a handler id plus its closure.
 struct HandlerDef: Equatable, Sendable {
     let handlerId: UInt32
@@ -75,6 +88,8 @@ public struct ServerError: Equatable, Sendable {
     public let message: String
     /// Source span where the error occurred, if the server supplied one.
     let span: FluxSpan?
+    /// ADR-0057 server-computed source excerpt (file id + line/col + snippet).
+    let excerpt: WireErrorExcerpt?
 
     /// A human-readable location string (`"at byte offset … (file …)"`), or
     /// `nil` when the server sent no span. Computed within the module so the

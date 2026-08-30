@@ -65,6 +65,8 @@ class FrameDeserializerPerfTest {
                 bytecodeOffset = 0u,
                 bytecodeLen = closure.size.toUShort(),
                 signals = emptyList(),
+                span = null,
+                excerpt = null,
             )
         return FrameBuilder()
             .apply {

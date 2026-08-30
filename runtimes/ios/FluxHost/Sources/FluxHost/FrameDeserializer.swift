@@ -35,7 +35,7 @@ enum FrameDeserializer {
     /// must never silently mis-decode a newer server's frames, and a new host
     /// must never accept an older server's incompatible layout. The mismatch
     /// surfaces as a red banner, never a crash.
-    static let protocolVersion: UInt8 = 0x01
+    static let protocolVersion: UInt8 = 0x02
 
     /// Decodes a frame from raw bytes.
     ///
@@ -220,6 +220,7 @@ enum FrameDeserializer {
         let message = try r.utf8(msgLen)
         let hasSpan = try r.u8()
         let span: FluxSpan? = (hasSpan != 0) ? try decodeSpan(&r) : nil
+        let excerpt: WireErrorExcerpt? = (try r.u8() != 0) ? try decodeExcerpt(&r) : nil
         return FluxFrame(
             version: version,
             seq: seq,
@@ -233,7 +234,7 @@ enum FrameDeserializer {
             files: [],
             componentNames: [],
             signalMeta: [:],
-            error: ServerError(message: message, span: span),
+            error: ServerError(message: message, span: span, excerpt: excerpt),
             isControl: false
         )
     }
@@ -470,14 +471,29 @@ enum FrameDeserializer {
         signals.reserveCapacity(Int(signalCount))
         for _ in 0..<signalCount { signals.append(try r.u32()) }
         let span = try decodeSpan(&r)
+        let excerpt: WireErrorExcerpt? = (try r.u8() != 0) ? try decodeExcerpt(&r) : nil
         return ClosureRef(
             hash: hash,
             bytecodeOffset: bytecodeOffset,
             bytecodeLen: bytecodeLen,
             signalCount: signalCount,
             signals: signals,
-            span: span
+            span: span,
+            excerpt: excerpt
         )
+    }
+
+    /// Decodes an ADR-0057 server-computed source excerpt (fileId, byte range,
+    /// line, column, snippet).
+    private static func decodeExcerpt(_ r: inout ByteReader) throws -> WireErrorExcerpt {
+        let fileId = try r.u32()
+        let byteStart = try r.u32()
+        let byteEnd = try r.u32()
+        let line = try r.u16()
+        let column = try r.u16()
+        let snippetLen = Int(try r.u16())
+        let snippet = try r.utf8(snippetLen)
+        return WireErrorExcerpt(fileId: fileId, byteStart: byteStart, byteEnd: byteEnd, line: UInt32(line), column: UInt32(column), snippet: snippet)
     }
 
     /// Decodes a `HandlerDef` (Appendix D §D.8).

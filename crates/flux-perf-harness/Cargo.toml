@@ -14,6 +14,8 @@ thiserror.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
+flux-vm-ref.workspace = true
+flux-syntax.workspace = true
 
 [lints.rust]
 # Match the workspace's strict lint posture (AGENTS.md §2.1).

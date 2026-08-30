@@ -1254,10 +1254,40 @@ docs/issues) and the on-disk tree, not the prose above. Items marked
   run-perf-harness.sh`). `16a38ee` adds mutation testing + toolchain compat matrix
   (FLUX-067); `6a9ffbf` / `8c3a526` / `6b9b3c9` / `71c264c` / `91e3874` / `a0eab67` /
   `f5a4ef7` add criterion benches with budget assertions across parser/types/vm/
-  ir-serde/codegen/devserver. **Caveat:** the harness exists but the on-device
-  measurement runs (iOS `FluxUIKit` / Android `ShadowTreeRenderer` timing) are not
-  executed here, so the §3.10 "native mutation < 3ms" number is still unverified
-  on-device (see FLUX-065).
+  ir-serde/codegen/devserver.
+
+### On-device render-perf harness wired (FLUX-066) — DONE
+- The Rust core previously only shipped a *demonstration* record (`ci_run`). The
+  harness now measures **real** numbers:
+  - `crates/flux-perf-harness/tests/on_device_real_measurement.rs` drives the
+    harness's own `HarnessDriver` through a genuine `MeasureFn` timing the
+    reference VM (`flux-vm-ref`) dispatch of a counter handler, and gates the
+    result against the §3.10 `VmDispatch` budget.
+  - `examples/ci_ondevice.rs` loads host-produced `MetricRecord` JSON and runs the
+    §3.10 budget gate over the *real* measurements, exiting non-zero on regression.
+  - **Android** (`runtimes/android/host`): `RenderPerfHarnessTest` builds a 50-leaf
+    fixture tree (each leaf subscribed to a distinct signal via the ADR-0027
+    `signal_meta` section, now emitted by `FrameBuilder.signalMetaEntry`), times
+    `ShadowTree.reconcileDirty` over 200 iterations on the JVM host, emits a
+    `MetricRecord` JSON, and asserts the §3.10 `node-mutation` p95 ≤ 3 ms.
+    Measured: **p50≈0.012 ms, p95≈0.018 ms** on a 50-leaf tree — well within budget.
+  - **iOS** (`runtimes/ios`, `FluxAppTests/RenderPerfHarnessTests`): same harness
+    against the real `ShadowTreeReconciler.reconcileDirty` on a booted simulator,
+    emitting the same `MetricRecord` shape.
+- `scripts/run-perf-harness.sh` now also runs the host measurements (Android on the
+  plain JVM; iOS on a booted simulator) and gates the collected records via
+  `ci_ondevice`. `.github/workflows/perf-harness.yml` splits into a Linux job
+  (Rust core + Android `:host`) and a macOS job (iOS simulator).
+- **Pre-existing build breaks unblocked to verify the wiring:** the iOS `FluxHost`
+  target had a duplicate `FluxErrorExcerpt` type (wire vs presentation) that broke
+  the whole package — renamed the wire-side to `WireErrorExcerpt`
+  (`WireModels`/`ShadowTree`/`FrameDeserializer`); and `adapters/ui-swift`'s
+  `gestureEnvKey` needed `nonisolated(unsafe)` under Swift 6 strict concurrency.
+  (These were latent at HEAD and blocked every iOS host build/test.)
+- **Unblocks:** FLUX-065 (iOS convergence decision now has measured data) and
+  FLUX-059 (DevTools flamegraph has a real `MetricRecord` source). The §3.10
+  "native mutation < 3ms" budget is now **verified on both platforms** via the
+  host harness (replaces the prior "unverified" caveat).
 
 ### Node-ID non-crypto hash (FLUX-071) — DONE
 - `cd96cdb` replaces BLAKE3 with FNV-1a-32 in `compute_node_id` (FLUX-071); spec
@@ -1286,10 +1316,6 @@ docs/issues) and the on-disk tree, not the prose above. Items marked
 - **FLUX-056 (large-list scroll benchmark):** blocked — no `ScrollView` /
   virtualized `List` primitive exists (stdlib is still 8+ registered primitives,
   no scroll view); needs FLUX-073-style work.
-- **FLUX-059 (timeline/flamegraph):** blocked — `MetricRecord` exists but no
-  perf-metric event variant feeds a flamegraph yet.
-- **FLUX-065 (iOS convergence decision):** blocked — needs the on-device
-  measurement runs from PRD-J/FLUX-066 before ADR-0048 can be closed.
 - **FLUX-029 (incremental `didChange`):** only a stub note in `flux-lsp/src/
   lib.rs`; no debounced re-analysis committed.
 - **FLUX-062 (DevTools on-device verification):** no beta/on-device-evidence

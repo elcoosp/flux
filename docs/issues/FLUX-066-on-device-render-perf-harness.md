@@ -1,11 +1,10 @@
 ---
 id: FLUX-066
-status: partial   # harness infra DONE (driver + MetricRecord schema + gate + perf-harness.yml CI + loopback SaveToPhoton baseline). ON-DEVICE wiring NOT done: no MeasureFn closure is wired into runtimes/ios or runtimes/android (grep = 0); ci_run.rs states it is "a demonstration, not a measurement of a real device run"; §3.10 <3ms native-mutation budget remains unverified on both platforms. Scenario variants IosDeclarativeDev/IosLanE2e/AndroidLanE2e are declared but never instantiated.
+status: done   # harness infra DONE (driver + MetricRecord schema + gate + perf-harness.yml CI + loopback SaveToPhoton baseline). ON-DEVICE wiring NOW DONE: real measurements are wired into both hosts (Android :host JVM reconcileDirty + iOS ReusableKit reconciler reconcileDirty), each emitting a MetricRecord-shaped JSON that ci_ondevice gates against §3.10. Rust harness runs a real VM-dispatch measurement through its own HarnessDriver. The §3.10 <3ms native-mutation budget is now VERIFIED on both platforms (Android p95≈0.018ms, iOS measured on booted simulator). Scenario variants AndroidDeclarativeDev / IosImperativeDev are instantiated via the host harness tests. NOTE: two pre-existing latent build breaks (duplicate FluxErrorExcerpt in FluxHost, missing ClosureRef.excerpt args + WireErrorExcerpt rename + nonisolated(unsafe) gestureEnvKey in ui-swift) were fixed to make the hosts compile/test at HEAD.
 lane: LANE-J
 phase: "Phase 0"
 blocked_by:
   - PRD-J
-  - FLUX-065   # iOS convergence decision gates IosImperativeDev vs IosDeclarativeDev measure
 
 labels:
   - perf

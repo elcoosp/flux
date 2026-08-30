@@ -1,30 +1,39 @@
 name: perf-harness
 
-# PRD-J (LANE-J) — render-perf harness CI.
+# PRD-J (LANE-J) — render-perf harness CI (FLUX-066).
 #
 # Exercises the flux-perf-harness crate end to end: builds it, runs the
 # demonstration runner (which constructs a fixed warm record and evaluates the
-# §3.10 budget gate), and runs the crate's own unit tests (the hard gate). The
-# per-tier device numbers that close ADR-0048 are produced by the runtimes/
-# host adapters wiring MeasureFn closures; this job proves the harness itself
-# is buildable and executable on every push.
+# §3.10 budget gate), runs the crate's own unit tests (the hard gate), then runs
+# the on-device host measurements:
+#   - Android `:host` on the plain JVM (no emulator) — emits a MetricRecord JSON.
+#   - iOS `FluxApp` on a booted simulator (macOS runner) — emits a MetricRecord
+#     JSON.
+# Every collected record is loaded by `examples/ci_ondevice.rs` and gated against
+# the §3.10 budgets; the job fails if any real measurement exceeds its ceiling.
 
 on:
   push:
     branches: ["**"]
     paths:
       - "crates/flux-perf-harness/**"
+      - "runtimes/android/host/**"
+      - "runtimes/ios/**"
+      - "adapters/**"
       - "scripts/run-perf-harness.sh"
       - ".github/workflows/perf-harness.yml"
   pull_request:
     paths:
       - "crates/flux-perf-harness/**"
+      - "runtimes/android/host/**"
+      - "runtimes/ios/**"
+      - "adapters/**"
       - "scripts/run-perf-harness.sh"
       - ".github/workflows/perf-harness.yml"
 
 jobs:
-  perf-harness:
-    name: flux-perf-harness
+  perf-harness-rust-android:
+    name: flux-perf-harness (rust core + android host)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,7 +41,12 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
-      - name: Run perf harness
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Run perf harness (core + android host gate)
         run: bash scripts/run-perf-harness.sh --json perf-metric-record.json
       - name: Upload metric record
         if: always()
@@ -40,3 +54,24 @@ jobs:
         with:
           name: flux-perf-metric-record
           path: perf-metric-record.json
+
+  perf-harness-ios:
+    name: flux-perf-harness (ios host, simulator)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - name: Boot iOS simulator
+        uses: mannodermaker/simctl-install@v1
+        with:
+          model: "iPhone 17 Pro"
+          OS: "latest"
+      - name: Run perf harness (core + ios host gate)
+        run: bash scripts/run-perf-harness.sh --json perf-metric-record-ios.json
+      - name: Upload metric record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flux-perf-metric-record-ios
+          path: perf-metric-record-ios.json

@@ -117,4 +117,7 @@ struct ClosureRef: Equatable, Sendable {
     let signalCount: UInt16
     let signals: [UInt32]
     let span: FluxSpan
+    /// ADR-0057: server-computed source excerpt (path:line:col + snippet) shipped
+    /// alongside the closure so a VM fault is traceable to `.flux` source.
+    let excerpt: WireErrorExcerpt?
 }

@@ -35,7 +35,7 @@ final class AsyncResolverTests: XCTestCase {
         let closure = ClosureRef(
             hash: [], bytecodeOffset: 0,
             bytecodeLen: UInt16(asyncHandler.count), signalCount: 0,
-            signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0))
+            signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0), excerpt: nil)
         executor.registerHandler(1, closure: closure, bytecode: asyncHandler)
         return executor
     }

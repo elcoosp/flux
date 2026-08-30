@@ -70,6 +70,8 @@ class RuntimeFixesTest {
                     bytecodeOffset = 0u,
                     bytecodeLen = handlerBytecode.size.toUShort(),
                     signals = emptyList(),
+                    span = null,
+                    excerpt = null,
                 )
 
             val bytes =
