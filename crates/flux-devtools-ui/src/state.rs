@@ -287,6 +287,12 @@ impl DevToolsState {
         *self.selected_signal.read()
     }
 
+    /// Selects a signal node (revealing its reader effects), replacing any prior
+    /// selection. Used by the context-menu "Inspect" action and row clicks.
+    pub fn set_selected_signal(&self, id: SignalId) {
+        *self.selected_signal.write() = Some(id);
+    }
+
     /// Sets the time-travel scrub index (`None` returns to the live edge) and
     /// notifies so every pane repaints to the scrubbed state.
     pub fn set_scrub_index(&self, index: Option<usize>) {

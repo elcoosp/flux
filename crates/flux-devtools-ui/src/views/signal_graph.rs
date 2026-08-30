@@ -13,6 +13,8 @@ use gpui::{
     div, prelude::*, px, AnyElement, ClickEvent, Context, ElementId, InteractiveElement,
     IntoElement, ParentElement, Render, Styled, Window,
 };
+use gpui_component::menu::ContextMenuExt as _;
+use gpui_component::menu::PopupMenu;
 use gpui_component::ActiveTheme as _;
 
 use crate::row::{empty_row, into_any, kv_row, rows_column};
@@ -52,6 +54,7 @@ impl SignalGraphView {
         let mut rows: Vec<AnyElement> = Vec::new();
         for (id, value) in live.signals.iter() {
             let is_selected = selected == Some(*id);
+            let sig_id = *id;
             let mut row = div()
                 .id(ElementId::from(format!("sig-row-{id}")))
                 .px(crate::row::ROW_PAD_X)
@@ -74,13 +77,19 @@ impl SignalGraphView {
                             cx.notify();
                         });
                     }
-                });
+                })
+                .child(format!("sig#{id}"))
+                .child(value_label(value));
             if is_selected {
                 row = row.bg(colors.primary.opacity(0.22));
             }
-            rows.push(into_any(
-                row.child(format!("sig#{id}")).child(value_label(value)),
-            ));
+            let row = row.context_menu(move |menu: PopupMenu, _window, _cx| {
+                menu.menu(
+                    format!("Inspect signal #{sig_id}"),
+                    Box::new(crate::app::InspectSignal { id: sig_id }),
+                )
+            });
+            rows.push(into_any(row));
 
             // When selected, render the dependency edges as indented readers.
             if is_selected {

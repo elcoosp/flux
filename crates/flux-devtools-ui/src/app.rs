@@ -19,6 +19,7 @@ use gpui_component::{
 use gpui_platform::application;
 
 use crate::state::{DevToolsState, HostInfo, PaneTarget};
+use flux_syntax::SignalId;
 use crate::views::{
     ComponentTreeView, LogViewerView, NetworkInspectorView, SignalGraphView, TimelineView,
     VmInspectorView,
@@ -104,6 +105,15 @@ pub struct JumpToLive;
 #[derive(Clone, PartialEq, Action)]
 #[action(namespace = flux_devtools, no_json)]
 pub struct FocusSearch;
+
+/// Menu action: inspect a signal node in the signal graph (revealing its reader
+/// effects). Dispatched from the signal row right-click `ContextMenu`.
+#[derive(Clone, PartialEq, Action)]
+#[action(namespace = flux_devtools, no_json)]
+pub struct InspectSignal {
+    /// The signal id to select.
+    pub id: SignalId,
+}
 
 /// Keyboard action: toggle a debugger pane's visibility. One variant per pane;
 /// the [`PaneTarget`] payload selects which. Bound to `cmd-1..6`.
@@ -218,6 +228,13 @@ impl DevToolsRoot {
         App::on_action(cx, move |action: &TogglePane, cx: &mut App| {
             let state = root_toggle.read(cx).state.clone();
             state.toggle_pane(action.target);
+        });
+        // Inspect a signal from a right-click context menu (roadmap §3).
+        let root_inspect = root.clone();
+        App::on_action(cx, move |action: &InspectSignal, cx: &mut App| {
+            let state = root_inspect.read(cx).state.clone();
+            let id = action.id;
+            state.set_selected_signal(id);
         });
 
         Self {
