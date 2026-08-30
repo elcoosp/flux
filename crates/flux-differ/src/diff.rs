@@ -8,7 +8,8 @@ use std::hash::{Hash, Hasher};
 use ahash::AHashSet;
 use flux_ir::{IRArena, NodeView};
 use flux_syntax::{
-    Child, ClosureRef, HandlerId, NodeId, NodeRef, Patch, PropDiff, PropIdx, SignalId, Span, Value,
+    Child, ClosureRef, HandlerId, NodeId, NodeRef, Patch, PropDiff, PropIdx, SignalId, Span,
+    StringTable, Value,
 };
 
 /// Computes the minimal [`Patch`] stream transforming `old` into `new`.
@@ -47,7 +48,7 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
         // Task 1 (FLUX-014 P3): node-level prop skip. `props_equal` short-circuits
         // on the arena-stored `u64` hash, so identical-hash nodes emit no
         // `Update` and we avoid deserialising either cold blob.
-        let props_equal = props_equal(&o, &n);
+        let props_equal = props_equal(&o, &n, old, new);
 
         // LANE-H T2: structural fast-path. The arena precomputes `children_hash`
         // as an order-sensitive blake3 fold of the *full* child layout (slot,
@@ -78,7 +79,7 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
                 // Props changed; structure (children) unchanged.
                 patches.push(Patch::Update {
                     id: *id,
-                    props_diff: props_diff(&o, &n),
+                    props_diff: props_diff(&o, &n, old, new),
                 });
                 continue;
             }
@@ -100,7 +101,7 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
         }
         patches.push(Patch::Update {
             id: *id,
-            props_diff: props_diff(&o, &n),
+            props_diff: props_diff(&o, &n, old, new),
         });
     }
 
@@ -288,30 +289,74 @@ fn child_ids(v: &NodeView<'_>) -> AHashSet<NodeId> {
         .collect()
 }
 
+/// `true` when `a` and `b` denote the same value, resolving interned strings to
+/// their *content* rather than comparing positional [`flux_syntax::StringId`]s.
+///
+/// String literals are interned positionally per compile: `"first"` and
+/// `"second"` can both land on `StringId(1)` in their respective compiles, so a
+/// naive `Value` comparison reports them equal and a hot reload would silently
+/// drop the edited label. Resolving through each arena's own `StringTable`
+/// recovers the actual text so literal-text edits are detected and shipped.
+fn values_equal(a: &Value, b: &Value, ta: &StringTable, tb: &StringTable) -> bool {
+    match (a, b) {
+        (Value::Str(id_a), Value::Str(id_b)) => match (ta.resolve(*id_a), tb.resolve(*id_b)) {
+            (Some(sa), Some(sb)) => sa == sb,
+            _ => id_a == id_b,
+        },
+        (Value::List(la), Value::List(lb)) => {
+            la.len() == lb.len() && la.iter().zip(lb).all(|(x, y)| values_equal(x, y, ta, tb))
+        }
+        (Value::Record(ra), Value::Record(rb)) => {
+            ra.len() == rb.len()
+                && ra
+                    .iter()
+                    .zip(rb)
+                    .all(|((ka, x), (kb, y))| ka == kb && values_equal(x, y, ta, tb))
+        }
+        _ => a == b,
+    }
+}
+
 /// `true` when every prop key maps to the same value in both nodes.
 ///
 /// Prefers the arena-stored prop hash (an O(1) `u64` compare) over unpacking
 /// both cold blobs — see `IRArena::props_hash`. The hash is computed from all
 /// `(PropIdx, Value)` fields at pack time, so a mismatch implies the fields
-/// differ. When the hashes match we still re-check the actual fields as a
-/// belt-and-braces guard against any path that bypassed `props_equal` (and to
-/// keep behaviour byte-identical to the pre-hash baseline).
-fn props_equal(o: &NodeView<'_>, n: &NodeView<'_>) -> bool {
+/// differ. When the hashes match we re-check the actual fields as a guard, and
+/// compare interned strings by *content* (see [`values_equal`]) so literal-text
+/// edits are not masked by positional `StringId` interning.
+fn props_equal(o: &NodeView<'_>, n: &NodeView<'_>, old: &IRArena, new: &IRArena) -> bool {
     if o.props_hash() != n.props_hash() {
         return false;
     }
-    o.props().fields() == n.props().fields()
+    let of = o.props();
+    let of = of.fields();
+    let nf = n.props();
+    let nf = nf.fields();
+    of.len() == nf.len()
+        && of.iter().zip(nf).all(|((ka, va), (kb, vb))| {
+            ka == kb && values_equal(va, vb, old.string_table(), new.string_table())
+        })
 }
 
 /// Computes the [`PropDiff`] between two nodes.
-fn props_diff(o: &NodeView<'_>, n: &NodeView<'_>) -> PropDiff {
+///
+/// The change list is built with content-aware value comparison (see
+/// [`values_equal`]) so a literal-text edit — where the positional `StringId`
+/// is unchanged but the resolved text differs — appears as a real change and
+/// is shipped to the host on the `Patch::Update`.
+fn props_diff(o: &NodeView<'_>, n: &NodeView<'_>, old: &IRArena, new: &IRArena) -> PropDiff {
     let o_fields = o.props();
     let o_fields = o_fields.fields();
     let n_fields = n.props();
     let n_fields = n_fields.fields();
     let changes: Vec<(PropIdx, Value)> = n_fields
         .iter()
-        .filter(|(k, v)| !o_fields.iter().any(|(ok, ov)| ok == k && ov == v))
+        .filter(|(k, v)| {
+            !o_fields.iter().any(|(ok, ov)| {
+                ok == k && values_equal(ov, v, old.string_table(), new.string_table())
+            })
+        })
         .map(|(k, v)| (*k, v.clone()))
         .collect();
     let removals: Vec<PropIdx> = o_fields

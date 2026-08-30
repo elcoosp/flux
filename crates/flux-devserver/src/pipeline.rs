@@ -1181,23 +1181,37 @@ mod tests {
         let init_frame = Frame::from_init_bytes(&init).expect("decodes as Init");
         let init_string_count = init_frame.string_table.len();
 
-        // Content-preserving literal edit: "first" → "second". Same structure,
-        // same content hash (string ids are positional, so the prop value is
-        // identical), so FLUX-074 keeps the wire id stable and the compiler
-        // ships `Unchanged` instead of a churned Delta.
+        // Genuine prop-value edit: "first" → "second". The literal text changes,
+        // but strings are interned positionally, so the prop's `StringId` is
+        // identical in both compiles. The differ must resolve the string *content*
+        // (not the positional id) to detect the change and ship a `Delta` — the
+        // host MUST receive "second", so `Unchanged` here would be a hot-reload
+        // bug (stale label). The Delta carries the *full* string table for this
+        // compile, not a partial subset.
         pipeline.set_source(
             Path::new("/tmp/project/main.flux"),
             "compo Hello\n  Button(text: \"second\")\n".to_owned(),
         );
-        match pipeline.compile().expect("recompiles") {
-            Compiled::Unchanged => {}
-            other => panic!(
-                "content-preserving literal edit keeps wire id stable → Unchanged, got {other:?}"
-            ),
-        }
+        let delta = match pipeline.compile().expect("recompiles") {
+            Compiled::Delta(bytes) => bytes,
+            other => panic!("prop-value edit ships a Delta, got {other:?}"),
+        };
+        let delta_frame = Frame::from_delta_bytes(&delta).expect("decodes as Delta");
+        let full_table_len = pipeline
+            .last_good
+            .as_ref()
+            .expect("tree compiled")
+            .arena
+            .string_table()
+            .len();
+        assert_eq!(
+            delta_frame.strings.len(),
+            full_table_len,
+            "value-edit Delta ships the full table (positional ids are per-compile)"
+        );
 
         // Genuine structural edit: add a second child node. The compiler must
-        // ship a `Delta`, and that Delta carries the complete (full) string
+        // still ship a `Delta`, and that Delta carries the complete (full) string
         // table for the new compile, not a partial one.
         pipeline.set_source(
             Path::new("/tmp/project/main.flux"),
