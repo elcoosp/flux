@@ -386,6 +386,8 @@ public struct AdapterRegistry {
             "Animate": { AnyFluxAdapter(AnimateAdapter(executor: $0)) },
             // FLUX-040 form primitives (PRD-N family).
             "Switch": { AnyFluxAdapter(SwitchAdapter(executor: $0)) },
+            // FLUX-077 — `Toggle` (data-driven two-state control, FLUX-072).
+            "Toggle": { AnyFluxAdapter(ToggleAdapter(executor: $0)) },
             "Checkbox": { AnyFluxAdapter(CheckboxAdapter(executor: $0)) },
             "Slider": { AnyFluxAdapter(SliderAdapter(executor: $0)) },
             "Picker": { AnyFluxAdapter(PickerAdapter(executor: $0)) },
