@@ -34,9 +34,11 @@ public class OverlayContainerAdapter: FluxAdapter {
     }
 
     public func update(_ view: UIView, from old: Props, to new: Props) {
-        // `onDismiss` (handler id) and any presentation data are recorded by the
-        // host layer once the native surface is wired (ADR-0048).
-        _ = new.getHandler(named: "onDismiss")
+        // `onDismiss` (handler id) is recorded for parity with Android
+        // `PROP_ON_DISMISS`; the host presentation layer (ADR-0048) invokes it once
+        // the native surface is wired. Absent means no handler (degraded form).
+        let onDismiss = new.getHandler(named: "onDismiss")
+        view.fluxRecord(FluxRecordedProp.onDismiss, onDismiss as Any)
     }
 
     public func setChildren(_ children: [AnyObject], on view: UIView) {
@@ -85,8 +87,14 @@ public final class AnimateAdapter: OverlayContainerAdapter {
     public init(executor: (any FluxExecutor)? = nil) { super.init(executor: executor, surface: "Animate") }
 
     public override func update(_ view: UIView, from old: Props, to new: Props) {
-        _ = new.getHandler(named: "signal")
-        _ = new.getString(named: "curve")
-        _ = new.getFloat(named: "duration")
+        let signal = new.getHandler(named: "signal")
+        let curve = new.getString(named: "curve")
+        let duration = new.getFloat(named: "duration")
+        // Recorded for parity with Android `AnimateAdapter.PROP_SIGNAL` /
+        // `PROP_CURVE` / `PROP_DURATION` so the host layer (ADR-0048) drives the
+        // native `withAnimation`. The children render unchanged until then.
+        view.fluxRecord(FluxRecordedProp.signal, signal as Any)
+        view.fluxRecord(FluxRecordedProp.curve, curve as Any)
+        view.fluxRecord(FluxRecordedProp.duration, duration as Any)
     }
 }

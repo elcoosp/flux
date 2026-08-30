@@ -9,6 +9,55 @@
 
 import UIKit
 
+/// Recorded data props for a degraded (pre-ADR-0048) layout/overlay adapter.
+///
+/// The Android kit records each primitive's data props onto a per-node
+/// `FluxNativeView` (`FluxNativeView.setProperty`) so the host renderer can
+/// consume them. The Swift kit has no `FluxNativeView` type (that is the
+/// Android host's internal store), so the same data is recorded here onto the
+/// native `UIView` via a documented associated object — mirroring the Android
+/// recorded-property shape exactly (FLUX-077 parity). The keys match the
+/// Android `PROP_*` constants; the native *presentation* of that data stays
+/// gated on ADR-0048 (degraded container form).
+enum FluxRecordedProp {
+    /// `Stack`/`Grid` inter-child spacing (Android `PROP_GAP` = `gap`).
+    static let gap = "gap"
+    /// `Grid` column count (Android `PROP_COLUMNS` = `columns`).
+    static let columns = "columns"
+    /// `Spacer` grow weight (Android `PROP_FLEX` = `flex`).
+    static let flex = "flex"
+    /// `SafeArea` inset edges (Android `PROP_EDGES` = `edges`).
+    static let edges = "edges"
+    /// `Modal`/`Sheet`/`Dialog` onDismiss handler id (Android `PROP_ON_DISMISS`).
+    static let onDismiss = "onDismiss"
+    /// `Animate` signal handler id (Android `PROP_SIGNAL`).
+    static let signal = "signal"
+    /// `Animate` easing curve (Android `PROP_CURVE`).
+    static let curve = "curve"
+    /// `Animate` duration in seconds (Android `PROP_DURATION`).
+    static let duration = "duration"
+}
+
+extension UIView {
+    /// The recorded data-prop bag for degraded adapters (FLUX-077 parity).
+    ///
+    /// `nil` until a degraded adapter records its first prop; the reconciler
+    /// reads these back when the native presentation layer is wired (ADR-0048).
+    private static var recordedPropsKey: UInt8 = 0
+
+    var fluxRecordedProps: [String: Any] {
+        get { objc_getAssociatedObject(self, &UIView.recordedPropsKey) as? [String: Any] ?? [:] }
+        set { objc_setAssociatedObject(self, &UIView.recordedPropsKey, newValue, .OBJC_ASSOCIATION_RETAIN) }
+    }
+
+    /// Records `value` under `key`, replacing any prior entry.
+    func fluxRecord(_ key: String, _ value: Any) {
+        var bag = fluxRecordedProps
+        bag[key] = value
+        fluxRecordedProps = bag
+    }
+}
+
 /// `Stack` — z-order overlay of children (SwiftUI `ZStack`). Mapped to a
 /// `UIStackView` laid out vertically; later children paint above earlier ones
 /// via z-ordering. The `gap` prop spaces siblings.
@@ -28,7 +77,11 @@ public final class StackAdapter: FluxAdapter {
     }
 
     public func update(_ view: UIStackView, from old: Props, to new: Props) {
-        view.spacing = CGFloat(new.getFloat(named: "gap") ?? 0)
+        let gap = new.getFloat(named: "gap") ?? 0
+        if Double(view.spacing) != gap { view.spacing = CGFloat(gap) }
+        // Recorded for parity with Android `StackAdapter.PROP_GAP` so the host
+        // presentation layer (ADR-0048) reads the same data the Compose host does.
+        view.fluxRecord(FluxRecordedProp.gap, gap)
     }
 
     public func setChildren(_ children: [AnyObject], on view: UIStackView) {
@@ -62,7 +115,13 @@ public final class GridAdapter: FluxAdapter {
     }
 
     public func update(_ view: UIStackView, from old: Props, to new: Props) {
-        view.spacing = CGFloat(new.getFloat(named: "gap") ?? 0)
+        let gap = new.getFloat(named: "gap") ?? 0
+        if Double(view.spacing) != gap { view.spacing = CGFloat(gap) }
+        let columns = new.getInt(named: "columns") ?? 2
+        // Recorded for parity with Android `GridAdapter.PROP_COLUMNS` /
+        // `PROP_GAP` so the host layout reads the same row-major data Compose does.
+        view.fluxRecord(FluxRecordedProp.columns, columns)
+        view.fluxRecord(FluxRecordedProp.gap, gap)
     }
 
     public func setChildren(_ children: [AnyObject], on view: UIStackView) {
@@ -96,9 +155,11 @@ public final class SpacerAdapter: FluxAdapter {
     }
 
     public func update(_ view: UIStackView, from old: Props, to new: Props) {
-        // `flex` is data for the host layout; no native view mutation required
-        // for the degraded (pre-ADR-0048) Spacer beyond hosting the blank.
-        _ = new.getFloat(named: "flex")
+        let flex = new.getFloat(named: "flex") ?? 1
+        // Recorded for parity with Android `SpacerAdapter.PROP_FLEX` — the grow
+        // weight the host layout consumes (ADR-0048). No native view mutation is
+        // needed for the degraded Spacer beyond hosting the blank.
+        view.fluxRecord(FluxRecordedProp.flex, flex)
     }
 
     public func setChildren(_ children: [AnyObject], on view: UIStackView) {
@@ -129,9 +190,11 @@ public final class SafeAreaAdapter: FluxAdapter {
     }
 
     public func update(_ view: UIView, from old: Props, to new: Props) {
-        // `edges` is data for the host layout; the insets are applied at
-        // `setChildren` time via safe-area-guided constraints (degraded form).
-        _ = new.getString(named: "edges")
+        // `edges` selects which insets to apply; recorded for parity with
+        // Android `SafeAreaAdapter.PROP_EDGES` so the host layout reads the same
+        // edge set. Absent edges means "all edges" (degraded form).
+        let edges = new.getString(named: "edges")
+        view.fluxRecord(FluxRecordedProp.edges, edges as Any)
     }
 
     public func setChildren(_ children: [AnyObject], on view: UIView) {
