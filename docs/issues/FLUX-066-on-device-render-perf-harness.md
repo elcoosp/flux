@@ -1,10 +1,12 @@
 ---
 id: FLUX-066
-status: done
+status: partial   # harness infra DONE (driver + MetricRecord schema + gate + perf-harness.yml CI + loopback SaveToPhoton baseline). ON-DEVICE wiring NOT done: no MeasureFn closure is wired into runtimes/ios or runtimes/android (grep = 0); ci_run.rs states it is "a demonstration, not a measurement of a real device run"; §3.10 <3ms native-mutation budget remains unverified on both platforms. Scenario variants IosDeclarativeDev/IosLanE2e/AndroidLanE2e are declared but never instantiated.
 lane: LANE-J
 phase: "Phase 0"
 blocked_by:
   - PRD-J
+  - FLUX-065   # iOS convergence decision gates IosImperativeDev vs IosDeclarativeDev measure
+
 labels:
   - perf
   - ios
