@@ -474,25 +474,51 @@ The entries below land the work committed since the changelog was last updated
   but no caller in `flux-devserver` constructs `TelemetryEvent::perf_record(...)`
   and sends it on `:7333` yet. Small, isolated follow-up (server already depends on
   both `flux-ir-serde` and `flux-perf-harness`).
-- **Verification note:** `cargo test -p flux-devtools-ui` could not be run green at
-  landing because the workspace tree had concurrent in-flight breakage in
-  `crates/flux-ir/src/lower/mod.rs` (another agent's LANE work, outside this issue's
-  scope) breaking `flux-ir`, a transitive dep of `flux-devtools-ui`. Independent
-  layers verified: `flux-perf-harness` tests green; `flux-ir-serde` compiles +
-  clippy-clean. DevTools tests await the tree returning to green (no fabricated
-  green).
+- **Verification note:** `cargo test -p flux-devtools-ui --lib` passes (45/45,
+  incl. the 8 FLUX-059 flamegraph/ingest tests) once the workspace tree is green —
+  the earlier block was concurrent in-flight breakage in `crates/flux-ir/src/lower/mod.rs`
+  (another agent's LANE work, outside this issue's scope) which broke `flux-ir`, a
+  transitive dep of `flux-devtools-ui`. Independent layers also green: `flux-perf-harness`
+  tests green; `flux-ir-serde` (wire variant + round-trip tests) clippy-clean + all
+  suites green. No fabricated green.
 
-### PARTIAL — DevTools log viewer + network inspector (FLUX-060, LANE-P)
+### DONE — DevTools log viewer + network inspector (FLUX-060, LANE-P) — verified
 
 - **Log viewer — DONE (verified):** pure `LogBuffer`/`LogEntry`/`LogLevel` model
   (`time_travel/log_buffer.rs`, 4 tests), wired into `DevToolsState`
-  (`logs: RwLock<LogBuffer>` + `ingest_log`/`log_snapshot`, 1 test), gpui
-  `LogViewerView` mounted as the fifth `DevToolsRoot` pane. `cargo test -p
-  flux-devtools-ui --lib` → 23/23 green; fmt + clippy clean.
-- **Network inspector — BLOCKED:** no `TelemetryEvent::NetworkRequest` variant
-  exists and FLUX-047 (HTTP capability) is `todo`, so there is no real traffic to
-  inspect. No inspector code fabricated; unblock after FLUX-047 + a
-  `NetworkRequest` telemetry variant.
+  (`logs: RwLock<LogBuffer>` + `ingest_log`/`log_snapshot`, 1 test). The gpui
+  `LogViewerView` (`views/log_viewer.rs`, 1 test) was restored and is now mounted
+  as the **`Logs` pane** in the `DevToolsRoot` 3×2 grid (it had been dropped in
+  `2647f09` and was not actually mounted; this issue's earlier "DONE" claim was
+  stale — the model existed but no view rendered it).
+- **Network inspector — DONE (unblocked by FLUX-047):** FLUX-047 (HTTP capability)
+  is now `done`, so real HTTP traffic exists to inspect. Implementation:
+  - New `NetworkRequest` / `NetworkResponse` wire variants on the `0x10` telemetry
+    frame (`flux-ir-serde::TelemetryEvent` / `EnrichedTelemetryEvent`, tags `0x05`
+    / `0x06`) — **no new wire field**, length-prefixed like the other events.
+    `NetworkRequest` carries `request_id`/`method`/`url`/`body`/`capability_id`;
+    `NetworkResponse` carries `request_id`/`status_code`/`latency_ms`/`body`/
+    `result_kind` (ADR-0044 cell state, `0`=Pending/`1`=Ready/`2`=Error). Encoded/
+    decoded/enriched round-trips + tag-byte conformance covered by
+    `flux-ir-serde` tests (`network_events_carry_expected_wire_tags`,
+    `network_events_round_trip_enriched`).
+  - Pure `NetworkLog`/`NetworkRecord`/`NetworkPhase` model
+    (`time_travel/network_log.rs`, 6 tests): a bounded FIFO that pairs a response
+    with its request by `request_id`; a response with no retained request is
+    dropped (no fabricated row).
+  - Wired into `DevToolsState` (`net: RwLock<NetworkLog>` + `ingest_network_request`
+    /`ingest_network_response`/`network_snapshot`) and fed through the single
+    `handle_telemetry` ingest path (so the wire client needs no second call site).
+    Tests: `ingest_network_pairs_request_and_response`,
+    `handle_telemetry_feeds_network_log`, `wire_client::ingest_network_frame_feeds_network_log`.
+  - gpui `NetworkInspectorView` (`views/network_inspector.rs`, 1 test) mounted as
+    the **`Network` pane** in the `DevToolsRoot` 3×2 grid, showing `method url →
+    status (latency)` per exchange, pending until the response lands.
+- **Verification:** `cargo nextest run -p flux-devtools-ui --lib` → 45/45 green
+  (incl. all FLUX-060 tests); `cargo nextest run -p flux-ir-serde` → 67/67 green
+  (incl. the new network wire tests); `cargo clippy` clean on both crates' own
+  files. The `DevToolsRoot` body is now a 3×2 grid: row 1 VM / Signals / Timeline,
+  row 2 Component Tree / Logs / Network.
 
 ### PARTIAL — DevTools multi-device connect (FLUX-061, LANE-P)
 

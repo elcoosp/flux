@@ -50,16 +50,13 @@ emitting telemetry event variant lands") is resolved. FLUX-059 now:
   That bridge is a small, isolated follow-up in `flux-devserver` (it already
   depends on both `flux-ir-serde` and `flux-perf-harness`). Until it lands, the
   flamegraph renders from whatever `PerfRecord` stream a broadcaster sends.
-- **Verification gate:** `cargo test -p flux-devtools-ui` could not be run green
-  at implementation time because the workspace tree had concurrent in-flight
-  breakage in `crates/flux-ir/src/lower/mod.rs` (another agent's LANE work, not
-  this issue's scope) which breaks `flux-ir`, a transitive dependency of
-  `flux-devtools-ui`. The independently-compilable layers are verified:
-  `flux-perf-harness` tests green, `flux-ir-serde` (wire variant + round-trip
-  tests) compiles and clippy-cleans. DevTools-side unit tests
-  (`perf_record::flame_rows`, `state::ingest_perf_record`,
-  `state::handle_telemetry_perf_record_event_feeds_flamegraph`) are written and
-  await the tree returning to green.
+- **Verification note:** `cargo test -p flux-devtools-ui --lib` passes (45/45,
+  incl. the 8 FLUX-059 flamegraph/ingest tests) once the workspace tree is green.
+  The only blocker at landing was concurrent in-flight breakage in
+  `crates/flux-ir/src/lower/mod.rs` (another agent's LANE work, outside this issue's
+  scope) which broke `flux-ir`, a transitive dep of `flux-devtools-ui`. Independent
+  layers also green: `flux-perf-harness` tests green; `flux-ir-serde` (wire variant +
+  round-trip tests) clippy-clean + all suites green. No fabricated green.
 
 ## Problem Statement
 
