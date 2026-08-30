@@ -5,6 +5,8 @@ import androidx.lifecycle.ViewModelProvider
 import dev.flux.host.AdapterRegistry
 import dev.flux.host.FluxExecutor
 import dev.flux.host.ReactiveDispatcher
+import dev.flux.host.media.ImageCache
+import dev.flux.host.media.OkHttpImageFetcher
 import dev.flux.host.shadow.ShadowTree
 import dev.flux.host.signal.SignalGraph
 import dev.flux.host.transport.FluxTransport
@@ -34,6 +36,15 @@ import dev.flux.host.vm.NativeCapabilityHost
  */
 public class FluxSession(
     private val wsUrl: String = "ws://127.0.0.1:7331",
+    /** Dev-server asset base for the `Image` primitive (FLUX-039). The dev
+     * server joins an `Image` `source` prop onto the project root and serves it
+     * from `/assets`; we match [dev.flux.ui.ImageAdapter]'s contract so the
+     * renderer can resolve and cache asset URLs. */
+    public val assetBaseUrl: String = "http://localhost:7332/assets/",
+    /** Shared on-device image cache (FLUX-039): LRU memory + single-flight
+     * fetch. One instance per session so bitmaps survive hot reloads of the
+     * Flux tree without re-fetching every asset. */
+    public val imageCache: ImageCache = ImageCache(OkHttpImageFetcher()),
     /** The real device-OS capability host (FLUX-045). The app shell passes
      * [dev.flux.app.native.AndroidNativeCapabilityHost] so the six concrete caps
      * (6..=11) perform real OS calls; when omitted the headless
