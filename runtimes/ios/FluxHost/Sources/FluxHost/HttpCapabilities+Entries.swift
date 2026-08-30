@@ -123,7 +123,31 @@ internal struct HttpAsyncResolver: AsyncResolver {
         var table = tableProvider()
         let url = table.lookup(request.urlId) ?? ""
         let body = request.bodyId.flatMap { table.lookup($0) }
+        // FLUX-060: broadcast the outbound request to DevTools (the bridge's
+        // sink is wired only under DEBUG, so release builds pay nothing).
+        fluxDevtoolsEmit(
+            .networkRequest(
+                requestId: UInt32(cellId),
+                method: request.method,
+                url: url,
+                body: body,
+                capabilityId: 14
+            )
+        )
+        let started = ContinuousClock.now
         let response = transport.request(method: request.method, url: url, body: body)
+        let elapsed = started.duration(to: ContinuousClock.now)
+        let latencyMs = UInt32(clamping: Int64(elapsed.components.seconds * 1_000)
+            + Int64(elapsed.components.attoseconds) / 1_000_000)
+        fluxDevtoolsEmit(
+            .networkResponse(
+                requestId: UInt32(cellId),
+                statusCode: 200,
+                latencyMs: latencyMs,
+                body: response,
+                resultKind: 1
+            )
+        )
         if request.parseJson {
             return FluxValueJsonParser.parse(response)
         }

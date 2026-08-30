@@ -61,6 +61,17 @@ public enum TelemetryEvent {
     /// Emitted when a handler starts or finishes.
     case handlerInvocation(handlerId: UInt32, isStart: Bool, gasUsed: UInt32?)
 
+    /// Emitted when the `Http` capability (FLUX-047) issues a request, so the
+    /// DevTools network inspector (FLUX-060) shows outbound traffic. Byte layout
+    /// matches `flux_ir_serde::TelemetryEvent::NetworkRequest` (tag `0x05`).
+    case networkRequest(requestId: UInt32, method: String, url: String, body: String?, capabilityId: UInt32)
+
+    /// Emitted when a pending `Http` request resolves, so the inspector can pair
+    /// it with its `networkRequest`. Byte layout matches
+    /// `flux_ir_serde::TelemetryEvent::NetworkResponse` (tag `0x06`).
+    /// `resultKind` is `0`=Pending, `1`=Ready, `2`=Error (ADR-0044 cell state).
+    case networkResponse(requestId: UInt32, statusCode: UInt16, latencyMs: UInt32, body: String?, resultKind: UInt8)
+
     /// Encodes this event as a union body (no frame header, no length prefix).
     /// Bit-identical to `flux_ir_serde::TelemetryEvent::encode_into` (Appendix D §D.12):
     /// the batch frame already carries `event_count`, so each event is written
@@ -118,6 +129,30 @@ public enum TelemetryEvent {
             } else {
                 body.append(0x00)
             }
+        case let .networkRequest(reqId, method, url, reqBody, capId):
+            body.append(0x05)
+            body.append(contentsOf: reqId.bytesLE())
+            encodeStr(into: &body, method)
+            encodeStr(into: &body, url)
+            if let b = reqBody {
+                body.append(0x01)
+                encodeStr(into: &body, b)
+            } else {
+                body.append(0x00)
+            }
+            body.append(contentsOf: capId.bytesLE())
+        case let .networkResponse(reqId, status, latency, respBody, kind):
+            body.append(0x06)
+            body.append(contentsOf: reqId.bytesLE())
+            body.append(contentsOf: status.bytesLE())
+            body.append(contentsOf: latency.bytesLE())
+            if let b = respBody {
+                body.append(0x01)
+                encodeStr(into: &body, b)
+            } else {
+                body.append(0x00)
+            }
+            body.append(kind)
         }
         data.append(contentsOf: UInt32(body.count).bytesLE())
         data.append(body)
@@ -312,6 +347,13 @@ public func fluxDevtoolsSetSink(_ sink: (any VMTelemetrySink)?) {
 /// Emits a telemetry event if a DevTools sink is attached.
 public func fluxDevtoolsEmit(_ event: TelemetryEvent) {
     fluxDevtoolsSink?.emit(event)
+}
+
+/// Encodes a UTF-8 string as a little-endian `u16` length prefix + bytes (matches Rust `encode_str`).
+func encodeStr(into data: inout Data, _ value: String) {
+    let bytes = Data(value.utf8)
+    data.append(contentsOf: UInt16(bytes.count).bytesLE())
+    data.append(bytes)
 }
 
 /// Encodes a `FluxValue` into `data` per Appendix D §D.5.
