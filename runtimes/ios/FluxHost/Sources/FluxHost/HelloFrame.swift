@@ -27,58 +27,70 @@ extension Data {
 
 extension HelloFrame {
     // ===== GENERATED-BEGIN (derived from flux-devserver capability_idl; do not edit) =====
-    private static let idlCapabilities: [(String, UInt32, [(String, UInt16)])] = [
-        ("Camera", 1, [
-            ("takePicture", 1),
-            ("startPreview", 2),
-            ("stopPreview", 3),
-        ]),
-        ("Storage", 2, [
-            ("setItem", 1),
-            ("getItem", 2),
-            ("removeItem", 3),
-        ]),
-        ("Router", 3, [
-            ("navigate", 1),
-        ]),
-        ("Clipboard", 4, [
-            ("setString", 1),
-            ("getString", 2),
-        ]),
-        ("Geolocation", 5, [
-            ("getCurrentPosition", 1),
-        ]),
-        ("Push", 6, [
-            ("registerForNotifications", 1),
-            ("scheduleNotification", 2),
-        ]),
-        ("Biometric", 7, [
-            ("authenticate", 1),
-        ]),
-        ("Background", 8, [
-            ("schedule", 1),
-        ]),
-        ("FileSystem", 9, [
-            ("readAsString", 1),
-            ("writeAsString", 2),
-            ("delete", 3),
-        ]),
-        ("DeepLink", 10, [
-            ("openURL", 1),
-        ]),
-        ("Sensors", 11, [
-            ("read", 1),
-        ]),
-        ("WebView", 12, [
-            ("load", 1),
-            ("evaluate", 2),
-            ("sendMessage", 3),
-        ]),
-        ("NativeModule", 13, [
-            ("invoke", 1),
-        ]),
-    ]
-    // ===== GENERATED-END =====
+private static let idlCapabilities: [(String, UInt32, [(String, UInt16)])] = [
+    ("Camera", 1, [
+        ("takePicture", 1),
+        ("startPreview", 2),
+        ("stopPreview", 3),
+    ]),
+    ("Storage", 2, [
+        ("setItem", 1),
+        ("getItem", 2),
+        ("removeItem", 3),
+    ]),
+    ("Router", 3, [
+        ("navigate", 1),
+    ]),
+    ("Clipboard", 4, [
+        ("setString", 1),
+        ("getString", 2),
+    ]),
+    ("Geolocation", 5, [
+        ("getCurrentPosition", 1),
+    ]),
+    ("Push", 6, [
+        ("registerForNotifications", 1),
+        ("scheduleNotification", 2),
+    ]),
+    ("Biometric", 7, [
+        ("authenticate", 1),
+    ]),
+    ("Background", 8, [
+        ("schedule", 1),
+    ]),
+    ("FileSystem", 9, [
+        ("readAsString", 1),
+        ("writeAsString", 2),
+        ("delete", 3),
+    ]),
+    ("DeepLink", 10, [
+        ("openURL", 1),
+    ]),
+    ("Sensors", 11, [
+        ("read", 1),
+    ]),
+    ("WebView", 12, [
+        ("load", 1),
+        ("evaluate", 2),
+        ("sendMessage", 3),
+    ]),
+    ("NativeModule", 13, [
+        ("invoke", 1),
+    ]),
+    ("Http", 14, [
+        ("fetch", 1),
+        ("getJson", 2),
+        ("postJson", 3),
+    ]),
+    ("Persist", 15, [
+        ("put", 1),
+        ("get", 2),
+        ("query", 3),
+        ("delete", 4),
+    ]),
+]
+// ===== GENERATED-END =====
+
 
     /// The capabilities this host build advertises (Appendix D §D.12.1, §24.4).
     ///

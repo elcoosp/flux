@@ -22,8 +22,8 @@ mod tests {
     fn manifest_ids_match_native_registries() {
         // The ids here must equal the native registry tables and
         // stdlib/capabilities.flux (delegated to the IDL).
-        assert_eq!(CapabilityIdl::names_for(1, 1), Some(("Camera", "take")));
-        assert_eq!(CapabilityIdl::names_for(2, 2), Some(("Storage", "get")));
+        assert_eq!(CapabilityIdl::names_for(1, 1), Some(("Camera", "takePicture")));
+        assert_eq!(CapabilityIdl::names_for(2, 2), Some(("Storage", "getItem")));
         assert_eq!(CapabilityIdl::names_for(3, 1), Some(("Router", "navigate")));
         assert_eq!(CapabilityIdl::names_for(9, 9), None);
     }
@@ -31,12 +31,12 @@ mod tests {
     #[test]
     fn satisfaction_checks_name_and_feature() {
         let advertised = hello_capabilities();
-        assert!(is_satisfied(&advertised, "Camera", "take"));
-        assert!(is_satisfied(&advertised, "Storage", "get"));
+        assert!(is_satisfied(&advertised, "Camera", "takePicture"));
+        assert!(is_satisfied(&advertised, "Storage", "getItem"));
         assert!(is_satisfied(&advertised, "Router", "navigate"));
         assert!(is_satisfied(&advertised, "Camera", "stopPreview"));
         // A method the host does not advertise must fail.
         let empty: Vec<(String, u32, Vec<String>)> = Vec::new();
-        assert!(!is_satisfied(&empty, "Camera", "take"));
+        assert!(!is_satisfied(&empty, "Camera", "takePicture"));
     }
 }

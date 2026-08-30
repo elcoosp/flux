@@ -111,8 +111,20 @@ private val idlCapabilities: List<Triple<String, UInt, List<Pair<String, UInt>>>
     Triple("NativeModule", 13u, listOf(
         "invoke" to 1u,
     )),
+    Triple("Http", 14u, listOf(
+        "fetch" to 1u,
+        "getJson" to 2u,
+        "postJson" to 3u,
+    )),
+    Triple("Persist", 15u, listOf(
+        "put" to 1u,
+        "get" to 2u,
+        "query" to 3u,
+        "delete" to 4u,
+    )),
 )
 // ===== GENERATED-END =====
+
 
 /**
  * The capabilities this host build advertises (Appendix D §D.12.1, §24.4),
