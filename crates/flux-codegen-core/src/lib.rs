@@ -30,6 +30,7 @@ pub mod emitter;
 pub mod error;
 pub mod expressions;
 pub mod model;
+pub mod native_gen;
 pub mod primitives;
 pub mod view_tree;
 
