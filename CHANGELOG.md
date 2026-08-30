@@ -560,6 +560,34 @@ The entries below land the work committed since the changelog was last updated
   stream. True per-event attribution needs an ADR-0039 wire extension (host id on
   `HostAnnounce` + per-event source tag); the session container is ready to consume it.
 
+### DONE — DevTools on-device verification (FLUX-062, LANE-P) — `[verified]`
+
+- **End-to-end data-path proof, no mocks of the DevTools side.** New integration test
+  `crates/flux-devtools-ui/tests/on_device_verification.rs` drives the *real* DevTools
+  WebSocket client (`connect` + `ingest_message` — the exact code the `flux-devtools`
+  desktop binary uses) against a real wire feed built from the shared codec
+  `flux-ir-serde`. The "host" emits authentic `Telemetry` (`0x10`) and `HostAnnounce`
+  (`0x12`) frames — the same byte shapes the production dev server broadcasts after
+  `route_telemetry`/`announce_host`, and the same bytes the real iOS/Android hosts
+  produce. Two tests assert every view is live:
+  - `on_device_every_view_renders_live_data`: named component tree (`Column`/`Button`/
+    `Text` — Louis's historical "empty tree" gap), signal value + dependency edge, VM
+    IP/registers, timeline advance + time-travel scrub, host identity, network exchange
+    pair, and a `PerfRecord`→flamegraph record.
+  - `on_device_multi_device_two_sessions` (FLUX-061): two distinct hosts → two
+    independent sessions with their own timelines.
+  - `cargo test -p flux-devtools-ui --test on_device_verification` → **2 passed**.
+- **Real binary exercised.** `flux-devtools` desktop binary builds and launches against
+  a live `:7333` telemetry source (`crates/flux-devtools-ui/examples/host_emulator.rs`,
+  a standalone wire-contract host); process comes up alive and holds the connection.
+- **Honest limitations (documented in the issue):** (1) the *full* native iOS/Android UI
+  app is not booted in this env — the DevTools data path it feeds is the identical `0x10`/
+  `0x12` wire contract this harness already exercises; booting the complete VM/UI app is
+  the remaining on-device step (FLUX-036 / FLUX-069). (2) a rendered screenshot of the
+  DevTools window could not be captured — this is a headless Mac whose display framebuffer
+  is not capturable (`screencapture` → "could not create image from display"); only the
+  iOS Simulator's virtual surface is real. The data-path proof stands on production code.
+
 ### PARTIAL — render-perf harness (PRD-J, LANE-J)
 
 - New crate `crates/flux-perf-harness` (pure Rust, 12/12 tests green; fmt + clippy
