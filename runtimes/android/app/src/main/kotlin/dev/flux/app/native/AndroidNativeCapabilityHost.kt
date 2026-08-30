@@ -1,13 +1,9 @@
 package dev.flux.app.native
 
-import android.Manifest
-import android.app.Activity
 import android.content.Context
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.hardware.Sensor
-import android.hardware.SensorManager
 import android.os.Build
+import androidx.biometric.BiometricPrompt
+import androidx.fragment.app.FragmentActivity
 import dev.flux.host.vm.FluxValue
 import dev.flux.host.vm.NativeCapabilityHost
 import dev.flux.host.vm.SignalStore
@@ -17,6 +13,8 @@ import dev.flux.host.vm.VmError
 import dev.flux.host.vm.VmErrorKind.CAPABILITY_DENIED
 import dev.flux.host.vm.VmErrorKind.TYPE_MISMATCH
 import java.io.File
+import java.util.concurrent.Executor
+import java.util.concurrent.Executors
 
 /**
  * The real device-OS implementation of [NativeCapabilityHost] (FLUX-045). Unlike
@@ -27,20 +25,30 @@ import java.io.File
  * running app.
  *
  * It MUST live in `runtimes/android/app` (not the pure-JVM `:host` module) because
- * it imports `android.*` — the `:host` unit tests run without an emulator and are
+ * it imports `androidx.*` — the `:host` unit tests run without an emulator and are
  * forbidden from touching the framework (AGENTS.md §3.5 / FLUX-045 scope).
  *
- * Every async path resolves the caller's result cell through [resolve]; a denied
- * permission yields a typed [VmError] (CAPABILITY_DENIED, ADR-0057), never a crash.
+ * Real OS surfaces used here (user-exempted androidx additions, 2026-08-30):
+ * - Biometric: `androidx.biometric.BiometricPrompt` (a genuine OS auth dialog).
+ * - Background: `androidx.work.WorkManager` (modern, battery-friendly scheduler).
+ *
+ * Biometric is asynchronous (user-interactive), so it follows the ADR-0044
+ * result-cell pattern: [call] allocates a Pending cell, returns its id, and the
+ * prompt's callback later resolves it via [resolveCell].
  *
  * @property context the host activity/application context used for framework calls.
+ * @property mainExecutor the executor BiometricPrompt uses for its callbacks.
  */
 public class AndroidNativeCapabilityHost(
     private val context: Context,
+    private val mainExecutor: Executor = Executors.newSingleThreadExecutor(),
 ) : NativeCapabilityHost {
     private val resolver: StringResolver = TableStringResolver(emptyMap())
 
-    override fun handles(capId: UInt, methodId: UShort): Boolean = capId in 6u..11u
+    override fun handles(
+        capId: UInt,
+        methodId: UShort,
+    ): Boolean = capId in 6u..11u
 
     override fun call(
         capId: UInt,
@@ -48,17 +56,17 @@ public class AndroidNativeCapabilityHost(
         args: FluxValue,
         signals: SignalStore,
     ): UInt {
-        // Allocate a result cell; the per-cap methods resolve it via [resolve],
-        // which writes the produced value back into the live signal store. A denied
-        // grant throws a typed [VmError] (CAPABILITY_DENIED, ADR-0057); any other
-        // framework failure is surfaced as a typed denial rather than an unchecked
-        // exception into the VM.
+        // Allocate a result cell; per-cap methods either write it synchronously
+        // (resolve()) or, for async caps like Biometric, mark it Pending and let a
+        // callback resolve it later (ADR-0044). A denied permission yields a typed
+        // [VmError] (CAPABILITY_DENIED, ADR-0057); any other framework failure is
+        // surfaced as a typed denial rather than an unchecked exception into the VM.
         val id = signals.allocateCell()
         val resolve: (FluxValue) -> Unit = { signals.write(id, it) }
         try {
             when (capId) {
                 6u -> push(methodId, args, resolve)
-                7u -> biometric(methodId, args, resolve)
+                7u -> biometric(methodId, args, signals, id)
                 8u -> background(methodId, args, resolve)
                 9u -> fileSystem(methodId, args, resolve)
                 10u -> deepLink(methodId, args, resolve)
@@ -83,12 +91,12 @@ public class AndroidNativeCapabilityHost(
         when (methodId) {
             1u.toUShort() -> {
                 // Push.registerForNotifications: request POST_NOTIFICATIONS permission
-                // (Android 13+) and return the canonical FCM/instance token.
+                // (Android 13+) and return the canonical device-scoped token.
                 val granted =
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         context.checkSelfPermission(
-                            Manifest.permission.POST_NOTIFICATIONS,
-                        ) == PackageManager.PERMISSION_GRANTED
+                            android.Manifest.permission.POST_NOTIFICATIONS,
+                        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
                     } else {
                         true
                     }
@@ -98,7 +106,11 @@ public class AndroidNativeCapabilityHost(
             }
             2u.toUShort() -> {
                 // Push.getToken: return the currently cached token (or null).
-                val token = cachedPushToken ?: run { resolve(FluxValue.NullVal); return }
+                val token =
+                    cachedPushToken ?: run {
+                        resolve(FluxValue.NullVal)
+                        return
+                    }
                 resolve(FluxValue.StrVal(resolver.intern(token)))
             }
             else -> throw VmError(TYPE_MISMATCH, 0u)
@@ -120,51 +132,63 @@ public class AndroidNativeCapabilityHost(
 
     private var cachedPushToken: String? = null
 
-    // --- cap 7: Biometric ----------------------------------------------------
+    // --- cap 7: Biometric (async, ADR-0044 result cell) ----------------------
 
     private fun biometric(
         methodId: UShort,
         args: FluxValue,
-        resolve: (FluxValue) -> Unit,
+        signals: SignalStore,
+        cellId: UInt,
     ) {
         when (methodId) {
             1u.toUShort() -> {
-                // Biometric.authenticate: a real OS auth gate. `androidx.biometric` is not
-                // in the (frozen) dependency set, so we use the framework
-                // KeyguardManager device-credential prompt — a genuine OS
-                // authentication step (device PIN / pattern / password) with no extra
-                // dependency. The foreground activity (tracked by ActivityTracker) is
-                // required to host the system credential dialog.
+                // Biometric.authenticate: a genuine OS auth dialog via BiometricPrompt.
+                // Resolves the result cell asynchronously when the user completes it.
                 val activity = currentActivity()
-                val keyguard =
-                    context.getSystemService(Context.KEYGUARD_SERVICE) as? android.app.KeyguardManager
-                if (activity == null || keyguard == null || !keyguard.isKeyguardSecure) {
-                    // No secure lock screen configured, or no activity to host the
-                    // dialog: degrade to a non-authenticated result rather than a crash.
-                    resolve(FluxValue.BoolVal(false))
+                if (activity == null) {
+                    // No foreground activity to host the prompt: degrade to a non-auth
+                    // result rather than a crash (ADR-0057).
+                    signals.write(cellId, FluxValue.BoolVal(false))
                     return
                 }
-                val intent = keyguard.createConfirmDeviceCredentialIntent("Confirm it's you", null)
-                if (intent == null) {
-                    resolve(FluxValue.BoolVal(false))
-                    return
-                }
-                // The activity owns the result via onActivityResult / a registered
-                // launcher; we publish the outcome through a one-shot callback the
-                // activity forwards to when it resumes.
-                activity.startActivity(intent)
-                // NOTE: a production integration would await the activity result via
-                // ActivityResultLauncher and resolve the cell on return. For the MLP we
-                // resolve optimistically after the dialog is presented; the real
-                // pin/pattern check is performed by the OS and the activity reports the
-                // authoritative result back through ActivityTracker.
-                resolve(FluxValue.BoolVal(true))
+                signals.markPending(cellId)
+                val promptInfo =
+                    BiometricPrompt.PromptInfo
+                        .Builder()
+                        .setTitle("Confirm it's you")
+                        .setSubtitle("Authenticate to continue")
+                        .setNegativeButtonText("Cancel")
+                        .build()
+                val prompt =
+                    BiometricPrompt(
+                        activity,
+                        mainExecutor,
+                        object : BiometricPrompt.AuthenticationCallback() {
+                            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                                signals.resolveCell(cellId, FluxValue.BoolVal(true))
+                            }
+
+                            override fun onAuthenticationFailed() {
+                                // A non-fatal failure (e.g. unrecognized fingerprint);
+                                // the dialog stays up. We do not resolve here.
+                            }
+
+                            override fun onAuthenticationError(
+                                errorCode: Int,
+                                errString: CharSequence,
+                            ) {
+                                // User cancelled or a hard error: resolve definitively.
+                                signals.resolveCell(cellId, FluxValue.BoolVal(false))
+                            }
+                        },
+                    )
+                prompt.authenticate(promptInfo)
             }
             else -> throw VmError(TYPE_MISMATCH, 0u)
         }
     }
 
-    // --- cap 8: Background ---------------------------------------------------
+    // --- cap 8: Background (WorkManager) -------------------------------------
 
     private fun background(
         methodId: UShort,
@@ -173,8 +197,9 @@ public class AndroidNativeCapabilityHost(
     ) {
         when (methodId) {
             1u.toUShort() -> {
-                // Background.schedule: enqueue a real JobScheduler job. `args` carries the
-                // task payload; the job runs in the background even when the app is closed.
+                // Background.schedule: enqueue a real WorkManager job. `args` carries the
+                // task payload; the worker runs it in the background even when the app
+                // is closed. Returns the work request id.
                 val rec = args as? FluxValue.RecordVal ?: throw VmError(TYPE_MISMATCH, 0u)
                 val payload = rec.fields.firstOrNull()?.value
                 val text =
@@ -185,21 +210,21 @@ public class AndroidNativeCapabilityHost(
                         null -> ""
                         else -> throw VmError(TYPE_MISMATCH, 0u)
                     }
-                val jobId = FluxBackgroundJobService.schedule(context, text)
-                resolve(FluxValue.StrVal(resolver.intern(jobId.toString())))
+                val workId = FluxBackgroundWorker.schedule(context, text)
+                resolve(FluxValue.StrVal(resolver.intern(workId)))
             }
             2u.toUShort() -> {
                 // Background.cancel: cancel a previously scheduled job by id.
                 val rec = args as? FluxValue.RecordVal ?: throw VmError(TYPE_MISMATCH, 0u)
                 val idVal = rec.fields.firstOrNull()?.value
-                val jobId =
+                val workId =
                     when (idVal) {
-                        is FluxValue.StrVal -> resolver.resolve(idVal.id).toIntOrNull()
-                        is FluxValue.IntVal -> idVal.value.toInt()
+                        is FluxValue.StrVal -> resolver.resolve(idVal.id)
+                        is FluxValue.IntVal -> idVal.value.toString()
                         else -> null
                     }
-                if (jobId != null) FluxBackgroundJobService.cancel(context, jobId)
-                resolve(FluxValue.BoolVal(jobId != null))
+                if (workId != null) FluxBackgroundWorker.cancel(context, workId)
+                resolve(FluxValue.BoolVal(workId != null))
             }
             else -> throw VmError(TYPE_MISMATCH, 0u)
         }
@@ -226,8 +251,9 @@ public class AndroidNativeCapabilityHost(
             2u.toUShort() -> {
                 // writeAsString: atomically write a file under the app's private files dir.
                 val rec = args as? FluxValue.RecordVal ?: throw VmError(TYPE_MISMATCH, 0u)
-                val path = (rec.fields.firstOrNull()?.value as? FluxValue.StrVal)?.let { resolver.resolve(it.id) }
-                    ?: throw VmError(TYPE_MISMATCH, 0u)
+                val path =
+                    (rec.fields.firstOrNull()?.value as? FluxValue.StrVal)?.let { resolver.resolve(it.id) }
+                        ?: throw VmError(TYPE_MISMATCH, 0u)
                 val content = rec.fields.getOrNull(1)?.value
                 val text =
                     when (content) {
@@ -264,8 +290,8 @@ public class AndroidNativeCapabilityHost(
                 // openURL: hand the URL to the system so it opens the matching app /
                 // browser. `args` carries the url string (interned) as field 0.
                 val url = pathOf(args) ?: throw VmError(TYPE_MISMATCH, 0u)
-                val intent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url))
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                 if (intent.resolveActivity(context.packageManager) != null) {
                     context.startActivity(intent)
                     resolve(FluxValue.BoolVal(true))
@@ -288,16 +314,17 @@ public class AndroidNativeCapabilityHost(
             1u.toUShort() -> {
                 // read: sample the device's real motion sensors (accelerometer +
                 // gyroscope) and return their current readings as a record.
-                val manager = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+                val manager =
+                    context.getSystemService(android.content.Context.SENSOR_SERVICE) as? android.hardware.SensorManager
                 if (manager == null) {
                     resolve(FluxValue.RecordVal(emptyList()))
                     return
                 }
                 val fields = mutableListOf<FluxValue.Field>()
-                sampleSensor(manager, Sensor.TYPE_ACCELEROMETER)?.let { (x, y, z) ->
+                sampleSensor(manager, android.hardware.Sensor.TYPE_ACCELEROMETER)?.let { (x, y, z) ->
                     fields += FluxValue.Field(0u, vectorRecord("accelerometer", x, y, z))
                 }
-                sampleSensor(manager, Sensor.TYPE_GYROSCOPE)?.let { (x, y, z) ->
+                sampleSensor(manager, android.hardware.Sensor.TYPE_GYROSCOPE)?.let { (x, y, z) ->
                     fields += FluxValue.Field(1u, vectorRecord("gyroscope", x, y, z))
                 }
                 resolve(FluxValue.RecordVal(fields))
@@ -307,7 +334,7 @@ public class AndroidNativeCapabilityHost(
     }
 
     private fun sampleSensor(
-        manager: SensorManager,
+        manager: android.hardware.SensorManager,
         type: Int,
     ): Triple<Float, Float, Float>? {
         val sensor = manager.getDefaultSensor(type) ?: return null
@@ -321,11 +348,11 @@ public class AndroidNativeCapabilityHost(
                 }
 
                 override fun onAccuracyChanged(
-                    s: Sensor,
+                    s: android.hardware.Sensor,
                     accuracy: Int,
                 ) = Unit
             }
-        manager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_UI)
+        manager.registerListener(listener, sensor, android.hardware.SensorManager.SENSOR_DELAY_UI)
         // Sample for a brief window, then unregister to avoid a leak.
         try {
             Thread.sleep(SENSOR_SAMPLE_MS)
@@ -364,7 +391,7 @@ public class AndroidNativeCapabilityHost(
     }
 
     /** Resolves the current foreground activity, or null if none is available. */
-    private fun currentActivity(): Activity? = ActivityTracker.current()
+    private fun currentActivity(): FragmentActivity? = ActivityTracker.current() as? FragmentActivity
 
     private companion object {
         const val SENSOR_SAMPLE_MS: Long = 50

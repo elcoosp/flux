@@ -55,6 +55,11 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.navigation.compose)
+    // FLUX-045 real-OS capability bodies (user-exempted manifest additions):
+    // BiometricPrompt host + WorkManager background jobs + FragmentActivity base.
+    implementation(libs.androidx.biometric)
+    implementation(libs.androidx.work.runtime)
+    implementation(libs.androidx.fragment)
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.ui.graphics)

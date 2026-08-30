@@ -19,11 +19,8 @@
             </intent-filter>
         </activity>
 
-        <!-- FLUX-045 Background capability: real JobScheduler job host. -->
-        <service
-            android:name=".native.FluxBackgroundJobService"
-            android:exported="false"
-            android:permission="android.permission.BIND_JOB_SERVICE" />
+        <!-- FLUX-045 Background capability: WorkManager handles the background
+             work (no manifest entry required). -->
     </application>
 
 </manifest>

@@ -34,12 +34,16 @@ injected at launch.
 
 - Android (`runtimes/android/app/.../native/AndroidNativeCapabilityHost.kt`,
   commit c5c0283): Push (`POST_NOTIFICATIONS` gate + device-scoped token via
-  `Settings.Secure.ANDROID_ID`), Biometric (`KeyguardManager` device-credential
-  gate — androidx.biometric is not in the frozen deps), Background (`JobScheduler`
-  via `FluxBackgroundJobService` — WorkManager not in frozen deps), FileSystem
+  `Settings.Secure.ANDROID_ID`), Biometric (**`androidx.biometric.BiometricPrompt`**
+  — a genuine OS auth dialog, resolved through an ADR-0044 Pending result cell),
+  Background (**`androidx.work.WorkManager`** via `FluxBackgroundWorker`,
+  replacing the earlier `JobScheduler` `FluxBackgroundJobService`), FileSystem
   (real `filesDir` read/write/delete), DeepLink (`startActivity(ACTION_VIEW)`),
   Sensors (real `SensorManager` accelerometer + gyroscope sampling). Wired through
-  `FluxSession`/`FluxHostActivity` with `ActivityTracker`.
+  `FluxSession`/`FluxHostActivity` with `ActivityTracker`. The `androidx.biometric`
+  + `androidx.work` + `androidx.fragment` deps were added per an explicit user
+  waiver of the frozen-dependency policy (2026-08-30); they are NOT routed through
+  `MANIFEST_REQUESTS.md`.
 - iOS (`runtimes/ios/Sources/Host/IOSNativeCapabilityHost.swift`, commit 6249767):
   Push (`UNUserNotificationCenter` auth + settings), Biometric (`LAContext`
   device-owner gate, degrades to false never crashes), Background (`BGTaskScheduler`
