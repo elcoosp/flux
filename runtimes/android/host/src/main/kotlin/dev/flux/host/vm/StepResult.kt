@@ -380,6 +380,14 @@ internal fun executeInstruction(
             regs[instr.u8(0)] = FluxValue.NullVal
             StepResult.Proceed
         }
+        Opcode.IS_NULL -> {
+            // FLUX-053 null-safe access (mirror flux-vm-ref IsNull): `dst` is
+            // `true` iff `src` holds `Null`. Operand order matches the oracle
+            // (dst = u8(0), src = u8(1)); see tests/isa-vectors/is_null_*.json.
+            val src = instr.u8(1)
+            regs[instr.u8(0)] = FluxValue.BoolVal(regs[src] == FluxValue.NullVal)
+            StepResult.Proceed
+        }
         Opcode.MOV -> {
             regs[instr.u8(0)] = regs[instr.u8(1)]
             StepResult.Proceed

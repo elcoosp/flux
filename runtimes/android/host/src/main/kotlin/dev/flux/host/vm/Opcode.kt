@@ -88,6 +88,10 @@ public enum class Opcode(
     LOAD_BOOL_CONST(0xB2, 2),
     LOAD_STR_CONST(0xB3, 5),
     LOAD_NULL(0xB4, 1),
+    // --- FLUX-053: null-safe access (mirror flux-vm-ref IS_NULL = 0xD1). ---
+    // Sets `dst` to `true` iff `src` holds `Null` — the one null-distinguishing
+    // test `truthy` cannot provide (both `Null` and `Int(0)` are falsey).
+    IS_NULL(0xD1, 2),
     MOV(0xB5, 2),
 
     GAS_CHECK(0xC0, 4),
