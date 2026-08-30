@@ -25,8 +25,7 @@ Before planning forward, here's what the dump shows, stripped of aspiration:
   a unified sync/async capability bridge (`CALL_CAP`) is a clean model — most
   frameworks bolt this on later.
 - Engineering discipline is unusually high for pre-1.0: TDD-enforced,
-  zero-warnings, ADR-numbered decisions, a merge-guard that prevents directory
-  collisions across parallel agents, a manifest-freeze process. This lowers
+  zero-warnings, ADR-numbered decisions, a manifest-freeze process. This lowers
   the risk of the "rewrite everything at 1.0" tax most frameworks pay.
 
 **Thin / pre-alpha (this is most of the gap to 1.0):**

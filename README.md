@@ -26,7 +26,6 @@ views driven by a minimal VM and a reactive signal graph.
 ![Rust CI](https://github.com/elcoosp/flux/actions/workflows/rust-check.yml/badge.svg)
 ![iOS CI](https://github.com/elcoosp/flux/actions/workflows/ios-check.yml/badge.svg)
 ![Android CI](https://github.com/elcoosp/flux/actions/workflows/android-check.yml/badge.svg)
-![Merge Guard](https://github.com/elcoosp/flux/actions/workflows/merge-guard.yml/badge.svg)
 
 ---
 
@@ -264,7 +263,6 @@ GitHub Actions guard `main` (13 workflows under `.github/workflows`):
 | `rust-check.yml` | `cargo fmt` / `clippy` / `nextest` on every push |
 | `ios-check.yml` | Swift build + test of the iOS host |
 | `android-check.yml` | Kotlin build + test of the Android host |
-| `merge-guard.yml` | Blocks shared-index commit hazards on parallel `main` |
 | `manifest-steward.yml` | Keeps the `Cargo.toml` workspace manifest consistent |
 | `adr-numbering.yml` | Enforces ADR numbering discipline |
 | `benchmarks.yml` | Runs the criterion benchmark suite |

@@ -106,7 +106,7 @@ change. Both kits remain adapter **contract version 1**, and the props contract
 | `runtimes/ios` | XcodeGen project (`project.yml`, scheme `FluxApp`) |
 | `stdlib/` | Stdlib `.flux` sources (reflected by `flux doc`) |
 | `docs/spec`, `docs/adr`, `docs/scripts/check-adr-numbering.sh` | Spec, ADRs, numbering guard |
-| `scripts/` | `merge-guard-check.sh`, `manifest-steward.sh` |
+| `scripts/` | `manifest-steward.sh` |
 
 ### 0.4 State of play
 
@@ -472,9 +472,6 @@ All agents work on `main` at once. No branches, no worktrees, no PRs.
   `git commit --only <your/files> -m "…"` — never `git add -A` +
   `git commit`, never `git commit -a`. Verify with
   `git diff --cached --name-only` before any commit.
-- The `merge-guard` workflow records touched top-level directories in
-  `.github/dir-locks.json` and fails overlapping consecutive pushes; the
-  `manifest-steward` applies `MANIFEST_REQUESTS.md` weekly. Don't fight them.
 
 ---
 

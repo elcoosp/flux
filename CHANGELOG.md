@@ -91,8 +91,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   window is in the background — instead of only after a refocus.
 
 The entries below land the work committed since the changelog was last updated
-(`a8c86d0`, 2026-08-27). The `[skip ci]` merge-guard directory-recording commits
-are intentionally omitted (automation noise, not user-facing change).
+(`a8c86d0`, 2026-08-27).
 
 ### LANE-A / LANE-B — router navigation + positional `Screen` route-prop blind spot — DONE
 
