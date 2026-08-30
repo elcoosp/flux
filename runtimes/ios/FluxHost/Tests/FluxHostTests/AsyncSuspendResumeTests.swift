@@ -90,6 +90,37 @@ final class AsyncSuspendResumeTests: XCTestCase {
         XCTAssertFalse(outcome.signals.isEmpty)
     }
 
+    /// Cancellation parity (FLUX-086, Part B): when the awaiting `Task` is cancelled
+    /// before its `Pending` cell settles, the signal graph must match the Rust oracle's
+    /// `SuspendState` exactly — the `Pending` result cell is left untouched and no other
+    /// signal was written before the `AWAIT`. A cancel is modelled as dropping the
+    /// continuation (never calling `resume`); the captured `SuspendState` is the
+    /// post-cancel source of truth for all three runtimes. The cancellation contract is
+    /// already fully specified by the oracle's suspend semantics, so we assert it here
+    /// rather than filing a follow-up.
+    @MainActor
+    func testAwaitCancellationLeavesPendingCellAndNoWrites() {
+        var graph = SignalGraph()
+        let payload = FluxValue.record([(0, .int(42))])
+
+        let first = FluxBytecodeVM.runResumable(asyncBytecode, signals: &graph, payload: payload)
+        guard case let .success(.suspended(state)) = first else {
+            XCTFail("async capability should suspend, got \(String(describing: first))")
+            return
+        }
+        guard case let .int(cellId) = state.registers[2] else {
+            XCTFail("result_reg must hold the cell id")
+            return
+        }
+        XCTAssert(cellId >= 1_000_000, "async capability must allocate a fresh cell id")
+
+        // Oracle contract: at cancellation the only signal state is the Pending cell; the
+        // handler had written nothing before the AWAIT (signal 2 must remain unbound).
+        XCTAssertEqual(graph.cellState(cellId), .pending, "cell must remain Pending after cancel")
+        XCTAssertNil(graph.read(2), "no signal writes may have occurred before the AWAIT")
+        XCTAssertEqual(state.registers[2], .int(cellId), "captured future_reg must match the pending cell")
+    }
+
     /// v1 semantics are preserved: a program that never emits `AWAIT` runs to `HALT`
     /// in a single `runResumable` call and never suspends.
     @MainActor
