@@ -965,7 +965,7 @@ word_end = _{ !(ASCII_ALPHANUMERIC | "_") }
 
 // Keywords are matched before identifiers (see `ident` below), which prevents
 // an identifier from consuming a leading keyword token.
-keyword = @{ ("component" | "capability" | "createRef" | "onCleanup" | "onMount" | "otherwise" | "untrack" | "resource" | "provide" | "derived" | "effect" | "import" | "batch" | "false" | "match" | "state" | "trait" | "true" | "type" | "when" | "with" | "else" | "let" | "use" | "if" | "fn" | "ForEach" | "useContext" | "props") ~ word_end }
+keyword = @{ ("component" | "capability" | "createRef" | "onCleanup" | "onMount" | "otherwise" | "untrack" | "resource" | "provide" | "derived" | "effect" | "batch" | "false" | "match" | "state" | "trait" | "true" | "type" | "when" | "with" | "else" | "let" | "use" | "if" | "fn" | "ForEach" | "useContext" | "props") ~ word_end }
 
 ident = @{ !keyword ~ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* }
 path  = { ident ~ ("::" ~ ident)* }
@@ -992,9 +992,8 @@ ellipsis = { "..." }
 // ========================= Top-level =========================
 
 file      = { SOI ~ statement* ~ EOI }
-statement = { import_decl | use_decl | annotated_component | fn_decl | type_decl | trait_decl | capability_decl | const_binding }
+statement = { use_decl | annotated_component | fn_decl | type_decl | trait_decl | capability_decl | const_binding }
 
-import_decl = { "import" ~ ident ~ "from" ~ string_lit }
 use_decl    = { "use" ~ path ~ ("::" ~ "*")? }
 
 // Module-level associated constant (mlp-spec §18.6):

@@ -104,11 +104,6 @@ fn describe_decl(decl: &Decl) -> DeclSchema {
             name: c.path.last().map(|i| i.name.clone()).unwrap_or_default(),
             props: Vec::new(),
         },
-        Decl::Import(i) => DeclSchema {
-            kind: "import".to_owned(),
-            name: i.name.name.clone(),
-            props: Vec::new(),
-        },
         Decl::Use(u) => DeclSchema {
             kind: "use".to_owned(),
             name: u

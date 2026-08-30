@@ -322,7 +322,6 @@ impl<'a> Lowerer<'a> {
             | Decl::Type(_)
             | Decl::Trait(_)
             | Decl::Capability(_)
-            | Decl::Import(_)
             | Decl::Use(_)
             | Decl::Const(_) => Ok(()),
             // Record types register their constructor name so handler calls to

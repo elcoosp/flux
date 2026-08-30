@@ -441,10 +441,13 @@ graph TB
 ```pest
 // Top-level
 file        = { SOI ~ statement* ~ EOI }
-statement   = { component | fn_decl | type_decl | trait_decl | import | use }
-import      = { "import" ~ ident ~ "from" ~ string_lit }
+statement   = { component | fn_decl | type_decl | trait_decl | use }
 use         = { "use" ~ path ~ ("::" ~ "*")? }
 
+// `use` resolves a module from the package root (no string path). `use theme`
+// brings every export of `theme.flux` (or `theme/main.flux`) into scope;
+// `use theme::*` is equivalent; `use theme::red` brings only `red`.
+//
 // Components
 component   = { "component" ~ ident ~ generic_params? ~ props_block? ~ block }
 props_block = { "(" ~ prop_decl ~ ("," ~ prop_decl)* ~ ")" }
@@ -495,7 +498,7 @@ interp      = { "{" ~ ident ~ "}" }
 **Example `.flux` source:**
 
 ```flux
-import Counter from "./counter.flux"
+use counter
 
 type Color =
   | Red
@@ -557,7 +560,7 @@ pub enum TypeKind {
 ### 18.3 Module System
 
 - **One module per `.flux` file.**
-- **Explicit imports:** `import Counter from "./counter.flux"`.
+- **Explicit imports:** `use Counter` (resolves `Counter.flux` from the package root).
 - **Default prelude:** `flux::prelude` imported implicitly (primitives, basic types, default traits).
 - **Stdlib vs language boundary:**
 

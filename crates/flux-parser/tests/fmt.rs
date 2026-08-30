@@ -158,10 +158,11 @@ fn formatter_handles_optional_chaining_and_unary() {
 }
 
 #[test]
-fn formatter_handles_const_binding_and_import_use() {
-    assert_stable(
-        "import Colors from \"theme\"\nuse Colors::*\n\nColor.red = RGB(1.0, 0.0, 0.0)\n\ncompo A\n  Text(\"x\")\n",
-    );
+fn formatter_handles_const_binding_and_use() {
+    // `use theme::*` loads the `theme` module from the package root and brings
+    // its members (here `Color`) into scope; `Color.red` is a module-level
+    // associated constant.
+    assert_stable("use theme::*\n\nColor.red = RGB(1.0, 0.0, 0.0)\n\ncompo A\n  Text(\"x\")\n");
 }
 
 #[test]

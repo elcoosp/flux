@@ -43,7 +43,6 @@ pub(crate) enum ExprNodeKind {
 #[must_use]
 pub(crate) fn decl_node_id(decl: &Decl) -> NodeId {
     let tag = match decl {
-        Decl::Import(_) => 1,
         Decl::Use(_) => 2,
         Decl::Component(_) => COMPONENT_TAG,
         Decl::Fn(_) => 4,

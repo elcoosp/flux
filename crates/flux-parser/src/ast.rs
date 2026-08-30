@@ -58,8 +58,6 @@ pub struct Ast {
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
 pub enum Decl {
-    /// `import Name from "path"`.
-    Import(ImportDecl),
     /// `use a::b::*`.
     Use(UseDecl),
     /// `component Name[T](props) { … }`.
@@ -84,7 +82,6 @@ impl Decl {
     #[must_use]
     pub fn span(&self) -> Span {
         match self {
-            Self::Import(decl) => decl.span,
             Self::Use(decl) => decl.span,
             Self::Component(decl) => decl.span,
             Self::Fn(decl) => decl.span,
@@ -103,17 +100,6 @@ pub struct Ident {
     /// The identifier text exactly as written.
     pub name: String,
     /// Span of the identifier.
-    pub span: Span,
-}
-
-/// `import Name from "module/path"`.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ImportDecl {
-    /// Local name bound by the import.
-    pub name: Ident,
-    /// Module path string literal, with escapes left as written.
-    pub source: String,
-    /// Span of the whole declaration.
     pub span: Span,
 }
 

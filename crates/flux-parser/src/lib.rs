@@ -19,9 +19,9 @@ pub mod parser;
 
 pub use ast::{
     Annotation, Arg, Ast, BinOp, Block, BlockItem, CapabilityDecl, ComponentDecl, ConstBinding,
-    Decl, Expr, ExprKind, FnDecl, FnName, Ident, ImportDecl, LetPattern, LifecycleKind, MatchArm,
-    MatchPattern, MatchPatternKind, MethodSig, Param, Pattern, PropDecl, StateDecl, StrPart,
-    TraitDecl, Type, TypeDecl, TypeKindAst, TypeParam, UseDecl, Variant,
+    Decl, Expr, ExprKind, FnDecl, FnName, Ident, LetPattern, LifecycleKind, MatchArm, MatchPattern,
+    MatchPatternKind, MethodSig, Param, Pattern, PropDecl, StateDecl, StrPart, TraitDecl, Type,
+    TypeDecl, TypeKindAst, TypeParam, UseDecl, Variant,
 };
 pub use error::{Location, ParseError};
 pub use lexer::{LexError, Token, TokenKind, keyword_kind};

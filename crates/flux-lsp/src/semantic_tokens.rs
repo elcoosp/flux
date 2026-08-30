@@ -50,7 +50,7 @@ pub(crate) fn classify(kind: TokenKind) -> Option<u32> {
     use TokenKind::*;
     Some(match kind {
         // Declaration keywords.
-        Compo | Type | Trait | Capability | State | Derived | Fn | Let | Use | Import => KEYWORD,
+        Compo | Type | Trait | Capability | State | Derived | Fn | Let | Use => KEYWORD,
         // Control / lifecycle keywords.
         If | Else | When | Otherwise | Match | Effect | OnMount | OnCleanup | Batch | Untrack
         | Resource | Await | Provide | UseContext | CreateRef => KEYWORD,

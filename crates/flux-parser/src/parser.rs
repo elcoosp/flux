@@ -14,10 +14,9 @@ use flux_syntax::Span;
 
 use crate::ast::{
     Annotation, Arg, Ast, BinOp, Block, BlockItem, CapabilityDecl, ComponentDecl, ConstBinding,
-    Decl, DerivedDecl, Expr, ExprKind, FnDecl, FnName, Ident, ImportDecl, LetPattern,
-    LifecycleKind, MatchArm, MatchPattern, MatchPatternKind, MethodSig, Param, Pattern, PropDecl,
-    RecordDecl, RecordField, StateDecl, StrPart, TraitDecl, Type, TypeDecl, TypeKindAst, TypeParam,
-    UseDecl, Variant,
+    Decl, DerivedDecl, Expr, ExprKind, FnDecl, FnName, Ident, LetPattern, LifecycleKind, MatchArm,
+    MatchPattern, MatchPatternKind, MethodSig, Param, Pattern, PropDecl, RecordDecl, RecordField,
+    StateDecl, StrPart, TraitDecl, Type, TypeDecl, TypeKindAst, TypeParam, UseDecl, Variant,
 };
 use crate::error::{Location, ParseError, line_at};
 use crate::lexer::{Token, TokenKind, lex};
@@ -296,7 +295,6 @@ impl<'s> Parser<'s> {
         let tok = self.peek();
         match tok.kind {
             TokenKind::Compo => self.component_decl(),
-            TokenKind::Import => self.import_decl(),
             TokenKind::Use => self.use_decl(),
             TokenKind::Fn => self.fn_decl().map(Decl::Fn),
             TokenKind::Type => self.type_decl(),
@@ -430,19 +428,6 @@ impl<'s> Parser<'s> {
         }
         self.eat(TokenKind::RParen)?;
         Ok(props)
-    }
-
-    fn import_decl(&mut self) -> Result<Decl, ParseError> {
-        let start = self.eat(TokenKind::Import)?;
-        let name = self.ident()?;
-        self.eat(TokenKind::Ident)?; // `from`
-        let src_tok = self.eat(TokenKind::Str)?;
-        let source = unescape(self.text_of(src_tok));
-        Ok(Decl::Import(ImportDecl {
-            name,
-            source,
-            span: Span::new(self.file_id, start.start as u32, src_tok.end as u32),
-        }))
     }
 
     fn use_decl(&mut self) -> Result<Decl, ParseError> {
@@ -1924,7 +1909,6 @@ fn kind_name(kind: TokenKind) -> &'static str {
         TokenKind::Otherwise => "otherwise",
         TokenKind::Match => "match",
         TokenKind::Use => "use",
-        TokenKind::Import => "import",
         TokenKind::Type => "type",
         TokenKind::Record => "record",
         TokenKind::Trait => "trait",

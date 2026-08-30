@@ -5,7 +5,6 @@ use crate::ast::ComponentDecl;
 use crate::ast::ConstBinding;
 use crate::ast::Decl;
 use crate::ast::FnDecl;
-use crate::ast::ImportDecl;
 use crate::ast::RecordDecl;
 use crate::ast::TraitDecl;
 use crate::ast::TypeDecl;
@@ -22,7 +21,6 @@ use crate::fmt::ty::write_type;
 /// Appends `decl` at `indent` levels (top-level declarations use `indent = 0`).
 pub(crate) fn write_decl(out: &mut String, decl: &Decl, indent: usize) {
     match decl {
-        Decl::Import(import) => write_import(out, import),
         Decl::Use(use_decl) => write_use(out, use_decl),
         Decl::Component(component) => write_component(out, component, indent),
         Decl::Fn(fn_decl) => write_fn(out, fn_decl, indent),
@@ -59,22 +57,6 @@ fn write_annotations(out: &mut String, annotations: &[Annotation], indent: usize
         }
         out.push('\n');
     }
-}
-
-fn write_import(out: &mut String, import: &ImportDecl) {
-    out.push_str("import ");
-    out.push_str(&import.name.name);
-    out.push_str(" from \"");
-    // The `source` string is stored unescaped (see `ImportDecl::source`); re-escape
-    // any embedded quotes so the round-trip through the lexer is exact.
-    for ch in import.source.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            other => out.push(other),
-        }
-    }
-    out.push('"');
 }
 
 fn write_use(out: &mut String, use_decl: &UseDecl) {

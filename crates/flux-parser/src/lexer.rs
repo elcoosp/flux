@@ -66,8 +66,6 @@ pub enum TokenKind {
     Match,
     /// `use`.
     Use,
-    /// `import`.
-    Import,
     /// `type`.
     Type,
     /// `record` — a product-type (struct) declaration.
@@ -218,7 +216,6 @@ pub fn keyword_kind(text: &str) -> Option<TokenKind> {
         "otherwise" => TokenKind::Otherwise,
         "match" => TokenKind::Match,
         "use" => TokenKind::Use,
-        "import" => TokenKind::Import,
         "type" => TokenKind::Type,
         "record" => TokenKind::Record,
         "trait" => TokenKind::Trait,
