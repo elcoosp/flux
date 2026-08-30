@@ -78,6 +78,9 @@ public class ShadowTree(
     private val expandedIndex = LinkedHashMap<UInt, WireNode>()
     /** Expansion-time `signalMeta` overrides for derived ForEach row ids. */
     private val signalMetaOverride = LinkedHashMap<UInt, NodeSignalMeta>()
+    /** Template row `WireNode` for each ForEach node id, captured at build time so
+     *  [reconcileForEach] can re-expand rows on list-signal change without a frame. */
+    private val forEachTemplate = LinkedHashMap<UInt, WireNode>()
     internal var root: ShadowNode? = null
     internal var executorRef: FluxExecutor? = null
 
@@ -713,6 +716,11 @@ public class ShadowTree(
         emitTrace(TraceEvent.Build(seq = lastSeq, id = wire.id))
         val childWireIds =
             if (signalMeta[wire.id]?.itemSlot != null) {
+                // Capture the template row so a later dispatch that appends to /
+                // removes from the list can re-expand the ForEach without a fresh
+                // frame (FLUX-072 / ADR-0050 dynamic re-expansion).
+                val templateRowId = childIdList(wire).firstOrNull()
+                if (templateRowId != null) index[templateRowId]?.let { forEachTemplate[wire.id] = it }
                 expandForEach(wire, index, executor)
             } else {
                 wire.children.map { childIdOf(it) }
@@ -804,6 +812,78 @@ public class ShadowTree(
             expanded.add(rowId)
         }
         return expanded
+    }
+
+    /**
+     * Re-expands a `ForEach` node after its backing list signal changed (a
+     * handler `append`/`remove`/`clear`). Expansion happens only in [build] at
+     * frame-apply time, so a dispatch that mutates the list left the rows frozen
+     * at their initial count — the reported To-Do bug where adding a task never
+     * shows a new row (FLUX-072 / ADR-0050).
+     *
+     * Mirrors the `build` expansion: it seeds each row's `item` signal slot with
+     * `list[i]`, builds (or re-materialises) one row per element using the
+     * template captured at build time, destroys rows that disappeared, and
+     * re-attaches the new child list to the adapter. The list value is read
+     * live from the signal graph so it always reflects the post-dispatch state.
+     *
+     * @param node the previously-built `ForEach` shadow node to re-expand.
+     */
+    internal fun reconcileForEach(node: ShadowNode) {
+        val foreachId = node.id
+        val meta = signalMeta[foreachId] ?: return
+        val itemSlot = meta.itemSlot ?: return
+        val listSignal = meta.deps.firstOrNull() ?: return
+        val template = forEachTemplate[foreachId] ?: return
+        val host = executorRef as? HostExecutor ?: return
+        val list =
+            host.materializationSignals.read(listSignal) as? FluxValue.ListVal ?: return
+        val templateMeta = signalMeta[template.id] ?: signalMetaOverride[template.id]
+        // Desired row ids, one per current list element, in order.
+        val desired =
+            list.items.mapIndexed { i, elem ->
+                val rowId = deriveForEachRowId(foreachId, i.toUInt())
+                host.materializationSignals.write(itemSlot, elem)
+                expandedIndex[rowId] = template.copy(id = rowId, children = emptyList())
+                if (templateMeta != null) signalMetaOverride[rowId] = templateMeta
+                rowId
+            }.toSet()
+        // Tear down rows that no longer exist in the list.
+        for (child in node.children.toList()) {
+            if (child.id !in desired) {
+                destroySubtree(child)
+                nodes.remove(child.id)
+                parents.remove(child.id)
+            }
+        }
+        // Build new rows and re-materialise existing ones against the freshly
+        // seeded `item` slot so each row shows its own list element.
+        val newChildren =
+            list.items.mapIndexed { i, elem ->
+                val rowId = deriveForEachRowId(foreachId, i.toUInt())
+                host.materializationSignals.write(itemSlot, elem)
+                val child =
+                    nodes[rowId] ?: run {
+                        val wire = expandedIndex[rowId] ?: template.copy(id = rowId, children = emptyList())
+                        val built = build(wire, emptyMap(), host, 1u)
+                        nodes[rowId] = built
+                        parents[rowId] = foreachId
+                        built
+                    }
+                val kit = materializeProps(child.wireProps.fields, child.id)
+                child.props = kit
+                reconciled[child.id] = (reconciled[child.id] ?: 0) + 1
+                updatedCount++
+                propMaterializations += 1u
+                withAdapter(child.kind, child.componentId, child.view) { a, v -> a.update(v, kit) }
+                child
+            }
+        node.children.clear()
+        node.children.addAll(newChildren)
+        node.wireProps = WireProps(node.wireProps.fields, newChildren.map { it.id })
+        withAdapter(node.kind, node.componentId, node.view) { a, v ->
+            a.setChildren(v, newChildren.map { it.id }, newChildren.map { it.view })
+        }
     }
 
     /** Stable derived id for the `i`-th row of ForEach node `foreachId`. */

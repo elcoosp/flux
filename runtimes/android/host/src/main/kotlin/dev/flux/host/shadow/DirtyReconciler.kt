@@ -66,6 +66,12 @@ public fun ShadowTree.reconcileDirty(
     emitTrace(TraceEvent.Dirty(seq = lastSeq, ids = ordered))
     for (id in ordered) {
         val node = nodes[id] ?: continue
+        // A `ForEach` whose list signal changed must re-expand its rows (append /
+        // remove / clear), not just re-materialise its own (empty) props — this is
+        // the dynamic list re-expansion that was missing (FLUX-072 / ADR-0050).
+        if (signalMeta[id]?.itemSlot != null) {
+            reconcileForEach(node)
+        }
         // ADR-0027 (FA-IRWIRE): re-materialise dynamic props against the freshly
         // written signals before sending the kit to the adapter.
         val newKit = materializeProps(node.wireProps.fields, id)

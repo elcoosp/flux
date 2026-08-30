@@ -15,6 +15,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.material3.Button
@@ -87,6 +90,7 @@ public fun FluxTreeView(
         "grid" -> RenderGrid(node, onButtonClick, routerVersion, onTextChange, imageCache, assetBaseUrl)
         "spacer" -> RenderSpacer(node)
         "safearea" -> RenderSafeArea(node, onButtonClick, routerVersion, onTextChange, imageCache, assetBaseUrl)
+        "scrollview" -> RenderScrollView(node, onButtonClick, routerVersion, onTextChange, imageCache, assetBaseUrl)
         "modal" -> RenderOverlayContainer(node, onButtonClick, routerVersion, onTextChange, imageCache, assetBaseUrl)
         "sheet" -> RenderOverlayContainer(node, onButtonClick, routerVersion, onTextChange, imageCache, assetBaseUrl)
         "dialog" -> RenderOverlayContainer(node, onButtonClick, routerVersion, onTextChange, imageCache, assetBaseUrl)
@@ -498,6 +502,42 @@ private fun RenderSafeArea(
     val edges = node.props.getString(PropsIndex.SAFEAREA_EDGES)
     val inset = if (edges == "top") 24.dp else 8.dp
     Column(modifier = Modifier.fillMaxWidth().padding(inset)) {
+        for (child in node.children) {
+            FluxTreeView(
+                child,
+                onButtonClick,
+                routerVersion,
+                onTextChange,
+                imageCache = imageCache,
+                assetBaseUrl = assetBaseUrl,
+            )
+        }
+    }
+}
+
+/**
+ * `ScrollView` — a scrollable viewport for its children (FLUX-056, PRD-N).
+ * The [PropsIndex.SCROLL_ORIENTATION] prop selects the scroll axis (`"vertical"`
+ * default, `"horizontal"` otherwise); the matching Compose scroll modifier is
+ * applied so the children can scroll past the viewport. Mapped from the Android
+ * `ScrollView` / `horizontalScroll` the codegen emits.
+ */
+@Composable
+private fun RenderScrollView(
+    node: ShadowNode,
+    onButtonClick: (UInt) -> Unit,
+    routerVersion: Int,
+    onTextChange: (UInt, String) -> Unit = { _, _ -> },
+    imageCache: ImageCache,
+    assetBaseUrl: String = "http://localhost:7332/assets/",
+) {
+    val orientation = node.props.getString(PropsIndex.SCROLL_ORIENTATION) ?: "vertical"
+    val scrollModifier = if (orientation == "horizontal") {
+        Modifier.horizontalScroll(rememberScrollState())
+    } else {
+        Modifier.verticalScroll(rememberScrollState())
+    }
+    Column(modifier = Modifier.fillMaxWidth().then(scrollModifier)) {
         for (child in node.children) {
             FluxTreeView(
                 child,
