@@ -253,6 +253,44 @@ class FluxBytecodeVmTest {
         assertTrue(resumed.outcome.signals.isNotEmpty())
     }
 
+    /** FLUX-072: list-mutation opcodes (INSERT/REMOVE/CLEAR/REMOVE_ITEM) mirror flux-vm-ref. */
+    @Test
+    fun `list insert remove clear removeItem mutate in place`() {
+        // r0 = [], push 5, insert 7 at idx 1 => [5,7], removeItem 7 => [5],
+        // clear => [], then assert r0 is an empty list.
+        val prog =
+            byteArrayOf(
+                0x80.toByte(), 0, 0, 1, // ALLOC_LIST r0, cap=1
+                0xB0.toByte(), 1, 5, 0, 0, 0, 0, 0, 0, 0, // LOAD_INT_CONST r1 = 5
+                0x81.toByte(), 0, 1, // LIST_PUSH r0, r1  => [5]
+                0xB0.toByte(), 2, 7, 0, 0, 0, 0, 0, 0, 0, // LOAD_INT_CONST r2 = 7
+                0x85.toByte(), 0, 1, 2, // LIST_INSERT r0, idx=1, r2 => [5,7]
+                0x88.toByte(), 0, 2, // LIST_REMOVE_ITEM r0, r2(7) => [5]
+                0x87.toByte(), 0, // LIST_CLEAR r0 => []
+                0x00, // HALT
+            )
+        val out = FluxBytecodeVM.run(prog, InMemorySignals(), FluxValue.NullVal)
+        assertTrue(out is VmResult.Success)
+        out as VmResult.Success
+        val r0 = out.outcome.registers[0]
+        assertTrue(r0 is FluxValue.ListVal, "r0 must be a list after clear")
+        assertEquals(0, (r0 as FluxValue.ListVal).items.size)
+    }
+
+    @Test
+    fun `list remove out of bounds faults`() {
+        val prog =
+            byteArrayOf(
+                0x80.toByte(), 0, 0, 1, // ALLOC_LIST r0, cap=1
+                0x86.toByte(), 0, 5, // LIST_REMOVE r0, idx=5 (empty list)
+                0x00, // HALT
+            )
+        val err = FluxBytecodeVM.run(prog, InMemorySignals(), FluxValue.NullVal)
+        assertTrue(err is VmResult.Failure)
+        err as VmResult.Failure
+        assertEquals(VmErrorKind.INDEX_OUT_OF_BOUNDS, err.kind)
+    }
+
     /** v1 semantics preserved: a program without `AWAIT` runs straight to `HALT`. */
     @Test
     fun `no await runs straight to halt`() {

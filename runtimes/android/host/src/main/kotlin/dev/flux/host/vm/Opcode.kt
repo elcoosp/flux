@@ -68,6 +68,15 @@ public enum class Opcode(
     LIST_GET(0x82, 3),
     LIST_LEN(0x83, 2),
     LIST_CONCAT(0x84, 3),
+    // --- FLUX-072: dynamic-list mutation opcodes (mirror flux-vm-ref). ---
+    // These were added to the Rust oracle + compiler but the host VM lacked
+    // them, so `tasks.clear()` / `tasks.remove(item)` / `tasks.insert(i, x)`
+    // hit an unknown-opcode branch and the list signal never changed on device.
+    // Operand widths match `opcode/decode.rs` verbatim.
+    LIST_INSERT(0x85, 3),
+    LIST_REMOVE(0x86, 2),
+    LIST_CLEAR(0x87, 1),
+    LIST_REMOVE_ITEM(0x88, 2),
 
     CALL_CAP(0x90, 8),
 

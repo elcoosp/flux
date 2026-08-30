@@ -276,6 +276,46 @@ internal fun executeInstruction(
             regs[instr.u8(0)] = FluxValue.ListVal(items)
             StepResult.Proceed
         }
+        // --- FLUX-072: dynamic-list mutation (mirror flux-vm-ref semantics). ---
+        Opcode.LIST_INSERT -> {
+            val list = instr.u8(0)
+            val idx = instr.u8(1)
+            val valReg = instr.u8(2)
+            val items = requireList(regs[list], instr.offset).toMutableList()
+            if (idx > items.size) {
+                throw VmError(VmErrorKind.INDEX_OUT_OF_BOUNDS, instr.offset)
+            }
+            items.add(idx, regs[valReg])
+            regs[list] = FluxValue.ListVal(items)
+            StepResult.Proceed
+        }
+        Opcode.LIST_REMOVE -> {
+            val list = instr.u8(0)
+            val idx = instr.u8(1)
+            val items = requireList(regs[list], instr.offset).toMutableList()
+            if (idx >= items.size) {
+                throw VmError(VmErrorKind.INDEX_OUT_OF_BOUNDS, instr.offset)
+            }
+            items.removeAt(idx)
+            regs[list] = FluxValue.ListVal(items)
+            StepResult.Proceed
+        }
+        Opcode.LIST_CLEAR -> {
+            val list = instr.u8(0)
+            val items = requireList(regs[list], instr.offset).toMutableList()
+            items.clear()
+            regs[list] = FluxValue.ListVal(items)
+            StepResult.Proceed
+        }
+        Opcode.LIST_REMOVE_ITEM -> {
+            val list = instr.u8(0)
+            val valReg = instr.u8(1)
+            val items = requireList(regs[list], instr.offset).toMutableList()
+            val pos = items.indexOfFirst { it == regs[valReg] }
+            if (pos >= 0) items.removeAt(pos)
+            regs[list] = FluxValue.ListVal(items)
+            StepResult.Proceed
+        }
         Opcode.CALL_CAP -> {
             val resultReg = instr.u8(0)
             val capId = instr.u32(1).toUInt()

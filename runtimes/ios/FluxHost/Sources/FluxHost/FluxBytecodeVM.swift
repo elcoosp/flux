@@ -452,6 +452,51 @@ enum FluxBytecodeVM {
                 let b = try requireList(reg(instr.u8(2)), at: instr.offset)
                 regs[Int(dst)] = .list(a + b)
 
+            // --- FLUX-072: dynamic-list mutation (mirror flux-vm-ref). ---
+            case .listInsert:
+                let list = instr.u8(0)
+                let idx = Int(instr.u8(1))
+                let val = reg(instr.u8(2))
+                guard case var .list(items) = regs[Int(list)] else {
+                    throw VmError.typeMismatch(offset: instr.offset)
+                }
+                if idx > items.count {
+                    throw VmError.indexOutOfBounds(offset: instr.offset)
+                }
+                items.insert(val, at: idx)
+                regs[Int(list)] = .list(items)
+
+            case .listRemove:
+                let list = instr.u8(1)
+                let idx = Int(instr.u8(2))
+                guard case var .list(items) = regs[Int(list)] else {
+                    throw VmError.typeMismatch(offset: instr.offset)
+                }
+                if idx >= items.count {
+                    throw VmError.indexOutOfBounds(offset: instr.offset)
+                }
+                items.remove(at: idx)
+                regs[Int(list)] = .list(items)
+
+            case .listClear:
+                let list = instr.u8(0)
+                guard case var .list(items) = regs[Int(list)] else {
+                    throw VmError.typeMismatch(offset: instr.offset)
+                }
+                items.removeAll()
+                regs[Int(list)] = .list(items)
+
+            case .listRemoveItem:
+                let list = instr.u8(0)
+                let val = reg(instr.u8(1))
+                guard case var .list(items) = regs[Int(list)] else {
+                    throw VmError.typeMismatch(offset: instr.offset)
+                }
+                if let pos = items.firstIndex(where: { $0 == val }) {
+                    items.remove(at: pos)
+                }
+                regs[Int(list)] = .list(items)
+
             case .callCap:
                 let resultReg = instr.u8(0)
                 let capID = instr.u32(1)
@@ -945,6 +990,51 @@ enum FluxBytecodeVM {
                 let a = try requireList(reg(instr.u8(1)), at: instr.offset)
                 let b = try requireList(reg(instr.u8(2)), at: instr.offset)
                 regs[Int(dst)] = .list(a + b)
+
+            // --- FLUX-072: dynamic-list mutation (mirror flux-vm-ref). ---
+            case .listInsert:
+                let list = instr.u8(0)
+                let idx = Int(instr.u8(1))
+                let val = reg(instr.u8(2))
+                guard case var .list(items) = regs[Int(list)] else {
+                    throw VmError.typeMismatch(offset: instr.offset)
+                }
+                if idx > items.count {
+                    throw VmError.indexOutOfBounds(offset: instr.offset)
+                }
+                items.insert(val, at: idx)
+                regs[Int(list)] = .list(items)
+
+            case .listRemove:
+                let list = instr.u8(1)
+                let idx = Int(instr.u8(2))
+                guard case var .list(items) = regs[Int(list)] else {
+                    throw VmError.typeMismatch(offset: instr.offset)
+                }
+                if idx >= items.count {
+                    throw VmError.indexOutOfBounds(offset: instr.offset)
+                }
+                items.remove(at: idx)
+                regs[Int(list)] = .list(items)
+
+            case .listClear:
+                let list = instr.u8(0)
+                guard case var .list(items) = regs[Int(list)] else {
+                    throw VmError.typeMismatch(offset: instr.offset)
+                }
+                items.removeAll()
+                regs[Int(list)] = .list(items)
+
+            case .listRemoveItem:
+                let list = instr.u8(0)
+                let val = reg(instr.u8(1))
+                guard case var .list(items) = regs[Int(list)] else {
+                    throw VmError.typeMismatch(offset: instr.offset)
+                }
+                if let pos = items.firstIndex(where: { $0 == val }) {
+                    items.remove(at: pos)
+                }
+                regs[Int(list)] = .list(items)
 
             case .callCap:
                 let resultReg = instr.u8(0)

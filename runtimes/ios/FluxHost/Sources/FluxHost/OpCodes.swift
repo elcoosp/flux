@@ -64,6 +64,14 @@ enum Opcode: UInt8, CaseIterable, Equatable {
     case listGet = 0x82
     case listLen = 0x83
     case listConcat = 0x84
+    // --- FLUX-072: dynamic-list mutation opcodes (mirror flux-vm-ref). ---
+    // These were added to the Rust oracle + compiler but the host VM lacked
+    // them, so `tasks.clear()` / `tasks.remove(item)` / `tasks.insert(i, x)`
+    // hit an unknown-opcode branch and the list signal never changed on device.
+    case listInsert = 0x85
+    case listRemove = 0x86
+    case listClear = 0x87
+    case listRemoveItem = 0x88
 
     case callCap = 0x90
 
@@ -134,6 +142,10 @@ enum Opcode: UInt8, CaseIterable, Equatable {
         case .listGet: "LIST_GET"
         case .listLen: "LIST_LEN"
         case .listConcat: "LIST_CONCAT"
+        case .listInsert: "LIST_INSERT"
+        case .listRemove: "LIST_REMOVE"
+        case .listClear: "LIST_CLEAR"
+        case .listRemoveItem: "LIST_REMOVE_ITEM"
         case .callCap: "CALL_CAP"
         case .matchTag: "MATCH_TAG"
         case .extractField: "EXTRACT_FIELD"
@@ -166,6 +178,10 @@ enum Opcode: UInt8, CaseIterable, Equatable {
              .loadStrConst: 5
         case .allocRecord, .allocList: 3
         case .loadBoolConst, .listPush: 2
+        case .listInsert: 4
+        case .listRemove: 3
+        case .listClear: 1
+        case .listRemoveItem: 2
         case .loadIntConst, .loadFloatConst: 9
         case .jump: 4
         case .gasCheck: 4
