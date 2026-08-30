@@ -1,6 +1,6 @@
 ---
 id: FLUX-087
-status: todo
+status: done
 lane: LANE-CILINT
 phase: "Phase 2"
 blocked_by: []
@@ -61,3 +61,35 @@ FLUX-088) so the gate is green now and tightens as FLUX-088 lands.
 
 - The actual file splits (FLUX-088).
 - Mutation testing scope (FLUX-067, already done).
+
+## Resolution (2026-08-30)
+
+Implemented and wired green.
+
+- `scripts/ci-size-gate.sh` (delta gate by default):
+  - File length (>300 lines, §1.2) — BLOCKING in delta; respects
+    `scripts/ci-size-gate.allowlist` (escape hatch). `tokei` was NOT a real
+    project dependency, so the gate uses portable `awk`/`wc`/`git`; no new CI
+    runner dep.
+  - Forbidden calls (`unwrap`/`expect`/`panic!` in non-test Rust; `try!`/
+    force-unwrap in non-test Swift/Kotlin, §2.1/§2.2/§2.3) — BLOCKING regression
+    check on newly-added diff lines only, so pre-existing debt isn't punished.
+  - Function length (>40 lines, §1.2) — STRICT in `--all` mode, but NON-BLOCKING
+    in delta mode: the tree carries widespread pre-existing function debt with no
+    per-function allowlist, so blocking it on day one would red the gate. Promote
+    to blocking in delta once FLUX-088/function-split work clears the debt.
+  - `--all` (strict whole-tree), `--base/--head`, `--selftest` (own throwaway git
+    repo), `-v` supported. Embedded selftest passes.
+- `scripts/ci-size-gate.allowlist`: seeded with **60** currently-oversized tracked
+  production source files (measured 2026-08-30), not the "11" the problem
+  statement assumed — the repo's real oversized-file count is ~5x that. Each
+  FLUX-088 split removes its line so the rule re-arms.
+- Wired into CI: `.github/workflows/size-gate.yml` (always-on, delta blocking +
+  non-blocking `--all` report + selftest job) and a `FLUX-087 structural gate`
+  step added to `rust-check.yml`, `android-check.yml`, `ios-check.yml`
+  (checkouts switched to `fetch-depth: 0` so `origin/main` merge-base resolves).
+
+Note on the "11 files" assumption: the plan's figure was stale; the live tree has
+57+ production source files over 300 lines. The allowlist is generated, not
+hand-counted, and is kept complete (verified: `--all` reports 0 file-length
+failures).

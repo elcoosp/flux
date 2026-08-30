@@ -1,0 +1,55 @@
+name: size-gate
+
+# FLUX-087 (LANE-CILINT) — AGENTS.md §1.2 structural gate.
+# Runs scripts/ci-size-gate.sh against EVERY push/PR so the ≤300-line-file /
+# ≤40-line-fn / no-unwrap-in-non-test-lib rules cannot silently regress.
+#   * Delta mode (default): fails only on NEW violations introduced by the diff
+#     vs the merge base. File-length respects scripts/ci-size-gate.allowlist
+#     (the seed of known-oversized files being split under FLUX-088); each landed
+#     split removes its line so the rule re-arms.
+#   * The job also runs `--all` as a NON-BLOCKING report so the pre-existing debt
+#     total is visible on every run (FLUX-088 tracks the cleanup).
+#
+# Language-agnostic and dependency-free (bash + git + awk), so it fails fast
+# before the Rust/Swift/Kotlin toolchains spin up.
+
+on:
+  workflow_call:
+  push:
+    branches: ["**"]
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  size-gate:
+    name: FLUX-087 size gate (delta)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          # Need full history so the merge-base vs origin/main resolves correctly.
+          fetch-depth: 0
+
+      - name: FLUX-087 delta gate (blocking)
+        run: bash scripts/ci-size-gate.sh --base origin/main --head HEAD
+
+      - name: FLUX-087 full-tree report (non-blocking)
+        if: always()
+        run: bash scripts/ci-size-gate.sh --all --base origin/main --head HEAD || true
+
+  size-gate-selftest:
+    name: FLUX-087 gate selftest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Run embedded selftest
+        run: bash scripts/ci-size-gate.sh --selftest

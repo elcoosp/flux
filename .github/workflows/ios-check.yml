@@ -30,6 +30,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: FLUX-087 structural gate (≤300-line files / ≤40-line fns / no force-unwrap in non-test Swift)
+        # Delta mode: fails only on NEW violations introduced by this change.
+        # File-length respects scripts/ci-size-gate.allowlist (seed of oversized
+        # files being split under FLUX-088). See docs/issues/FLUX-087-*.md.
+        run: bash scripts/ci-size-gate.sh --base origin/main --head HEAD
 
       - name: Install XcodeGen
         run: brew install xcodegen

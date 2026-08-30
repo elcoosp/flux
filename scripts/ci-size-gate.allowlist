@@ -1,0 +1,78 @@
+# ci-size-gate.allowlist — FLUX-087 escape hatch.
+#
+# Each line is a repo-relative path (exact match) that is EXEMPT from the
+# file-line-count rule (>300 lines / AGENTS.md §1.2). Lines beginning with `#`
+# and blank lines are ignored.
+#
+# SEED (regenerated 2026-08-30 from `git ls-files`): every tracked production
+# source file currently over 300 lines. These files are being split under
+# FLUX-088 (one file per PR). When a split lands and the file drops to <=300
+# lines, REMOVE its line from this allowlist so the gate re-arms on it. Do NOT
+# add new paths here to silence the gate — fix the file instead. (Adding an
+# entry requires justification in the PR.)
+#
+# The function-length (>40 lines / §1.2) and unwrap/expect/panic (§2.x) rules are
+# NOT allowlisted per file: they are enforced as regression checks on lines you
+# actually touch (delta mode). Pre-existing occurrences are cleaned up via their
+# own issues, not this allowlist.
+
+crates/flux-cli/src/build.rs
+crates/flux-codegen-core/src/emitter.rs
+crates/flux-codegen-core/src/native_gen.rs
+crates/flux-codegen-core/src/primitives.rs
+crates/flux-codegen-core/src/view_tree.rs
+crates/flux-codegen-kotlin/src/backend_impl.rs
+crates/flux-codegen-swift/src/backend_impl.rs
+crates/flux-devserver/src/debug_bridge.rs
+crates/flux-devserver/src/dispatch.rs
+crates/flux-devserver/src/pipeline.rs
+crates/flux-devserver/src/server.rs
+crates/flux-devserver/src/server/session.rs
+crates/flux-devtools-ui/src/app.rs
+crates/flux-devtools-ui/src/state.rs
+crates/flux-devtools-ui/src/time_travel/reconstruct.rs
+crates/flux-devtools-ui/src/views/component_tree.rs
+crates/flux-devtools-ui/src/wire_client.rs
+crates/flux-differ/benches/diff.rs
+crates/flux-differ/src/diff.rs
+crates/flux-ir-serde/src/frame.rs
+crates/flux-ir-serde/src/telemetry.rs
+crates/flux-ir-serde/src/wire.rs
+crates/flux-ir/src/arena.rs
+crates/flux-ir/src/instance.rs
+crates/flux-ir/src/lower/bytecode.rs
+crates/flux-ir/src/lower/mod.rs
+crates/flux-lsp/src/goto_def.rs
+crates/flux-lsp/src/lib.rs
+crates/flux-parity/src/persistence.rs
+crates/flux-parity/src/reduce.rs
+crates/flux-parity/src/trace.rs
+crates/flux-parity/src/trace/json.rs
+crates/flux-parser/src/ast/expr.rs
+crates/flux-parser/src/fmt/expr.rs
+crates/flux-parser/src/lexer.rs
+crates/flux-parser/src/parser.rs
+crates/flux-perf-harness/src/metric.rs
+crates/flux-syntax/src/ids.rs
+crates/flux-types/src/capabilities.rs
+crates/flux-types/src/checker.rs
+crates/flux-types/src/error.rs
+crates/flux-types/src/kind.rs
+crates/flux-vm-ref/src/vm.rs
+fuzz/examples/gen_corpus.rs
+runtimes/android/app/src/main/kotlin/dev/flux/app/ShadowTreeRenderer.kt
+runtimes/android/app/src/main/kotlin/dev/flux/app/native/AndroidNativeCapabilityHost.kt
+runtimes/android/host/src/main/kotlin/dev/flux/host/FluxExecutor.kt
+runtimes/android/host/src/main/kotlin/dev/flux/host/shadow/ShadowTree.kt
+runtimes/android/host/src/main/kotlin/dev/flux/host/vm/CapabilityRegistry.kt
+runtimes/android/host/src/main/kotlin/dev/flux/host/vm/FluxBytecodeVM.kt
+runtimes/android/host/src/main/kotlin/dev/flux/host/vm/StepResult.kt
+runtimes/android/host/src/main/kotlin/dev/flux/host/vm/debug/Telemetry.kt
+runtimes/android/host/src/main/kotlin/dev/flux/host/wire/FrameDeserializer.kt
+runtimes/ios/FluxHost/Sources/FluxHost/AdapterKit.swift
+runtimes/ios/FluxHost/Sources/FluxHost/Debug/Telemetry.swift
+runtimes/ios/FluxHost/Sources/FluxHost/FluxBytecodeVM.swift
+runtimes/ios/FluxHost/Sources/FluxHost/FluxExecutor.swift
+runtimes/ios/FluxHost/Sources/FluxHost/FrameDeserializer.swift
+runtimes/ios/FluxHost/Sources/FluxHost/ShadowTreeReconciler.swift
+runtimes/ios/Sources/Host/IOSNativeCapabilityHost.swift
