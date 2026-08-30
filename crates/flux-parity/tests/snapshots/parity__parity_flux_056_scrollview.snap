@@ -1,0 +1,141 @@
+---
+source: crates/flux-parity/tests/parity.rs
+expression: serialized
+---
+verdict: equivalent
+
+ dev    == [
+    Component {
+        name: "ScrollShowcase",
+        children: [
+            Primitive {
+                name: "Column",
+                props: [],
+                children: [
+                    Primitive {
+                        name: "ScrollView",
+                        props: [],
+                        children: [
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                        ],
+                    },
+                    Primitive {
+                        name: "ScrollView",
+                        props: [],
+                        children: [
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    },
+]
+swift  == [
+    Component {
+        name: "ScrollShowcase",
+        children: [
+            Primitive {
+                name: "Column",
+                props: [],
+                children: [
+                    Primitive {
+                        name: "ScrollView",
+                        props: [],
+                        children: [
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                        ],
+                    },
+                    Primitive {
+                        name: "ScrollView",
+                        props: [],
+                        children: [
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    },
+]
+kotlin == [
+    Component {
+        name: "ScrollShowcase",
+        children: [
+            Primitive {
+                name: "Column",
+                props: [],
+                children: [
+                    Primitive {
+                        name: "ScrollView",
+                        props: [],
+                        children: [
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                        ],
+                    },
+                    Primitive {
+                        name: "ScrollView",
+                        props: [],
+                        children: [
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                            Primitive {
+                                name: "Text",
+                                props: [],
+                                children: [],
+                            },
+                        ],
+                    },
+                ],
+            },
+        ],
+    },
+]

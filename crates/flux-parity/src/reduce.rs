@@ -309,5 +309,6 @@ pub(crate) fn is_container(name: &str) -> bool {
             | "Modal"
             | "Sheet"
             | "Dialog"
+            | "ScrollView"
     )
 }

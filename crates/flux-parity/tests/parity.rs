@@ -426,3 +426,40 @@ fn flux_042_animate_wrapper_pins_dev_release_mapping() {
     );
     insta::assert_snapshot!("parity_flux_042_animate", serialized);
 }
+
+/// FLUX-056: the `ScrollView` primitive (PRD-N) must lower and codegen to
+/// structurally identical view trees across the dev (reduced AST) path and both
+/// release (SwiftUI `ScrollView` / Compose `ScrollView`) backends, with its
+/// children carried through on every path. The `orientation` prop selects the
+/// scroll axis and is recorded as data the host consumes; this test pins the
+/// dev/release equivalence (vertical default + explicit horizontal) for the
+/// scroll primitive.
+#[test]
+fn flux_056_scrollview_pins_dev_release_mapping() {
+    let source = r#"compo ScrollShowcase
+  Column(gap: 16) {
+    ScrollView {
+      Text("scrolled item 1")
+      Text("scrolled item 2")
+    }
+    ScrollView(orientation: "horizontal") {
+      Text("h item 1")
+      Text("h item 2")
+    }
+  }
+"#;
+    let report =
+        check_parity(source, 560).expect("FLUX-056 example parses, type-checks and lowers");
+    assert!(
+        report.is_equivalent(),
+        "parity divergence for FLUX-056 ScrollView: dev vs swift vs kotlin trees differ"
+    );
+    let serialized = format!(
+        "verdict: {}\n\n dev    == {:#?}\nswift  == {:#?}\nkotlin == {:#?}\n",
+        report.verdict(),
+        report.dev,
+        report.swift,
+        report.kotlin
+    );
+    insta::assert_snapshot!("parity_flux_056_scrollview", serialized);
+}
