@@ -108,7 +108,7 @@ public enum HelloFrame {
         data.append(0x55)
         data.append(0x5C)
         data.append(0x46)
-        data.append(1) // protocol version
+        data.append(0x02) // protocol version (matches dev server PROTOCOL_VERSION)
         data.append(0x01) // FrameKind::Hello
         data.fluxAppendString(platform)
         data.fluxAppendString(device)

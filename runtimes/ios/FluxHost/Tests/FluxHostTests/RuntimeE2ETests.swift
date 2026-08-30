@@ -76,7 +76,7 @@ private let incrementClosure = ClosureRef(
     bytecodeLen: UInt16(incrementBytecode.count),
     signalCount: 0,
     signals: [],
-    span: FluxSpan(fileId: 0, start: 0, end: 0)
+    span: FluxSpan(fileId: 0, start: 0, end: 0), excerpt: nil
 )
 
 final class RuntimeE2ETests: XCTestCase {
@@ -301,7 +301,7 @@ final class RuntimeE2ETests: XCTestCase {
         let closure = ClosureRef(
             hash: Array(repeating: 0, count: 8),
             bytecodeOffset: 0, bytecodeLen: 2, signalCount: 0, signals: [],
-            span: FluxSpan(fileId: 0, start: 0, end: 0)
+            span: FluxSpan(fileId: 0, start: 0, end: 0), excerpt: nil
         )
         let result = executor.dispatch(bytecode: bytecode, closure: closure, payload: .null)
         XCTAssertNotNil(result.error)

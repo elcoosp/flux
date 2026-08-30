@@ -124,7 +124,7 @@ final class GapG1RegisterHandlersTests: XCTestCase {
         let closure = ClosureRef(
             hash: Array(repeating: 0, count: 8),
             bytecodeOffset: 0, bytecodeLen: UInt16(bytecode.count),
-            signalCount: 0, signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0)
+            signalCount: 0, signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0), excerpt: nil
         )
 
         let button = gapNode(11, componentId: 1, handlers: [1])
@@ -165,7 +165,7 @@ final class GapG2MemoryCapTests: XCTestCase {
         let closure = ClosureRef(
             hash: Array(repeating: 0, count: 8),
             bytecodeOffset: 0, bytecodeLen: UInt16(big.count),
-            signalCount: 0, signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0)
+            signalCount: 0, signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0), excerpt: nil
         )
         let executor = FluxExecutor(graph: SignalGraph(), registry: gapRegistry())
         let result = executor.dispatch(bytecode: big, closure: closure, payload: .null)
@@ -183,7 +183,7 @@ final class GapG2MemoryCapTests: XCTestCase {
         let closure = ClosureRef(
             hash: Array(repeating: 0, count: 8),
             bytecodeOffset: 0, bytecodeLen: UInt16(small.count),
-            signalCount: 0, signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0)
+            signalCount: 0, signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0), excerpt: nil
         )
         let executor = FluxExecutor(graph: SignalGraph(), registry: gapRegistry())
         let result = executor.dispatch(bytecode: small, closure: closure, payload: .null)
@@ -300,7 +300,7 @@ final class GapG5LifecycleTests: XCTestCase {
         let closure = ClosureRef(
             hash: Array(repeating: 0, count: 8),
             bytecodeOffset: 0, bytecodeLen: UInt16(mountBc.count),
-            signalCount: 0, signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0)
+            signalCount: 0, signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0), excerpt: nil
         )
         let node = gapNode(10, componentId: 0, props: [Prop(index: 0, value: .str(7))], mountHandler: 1)
         let frame = gapFrame(
@@ -325,7 +325,7 @@ final class GapG5LifecycleTests: XCTestCase {
         let closure = ClosureRef(
             hash: Array(repeating: 0, count: 8),
             bytecodeOffset: 0, bytecodeLen: UInt16(cleanupBc.count),
-            signalCount: 0, signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0)
+            signalCount: 0, signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0), excerpt: nil
         )
         let node = gapNode(10, componentId: 0, props: [Prop(index: 0, value: .str(7))], cleanupHandler: 2)
         let frame = gapFrame(
@@ -413,7 +413,7 @@ final class GapR1DirtySetTests: XCTestCase {
         executor.registerHandler(
             1,
             closure: ClosureRef(hash: [], bytecodeOffset: 0, bytecodeLen: UInt16(writeSignal5.count),
-                                signalCount: 0, signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0)),
+                                signalCount: 0, signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0), excerpt: nil),
             bytecode: writeSignal5
         )
 
@@ -450,7 +450,7 @@ final class GapR3CacheTests: XCTestCase {
         // First registration: handler 1 writes signal 5 = 2.
         executor.registerHandler(
             1,
-            closure: ClosureRef(hash: [], bytecodeOffset: 0, bytecodeLen: 0, signalCount: 0, signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0)),
+            closure: ClosureRef(hash: [], bytecodeOffset: 0, bytecodeLen: 0, signalCount: 0, signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0), excerpt: nil),
             bytecode: writeSignal(5, 2)
         )
         executor.dispatch(FluxEvent(handlerId: 1, nodeId: 0))
@@ -460,7 +460,7 @@ final class GapR3CacheTests: XCTestCase {
         // cached decode and run the new body (signal 5 = 3, not 2).
         executor.registerHandler(
             1,
-            closure: ClosureRef(hash: [], bytecodeOffset: 0, bytecodeLen: 0, signalCount: 0, signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0)),
+            closure: ClosureRef(hash: [], bytecodeOffset: 0, bytecodeLen: 0, signalCount: 0, signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0), excerpt: nil),
             bytecode: writeSignal(5, 3)
         )
         executor.dispatch(FluxEvent(handlerId: 1, nodeId: 0))
@@ -469,7 +469,7 @@ final class GapR3CacheTests: XCTestCase {
         // A different handler id keeps its own cached decode (signal 6 = 9).
         executor.registerHandler(
             2,
-            closure: ClosureRef(hash: [], bytecodeOffset: 0, bytecodeLen: 0, signalCount: 0, signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0)),
+            closure: ClosureRef(hash: [], bytecodeOffset: 0, bytecodeLen: 0, signalCount: 0, signals: [], span: FluxSpan(fileId: 0, start: 0, end: 0), excerpt: nil),
             bytecode: writeSignal(6, 9)
         )
         executor.dispatch(FluxEvent(handlerId: 2, nodeId: 0))

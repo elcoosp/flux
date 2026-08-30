@@ -57,15 +57,15 @@ public enum TelemetryEvent {
     /// Emitted when a signal's value changes.
     case signalWrite(signalId: UInt32, oldValue: FluxValue, newValue: FluxValue, triggeredEffectIds: [UInt32])
     /// Emitted when the reconciler mutates a native view.
-    case viewMutation(nodeId: UInt32, nativeViewId: UInt64, parentId: UInt32, mutationKind: UInt8, frame: Rect?)
+    case viewMutation(nodeId: UInt32, nativeViewId: UInt64, parentId: UInt32, mutationKind: UInt8, frame: Rect?, componentName: String)
     /// Emitted when a handler starts or finishes.
     case handlerInvocation(handlerId: UInt32, isStart: Bool, gasUsed: UInt32?)
 
-    /// Encodes this event as a length-prefixed union body (no frame header).
+    /// Encodes this event as a union body (no frame header, no length prefix).
+    /// Bit-identical to `flux_ir_serde::TelemetryEvent::encode_into` (Appendix D §D.12):
+    /// the batch frame already carries `event_count`, so each event is written
+    /// verbatim and decoded directly by `TelemetryEvent::decode_from`.
     func encode(into data: inout Data) {
-        let start = data.count
-        // Reserve a 4-byte length slot; back-patch after the body is written.
-        data.append(contentsOf: [UInt8](repeating: 0, count: 4))
         switch self {
         case let .vmStep(offset, opcode, registers, gas):
             data.append(0x01)
@@ -84,7 +84,7 @@ public enum TelemetryEvent {
             for effect in effects {
                 data.append(contentsOf: effect.bytesLE())
             }
-        case let .viewMutation(node, native, parent, kind, frame):
+        case let .viewMutation(node, native, parent, kind, frame, name):
             data.append(0x03)
             data.append(contentsOf: node.bytesLE())
             data.append(contentsOf: native.bytesLE())
@@ -99,6 +99,9 @@ public enum TelemetryEvent {
             } else {
                 data.append(0x00)
             }
+            let nameBytes = Data(name.utf8)
+            data.append(contentsOf: UInt32(nameBytes.count).bytesLE())
+            data.append(nameBytes)
         case let .handlerInvocation(handler, isStart, gas):
             data.append(0x04)
             data.append(contentsOf: handler.bytesLE())
@@ -110,13 +113,10 @@ public enum TelemetryEvent {
                 data.append(0x00)
             }
         }
-        let len = UInt32(data.count - start - 4)
-        let lenBytes = len.bytesLE()
-        data.replaceSubrange(start ..< start + 4, with: lenBytes)
     }
 
     /// Encodes this event into a full `Telemetry` frame (Appendix D §D.12).
-    func toFrameBytes(version: UInt8 = 1) -> Data {
+    func toFrameBytes(version: UInt8 = 0x02) -> Data {
         var data = Data()
         data.append(contentsOf: FluxTelemetryMagic.bytesLE())
         data.append(version)
@@ -140,7 +140,7 @@ public enum DebugCommand {
     case requestSnapshot
 
     /// Encodes this command into a full `DebugCommand` frame (kind `0x11`).
-    func toFrameBytes(commandId: UInt32, version: UInt8 = 1) -> Data {
+    func toFrameBytes(commandId: UInt32, version: UInt8 = 0x02) -> Data {
         var payload = Data()
         switch self {
         case .pause: payload.append(0x01)
@@ -215,7 +215,7 @@ public final class TelemetryBridge: VMTelemetrySink {
         pending.removeAll()
         var frame = Data()
         frame.append(contentsOf: FluxTelemetryMagic.bytesLE())
-        frame.append(1)
+        frame.append(0x02)
         frame.append(0x10)
         frame.append(contentsOf: UInt16(batch.count).bytesLE())
         for event in batch {

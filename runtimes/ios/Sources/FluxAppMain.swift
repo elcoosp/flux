@@ -91,11 +91,8 @@ struct FluxRootView: View {
             FluxHostRepresentable(executor: executor)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityLabel("Flux root")
-            if let error = executor.lastError {
-                ErrorOverlay(error: error)
-            }
-            if let serverError = executor.serverError {
-                ServerErrorOverlay(error: serverError)
+            if let error = executor.lastFluxError {
+                FluxErrorOverlay(error: error)
             }
             if connection.isReconnecting {
                 ReconnectingOverlay()
@@ -140,57 +137,142 @@ private struct FluxHostRepresentable: UIViewControllerRepresentable {
     }
 }
 
-/// Inline error overlay shown when a VM fault is captured by the executor.
-struct ErrorOverlay: View {
-    let error: VmError
+/// The unified on-device error overlay (FLUX-028 / FLUX-075 / ADR-0057).
+///
+/// One visual language for every fault the runtime can surface — a VM fault
+/// (`.vm`), a wire/protocol fault (`.wire`), a runtime capability error
+/// (`.capability`/`.runtime`), or a server compile/type error (`.compile`/
+/// `.server`/`.parse`/`.type`). The executor collapses `VmError` and
+/// `ServerError` into a single `FluxError` (carrying an ADR-0057 source
+/// excerpt); this view is pure presentation and never guesses at the cause.
+///
+/// Visual spec (shared with the Android `ErrorOverlay`, §3.11):
+/// - a colored accent bar keyed by severity (fatal = red, fault = amber/red),
+/// - a one-line title = kind + short label,
+/// - the human message (what/why/how),
+/// - `path:line:col` when an excerpt is present,
+/// - the cited source line in monospace with a `^` caret under the column,
+/// - a formatted dispatch stack when call sites are available.
+///
+/// Fatal compile/type/parse errors render as a full-width top-anchored tinted
+/// panel (the tree it would have replaced is gone); VM/wire/runtime faults
+/// render as a dismissible material card that keeps the last good tree on
+/// screen (Appendix E §E.6).
+struct FluxErrorOverlay: View {
+    let error: FluxError
+
+    /// Fatal compile/type/parse/server errors replace the tree; VM/wire/runtime
+    /// faults are recoverable and keep the last good UI.
+    private var isFatal: Bool {
+        switch error.kind {
+        case .parse, .type, .compile, .server: return true
+        default: return false
+        }
+    }
+
+    /// The accent color keyed by fault kind.
+    private var accent: Color {
+        switch error.kind {
+        case .compile, .parse, .type, .server: return .red
+        case .vm: return .red
+        case .runtime, .capability: return .orange
+        case .wire: return .orange
+        }
+    }
+
+    private var titleLabel: String {
+        switch error.kind {
+        case .compile, .parse, .type, .server: return "Flux compile error"
+        case .vm: return "Flux VM fault"
+        case .runtime: return "Flux runtime error"
+        case .capability: return "Flux capability error"
+        case .wire: return "Flux wire error"
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Flux VM fault")
-                .font(.headline)
-            Text(error.kind.name)
+            HStack(alignment: .top, spacing: 10) {
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(accent)
+                    .frame(width: 4)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(titleLabel)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    Text(error.kind.rawValue)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textCase(.uppercase)
+                }
+                Spacer(minLength: 0)
+            }
+            Text(error.message)
                 .font(.subheadline)
-            Text("at byte offset \(error.offset)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+            if let excerpt = error.excerpt {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(excerpt.path):\(excerpt.line):\(excerpt.column)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                    MonoSnippetView(snippet: excerpt.snippet, column: Int(excerpt.column))
+                }
+            }
+            if !error.callSites.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(Array(error.callSites.enumerated()), id: \.offset) { _, site in
+                        Text(site)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
         }
+        .padding(14)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(accent.opacity(0.5), lineWidth: 1)
+        )
         .padding()
-        .background(.thinMaterial)
-        .cornerRadius(12)
-        .padding()
+        .frame(maxWidth: .infinity, alignment: isFatal ? .top : .bottom)
+    }
+}
+
+/// Renders a source line in monospace with a `^` caret under the cited column.
+private struct MonoSnippetView: View {
+    let snippet: String
+    let column: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(snippet)
+                .font(.system(.caption, design: .monospaced))
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+            if column > 0 {
+                Text(caret)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+
+    /// `column - 1` spaces followed by `^`. Clamped so an out-of-range column
+    /// still renders a visible marker at the line start.
+    private var caret: String {
+        let pad = max(0, min(column, snippet.count) - 1)
+        return String(repeating: " ", count: pad) + "^"
     }
 }
 
 /// FR-017 "Reconnecting…" banner shown while the dev-server socket is down.
 /// Reuses the error-overlay's material styling so the two banners read as one
 /// family; it is informational (amber) rather than a fault (red).
-/// Inline overlay shown when the dev server reports a failed recompile via an
-/// `Error` (0x03) frame. Mirrors `ErrorOverlay`'s material styling; it is a red
-/// fault banner that keeps the last good tree visible (Appendix E §E.6).
-struct ServerErrorOverlay: View {
-    let error: ServerError
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Flux compile error")
-                .font(.headline)
-            Text(error.message)
-                .font(.subheadline)
-                .textSelection(.enabled)
-            if let location = error.location {
-                Text(location)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding()
-        .background(.thinMaterial)
-        .cornerRadius(12)
-        .padding()
-        .frame(maxWidth: .infinity, alignment: .top)
-    }
-}
-
 struct ReconnectingOverlay: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
