@@ -332,3 +332,81 @@ private fun counterIncrementClosure(): ByteArray =
         0,
         0x00.toByte(), // HALT
     )
+
+/**
+ * FLUX-072 / ADR-0050: the host must expand a `ForEach` into one row per list
+ * element. The lowered tree ships a single `ForEach` node whose `Splice` child
+ * is one template row; on build the host instantiates a row per element of the
+ * live list signal. This test drives a real `FluxExecutor` + `SignalGraph` with
+ * a 2-element list and asserts the ForEach root renders exactly 2 row children
+ * (the previous behaviour rendered only the single template row via
+ * `firstOrNull`).
+ */
+@OptIn(ExperimentalCoroutinesApi::class)
+class ForEachExpansionTest {
+    private val stdlibKinds = listOf("column", "text", "button", "row", "textinput", "screen", "router")
+
+    private fun stdlibEntries(): List<Pair<UInt, String>> {
+        val ids = (100u..106u).toList()
+        return ids.zip(stdlibKinds) +
+            listOf(200u to "text", 300u to "button", 500u to "screen", 600u to "router")
+    }
+
+    @Test
+    fun `foreach expands into one row per list element`() =
+        runTest {
+            val dispatcher = StandardTestDispatcher(testScheduler)
+            val scope = TestScope(dispatcher)
+            val signals = SignalGraph()
+            signals.seed(
+                listOf(
+                    5u to
+                        FluxValue.ListVal(
+                            listOf(FluxValue.StrVal(1u), FluxValue.StrVal(2u)),
+                        ),
+                ),
+            )
+
+            val listSignal = 5u
+            val itemSlot = 9u
+            val bytes =
+                FrameBuilder()
+                    .apply {
+                        magic()
+                        version(1)
+                        seq(0)
+                        flags(fullTree = true)
+                        patchCount(0)
+                        handlerCount(0)
+                        stringCount(stdlibEntries().size)
+                        for ((id, kind) in stdlibEntries()) stringEntry(id, kind)
+                        node(
+                            id = 1u,
+                            kind = 0x12u,
+                            component = 100u,
+                            props = emptyList(),
+                            childIds = listOf(10u),
+                            pure = false,
+                        )
+                        node(
+                            id = 10u,
+                            kind = 0x10u,
+                            component = 200u,
+                            props = listOf(PropsIndex.TEXT_TEXT to WireValue.StrVal(7u)),
+                            childIds = emptyList(),
+                        )
+                        signalMetaEntry(1u, listOf(listSignal), itemSlot = itemSlot)
+                    }.build()
+
+            val frame = FrameDeserializer.deserialize(bytes)
+            val tree = ShadowTree(AdapterRegistry.fromStringTable(stdlibEntries().map { (id, k) -> StringTableEntry(id, k) }))
+            val transport = MockTransport()
+            val executor = FluxExecutor(tree, signals, transport, scope, ReactiveDispatcher.test(dispatcher))
+            executor.materializationSignals.write(listSignal, signals.read(listSignal)!!)
+            executor.materializationSignals.flush()
+
+            val root = tree.applyFrame(frame, executor)
+            assertNotNull(root)
+            assertEquals(2, root!!.children.size, "ForEach with a 2-element list must render 2 rows")
+        }
+}

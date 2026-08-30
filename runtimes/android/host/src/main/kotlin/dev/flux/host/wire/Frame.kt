@@ -1,5 +1,7 @@
 package dev.flux.host.wire
 
+import dev.flux.host.FluxError
+
 import dev.flux.host.vm.FluxValue
 
 /**
@@ -138,6 +140,12 @@ public data class FluxFrame(
     val extraNodes: List<WireNode> = emptyList(),
     /** Per-node ADR-0027 signal-graph metadata, keyed by node id (Appendix D §T13). */
     val signalMeta: Map<UInt, NodeSignalMeta> = emptyMap(),
+    /** Source-file mappings (file id → path) for resolving spans to paths. */
+    val files: List<FileEntry> = emptyList(),
+    /** A server-side compile/type error delivered via an `Error` (0x03) frame. */
+    val serverError: FluxError? = null,
+    /** True for housekeeping frames (Heartbeat/InternString/StringInterned). */
+    val isControl: Boolean = false,
 )
 
 /**
@@ -153,6 +161,8 @@ public data class NodeSignalMeta(
     val deps: List<UInt>,
     val thunk: ClosureRef?,
     val layout: List<UShort>,
+    /** Per-`ForEach` node: the `item` signal slot its row thunks read (FLUX-072 / ADR-0050). */
+    val itemSlot: UInt? = null,
 )
 
 /**
@@ -199,6 +209,10 @@ public data class ClosureRef(
     val bytecodeOffset: UInt,
     val bytecodeLen: UShort,
     val signals: List<UInt>,
+    /** Source span of the handler body (Appendix D §D.7), resolved to path at render. */
+    val span: FluxSpan?,
+    /** Server-computed source excerpt (ADR-0057): path:line:col + snippet. */
+    val excerpt: FluxErrorExcerpt?,
 )
 
 /**
@@ -246,4 +260,36 @@ public data class BytecodeBlob(
 public data class StringEntry(
     val id: UInt,
     val text: String,
+)
+
+/** A source-file mapping entry (Appendix D §D.12.2 `source_map`): file id → path. */
+public data class FileEntry(
+    val fileId: UInt,
+    val path: String,
+)
+
+/**
+ * A source span on the wire (Appendix D §D.7 / §D.12.3): an interned file id
+ * plus byte offsets. Resolved to `path:line:col` at render time via the frame's
+ * `source_map` (file id → path).
+ */
+public data class FluxSpan(
+    val fileId: UInt,
+    val start: UInt,
+    val end: UInt,
+)
+
+/**
+ * A server-computed source excerpt (ADR-0057) carried inline on a `ClosureRef`
+ * or the `Error` frame so a fault maps to `path:line:col +` a snippet without a
+ * host round-trip. `snippet` is the cited source line; `col` is the 1-based
+ * column of [start] within it.
+ */
+public data class FluxErrorExcerpt(
+    val fileId: UInt,
+    val byteStart: UInt,
+    val byteEnd: UInt,
+    val line: UShort,
+    val col: UShort,
+    val snippet: String,
 )

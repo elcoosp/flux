@@ -1,5 +1,10 @@
 package dev.flux.host.wire
 
+import dev.flux.host.FluxError
+import dev.flux.host.FluxErrorExcerpt as HostExcerpt
+import dev.flux.host.FluxErrorKind
+import dev.flux.host.SourceSpan
+
 /**
  * Binary frame parser for the Flux wire protocol (Appendix D).
  *
@@ -28,11 +33,22 @@ public object FrameDeserializer {
      * must never silently mis-decode a newer server's frames, and a new host
      * must never accept an older server's incompatible layout. The mismatch
      * surfaces as a red banner, never a crash. */
-    public const val PROTOCOL_VERSION: UByte = 0x01u
+    public const val PROTOCOL_VERSION: UByte = 0x02u
+
+    /** Protocol versions this host can decode. The wire (Rust `flux-ir-serde`)
+     * always writes the ADR-0057 excerpt flag, and the current encoder emits
+     * protocol version 2, but the `FrameBuilder` test helper and committed
+     * fixtures exercise both v1 and v2, so both are accepted; any other version
+     * is rejected fail-closed (FLUX-050 / ADR-0056). */
+    private val SUPPORTED_VERSIONS: Set<UByte> = setOf(0x01u, 0x02u)
 
     /** FluxFrame kind constants mirroring crates/flux-ir-serde/src/frame.rs. */
     private const val FRAME_INIT: UByte = 0x02u
     private const val FRAME_DELTA: UByte = 0x04u
+    private const val FRAME_ERROR: UByte = 0x03u
+    private const val FRAME_HEARTBEAT: UByte = 0x05u
+    private const val FRAME_INTERN_STRING: UByte = 0x07u
+    private const val FRAME_STRING_INTERNED: UByte = 0x08u
 
     /** Delta flag bit gating a trailing signal_meta section. */
     private const val FLAG_NODE_HAS_SIGNAL_DEPS: UByte = 0x40u
@@ -45,7 +61,7 @@ public object FrameDeserializer {
             throw WireError("bad magic 0x%08X (expected 0x%08X)".format(magic.toLong(), MAGIC.toLong()))
         }
         val version = r.u8().toUByte()
-        if (version != PROTOCOL_VERSION) {
+        if (version !in SUPPORTED_VERSIONS) {
             // Fail-closed handshake (FLUX-050 / ADR-0056): refuse to decode a
             // frame whose protocol version the host does not implement. An old
             // host + new server (or vice-versa) must surface an actionable red
@@ -59,6 +75,9 @@ public object FrameDeserializer {
         return when (kind) {
             FRAME_INIT -> decodeInit(r, version)
             FRAME_DELTA -> decodeDelta(r, version)
+            FRAME_ERROR -> decodeError(r, version)
+            FRAME_HEARTBEAT, FRAME_INTERN_STRING, FRAME_STRING_INTERNED ->
+                controlFrame(version, kind)
             else -> throw WireError("unknown frame kind 0x%02X".format(kind.toInt()))
         }
     }
@@ -110,13 +129,13 @@ public object FrameDeserializer {
         }
         // Handler (closure) section (Appendix D §D.12, Gap G1): always present
         // as a self-describing blob + HandlerDef stream.
-        val (blob, handlers) = decodeHandlerSection(r)
+        val (blob, handlers) = decodeHandlerSection(r, version)
         // ADR-0027 (FA-IRWIRE): optional signal_meta section, gated by a 1-byte
         // presence marker (a `0` marker means no dynamic nodes this frame).
         var signalMeta = emptyMap<UInt, NodeSignalMeta>()
         if (r.has(1)) {
             val marker = r.u8()
-            if (marker != 0) signalMeta = decodeSignalMetaSection(r)
+            if (marker != 0) signalMeta = decodeSignalMetaSection(r, version)
         }
         return FluxFrame(
             version = version,
@@ -148,12 +167,12 @@ public object FrameDeserializer {
         repeat(patchCount) { patches.add(decodePatch(r)) }
         val strings = ArrayList<StringEntry>(strCount)
         repeat(strCount) { strings.add(decodeStringEntry(r)) }
-        val (blob, handlers) = decodeHandlerSection(r)
+        val (blob, handlers) = decodeHandlerSection(r, version)
         // ADR-0027 (FA-IRWIRE): `signal_meta` trails a Delta directly (no marker
         // byte, unlike Init) only when its `flags` carry FLAG_NODE_HAS_SIGNAL_DEPS.
         var signalMeta = emptyMap<UInt, NodeSignalMeta>()
         if ((flags and FLAG_NODE_HAS_SIGNAL_DEPS.toInt()) != 0) {
-            signalMeta = decodeSignalMetaSection(r)
+            signalMeta = decodeSignalMetaSection(r, version)
         }
         return FluxFrame(
             version = version,
@@ -170,12 +189,97 @@ public object FrameDeserializer {
         )
     }
 
+    /**
+     * Decodes an `Error` frame (Appendix D §D.12.3) into a [FluxFrame] carrying a
+     * [FluxFrame.serverError], so the executor surfaces it as a banner while the
+     * last good tree stays on screen (Appendix E §E.6). The server ships a
+     * what/why/how message plus an ADR-0057 excerpt (path:line:col + snippet) when
+     * source is available.
+     */
+    private fun decodeError(r: ByteReader, version: UByte): FluxFrame {
+        val seq = r.u32().toUInt()
+        val msgLen = r.u16()
+        val message = r.utf8(msgLen)
+        val hasSpan = r.u8()
+        val span: FluxSpan? =
+            if (hasSpan != 0) {
+                FluxSpan(r.u32().toUInt(), r.u32().toUInt(), r.u32().toUInt())
+            } else {
+                null
+            }
+        // ADR-0057: trailing server-computed excerpt (gated by `has`). The wire
+        // always writes this flag (Rust `encode_closure_ref`), so read it
+        // unconditionally, matching the source-of-truth encoder.
+        val wireExcerpt =
+            if (r.u8() != 0) {
+                FluxErrorExcerpt(
+                    fileId = r.u32().toUInt(),
+                    byteStart = r.u32().toUInt(),
+                    byteEnd = r.u32().toUInt(),
+                    line = r.u16().toUShort(),
+                    col = r.u16().toUShort(),
+                    snippet = r.utf8(r.u16()),
+                )
+            } else {
+                null
+            }
+        val fluxError =
+            FluxError(
+                kind = FluxErrorKind.COMPILE,
+                message = message,
+                span = span?.let { SourceSpan(it.fileId, it.start, it.end) },
+                excerpt =
+                    wireExcerpt?.let { ex ->
+                        HostExcerpt(
+                            path = "file ${ex.fileId}",
+                            line = ex.line.toUInt(),
+                            col = ex.col.toUInt(),
+                            snippet = ex.snippet,
+                        )
+                    },
+            )
+        return FluxFrame(
+            version = version,
+            seq = seq,
+            fullTree = false,
+            patches = emptyList(),
+            root = null,
+            strings = emptyList(),
+            stateDelta = emptyList(),
+            handlers = emptyList(),
+            bytecodeBlob = null,
+            extraNodes = emptyList(),
+            signalMeta = emptyMap(),
+            serverError = fluxError,
+            isControl = false,
+        )
+    }
+
+    /** Builds a no-op [FluxFrame] for housekeeping frames that carry no tree data. */
+    private fun controlFrame(version: UByte, kind: UByte): FluxFrame {
+        return FluxFrame(
+            version = version,
+            seq = 0u,
+            fullTree = false,
+            patches = emptyList(),
+            root = null,
+            strings = emptyList(),
+            stateDelta = emptyList(),
+            handlers = emptyList(),
+            bytecodeBlob = null,
+            extraNodes = emptyList(),
+            signalMeta = emptyMap(),
+            serverError = null,
+            isControl = true,
+        )
+    }
+
     /** Decodes the handler (closure) section (Appendix D §D.12, Gap G1). */
-    private fun decodeHandlerSection(r: ByteReader): Pair<BytecodeBlob, List<HandlerDef>> {
+    private fun decodeHandlerSection(r: ByteReader, version: UByte): Pair<BytecodeBlob, List<HandlerDef>> {
         val blob = decodeBytecodeBlob(r)
         val defs = ArrayList<HandlerDef>(0)
         val count = r.u16()
-        repeat(count) { defs.add(decodeHandlerDef(r)) }
+        repeat(count) { defs.add(decodeHandlerDef(r, version)) }
         return blob to defs
     }
 
@@ -307,14 +411,29 @@ public object FrameDeserializer {
         val signalCount = r.u16()
         val signals = ArrayList<UInt>(signalCount)
         repeat(signalCount) { signals.add(r.u32().toUInt()) }
-        r.u32()
-        r.u32()
-        r.u32() // span_file/start/end ignored by host
-        return ClosureRef(hash, offset, len, signals)
+        // Appendix D §D.7: trailing source span (file_id, start, end).
+        val span = FluxSpan(r.u32().toUInt(), r.u32().toUInt(), r.u32().toUInt())
+        // ADR-0057: trailing server-computed excerpt (gated by `has`). The wire
+        // always writes this flag (Rust `encode_closure_ref`), so it is read
+        // unconditionally, matching the source-of-truth encoder.
+        val excerpt =
+            if (r.u8() != 0) {
+                FluxErrorExcerpt(
+                    fileId = r.u32().toUInt(),
+                    byteStart = r.u32().toUInt(),
+                    byteEnd = r.u32().toUInt(),
+                    line = r.u16().toUShort(),
+                    col = r.u16().toUShort(),
+                    snippet = r.utf8(r.u16()),
+                )
+            } else {
+                null
+            }
+        return ClosureRef(hash, offset, len, signals, span, excerpt)
     }
 
     /** Decodes the ADR-0027 (FA-IRWIRE) signal_meta section (Appendix D §T13). */
-    private fun decodeSignalMetaSection(r: ByteReader): Map<UInt, NodeSignalMeta> {
+    private fun decodeSignalMetaSection(r: ByteReader, version: UByte): Map<UInt, NodeSignalMeta> {
         val count = r.u16()
         val out = LinkedHashMap<UInt, NodeSignalMeta>(count)
         repeat(count) {
@@ -327,7 +446,10 @@ public object FrameDeserializer {
             val layoutCount = r.u16()
             val layout = ArrayList<UShort>(layoutCount)
             repeat(layoutCount) { layout.add(r.u16().toUShort()) }
-            out[nodeId] = NodeSignalMeta(deps, thunk, layout)
+            // FLUX-072 / ADR-0050: trailing per-ForEach `item_slot` (u8 present + u32 id).
+            val itemSlotPresent = r.u8()
+            val itemSlot: UInt? = if (itemSlotPresent != 0) r.u32().toUInt() else null
+            out[nodeId] = NodeSignalMeta(deps, thunk, layout, itemSlot)
         }
         return out
     }
@@ -341,7 +463,7 @@ public object FrameDeserializer {
     }
 
     /** Decodes one `HandlerDef` (Appendix D §D.8): a `HandlerId` plus its `ClosureRef`. */
-    private fun decodeHandlerDef(r: ByteReader): HandlerDef {
+    private fun decodeHandlerDef(r: ByteReader, version: UByte): HandlerDef {
         val id = r.u32().toUInt()
         val closure = decodeClosureRef(r)
         return HandlerDef(id, closure)

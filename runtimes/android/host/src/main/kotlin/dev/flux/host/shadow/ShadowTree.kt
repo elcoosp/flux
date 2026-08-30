@@ -74,6 +74,10 @@ public class ShadowTree(
 ) {
     internal val nodes = LinkedHashMap<UInt, ShadowNode>()
     internal val parents = LinkedHashMap<UInt, UInt>()
+    /** Per-frame clones of expanded ForEach row `WireNode`s, keyed by derived id. */
+    private val expandedIndex = LinkedHashMap<UInt, WireNode>()
+    /** Expansion-time `signalMeta` overrides for derived ForEach row ids. */
+    private val signalMetaOverride = LinkedHashMap<UInt, NodeSignalMeta>()
     internal var root: ShadowNode? = null
     internal var executorRef: FluxExecutor? = null
 
@@ -707,13 +711,14 @@ public class ShadowTree(
         reconciled[wire.id] = (reconciled[wire.id] ?: 0) + 1
         builtCount++
         emitTrace(TraceEvent.Build(seq = lastSeq, id = wire.id))
-        for (child in wire.children) {
-            val childId =
-                when (child) {
-                    is WireChild.Node -> child.id
-                    is WireChild.Splice -> child.items.firstOrNull()?.second ?: 0u
-                }
-            val childWire = index[childId] ?: continue
+        val childWireIds =
+            if (signalMeta[wire.id]?.itemSlot != null) {
+                expandForEach(wire, index, executor)
+            } else {
+                wire.children.map { childIdOf(it) }
+            }
+        for (childId in childWireIds) {
+            val childWire = expandedIndex[childId] ?: index[childId] ?: continue
             node.children.add(build(childWire, index, executor, depth + 1u))
         }
         withAdapter(wire.kind, wire.componentId, view) { a, v ->
@@ -756,6 +761,53 @@ public class ShadowTree(
                 is WireChild.Splice -> it.items.firstOrNull()?.second ?: 0u
             }
         }
+
+    /**
+     * Expands a `ForEach` wire node into the concrete row child ids for its
+     * *current* list value (FLUX-072 / ADR-0050). The lowered tree ships one
+     * `ForEach` node whose `Splice` child is a single template row; the host
+     * must instantiate one row per list element, binding each row's `item`
+     * signal (`signalMeta[id].itemSlot`) to `list[i]` before materialising its
+     * props.
+     *
+     * Returns the expanded row ids (registered in [expandedIndex] as cloned
+     * `WireNode`s seeded with their element value) so the caller can build them
+     * like any other child. For a non-ForEach node (no `itemSlot` metadata) it
+     * returns the static child ids unchanged, so existing nodes are untouched.
+     */
+    private fun expandForEach(wire: WireNode, index: Map<UInt, WireNode>, executor: FluxExecutor): List<UInt> {
+        val meta = signalMeta[wire.id] ?: return childIdList(wire)
+        val itemSlot = meta.itemSlot ?: return childIdList(wire)
+        val listSignal = meta.deps.firstOrNull() ?: return childIdList(wire)
+        val templateRowId =
+            childIdList(wire).firstOrNull()
+                ?: return childIdList(wire)
+        val templateRow = index[templateRowId] ?: return childIdList(wire)
+        val list =
+            (executor as? HostExecutor)?.materializationSignals?.read(listSignal)
+                as? dev.flux.host.vm.FluxValue.ListVal ?: return childIdList(wire)
+        val templateMeta = signalMeta[templateRowId]
+        val expanded = mutableListOf<UInt>()
+        for ((i, elem) in list.items.withIndex()) {
+            val rowId = deriveForEachRowId(wire.id, i.toUInt())
+            // Seed the row's `item` signal so the template's prop thunk (registered
+            // under `rowId` below) resolves `item` to `list[i]` when `build`
+            // materialises this row. We keep the template's *raw* props and let
+            // `build` run the thunk — no wire round-trip needed.
+            (executor as? HostExecutor)?.materializationSignals?.write(itemSlot, elem)
+            expandedIndex[rowId] =
+                templateRow.copy(
+                    id = rowId,
+                    children = emptyList(),
+                )
+            if (templateMeta != null) signalMetaOverride[rowId] = templateMeta
+            expanded.add(rowId)
+        }
+        return expanded
+    }
+
+    /** Stable derived id for the `i`-th row of ForEach node `foreachId`. */
+    private fun deriveForEachRowId(foreachId: UInt, i: UInt): UInt = foreachId * 2654435761u + i * 40503u + 0x9E3779B9u
 
     /** True when [node]'s resolved child id list differs from [fresh] (T5). */
     private fun childListChanged(
@@ -828,7 +880,7 @@ public class ShadowTree(
         wireProps: List<Pair<UShort, dev.flux.host.wire.WireValue>>,
         nodeId: UInt,
     ): Props {
-        val meta = signalMeta[nodeId]
+        val meta = signalMeta[nodeId] ?: signalMetaOverride[nodeId]
         val thunk = meta?.thunk
         val bytecode = thunk?.let { thunkBlobs[thunkKey(it.hash)] }
         val host = executorRef as? HostExecutor
