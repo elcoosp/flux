@@ -33,16 +33,16 @@ public final class ImageAdapter: FluxAdapter {
     /// root.
     static let assetBaseURL = URL(string: "http://localhost:7332/assets/")!
 
+    /// Shared host-side image cache (FLUX-039): `URLCache` (disk + memory) plus
+    /// single-flight fetch. One instance per adapter is unnecessary — a single
+    /// app-wide cache keeps every `Image` node from re-fetching the same asset.
+    static let cache = ImageCache.shared
+
     /// Placeholder shown until the bitmap arrives or when loading fails. A
     /// system symbol is used so it is always available and never `nil`.
     private static let placeholder: UIImage = {
         UIImage(systemName: "photo") ?? UIImage()
     }()
-
-    /// The in-flight data task for the current `src`, if any. Cancelled when a
-    /// new `src` arrives or the view is destroyed so a stale response can never
-    /// land on a recycled image view.
-    private var loadTask: URLSessionDataTask?
 
     public init(executor: (any FluxExecutor)? = nil) { self.executor = executor }
 
@@ -63,14 +63,13 @@ public final class ImageAdapter: FluxAdapter {
         }
         guard let src = new.getString(named: "source"), !src.isEmpty else {
             // Missing/empty `source` is treated as a load failure up front: show
-            // the placeholder and clear any pending request. This is the
-            // graceful-degrade path for BR-003.
-            loadTask?.cancel()
-            loadTask = nil
+            // the placeholder. This is the graceful-degrade path for BR-003.
             view.image = Self.placeholder
             return
         }
-        load(src, onto: view)
+        Task { @MainActor in
+            await self.load(src, onto: view)
+        }
     }
 
     public func setChildren(_ children: [AnyObject], on view: UIImageView) {
@@ -82,39 +81,36 @@ public final class ImageAdapter: FluxAdapter {
     }
 
     public func destroy(_ view: UIImageView) {
-        loadTask?.cancel()
-        loadTask = nil
+        view.image = Self.placeholder
     }
 
-    /// Fetches `src` from the dev asset server and swaps it onto `view`,
-    /// falling back to the placeholder on any failure. The data task runs off
-    /// the main actor; the completion re-dispatches to the main actor before
-    /// touching the view (UIKit requirement).
-    private func load(_ src: String, onto view: UIImageView) {
-        let url = Self.assetBaseURL.appending(path: src)
-        var request = URLRequest(url: url)
-        request.timeoutInterval = Self.loadTimeout
-        loadTask?.cancel()
-        let task = URLSession.shared.dataTask(with: request) { data, response, error in
-            // The completion runs on a background session queue, NOT the main
-            // actor. Hop to the main actor to mutate the view — `assumeIsolated`
-            // would trap here because we are not isolated (it crashed the app
-            // on any screen that renders an `Image`, e.g. the About screen).
-            Task { @MainActor in
-                defer { self.loadTask = nil }
-                if error != nil {
-                    view.image = Self.placeholder
-                    return
-                }
-                guard let data, let image = UIImage(data: data) else {
-                    view.image = Self.placeholder
-                    return
-                }
-                view.image = image
-            }
+    /// Fetches `src` through the shared [ImageCache] (disk + memory, single-flight)
+    /// and swaps the decoded bitmap onto `view`, falling back to the placeholder on
+    /// any failure. The cache coalesces concurrent same-URL loads and serves
+    /// repeats from `URLCache` without a network round-trip. The cache actor is
+    /// `await`ed off the main actor; the completion re-dispatches to the main
+    /// actor before touching the view (UIKit requirement).
+    private func load(_ src: String, onto view: UIImageView) async {
+        let url: URL
+        do {
+            url = try await Self.cache.resolveURL(src, assetBase: Self.assetBaseURL.absoluteString)
+        } catch {
+            view.image = Self.placeholder
+            return
         }
-        loadTask = task
-        task.resume()
+        let result = await Self.cache.get(url)
+        // Re-check in-flight identity is unnecessary: the cache is authoritative
+        // and a recycled view simply shows the latest resolved image.
+        switch result {
+        case .success(let data):
+            guard let image = UIImage(data: data) else {
+                view.image = Self.placeholder
+                return
+            }
+            view.image = image
+        case .failure:
+            view.image = Self.placeholder
+        }
     }
 
     /// Maps the `contentMode` prop string to a `UIView.ContentMode`.
@@ -125,8 +121,4 @@ public final class ImageAdapter: FluxAdapter {
         default: .scaleAspectFill
         }
     }
-
-    /// Network timeout for an asset fetch, in seconds. The dev server is local,
-    /// so a slow response indicates a real problem rather than latent latency.
-    private static let loadTimeout: TimeInterval = 5
 }
