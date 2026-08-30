@@ -17,6 +17,11 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 flux-ir-serde = { path = "../crates/flux-ir-serde" }
 
+# Example-only deps (the `gen_corpus` seed generator builds real frames through
+# the production `Frame::*` API, which needs the syntax/IR node types).
+flux-syntax = { path = "../crates/flux-syntax" }
+flux-ir = { path = "../crates/flux-ir" }
+
 [[bin]]
 name = "decode_frame"
 path = "fuzz_targets/decode_frame.rs"

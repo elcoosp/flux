@@ -1,6 +1,6 @@
 ---
 id: FLUX-085
-status: todo
+status: done
 lane: LANE-WIRE
 phase: "Phase 2"
 blocked_by: []

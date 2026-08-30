@@ -58,8 +58,28 @@ jobs:
       - name: Build the fuzz target (sanitized, release)
         run: cargo +nightly fuzz build -O decode_frame
 
+      - name: Regenerate the committed seed corpus (FLUX-085)
+        # Re-emits the curated real-frame seeds into `fuzz/corpus/decode_frame`
+        # so they can never silently drift from the production `Frame::*` API.
+        # The generator is idempotent (it skips files that already exist), so a
+        # clean run that detects drift fails the step.
+        run: cargo +nightly run --example gen_corpus
+
+      - name: Verify seed corpus is in sync with the generator
+        # If the generator would create NEW seeds, the committed corpus is stale.
+        run: |
+          before=$(find fuzz/corpus/decode_frame -name 'real_*' | wc -l)
+          cargo +nightly run --example gen_corpus
+          after=$(find fuzz/corpus/decode_frame -name 'real_*' | wc -l)
+          if [ "$before" -ne "$after" ]; then
+            echo "::error::committed wire seed corpus drifted from gen_corpus; run 'cargo +nightly run --example gen_corpus' and commit"
+            exit 1
+          fi
+
       - name: Run the fuzz target for 60s — must not panic
-        # libFuzzer exits non-zero on the first panic (including the
-        # `panic!` inside an `unwrap`/`expect` on attacker bytes); a clean
-        # timeout-driven exit (status 0) is the pass condition.
+        # libFuzzer seeds from `fuzz/corpus/decode_frame` (the committed real
+        # frames + the auto-grown random corpus) and mutates from there. It exits
+        # non-zero on the first panic (including the `panic!` inside an
+        # `unwrap`/`expect` on attacker bytes); a clean timeout-driven exit
+        # (status 0) is the pass condition.
         run: cargo +nightly fuzz run -O decode_frame -- -max_total_time=60
