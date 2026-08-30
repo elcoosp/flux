@@ -8,6 +8,7 @@ use gpui::{
     IntoElement, Render, Window,
 };
 use gpui_component::ActiveTheme as _;
+use gpui_component::input::{Input, InputEvent, InputState};
 
 use crate::row::{empty_row, into_any, kv_row, rows_column};
 use crate::state::DevToolsState;
@@ -28,6 +29,15 @@ pub struct ComponentTreeView {
     state: Arc<DevToolsState>,
     /// Node ids whose subtrees are currently collapsed (children hidden).
     collapsed: HashSet<u32>,
+    /// Live search box entity (lazily created on first render, which owns the
+    /// window/`cx` needed to construct an `InputState`).
+    search: Option<Entity<InputState>>,
+    /// The current search query; when non-empty the tree is filtered to nodes
+    /// whose component name matches (case-insensitive), keeping any branch that
+    /// has a matching descendant.
+    query: String,
+    /// Retained subscription so the search box input stays observed.
+    _search_sub: Option<gpui::Subscription>,
     /// Last tree node count logged, to throttle the population probe.
     last_tree_len: usize,
 }
@@ -38,6 +48,9 @@ impl ComponentTreeView {
         Self {
             state,
             collapsed: HashSet::new(),
+            search: None,
+            query: String::new(),
+            _search_sub: None,
             last_tree_len: usize::MAX,
         }
     }
@@ -116,7 +129,33 @@ impl ComponentTreeView {
                 children: kids,
             }
         }
-        roots.iter().map(|r| build(r, &children)).collect()
+        let built: Vec<TreeNode> = roots.iter().map(|r| build(r, &children)).collect();
+        if self.query.is_empty() {
+            return built;
+        }
+        // Filter: keep a node if its name matches, or any descendant matches.
+        let q = self.query.to_lowercase();
+        fn matches(node: &TreeNode, q: &str) -> bool {
+            let name_match = node
+                .frame
+                .component_name
+                .as_deref()
+                .map(|n| n.to_lowercase().contains(q))
+                .unwrap_or(false);
+            let child_match = node.children.iter().any(|c| matches(c, q));
+            name_match || child_match
+        }
+        fn prune(nodes: &[TreeNode], q: &str) -> Vec<TreeNode> {
+            nodes
+                .iter()
+                .filter(|n| matches(n, q))
+                .map(|n| TreeNode {
+                    frame: n.frame.clone(),
+                    children: prune(&n.children, q),
+                })
+                .collect()
+        }
+        prune(&built, &q)
     }
 
     /// A single tree row. Branches (`has_children`) get a `▾`/`▸` chevron that
@@ -183,10 +222,41 @@ impl ComponentTreeView {
     }
 
     /// Renders the view as a standalone pane.
-    pub fn render_pane(&mut self, this: Entity<Self>, cx: &Context<'_, Self>) -> AnyElement {
+    pub fn render_pane(
+        &mut self,
+        window: &mut Window,
+        this: Entity<Self>,
+        cx: &mut Context<'_, Self>,
+    ) -> AnyElement {
+        // Lazily build the search box on first render (we need `window`/`cx`
+        // here, which `new` doesn't have). Subscribe once so typing updates the
+        // filter query and repaints.
+        if self.search.is_none() {
+            let input = cx.new(|cx| {
+                InputState::new(window, cx).placeholder("Search components…")
+            });
+            let input_for_sub = input.clone();
+            self._search_sub = Some(cx.subscribe(
+                &input,
+                move |this: &mut Self, _entity: Entity<InputState>, ev: &InputEvent, cx| {
+                    if matches!(ev, InputEvent::Change) {
+                        let q = input_for_sub.read(cx).value().to_string();
+                        this.query = q;
+                        this.last_tree_len = usize::MAX; // force re-log after filter
+                        cx.notify();
+                    }
+                },
+            ));
+            self.search = Some(input);
+        }
+
         let tree = self.tree();
         if tree.is_empty() {
-            return into_any(empty_row("No layout frames received yet."));
+            return into_any(empty_row(if self.query.is_empty() {
+                "No layout frames received yet."
+            } else {
+                "No nodes match your search."
+            }));
         }
         // Throttled population probe (debug only): confirm telemetry reaches the
         // tree with a stable node count.
@@ -197,6 +267,16 @@ impl ComponentTreeView {
         }
         let mut rows: Vec<AnyElement> = Vec::new();
         self.render_tree(&tree, 0, this.clone(), cx, &mut rows);
+        // Search box (debounced filter by component name) on top, then the
+        // "Toggle all" button. Both sit in the header row above the tree.
+        let search_box = gpui::div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .mt(px(6.))
+            .child(
+                Input::new(self.search.as_ref().unwrap()),
+            );
         // Header with a real button (proves the click path works independent of
         // row-level hit-testing) that collapses/expands every branch at once.
         let header = gpui::div()
@@ -217,6 +297,7 @@ impl ComponentTreeView {
                     }),
             );
         let mut content: Vec<AnyElement> = Vec::new();
+        content.push(into_any(search_box));
         content.push(into_any(header));
         content.push(into_any(rows_column(rows)));
         into_any(rows_column(content))
@@ -224,8 +305,8 @@ impl ComponentTreeView {
 }
 
 impl Render for ComponentTreeView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
-        self.render_pane(cx.entity(), cx)
+    fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
+        self.render_pane(window, cx.entity(), cx)
     }
 }
 
@@ -249,6 +330,12 @@ mod tests {
         }
     }
 
+    fn frame_named(node_id: u32, parent_id: u32, name: &str) -> ViewFrame {
+        let mut f = frame(node_id, parent_id);
+        f.component_name = Some(name.to_string());
+        f
+    }
+
     #[test]
     fn tree_renders_rows_for_populated_view_frames() {
         let state = DevToolsState::new();
@@ -267,6 +354,43 @@ mod tests {
         // The component name must be carried through reconstruction so the tree
         // reads as `Column` (not a bare node id).
         assert_eq!(tree[0].frame.component_name.as_deref(), Some("Column"));
+    }
+
+    #[test]
+    fn search_query_filters_by_component_name() {
+        let state = DevToolsState::new();
+        // root Column (1) -> Button (2) -> Text (3); plus a sibling Image (4).
+        state.push_view_frame(frame_named(1, 0, "Column"));
+        state.push_view_frame(frame_named(2, 1, "Button"));
+        state.push_view_frame(frame_named(3, 2, "Text"));
+        state.push_view_frame(frame_named(4, 1, "Image"));
+        let mut view = ComponentTreeView::new(std::sync::Arc::new(state));
+
+        // No query: full tree present.
+        assert_eq!(view.tree().len(), 1);
+        assert_eq!(view.tree()[0].children.len(), 2);
+
+        // Match "button": the Column root stays (has a matching descendant) and
+        // the Button branch is kept; the Image sibling is pruned.
+        view.query = "button".to_string();
+        let filtered = view.tree();
+        assert_eq!(filtered.len(), 1);
+        let children = &filtered[0].children;
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].frame.component_name.as_deref(), Some("Button"));
+
+        // Match "image": Column root kept, only the Image branch remains.
+        view.query = "image".to_string();
+        let filtered = view.tree();
+        assert_eq!(filtered[0].children.len(), 1);
+        assert_eq!(
+            filtered[0].children[0].frame.component_name.as_deref(),
+            Some("Image")
+        );
+
+        // Match with no descendant hit prunes everything under the root.
+        view.query = "zzz".to_string();
+        assert!(view.tree().is_empty());
     }
 
     #[test]
