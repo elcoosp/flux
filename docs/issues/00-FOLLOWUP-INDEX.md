@@ -33,6 +33,13 @@ issue, and the LSP work (PRD-O's deferred server) is promoted into its own
 
 ## Stdlib (PRD-N deferred — `ScrollView` was the template)
 
+> Reconciliation note (2026-08-30): the stdlib `.flux` sources + Android adapter
+> coverage for FLUX-037/038/042/043/044 have since landed; several of these issues
+> were relabeled `done`/`partial` in their own frontmatter. The remaining real
+> stdlib gaps are iOS adapter parity for those primitives + ScrollView/List
+> (FLUX-056, blocked) + form (FLUX-040) + gesture (FLUX-041) primitives on both
+> platforms. Trust each issue's `status:` field over this pointer table.
+
 | CHANGELOG deferred (§PRD-N) | Issue |
 |---|---|
 | `Stack`/`Grid`/`Spacer`/`SafeArea` | FLUX-037 |

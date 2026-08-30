@@ -30,43 +30,67 @@ Before planning forward, here's what the dump shows, stripped of aspiration:
   the risk of the "rewrite everything at 1.0" tax most frameworks pay.
 
 **Thin / pre-alpha (this is most of the gap to 1.0):**
-- **Stdlib is 8 primitives** (`text`, `button`, `column`, `row`, `text_field`,
-  `screen`, `router`, plus `color`/`font`/`platform`/`traits`/`capabilities`
-  declarations). No `Image`, no scrollable list, no `Modal`/`Sheet`, no
-  gestures, no animation primitive, no `Stack`/`Grid` layout beyond
-  row/column, no forms beyond a single text field. This is nowhere near "90%
-  of use cases."
-- **Two example apps** (`counter`, `router`). No realistic app has been built
-  end-to-end, so real-world friction is still unknown.
+
+> NOTE: this baseline was written against an early tree and was not reconciled
+> as the repo advanced. The items below were re-grounded against source on
+> 2026-08-30 (see git blame `docs/issues/00-FOLLOWUP-INDEX.md` + the per-issue
+> `status:` relabels). Trust the code, not the prose.
+
+- **Stdlib is ~15 primitives** (`text`, `button`, `column`, `row`, `text_field`,
+  `screen`, `router`, `stack`, `grid`, `spacer`, `safearea`, `modal`, `sheet`,
+  `dialog`, `image`, `animate`) plus `color`/`font`/`platform`/`traits`/
+  `capabilities` declarations — all present in `stdlib/*.flux`. **The catch is
+  adapter parity, not source:** the Android dev kit (`adapters/ui-kotlin`) ships
+  a declarative adapter for every one of these, but the **iOS dev kit
+  (`adapters/ui-swift`) is missing Stack/Grid/Modal/Sheet/Dialog/SafeArea/Spacer/
+  Animate adapters** — it only has Column/Row/Screen/Text/Button/Image/Container/
+  Router/OverlayMotion. So a Flux app using those primitives renders fully on
+  Android and **blank for those nodes on iOS** today. Still missing on *both*
+  platforms: `ScrollView`/virtualized `List`, form primitives (Switch/Checkbox/
+  Slider/Picker/DatePicker/TextArea), and gesture primitives (long-press/swipe/
+  drag/pinch). This is still short of "90% of use cases."
+- **Three example apps** (`counter`, `router`, `todo`). `examples/todo` is a
+  real data-driven app (records, `ForEach`, `derived`, `Toggle`, `Spacer`) and
+  compiles through the real `Pipeline` — but it currently renders fully only on
+  Android until the iOS adapter gaps above are closed.
 - **iOS has not converged to the declarative tier** (AGENTS.md §0.2, Axis 2):
-  `adapters/ui-swift/FluxUIKit` is still an imperative UIKit reconciler while
-  Android is declarative Compose. ADR-0048 gates the port on measurement that
-  hasn't happened yet — **there is currently no render-perf test on either
-  platform**, so the §3.10 "native mutation < 3ms" budget is unverified
-  everywhere.
-- **Only 5 platform capabilities** (Camera, Storage, Router, Clipboard,
-  Geolocation) — no push notifications, biometrics, background tasks, file
-  system, sensors, deep linking, or a native-module escape hatch for anything
-  not on this list.
-- **DevTools (`flux-devtools-ui`) exists as a skeleton**: `time_travel`,
-  `views/{component_tree,signal_graph,timeline,vm_inspector}`, `wire_client`.
-  Structure is there; there's no evidence of a shipped, polished experience —
-  no error overlay, no network inspector, no perf flamegraphs, no on-device
-  hookup validated against a real app.
-- **Error handling is architecturally started, not finished**: `FluxError`
-  hierarchy + permission gate just landed (LANE-I) and the umbrella was
-  "half-disabled" until a follow-up fix — i.e., this is days old, not hardened.
-  There is no on-device error overlay, no source-mapped stack traces from
-  `.flux` spans through the VM/wire back to the editor.
-- **`flux build` doesn't actually invoke the native toolchain in the general
-  case** — it detects `xcodebuild`/`gradle` and logs a manual command if
-  absent; that's a CI/DX gap for anyone without both toolchains installed.
-- **Grammar is mid-migration** (ADR-0029): brace syntax still lives in some
-  fixtures alongside the new indentation-based lexer. Any DX work (syntax
-  highlighting, LSP) built against the old grammar will need rework.
-- **No LSP, no editor extension, no linter, no formatter for `.flux` itself**
-  — the single highest-leverage DX investment for "10x DX" is completely
-  unstarted.
+  `adapters/ui-swift/FluxUIKit` is still an imperative UIKit reconciler
+  (`ShadowTreeReconciler` owns a parallel tree of live `UIView`s) while Android
+  is declarative Compose. ADR-0048 gates the port on measurement that hasn't
+  happened yet — **the on-device render-perf harness exists as infra
+  (FLUX-066) but no `MeasureFn` is wired into either host, so the §3.10
+  "native mutation < 3ms" budget is unverified everywhere.** This is the real
+  Phase-0 blocker, not the stdlib/LSP/DevTools work the old prose implied.
+- **13 platform capabilities are wired** (ids 1–13: Camera, Storage, Router,
+  Clipboard, Geolocation, Push, Biometric, Background, FileSystem, DeepLink,
+  Sensors, WebView, NativeModule). The six concrete caps (6–11) plus Http(14)/
+  Persist(15) have real-OS bodies on both hosts (FLUX-045/FLUX-047 done; the iOS
+  app-shell access-level blocker on FLUX-047 is resolved). Permission gate +
+  `FluxError` taxonomy is in place (FLUX-049/PRD-K).
+- **DevTools (`flux-devtools-ui`) is shipped, not a skeleton**: `component_tree`
+  (live ViewMutation, snapshot-on-connect), `signal_graph` (FLUX-058 done),
+  `timeline`, `vm_inspector`, `log_viewer`, plus `time_travel/{buffer,
+  reconstruct}` and `wire_client`. The unified on-device error overlay
+  (FLUX-075) is actively being finished. What's still partial: no network
+  inspector view (FLUX-060), no concurrent multi-device session (FLUX-061), and
+  no timeline flamegraph wired to real perf records (FLUX-059, blocked on
+  FLUX-066 host wiring).
+- **`FluxError` hierarchy + permission gate are landed and hardening**: the
+  unified `FluxError` taxonomy exists across Rust/Kotlin/Swift; the on-device
+  error overlay (FLUX-075) is the remaining piece (in flight, not "days old").
+- **`flux build` still doesn't invoke the native toolchain** — it detects
+  `xcodebuild`/`gradle` and logs a manual command if absent (FLUX-068 open).
+  DX gap for anyone without both toolchains; the detection-and-log path is the
+  intended fallback, the invocation is not yet wired.
+- **Grammar migration is largely done** (ADR-0029): the indent/dedent lexer is
+  the live path; the LSP (FLUX-024/025/027/029 done) and VS Code extension
+  (FLUX-026 done: `editors/vscode/` with `flux.tmLanguage.json`, LSP client over
+  stdio, hot-reload status bar, `runOnDevice`) are built against the new grammar.
+  A `flux fmt` formatter is still missing (Phase 1).
+- **LSP + editor extension + DevTools are no longer the gap** — they are
+  substantially built (above). The single highest-leverage remaining DX work is
+  the iOS adapter-parity pass + `flux fmt`, plus closing the iOS convergence
+  decision so perf/DevTools can be measured on iOS.
 - **Website is docs + one interactive trace player**, in two locales (en/es)
   with an i18n-drift checker — a real base to build on, but thin on guides,
   cookbooks, and migration content.
@@ -216,9 +240,14 @@ complete and fuzzed; grammar frozen; wire protocol has a versioning test.
 
 ## 4. Phase 2 — Stdlib to 90% Coverage
 
-Current: `text`, `button`, `column`, `row`, `text_field`, `screen`, `router`
-+ `color`/`font`/`platform`/`traits`. Target additions, roughly ordered by
-how often they appear in a typical CRUD/social app:
+Current (re-grounded 2026-08-30): `text`, `button`, `column`, `row`,
+`text_field`, `screen`, `router`, `stack`, `grid`, `spacer`, `safearea`,
+`modal`, `sheet`, `dialog`, `image`, `animate` exist in `stdlib/*.flux` and have
+**Android** adapter coverage (`adapters/ui-kotlin`). iOS adapter coverage is
+**incomplete** (missing Stack/Grid/Modal/Sheet/Dialog/SafeArea/Spacer/Animate) —
+see Phase 2 gaps below; closing that parity is the priority, not authoring more
+`.flux` source. Target additions, roughly ordered by how often they appear in a
+typical CRUD/social app:
 
 **Layout & scrolling**
 - `ScrollView` / virtualized `List` (the single most-missing primitive —
