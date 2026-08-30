@@ -47,7 +47,37 @@ public sealed interface TelemetryEvent {
         val isStart: Boolean,
         val gasUsed: UInt?,
     ) : TelemetryEvent
+
+    /**
+     * Emitted when the `Http` capability (FLUX-047) issues a request, so the
+     * DevTools network inspector (FLUX-060) shows outbound traffic. Byte layout
+     * matches `flux_ir_serde::TelemetryEvent::NetworkRequest` (tag `0x05`).
+     */
+    public data class NetworkRequest(
+        val requestId: UInt,
+        val method: String,
+        val url: String,
+        val body: String?,
+        val capabilityId: UInt,
+    ) : TelemetryEvent
+
+    /**
+     * Emitted when a pending `Http` request resolves, so the inspector can pair
+     * it with its [NetworkRequest]. Byte layout matches
+     * `flux_ir_serde::TelemetryEvent::NetworkResponse` (tag `0x06`).
+     * [resultKind] is `0`=Pending, `1`=Ready, `2`=Error (ADR-0044 cell state).
+     */
+    public data class NetworkResponse(
+        val requestId: UInt,
+        val statusCode: UInt,
+        val latencyMs: UInt,
+        val body: String?,
+        val resultKind: UByte,
+    ) : TelemetryEvent
 }
+
+/** The `Http` capability id (FLUX-047) carried in [TelemetryEvent.NetworkRequest.capabilityId]. */
+internal const val CAPABILITY_HTTP: UInt = 14u
 
 /** A native view layout rectangle (device points). */
 public data class Rect(
@@ -153,6 +183,16 @@ private fun ByteArrayOutputStream.writeUIntLE(v: UInt) = writeUIntLE0(this, v)
 
 private fun ByteArrayOutputStream.writeUShortLE(v: UShort) = writeUShortLE0(this, v)
 
+/** Encodes a UTF-8 string as a little-endian `u16` length prefix + bytes (matches Rust `encode_str`). */
+private fun encodeStr(
+    out: ByteArrayOutputStream,
+    value: String,
+) {
+    val bytes = value.toByteArray(Charsets.UTF_8)
+    out.writeUShortLE(bytes.size.toUShort())
+    out.write(bytes)
+}
+
 private fun ByteArrayOutputStream.writeLongLE(v: Long) = writeLongLE0(this, v)
 
 /** Encodes this event as a length-prefixed union body (no frame header). */
@@ -200,6 +240,32 @@ internal fun TelemetryEvent.encodeBody(out: ByteArrayOutputStream) {
                 body.write(0x00)
             }
         }
+        is TelemetryEvent.NetworkRequest -> {
+            body.write(0x05)
+            body.writeUIntLE(requestId)
+            encodeStr(body, method)
+            encodeStr(body, url)
+            if (this.body != null) {
+                body.write(0x01)
+                encodeStr(body, this.body)
+            } else {
+                body.write(0x00)
+            }
+            body.writeUIntLE(capabilityId)
+        }
+        is TelemetryEvent.NetworkResponse -> {
+            body.write(0x06)
+            body.writeUIntLE(requestId)
+            body.writeUShortLE(statusCode.toUShort())
+            body.writeUIntLE(latencyMs)
+            if (this.body != null) {
+                body.write(0x01)
+                encodeStr(body, this.body)
+            } else {
+                body.write(0x00)
+            }
+            body.write(resultKind.toInt())
+        }
     }
     // Length-prefix (u32 LE) the body, back-patched at the front.
     val bytes = body.toByteArray()
@@ -224,7 +290,7 @@ private fun writeDoubleBitsLE(
 ) = writeLongLE0(out, v.toBits())
 
 /** Encodes this event into a full `Telemetry` frame (Appendix D §D.12). */
-public fun TelemetryEvent.toFrameBytes(version: UByte = 0x01u): ByteArray {
+public fun TelemetryEvent.toFrameBytes(version: UByte = 0x02u): ByteArray {
     val out = ByteArrayOutputStream()
     out.writeUIntLE(MAGIC)
     out.write(version.toInt())

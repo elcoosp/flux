@@ -9,6 +9,9 @@ import dev.flux.host.vm.FluxValue.NullVal
 import dev.flux.host.vm.FluxValue.RecordVal
 import dev.flux.host.vm.FluxValue.StrVal
 import dev.flux.host.vm.VmErrorKind.TYPE_MISMATCH
+import dev.flux.host.vm.debug.CAPABILITY_HTTP
+import dev.flux.host.vm.debug.TelemetryBridge
+import dev.flux.host.vm.debug.TelemetryEvent
 
 /** Reads the first `StrVal` id from a record argument, or null. */
 private fun firstStrId(args: FluxValue): UInt? =
@@ -142,8 +145,30 @@ public fun makeHttpResolver(
             pending.remove(cellId)
             val url = stringResolver.resolve(request.urlId)
             val body = request.bodyId?.let { stringResolver.resolve(it) }
+            // FLUX-060: broadcast the outbound request to DevTools (guarded by the
+            // bridge's DEBUG-gated sink so release builds pay nothing).
+            TelemetryBridge.emit(
+                TelemetryEvent.NetworkRequest(
+                    requestId = cellId,
+                    method = request.method,
+                    url = url,
+                    body = body,
+                    capabilityId = CAPABILITY_HTTP,
+                ),
+            )
+            val startedAt = System.currentTimeMillis()
             return try {
                 val response = transport.request(request.method, url, body)
+                val latencyMs = (System.currentTimeMillis() - startedAt).toUInt().coerceAtMost(UInt.MAX_VALUE)
+                TelemetryBridge.emit(
+                    TelemetryEvent.NetworkResponse(
+                        requestId = cellId,
+                        statusCode = 200u,
+                        latencyMs = latencyMs,
+                        body = response,
+                        resultKind = 1u.toUByte(),
+                    ),
+                )
                 if (request.parseJson) {
                     FluxValueJson.parse(response)
                 } else {
@@ -151,6 +176,15 @@ public fun makeHttpResolver(
                     StrVal(stringResolver.intern(response))
                 }
             } catch (e: Exception) {
+                TelemetryBridge.emit(
+                    TelemetryEvent.NetworkResponse(
+                        requestId = cellId,
+                        statusCode = 0u,
+                        latencyMs = (System.currentTimeMillis() - startedAt).toUInt().coerceAtMost(UInt.MAX_VALUE),
+                        body = e.message,
+                        resultKind = 2u.toUByte(),
+                    ),
+                )
                 NullVal
             }
         }
