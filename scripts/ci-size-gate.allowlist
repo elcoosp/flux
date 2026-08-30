@@ -54,7 +54,7 @@ crates/flux-parser/src/parser.rs
 crates/flux-perf-harness/src/metric.rs
 crates/flux-syntax/src/ids.rs
 crates/flux-types/src/capabilities.rs
-crates/flux-types/src/checker.rs
+
 crates/flux-types/src/error.rs
 crates/flux-types/src/kind.rs
 crates/flux-vm-ref/src/vm.rs
