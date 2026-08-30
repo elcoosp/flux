@@ -1,0 +1,66 @@
+name: website-check
+
+# FLUX-092 (LANE-DOCS, Phase 3 — docs/website) — promote `check-i18n-drift.ts`
+# from an advisory-only script to a REQUIRED, build-gating CI check.
+#
+# The docs site is multi-locale: English lives at `src/content/docs/` and
+# translations under `src/content/docs/{es,fr}/`. `check-i18n-drift.ts` already
+# exits 1 when an English page lacks its `es`/`fr` counterpart (beyond the
+# documented exemption set). This workflow makes that check enforceable: it runs
+# the parity unit tests and then the parity checker itself as a HARD step, so a
+# translated doc silently falling behind English fails the build.
+#
+# This is intentionally NOT advisory: every step is blocking (no
+# continue-on-error). The existing backlog of drift is already covered by the
+# exemption list in the script, so flipping to blocking does not regress the
+# current green build (verified locally before landing).
+
+on:
+  workflow_call:
+  push:
+    branches: ["**"]
+    paths:
+      - "website/**"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "website/**"
+
+permissions:
+  contents: read
+
+jobs:
+  website:
+    name: i18n-drift parity (required gate)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: website/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Parity unit tests (FLUX-030/092)
+        # Exercises findMissingTranslations AND the real CLI exit-code gate
+        # against drifted vs synced fixture trees.
+        run: pnpm run test:i18n
+
+      - name: i18n-drift parity check (required gate)
+        # HARD step: exits 1 on any English page missing its es/fr counterpart.
+        # This is the enforceable gate promoted by FLUX-092.
+        run: pnpm run check:i18n
+
+      - name: Build site (also runs check:i18n)
+        # `build` chains `astro build && pnpm run check:i18n`, so the gate is
+        # enforced on every production build as well.
+        run: pnpm run build

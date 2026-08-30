@@ -63,6 +63,10 @@ jobs:
     name: component · save→photon e2e
     uses: ./.github/workflows/benchmarks.yml
 
+  website-check:
+    name: component · docs i18n-drift required gate
+    uses: ./.github/workflows/website-check.yml
+
   wire-fuzz:
     name: component · wire robustness fuzz
     uses: ./.github/workflows/wire-fuzz.yml
@@ -90,13 +94,14 @@ jobs:
       - perf-harness
       - save-photon
       - wire-fuzz
+      - website-check
       - contract-freeze
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any component gate or the contract freeze did not pass
         run: |
           # `needs.*.result` is one of: success | failure | cancelled | skipped.
-          for job in rust-check ios-check android-check compat-matrix perf-harness save-photon wire-fuzz contract-freeze; do
+          for job in rust-check ios-check android-check compat-matrix perf-harness save-photon wire-fuzz website-check contract-freeze; do
             result="${{ needs[job].result }}"
             echo "$job -> $result"
             if [ "$result" != "success" ]; then

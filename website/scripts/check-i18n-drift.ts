@@ -1,10 +1,10 @@
 /**
  * check-i18n-drift.ts
  *
- * Fails the build if any default-locale (English, at the content root) doc lacks a
- * counterpart in every translation locale (`es`, `fr`). Content-only pages must
- * ship in all locales so the site never serves an untranslated page behind the
- * language switcher.
+ * Required (gating) CI check: fails the build if any default-locale (English, at
+ * the content root) doc lacks a counterpart in every translation locale
+ * (`es`, `fr`). Content-only pages must ship in all locales so the site never
+ * serves an untranslated page behind the language switcher.
  *
  * Starlight i18n layout: with `defaultLocale: 'root'`, English lives directly
  * under `src/content/docs/` and translations live under `src/content/docs/{es,fr}/`.
@@ -18,7 +18,10 @@
  *    exempt until a translation lands so the build does not break. Remove this
  *    exemption once `es/guides/quickstart` and `fr/guides/quickstart` exist.
  *
- * Run with: `pnpm check:i18n` (invoked during `pnpm build`).
+ * Run with: `pnpm check:i18n` (invoked during `pnpm build`, and as the required
+ * `website-check` CI gate). The docs root defaults to the real
+ * `src/content/docs`; override it with `I18N_DOCS_ROOT` to point the check at an
+ * arbitrary tree (used by the drifted-fixture test: FLUX-092).
  */
 import { readdir } from 'node:fs/promises';
 import { join, dirname, relative, extname } from 'node:path';
@@ -110,8 +113,11 @@ async function slugSetIn(root: string, locale: string): Promise<Set<string>> {
 const isMain =
   process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (isMain) {
+  // `I18N_DOCS_ROOT` overrides the docs root (FLUX-092): lets the CI-style
+  // failure be exercised against an arbitrary fixture tree in tests.
+  const rootOverride = process.env['I18N_DOCS_ROOT'];
   try {
-    const missingByLocale = await findMissingTranslations();
+    const missingByLocale = await findMissingTranslations(rootOverride);
     const localesWithGaps = Object.entries(missingByLocale).filter(
       ([, slugs]) => slugs.length > 0,
     );

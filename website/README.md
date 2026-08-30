@@ -41,5 +41,8 @@ hosts the recorded-dispatch playground.
 
 - The ADR ingest script (`scripts/ingest-adrs.ts`) was removed — ADRs are no
   longer copied into the site; the sidebar links out to the repo instead.
-- `scripts/check-i18n-drift.ts` is a no-op safety net while the site is
-  single-locale; re-enable parity checking there if a new locale is added.
+- `scripts/check-i18n-drift.ts` is a **required, build-gating** check
+  (FLUX-092): it fails the build whenever an English doc under `src/content/docs/`
+  lacks its `es/` and `fr/` counterparts (beyond the documented exemption set).
+  It runs in `pnpm build` and as the blocking `website-check` CI gate, and its
+  parity unit tests run via `pnpm test:i18n`.

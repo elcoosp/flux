@@ -78,6 +78,47 @@ async function main(): Promise<void> {
     rmSync(root, { recursive: true, force: true });
   }
 
+  // 4. End-to-end gating (FLUX-092): the CLI exits 1 on a drifted tree and 0
+  //    on a synced tree. This is what the required CI step actually enforces,
+  //    so we exercise the real script (with I18N_DOCS_ROOT pointed at a temp
+  //    fixture) rather than only the library function.
+  {
+    const { execFileSync } = await import('node:child_process');
+    const { join } = await import('node:path');
+    const here = new URL('.', import.meta.url).pathname;
+    const tsx = join(here, '..', 'node_modules', '.bin', 'tsx');
+    const script = join(here, 'check-i18n-drift.ts');
+
+    // 4a. synced tree -> exit 0.
+    const synced = makeTree(['a', 'b/c'], ['a', 'b/c'], ['a', 'b/c']);
+    let syncedExit = -1;
+    try {
+      execFileSync(tsx, [script], {
+        env: { ...process.env, I18N_DOCS_ROOT: synced },
+        stdio: 'ignore',
+      });
+      syncedExit = 0;
+    } catch (e) {
+      syncedExit = (e as { status?: number }).status ?? 1;
+    }
+    assert(syncedExit === 0, 'synced tree exits 0 (CI passes)');
+    rmSync(synced, { recursive: true, force: true });
+
+    // 4b. drifted tree (es lags) -> exit 1.
+    const drifted = makeTree(['a', 'b/c'], ['a'], ['a', 'b/c']);
+    let driftedExit = 0;
+    try {
+      execFileSync(tsx, [script], {
+        env: { ...process.env, I18N_DOCS_ROOT: drifted },
+        stdio: 'ignore',
+      });
+    } catch (e) {
+      driftedExit = (e as { status?: number }).status ?? 1;
+    }
+    assert(driftedExit === 1, 'drifted tree exits 1 (CI fails the build)');
+    rmSync(drifted, { recursive: true, force: true });
+  }
+
   console.log(`\ni18n-drift tests: ${passed} passed, ${failed} failed.`);
   if (failed > 0) process.exit(1);
 }
