@@ -37,7 +37,7 @@ crates/flux-differ/benches/diff.rs
 crates/flux-differ/src/diff.rs
 crates/flux-ir-serde/src/frame.rs
 crates/flux-ir-serde/src/telemetry.rs
-crates/flux-ir/src/arena.rs
+
 crates/flux-ir/src/instance.rs
 crates/flux-ir/src/lower/bytecode.rs
 crates/flux-ir/src/lower/mod.rs
