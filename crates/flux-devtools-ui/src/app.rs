@@ -172,6 +172,7 @@ impl Render for DevToolsRoot {
                 .flex_row()
                 .gap(px(4.))
                 .items_center()
+                .mr(px(12.))
                 .child(
                     gpui::div()
                         .w(px(10.))
