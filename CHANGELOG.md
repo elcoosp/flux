@@ -519,11 +519,28 @@ The entries below land the work committed since the changelog was last updated
   - gpui `NetworkInspectorView` (`views/network_inspector.rs`, 1 test) mounted as
     the **`Network` pane** in the `DevToolsRoot` 3×2 grid, showing `method url →
     status (latency)` per exchange, pending until the response lands.
+- **Live broadcast — DONE (2026-08-30 follow-up):** both hosts now emit
+  `NetworkRequest` / `NetworkResponse` around the `Http` capability (FLUX-047) so the
+  inspector shows real outbound traffic end-to-end, not just fixtures:
+  - Android `HttpCapabilities.makeHttpResolver` emits `TelemetryEvent.NetworkRequest`
+    (capability id `14`) before the call and `TelemetryEvent.NetworkResponse`
+    (`status_code`/`latency_ms`/`result_kind` = `1` Ready / `2` Error) after it.
+  - iOS `HttpAsyncResolver.resolve` does the same via `fluxDevtoolsEmit`.
+  - Wire layout is bit-identical across Kotlin/Swift/Rust (tag `0x05`/`0x06`,
+    length-prefixed, `u16` string length prefix). Pinned by the Rust
+    `host_network_telemetry_decodes_to_network_events` test and the Android
+    `TelemetryNetworkTest` against the **same canonical byte array**.
+  - Fixed a version divergence: the Android host telemetry frame defaulted to
+    `PROTOCOL_VERSION = 1` while `flux-ir-serde` requires `2`, so the dev server
+    silently dropped host frames. Bumped Android `toFrameBytes` default to `0x02`
+    to match iOS (`0x02`) and Rust.
 - **Verification:** `cargo nextest run -p flux-devtools-ui --lib` → 45/45 green
-  (incl. all FLUX-060 tests); `cargo nextest run -p flux-ir-serde` → 67/67 green
+  (incl. all FLUX-060 tests); `cargo nextest run -p flux-ir-serde` → 68/68 green
   (incl. the new network wire tests); `cargo clippy` clean on both crates' own
   files. The `DevToolsRoot` body is now a 3×2 grid: row 1 VM / Signals / Timeline,
-  row 2 Component Tree / Logs / Network.
+  row 2 Component Tree / Logs / Network. Host Kotlin/Swift are not compiled here
+  (no Android toolchain; Swift emit-byte generator verified via `swiftc`), but the
+  wire contract is locked by the shared canonical-byte Rust + Android tests.
 
 ### PARTIAL — DevTools multi-device connect (FLUX-061, LANE-P)
 
