@@ -1,6 +1,6 @@
 ---
 id: FLUX-061
-status: partial
+status: done
 lane: LANE-P
 phase: "Phase 4"
 blocked_by: []
