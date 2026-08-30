@@ -228,6 +228,19 @@ pub const CAPABILITY_IDL: &[CapabilityIdl] = &[
             },
         ],
     },
+    // --- FLUX-046: native-module escape hatch (wrap any native SDK). ---
+    // The host allow-lists which module names resolve (LANE-I); an undeclared
+    // module is denied at the gate like any capability. `invoke` (13,1) calls a
+    // method on the wrapped native module with positional args. Declared before
+    // Http/Persist (ids 14/15) so the table follows id order.
+    CapabilityIdl {
+        name: "NativeModule",
+        id: 13,
+        methods: &[MethodIdl {
+            name: "invoke",
+            id: 1,
+        }],
+    },
     // --- FLUX-047: HTTP fetch/JSON + structured persistence capabilities. ---
     // `Http` performs async network requests (resolves through the VM's await
     // machinery, ADR-0044/0045); `Persist` is structured, queryable local
@@ -254,14 +267,8 @@ pub const CAPABILITY_IDL: &[CapabilityIdl] = &[
         name: "Persist",
         id: 15,
         methods: &[
-            MethodIdl {
-                name: "put",
-                id: 1,
-            },
-            MethodIdl {
-                name: "get",
-                id: 2,
-            },
+            MethodIdl { name: "put", id: 1 },
+            MethodIdl { name: "get", id: 2 },
             MethodIdl {
                 name: "query",
                 id: 3,
@@ -271,18 +278,6 @@ pub const CAPABILITY_IDL: &[CapabilityIdl] = &[
                 id: 4,
             },
         ],
-    },
-    // --- FLUX-046: native-module escape hatch (wrap any native SDK). ---
-    // The host allow-lists which module names resolve (LANE-I); an undeclared
-    // module is denied at the gate like any capability. `invoke` (13,1) calls a
-    // method on the wrapped native module with positional args.
-    CapabilityIdl {
-        name: "NativeModule",
-        id: 13,
-        methods: &[MethodIdl {
-            name: "invoke",
-            id: 1,
-        }],
     },
 ];
 

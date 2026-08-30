@@ -110,8 +110,9 @@ impl ArenaBuilder {
         deps: Vec<flux_syntax::SignalId>,
         thunk: Option<flux_syntax::ClosureRef>,
         layout: Vec<u16>,
+        item_slot: Option<flux_syntax::SignalId>,
     ) {
-        self.arena.set_signal_metadata(id, deps, thunk, layout);
+        self.arena.set_signal_metadata(id, deps, thunk, layout, item_slot);
     }
 
     /// Consumes the builder, yielding the packed [`IRArena`].

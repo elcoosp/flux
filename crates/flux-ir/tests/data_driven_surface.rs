@@ -446,3 +446,57 @@ fn todo_example_rewrite_lowers_end_to_end() {
     let typed = flux_types::type_check(&ast).expect("type-check");
     let _lowered = flux_ir::lower::lower(&ast, &typed).expect("lower");
 }
+
+#[test]
+fn foreach_binds_item_to_per_row_signal_slot() {
+    // Root cause of the on-device empty-list bug (FLUX-072): the ForEach body's
+    // `item` must be bound to a dedicated per-ForEach signal slot so each row
+    // thunk reads a real signal instead of an unresolved free variable (which
+    // previously lowered to Null, rendering blank rows). The lowered ForEach
+    // node must carry `item_slot` in its signal metadata, and the template row's
+    // prop thunk must capture that signal.
+    let src = "record Task { label: String, done: Bool }
+compo C
+    state tasks: List[Task] = []
+    ForEach(tasks, key: fn(item) { item.label }) {
+        item => Row(text: item.label)
+    }
+";
+    let ast = flux_parser::parse(src, 0, "foreach.flux").expect("parse");
+    let typed = flux_types::type_check(&ast).expect("type-check");
+    let lowered = flux_ir::lower::lower(&ast, &typed).expect("lower");
+
+    let mut foreach_id: Option<flux_syntax::NodeId> = None;
+    let mut row_id: Option<flux_syntax::NodeId> = None;
+    for id in lowered.arena.all_ids() {
+        let view = lowered.arena.get(id).expect("node");
+        if view.kind() == NodeKind::ForEach {
+            foreach_id = Some(id);
+            for child in view.children() {
+                if let flux_syntax::Child::Splice { items } = child {
+                    if let Some((_, rid)) = items.first() {
+                        row_id = Some(*rid);
+                    }
+                }
+            }
+        }
+    }
+    let foreach_id = foreach_id.expect("ForEach node present");
+    let item_slot = lowered.arena.item_slot_of(foreach_id);
+    assert!(
+        item_slot.is_some(),
+        "ForEach must carry a per-row item signal slot"
+    );
+    let item_slot = item_slot.unwrap();
+    let row_id = row_id.expect("template row present");
+
+    let thunk = lowered
+        .prop_thunks
+        .get(&row_id)
+        .expect("template row must have a prop thunk now");
+    assert!(
+        thunk.captured_signals.contains(&item_slot),
+        "row thunk must capture the item slot signal {item_slot}; captured={:?}",
+        thunk.captured_signals
+    );
+}

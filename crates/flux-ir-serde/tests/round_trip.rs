@@ -6,8 +6,8 @@ use flux_ir_serde::{
     hash_props, serialize_patches,
 };
 use flux_syntax::{
-    Child, ClosureRef, HandlerId, NodeKind, Patch, PropDiff, Props, SignalId, Span, StringId,
-    StringTable, Value,
+    Child, ClosureRef, HandlerId, NodeKind, Patch, PropDiff, Props, SignalId, SourceExcerpt, Span,
+    StringId, StringTable, Value,
 };
 
 /// NaN-aware value equality: `f64::NAN` never equals itself under `PartialEq`,
@@ -82,6 +82,7 @@ fn sample_patches() -> Vec<Patch> {
                 bytecode_len: 8,
                 captured_signals: vec![SignalId::from(1u32), SignalId::from(2u32)],
                 span,
+                excerpt: None,
             },
         },
         Patch::Reattach {
@@ -309,11 +310,25 @@ fn delta_frame_round_trips() {
 
 #[test]
 fn error_frame_round_trips() {
-    let frame = Frame::error(3, "type mismatch in Counter", Some(Span::new(0, 12, 20)));
+    // ADR-0057: the error frame carries a server-computed excerpt (path:line:col
+    // + snippet) so the host renders source without a round-trip. Assert both the
+    // span and the excerpt survive encode/decode.
+    let excerpt = SourceExcerpt::from_span(
+        Span::new(0, 12, 20),
+        "count = count + 1\nwrong line\n",
+    )
+    .expect("excerpt computes from source");
+    let frame = Frame::error(
+        3,
+        "type mismatch in Counter",
+        Some(Span::new(0, 12, 20)),
+        Some(excerpt.clone()),
+    );
     let bytes = frame.to_bytes();
     let decoded = Frame::from_error_bytes(&bytes).expect("error decodes");
     assert_eq!(decoded.message, "type mismatch in Counter");
     assert_eq!(decoded.span, Some(Span::new(0, 12, 20)));
+    assert_eq!(decoded.excerpt, Some(excerpt), "excerpt must round-trip");
 }
 
 #[test]
@@ -502,12 +517,14 @@ fn init_frame_signal_meta_round_trips() {
         bytecode_len: 4,
         captured_signals: vec![SignalId::from(2u32)],
         span: Span::new(0, 0, 0),
+        excerpt: None,
     };
     let signal_meta = vec![NodeSignalMeta {
         node_id: flux_syntax::NodeId::from(1u32),
         deps: vec![SignalId::from(2u32), SignalId::from(3u32)],
         thunk: Some(closure),
         layout: vec![0u16, 1u16],
+        item_slot: None,
     }];
     let frame = Frame::init(
         &root,
@@ -567,6 +584,7 @@ fn delta_frame_signal_meta_requires_flag() {
         deps: vec![SignalId::from(5u32)],
         thunk: None,
         layout: vec![],
+        item_slot: None,
     }];
     let flagged = Frame::delta(
         2,

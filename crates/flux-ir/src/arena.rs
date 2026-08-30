@@ -67,6 +67,9 @@ pub struct IRArena {
     /// Record-field position → prop index, in the order the thunk fills the
     /// `ALLOC_RECORD` (T14). Empty when the node has no thunk.
     prop_layout_map: AHashMap<NodeId, Vec<u16>>,
+    /// Per-`ForEach` node: the dedicated per-element `item` signal slot its row
+    /// thunks read (FLUX-072 / ADR-0050). `None` for every other node kind.
+    item_slot_map: AHashMap<NodeId, Option<SignalId>>,
 
     // Pre-computed content hashes for O(1) differ comparisons (FLUX-014 P3).
     // `props_hashes[i]` mirrors `props_of(i).hash()`; `children_hashes[i]`
@@ -199,10 +202,21 @@ impl IRArena {
         deps: Vec<SignalId>,
         thunk: Option<ClosureRef>,
         layout: Vec<u16>,
+        item_slot: Option<SignalId>,
     ) {
         self.signal_deps_map.insert(id, deps);
         self.prop_thunk_map.insert(id, thunk);
         self.prop_layout_map.insert(id, layout);
+        self.item_slot_map.insert(id, item_slot);
+    }
+
+    /// The per-element `item` signal slot for a `ForEach` node (FLUX-072 /
+    /// ADR-0050), or `None` for any other node kind. The host allocates a fresh
+    /// per-row signal seeded with `list[i]` and rewrites each row thunk's
+    /// `READ_SIGNAL` to it when expanding the list.
+    #[must_use]
+    pub fn item_slot_of(&self, id: NodeId) -> Option<SignalId> {
+        self.item_slot_map.get(&id).copied().flatten()
     }
 
     /// The distinct `READ_SIGNAL` ids `id`'s prop/control expressions read,

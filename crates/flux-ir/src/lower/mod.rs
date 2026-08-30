@@ -287,9 +287,10 @@ impl<'a> Lowerer<'a> {
                         bytecode_len: self.prop_thunks[&node_id].bytecode.len() as u16,
                         captured_signals: deps.clone(),
                         span: Span::new(0, 0, 0),
+                        excerpt: None,
                     };
                     self.builder
-                        .signal_metadata(node_id, deps, Some(closure_ref), layout);
+                        .signal_metadata(node_id, deps, Some(closure_ref), layout, None);
                     return Ok(());
                 }
                 Err(_) => {
@@ -307,7 +308,7 @@ impl<'a> Lowerer<'a> {
         }
         let deps = collect_read_signals(&all, scope);
         self.builder
-            .signal_metadata(node_id, deps, None, Vec::new());
+            .signal_metadata(node_id, deps, None, Vec::new(), None);
         Ok(())
     }
 
@@ -484,17 +485,24 @@ impl<'a> Lowerer<'a> {
             }
             flux_parser::ExprKind::ForEach {
                 items: items_expr,
-                key: key_expr,
+                key: _key_expr,
                 body,
             } => {
                 let id = expr_node_id(expr, ExprNodeKind::ForEach);
                 // Real ForEach lowering (FLUX-072 / ADR-0050): lower the loop
                 // body into the child nodes that the host reconciles per item.
-                // The item binding is a runtime-scoped variable supplied by the
-                // host per iteration, so we lower the body structurally here;
-                // its prop expressions reference the item and are re-bound by
-                // the host when it instantiates the row for each element.
+                // The `item` binding is a runtime-scoped variable supplied by the
+                // host per iteration. We allocate a dedicated per-ForEach signal
+                // slot for `item` and bind it in `signal_scope` while lowering the
+                // body, so every row prop thunk reads `itemSlot` (instead of an
+                // unresolved free variable, which previously lowered to `Null`).
+                // The host, on list-signal change, clones the row template once
+                // per element, seeding a fresh per-row signal with `list[i]` and
+                // rewriting the row thunk's `READ_SIGNAL itemSlot` to that id.
+                let item_slot = self.next_signal();
+                self.signal_scope.push(("item".to_string(), item_slot));
                 let row_children = self.lower_block(body, owner)?;
+                self.signal_scope.pop();
                 // `Child::Splice` carries the per-item child node ids as
                 // `(Key, NodeId)` pairs (arena.rs encode/decode contract). The
                 // key is the row's position in the source body; the host
@@ -520,7 +528,11 @@ impl<'a> Lowerer<'a> {
                     span: expr.span,
                 };
                 self.builder.pack(node);
-                self.emit_signal_metadata(id, &[], &[items_expr, key_expr])?;
+                // `deps` carries the items-signal (list) so the host knows which
+                // signal to watch; `layout` carries `itemSlot` so the host knows
+                // which signal each row thunk reads for `item`.
+                self.builder
+                    .signal_metadata(id, collect_read_signals(&[items_expr], &self.signal_scope), None, Vec::new(), Some(item_slot));
                 Ok(Child::Node(id))
             }
             flux_parser::ExprKind::When {

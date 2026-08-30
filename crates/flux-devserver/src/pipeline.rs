@@ -43,7 +43,7 @@ use std::time::Instant;
 use flux_ir::{IRArena, LoweredIr, lower};
 use flux_ir_serde::{Frame, InitFrame, NodeSignalMeta};
 use flux_parser::Ast;
-use flux_syntax::{FileId, Patch, SignalId, StringId, Value};
+use flux_syntax::{FileId, Patch, SignalId, SourceExcerpt, StringId, Value};
 
 use crate::dispatch::{DependencyIndex, DispatchReport, NodeSignalDeps, emit_minimal_updates};
 use crate::error::Diagnostic;
@@ -699,9 +699,18 @@ impl Pipeline {
     }
 
     /// Builds an `Error` frame from `diagnostic` (spec §D.12.3).
+    ///
+    /// When the diagnostic carries a `Span` and the server still holds the source
+    /// text for that file, an ADR-0057 `SourceExcerpt` (path:line:col + the
+    /// offending line) is computed once here and shipped inline, so the host can
+    /// render a snippet/caret without re-scanning source or a round-trip.
     pub fn error_frame(&mut self, diagnostic: &Diagnostic) -> Vec<u8> {
         self.seq = self.seq.wrapping_add(1);
-        Frame::error(self.seq, &diagnostic.message, diagnostic.span).to_bytes()
+        let excerpt = diagnostic
+            .span
+            .and_then(|span| self.sources.get(&span.file_id).map(|(_, src)| (span, src)))
+            .and_then(|(span, src)| SourceExcerpt::from_span(span, src));
+        Frame::error(self.seq, &diagnostic.message, diagnostic.span, excerpt).to_bytes()
     }
 }
 
@@ -726,11 +735,13 @@ fn signal_meta_for(arena: &IRArena) -> Vec<NodeSignalMeta> {
         }
         let thunk = arena.prop_thunk_of(id).cloned();
         let layout = arena.prop_layout_of(id).to_vec();
+        let item_slot = arena.item_slot_of(id);
         metas.push(NodeSignalMeta {
             node_id: id,
             deps: deps.to_vec(),
             thunk,
             layout,
+            item_slot,
         });
     }
     metas

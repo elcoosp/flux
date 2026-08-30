@@ -14,7 +14,7 @@
 
 use flux_syntax::{
     Child, ClosureRef, FileId, HandlerId, NodeId, NodeKind, NodeRef, Patch, PropDiff, Props,
-    SignalId, Span, StringId, Value,
+    SignalId, SourceExcerpt, Span, StringId, Value,
 };
 
 /// A decode failure with an actionable, span-free description.
@@ -542,6 +542,25 @@ pub fn decode_span(r: &mut Reader<'_>) -> Result<Span, WireError> {
     Ok(Span::new(file_id, start, end))
 }
 
+/// Writes a length-prefixed UTF-8 string (u16 byte length + bytes), matching the
+/// layout `frame.rs::encode_str` uses for `Error`/`Hello` payloads.
+pub(crate) fn encode_str(w: &mut Writer, s: &str) {
+    w.u16(s.len() as u16);
+    w.bytes(s.as_bytes());
+}
+
+/// Reads a length-prefixed UTF-8 string (u16 byte length + bytes).
+pub(crate) fn decode_str(r: &mut Reader<'_>, ctx: &'static str) -> Result<String, WireError> {
+    let len = r.u16(ctx)? as usize;
+    let raw = r.bytes(len, ctx)?;
+    std::str::from_utf8(raw)
+        .map(str::to_owned)
+        .map_err(|_| WireError::InvalidUtf8 {
+            context: ctx,
+            at: r.pos(),
+        })
+}
+
 // ── Node (D.3) ─────────────────────────────────────────────────────────────
 
 pub(crate) fn encode_node(w: &mut Writer, node: &NodeRef) {
@@ -637,6 +656,21 @@ pub(crate) fn encode_closure_ref(w: &mut Writer, closure: &ClosureRef) {
         w.u32(*signal);
     }
     encode_span(w, &closure.span);
+    // ADR-0057: trailing server-computed source excerpt (gated by `has`), so a
+    // VM fault maps `offset → handler → path:line:col + snippet` offline. Absent
+    // on v1-derived trees (no source text) and decode-skipped there.
+    match &closure.excerpt {
+        Some(ex) => {
+            w.u8(1);
+            w.u32(ex.file_id);
+            w.u32(ex.byte_start);
+            w.u32(ex.byte_end);
+            w.u16(ex.line);
+            w.u16(ex.col);
+            encode_str(w, &ex.snippet);
+        }
+        None => w.u8(0),
+    }
 }
 
 pub(crate) fn decode_closure_ref(r: &mut Reader<'_>) -> Result<ClosureRef, WireError> {
@@ -650,12 +684,25 @@ pub(crate) fn decode_closure_ref(r: &mut Reader<'_>) -> Result<ClosureRef, WireE
         captured_signals.push(r.u32("closure.signal")?);
     }
     let span = decode_span(r)?;
+    let excerpt = if r.u8("closure.excerpt.present")? != 0 {
+        Some(SourceExcerpt {
+            file_id: FileId::from(r.u32("closure.excerpt.file")?),
+            byte_start: r.u32("closure.excerpt.start")?,
+            byte_end: r.u32("closure.excerpt.end")?,
+            line: r.u16("closure.excerpt.line")?,
+            col: r.u16("closure.excerpt.col")?,
+            snippet: decode_str(r, "closure.excerpt.snippet")?,
+        })
+    } else {
+        None
+    };
     Ok(ClosureRef {
         hash,
         bytecode_offset,
         bytecode_len,
         captured_signals,
         span,
+        excerpt,
     })
 }
 
@@ -915,6 +962,12 @@ pub struct NodeSignalMeta {
     pub thunk: Option<ClosureRef>,
     /// `prop_layout`: record-field position → prop index.
     pub layout: Vec<u16>,
+    /// For a `ForEach` node, the dedicated per-element `item` signal slot the
+    /// body's row thunks read. The host allocates a fresh per-row signal seeded
+    /// with `list[i]` and rewrites each row thunk's `READ_SIGNAL item_slot` to
+    /// it when expanding the list (FLUX-072 / ADR-0050). `None` for every other
+    /// node kind.
+    pub item_slot: Option<SignalId>,
 }
 
 /// Encodes a `NodeSignalMeta` entry (Appendix D, ADR-0027 section).
@@ -937,6 +990,13 @@ pub(crate) fn encode_signal_meta(w: &mut Writer, meta: &NodeSignalMeta) {
     w.u16(meta.layout.len() as u16);
     for &idx in &meta.layout {
         w.u16(idx);
+    }
+    match meta.item_slot {
+        Some(slot) => {
+            w.u8(1);
+            w.u32(slot);
+        }
+        None => w.u8(0),
     }
 }
 
@@ -974,11 +1034,18 @@ pub(crate) fn decode_signal_meta(r: &mut Reader<'_>) -> Result<NodeSignalMeta, W
     for _ in 0..layout_count {
         layout.push(r.u16("signal_meta.layout.idx")?);
     }
+    let item_slot_present = r.u8("signal_meta.item_slot.present")?;
+    let item_slot = if item_slot_present != 0 {
+        Some(SignalId::from(r.u32("signal_meta.item_slot.id")?))
+    } else {
+        None
+    };
     Ok(NodeSignalMeta {
         node_id,
         deps,
         thunk,
         layout,
+        item_slot,
     })
 }
 
