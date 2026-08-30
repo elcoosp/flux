@@ -3,19 +3,23 @@
 use std::sync::Arc;
 
 use anyhow::Context as _;
+use gpui::prelude::*;
 use gpui::{
     AnyView, App, AppContext, Context, Entity, FontWeight, IntoElement, ParentElement, Render,
     Styled, Window, px,
 };
 use gpui_component::{
-    Root, Theme, TitleBar, badge::Badge, group_box::GroupBox, separator::Separator,
-    status_bar::StatusBar,
+    Root, Theme, TitleBar, badge::Badge, group_box::GroupBox, scroll::Scrollable,
+    scroll::ScrollableElement, separator::Separator, status_bar::StatusBar,
 };
 
 use gpui_platform::application;
 
 use crate::state::{DevToolsState, HostInfo};
-use crate::views::{ComponentTreeView, SignalGraphView, TimelineView, VmInspectorView};
+use crate::views::{
+    ComponentTreeView, LogViewerView, NetworkInspectorView, SignalGraphView, TimelineView,
+    VmInspectorView,
+};
 use crate::wire_client::{DEFAULT_DEVTOOLS_PORT, connect, run_ingest_loop};
 
 /// The root DevTools window, owning the shared [`DevToolsState`] and the four
@@ -34,6 +38,8 @@ struct DevToolsRoot {
     signals: Entity<SignalGraphView>,
     tree: Entity<ComponentTreeView>,
     timeline: Entity<TimelineView>,
+    logs: Entity<LogViewerView>,
+    net: Entity<NetworkInspectorView>,
 }
 
 impl DevToolsRoot {
@@ -52,6 +58,8 @@ impl DevToolsRoot {
             signals: cx.new(|_| SignalGraphView::new(state.clone())),
             tree: cx.new(|_| ComponentTreeView::new(state.clone())),
             timeline: cx.new(|_| TimelineView::new(state.clone())),
+            logs: cx.new(|_| LogViewerView::new(state.clone())),
+            net: cx.new(|_| NetworkInspectorView::new(state.clone())),
         }
     }
 
@@ -149,20 +157,40 @@ impl Render for DevToolsRoot {
                         })),
                 ),
             )
-            // ── Body: four gpui-component GroupBox panes separated by dividers ──
+            // ── Body: six gpui-component GroupBox panes in a 3×2 grid, separated
+            //    by dividers. Row 1: VM / Signals / Timeline. Row 2: Component Tree
+            //    / Logs (FLUX-060) / Network (FLUX-060). ──
             .child(
                 gpui::div()
                     .flex()
-                    .flex_row()
+                    .flex_col()
                     .flex_1()
                     .min_h(px(0.))
-                    .child(pane("VM Inspector", self.vm.clone(), cx))
-                    .child(Separator::vertical())
-                    .child(pane("Signals", self.signals.clone(), cx))
-                    .child(Separator::vertical())
-                    .child(pane("Component Tree", self.tree.clone(), cx))
-                    .child(Separator::vertical())
-                    .child(pane("Timeline", self.timeline.clone(), cx)),
+                    .child(
+                        gpui::div()
+                            .flex()
+                            .flex_row()
+                            .flex_1()
+                            .min_h(px(0.))
+                            .child(pane("VM Inspector", self.vm.clone(), cx))
+                            .child(Separator::vertical())
+                            .child(pane("Signals", self.signals.clone(), cx))
+                            .child(Separator::vertical())
+                            .child(pane("Timeline", self.timeline.clone(), cx)),
+                    )
+                    .child(Separator::horizontal())
+                    .child(
+                        gpui::div()
+                            .flex()
+                            .flex_row()
+                            .flex_1()
+                            .min_h(px(0.))
+                            .child(pane("Component Tree", self.tree.clone(), cx))
+                            .child(Separator::vertical())
+                            .child(pane("Logs", self.logs.clone(), cx))
+                            .child(Separator::vertical())
+                            .child(pane("Network", self.net.clone(), cx)),
+                    ),
             )
             // ── Bottom status bar ──
             .child(
@@ -178,13 +206,17 @@ impl Render for DevToolsRoot {
 
 /// Wraps a pane view in a gpui-component [`GroupBox`] (titled, bordered surface)
 /// whose body holds the view, so every panel reads as a distinct, polished
-/// surface instead of bare text.
+/// surface instead of bare text. The body is scrollable so long content
+/// (deep component trees, large log buffers) scrolls instead of overflowing
+/// into neighbouring panes.
 fn pane<E: Render + 'static>(title: &'static str, view: Entity<E>, _cx: &App) -> impl IntoElement {
-    GroupBox::new()
-        .title(title)
-        .flex_1()
-        .min_w(px(0.))
-        .child(gpui::div().flex_col().min_h(px(0.)).child(view))
+    GroupBox::new().title(title).flex_1().min_w(px(0.)).child(
+        gpui::div()
+            .flex_col()
+            .min_h(px(0.))
+            .overflow_scrollbar()
+            .child(view),
+    )
 }
 
 /// Launches the DevTools application.
@@ -212,13 +244,25 @@ pub fn run_app() -> anyhow::Result<()> {
         .context("building DevTools tokio runtime")?;
     let ingest_state = state.clone();
     rt.spawn(async move {
-        match connect(&format!("127.0.0.1:{DEFAULT_DEVTOOLS_PORT}")).await {
-            Ok(stream) => {
-                if let Err(e) = run_ingest_loop(stream, ingest_state).await {
-                    eprintln!("DevTools ingest loop ended: {e}");
+        // Reconnect forever: the dev server (and its host) come and go as the
+        // user edits / restarts `flux dev`. A single failed handshake or a
+        // dropped socket must not kill telemetry permanently — retry with a
+        // short backoff so the DevTools window reconnects on its own.
+        let addr = format!("127.0.0.1:{DEFAULT_DEVTOOLS_PORT}");
+        loop {
+            match connect(&addr).await {
+                Ok(stream) => {
+                    if let Err(e) = run_ingest_loop(stream, ingest_state.clone()).await {
+                        eprintln!("DevTools ingest loop ended: {e}");
+                    }
+                    // Socket closed: brief pause before reconnecting.
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                }
+                Err(e) => {
+                    eprintln!("DevTools failed to connect to dev server ({e}); retrying");
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                 }
             }
-            Err(e) => eprintln!("DevTools failed to connect to dev server: {e}"),
         }
     });
 

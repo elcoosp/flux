@@ -12,9 +12,9 @@
 //! red (over budget); within budget it is green. The bar width is the budget
 //! ratio on a linear scale so "looks full == at the limit" reads at a glance.
 
-use flux_perf_harness::{evaluate, Budgets, LatencyMs, MetricKind, MetricRecord, Scenario};
+use flux_perf_harness::{Budgets, LatencyMs, MetricKind, MetricRecord, Scenario, evaluate};
 
-use gpui::{px, AnyElement, Div, ParentElement, Styled};
+use gpui::{AnyElement, Div, ParentElement, Styled, px};
 
 use crate::row::{empty_row, into_any, kv_row};
 

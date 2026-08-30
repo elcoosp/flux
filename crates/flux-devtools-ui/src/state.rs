@@ -591,9 +591,7 @@ mod tests {
     fn ingest_perf_record_stores_parsed_metric_record() {
         // A `PerfRecord` telemetry event carries the verbatim `MetricRecord`
         // JSON; ingestion must parse it and expose it for the flamegraph.
-        use flux_perf_harness::{
-            LatencyMs, MetricKind, MetricRecord, MetricSample, Scenario,
-        };
+        use flux_perf_harness::{LatencyMs, MetricKind, MetricRecord, MetricSample, Scenario};
         let rec = MetricRecord::new(
             Scenario::AndroidDeclarativeDev,
             MetricKind::NodeMutation,
@@ -622,9 +620,7 @@ mod tests {
     fn handle_telemetry_perf_record_event_feeds_flamegraph() {
         // End-to-end through the public handle_telemetry path (the wire client
         // routes every event here). A PerfRecord event must populate perf_records.
-        use flux_perf_harness::{
-            LatencyMs, MetricKind, MetricRecord, MetricSample, Scenario,
-        };
+        use flux_perf_harness::{LatencyMs, MetricKind, MetricRecord, MetricSample, Scenario};
         let rec = MetricRecord::new(
             Scenario::LoopbackE2e,
             MetricKind::SaveToPhoton,

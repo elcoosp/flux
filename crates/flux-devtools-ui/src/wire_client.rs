@@ -201,6 +201,46 @@ mod tests {
         );
     }
 
+    #[test]
+    fn ingest_network_frame_feeds_network_log() {
+        // FLUX-060: an enriched telemetry frame carrying a NetworkRequest +
+        // NetworkResponse must reach DevToolsState's network log via the single
+        // ingest path, so the network inspector shows real HTTP traffic.
+        let events = vec![
+            TelemetryEvent::NetworkRequest {
+                request_id: 4,
+                method: "GET".to_string(),
+                url: "https://api.example.com/ping".to_string(),
+                body: None,
+                capability_id: 14,
+            },
+            TelemetryEvent::NetworkResponse {
+                request_id: 4,
+                status_code: 200,
+                latency_ms: 31,
+                body: Some("pong".to_string()),
+                result_kind: 1,
+            },
+        ];
+        let enriched: Vec<EnrichedTelemetryEvent> =
+            events.into_iter().map(enrich_telemetry).collect();
+        let frame = EnrichedTelemetryFrame {
+            version: flux_ir_serde::PROTOCOL_VERSION,
+            event_count: enriched.len() as u16,
+            events: enriched,
+        }
+        .to_bytes();
+
+        let state = DevToolsState::new();
+        let n = ingest_message(&state, &Message::Binary(frame.into()));
+        assert_eq!(n, 2);
+        let snap = state.network_snapshot();
+        assert_eq!(snap.len(), 1);
+        assert_eq!(snap[0].method, "GET");
+        assert_eq!(snap[0].status_code, Some(200));
+        assert_eq!(snap[0].latency_ms, Some(31));
+    }
+
     /// Proves the DevTools data path end-to-end without a display: a local
     /// WebSocket server emits one enriched telemetry frame; the client connects
     /// and the ingest loop feeds it into `DevToolsState`. This is the headless
