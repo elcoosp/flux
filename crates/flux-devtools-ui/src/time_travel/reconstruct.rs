@@ -224,6 +224,7 @@ mod tests {
                 height: w,
             }),
             source_span: None,
+            component_name: "Test".to_string(),
         }
     }
 
@@ -337,6 +338,7 @@ mod tests {
             mutation_kind: 1, // Remove
             frame: None,
             source_span: None,
+            component_name: "Test".to_string(),
         });
         let state = reconstruct_state(&ReconstructedState::base(), &events);
         assert_eq!(state.view_frames.len(), 1);

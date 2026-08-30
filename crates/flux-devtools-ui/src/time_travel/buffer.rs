@@ -108,6 +108,7 @@ mod tests {
                 height: 10.0,
             }),
             source_span: None,
+            component_name: "Test".to_string(),
         }
     }
 

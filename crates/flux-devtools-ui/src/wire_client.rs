@@ -152,6 +152,7 @@ mod tests {
                 parent_id: NodeId::from(0u32),
                 mutation_kind: 0,
                 frame: None,
+                component_name: "Test".to_string(),
             },
         ];
         let enriched: Vec<EnrichedTelemetryEvent> =

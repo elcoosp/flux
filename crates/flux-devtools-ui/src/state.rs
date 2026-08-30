@@ -251,6 +251,24 @@ impl DevToolsState {
     /// protocol to tag each event with its source host (ADR-0039 extension) —
     /// until then, events route to whatever host announced most recently.
     pub fn handle_telemetry(&self, event: EnrichedTelemetryEvent) {
+        let tag = match &event {
+            EnrichedTelemetryEvent::VmStep { .. } => "VmStep",
+            EnrichedTelemetryEvent::SignalWrite { .. } => "SignalWrite",
+            EnrichedTelemetryEvent::ViewMutation {
+                node_id,
+                component_name,
+                ..
+            } => {
+                eprintln!(
+                    "[DT-TEL] ViewMutation node={} name={:?}",
+                    node_id, component_name
+                );
+                "ViewMutation"
+            }
+            EnrichedTelemetryEvent::HandlerInvocation { .. } => "HandlerInvocation",
+            _ => "Other",
+        };
+        eprintln!("[DT-EVT] {} (active={:?})", tag, self.active_host_key());
         let key = self.active_host_key();
         {
             let mut sessions = self.sessions.write();

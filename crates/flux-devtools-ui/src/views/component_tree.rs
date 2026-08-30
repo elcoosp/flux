@@ -61,14 +61,20 @@ impl ComponentTreeView {
     /// (working) panes use: key = indented marker + node id, value = geometry.
     fn row(&self, node: &TreeNode, depth: usize) -> AnyElement {
         let label = match &node.frame.frame {
-            Some(rect) => format!(
-                "{}×{} @ ({}, {})",
-                rect.width, rect.height, rect.x, rect.y
-            ),
+            Some(rect) => format!("{}×{} @ ({}, {})", rect.width, rect.height, rect.x, rect.y),
             None => "(geometry pending)".to_string(),
         };
-        let marker = if node.children.is_empty() { "•" } else { "▾" };
-        let key = format!("{}{} node #{}", "  ".repeat(depth), marker, node.frame.node_id);
+        let marker = if node.children.is_empty() {
+            "•"
+        } else {
+            "▾"
+        };
+        let key = format!(
+            "{}{} node #{}",
+            "  ".repeat(depth),
+            marker,
+            node.frame.node_id
+        );
         into_any(kv_row(key, label))
     }
 
