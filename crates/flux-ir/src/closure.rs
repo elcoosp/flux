@@ -5,7 +5,7 @@
 //! — so a closure is just its bytecode plus the list of signals it reads or
 //! writes. The host `FluxBytecodeVM` evaluates it against the live signal graph.
 
-use flux_syntax::{HandlerId, SignalId, Span, TypeId};
+use flux_syntax::{HandlerId, SignalId, SourceExcerpt, Span, TypeId};
 
 /// The bytecode representation of a single handler body.
 ///
@@ -22,6 +22,9 @@ pub struct ClosureIR {
     pub captured_signals: Vec<SignalId>,
     /// Source span the handler was lowered from.
     pub span: Span,
+    /// Server-computed source excerpt for on-device diagnostics (ADR-0057).
+    /// `None` for runtime-generated closures (no source text).
+    pub excerpt: Option<SourceExcerpt>,
     /// Parameter types, in declaration order.
     pub param_types: Vec<TypeId>,
     /// Return type of the handler.
@@ -53,6 +56,7 @@ impl ClosureIR {
             bytecode,
             captured_signals,
             span,
+            excerpt: None,
             param_types: Vec::new(),
             return_type: TypeId::from(0u32),
         }

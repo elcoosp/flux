@@ -197,7 +197,9 @@ impl Backend for Swift {
             .iter()
             .map(|t| {
                 let value = match t.group {
-                    flux_codegen_core::primitives::TokenGroup::Color => format!("static let {} = {}", t.name, t.swift),
+                    flux_codegen_core::primitives::TokenGroup::Color => {
+                        format!("static let {} = {}", t.name, t.swift)
+                    }
                     _ => format!("static let {}: CGFloat = {}", t.name, t.swift),
                 };
                 value

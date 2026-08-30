@@ -531,8 +531,13 @@ impl<'a> Lowerer<'a> {
                 // `deps` carries the items-signal (list) so the host knows which
                 // signal to watch; `layout` carries `itemSlot` so the host knows
                 // which signal each row thunk reads for `item`.
-                self.builder
-                    .signal_metadata(id, collect_read_signals(&[items_expr], &self.signal_scope), None, Vec::new(), Some(item_slot));
+                self.builder.signal_metadata(
+                    id,
+                    collect_read_signals(&[items_expr], &self.signal_scope),
+                    None,
+                    Vec::new(),
+                    Some(item_slot),
+                );
                 Ok(Child::Node(id))
             }
             flux_parser::ExprKind::When {
