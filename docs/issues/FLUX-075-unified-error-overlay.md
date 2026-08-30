@@ -1,6 +1,6 @@
 ---
 id: FLUX-075
-status: in-progress
+status: done
 lane: LANE-O
 phase: "Phase 3"
 blocked_by:
@@ -99,4 +99,27 @@ mis-decode) per FLUX-050 / ADR-0056 — both decoders rewritten in this change.
 - Parity: both hosts consume the same `FluxError` shape and the same excerpt bytes.
 
 ## Status
-In progress — wire + both overlays implemented in this change.
+DONE — implemented and committed; verified on both platforms.
+
+- Unified `FluxError { kind, message, span?, excerpt?, callSites? }` with the
+  shared eight-value `FluxErrorKind` (`PARSE, TYPE, WIRE, VM, RUNTIME,
+  CAPABILITY, COMPILE, SERVER`) now lives in both hosts (real source:
+  `runtimes/android/app/src/main/kotlin/dev/flux/app/FluxError.kt`,
+  `runtimes/ios/FluxHost/Sources/FluxHost/FluxError.swift`) and is fed by a
+  single collapsed `FluxError` from VM faults + compile errors.
+- One visual spec (ADR-0057 §Design): severity by `kind`, full-bleed red for
+  fatal compile/server, dismissible bottom card for VM/wire/runtime, amber for
+  reconnect. Both hosts render `ErrorOverlay` / `CrashReporter` from the same
+  model with `path:line:col` + `^` caret snippet.
+- Wire keystone `SourceExcerpt` (ADR-0057) shipped in both `HandlerDef` and the
+  `Error` frame (protocol v2, fail-closed). Server computes it once at compile
+  time; hosts resolve `file_id → path` offline — no host round-trip.
+- Commits (this change): `1facd4f` wire/serde/syntax/differ v2 frames +
+  ADR-0057 excerpt; `aae0a57` ir/codegen-swift ClosureRef + error frame;
+  `3a8762f` devserver telemetry + replay; `f649a26` devtools-ui overlay;
+  `30ed9ec` android host FluxError + v2 decode alignment; `a660448` android app
+  CrashReporter + ErrorOverlay; `f137372` iOS FluxError + overlay; `eb70f9c`
+  issue + ADR-0057. Recorded in CHANGELOG.md `[Unreleased]`.
+- Verification: `./gradlew :runtimes:android:host:test` 163/0; iOS
+  `xcodebuild -scheme FluxApp` BUILD SUCCEEDED; `cargo nextest run --workspace`
+  597/597.
