@@ -105,6 +105,13 @@ public object PropsIndex {
     public val CHECKBOX_ENABLED: UShort = propIndexForName("enabled")
     public val CHECKBOX_LABEL: UShort = propIndexForName("label")
 
+    // FLUX-077 — `Toggle` (data-driven two-state control, FLUX-072). Same
+    // `value` + `enabled` contract as `Switch`; the handler prop is emitted as
+    // `onValueChange` by the `Toggle` compo (`examples/todo`, codegen bridge).
+    public val TOGGLE_VALUE: UShort = propIndexForName("value")
+    public val TOGGLE_ON_VALUE_CHANGE: UShort = propIndexForName("onValueChange")
+    public val TOGGLE_ENABLED: UShort = propIndexForName("enabled")
+
     public val SLIDER_VALUE: UShort = propIndexForName("value")
     public val SLIDER_ON_CHANGE: UShort = propIndexForName("onChange")
     public val SLIDER_MIN: UShort = propIndexForName("min")

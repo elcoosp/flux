@@ -42,6 +42,8 @@ public object FluxUiKit {
             AnimateAdapter.KIND to FluxAdapterFactory(AnimateAdapter::create),
             // FLUX-040 form primitives (PRD-N family).
             SwitchAdapter.KIND to FluxAdapterFactory(SwitchAdapter::create),
+            // FLUX-077 — `Toggle` (data-driven two-state control, FLUX-072).
+            ToggleAdapter.KIND to FluxAdapterFactory(ToggleAdapter::create),
             CheckboxAdapter.KIND to FluxAdapterFactory(CheckboxAdapter::create),
             SliderAdapter.KIND to FluxAdapterFactory(SliderAdapter::create),
             PickerAdapter.KIND to FluxAdapterFactory(PickerAdapter::create),
