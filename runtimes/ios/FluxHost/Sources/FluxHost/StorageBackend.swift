@@ -75,18 +75,24 @@ final class UserDefaultsStorageBackend: @unchecked Sendable, StorageBackend {
         let k = self.key(key)
         guard let value else {
             defaults.removeObject(forKey: k)
-            defaults.synchronize()
             return
         }
-        defaults.set(try? FluxValueJSON.encode(value), forKey: k)
-        // Flush so a separate `UserDefaults(suiteName:)` instance created later
-        // in the same process observes the write (proves true persistence).
-        defaults.synchronize()
+        do {
+            let encoded = try FluxValueJSON.encode(value)
+            defaults.set(encoded, forKey: k)
+        } catch {
+            FluxCrashReporter.shared.record(StorageError.encodeFailed(key: key, underlying: error))
+        }
     }
 
     func get(_ key: UInt32) -> FluxValue? {
         guard let data = defaults.data(forKey: self.key(key)) else { return nil }
-        return try? FluxValueJSON.decode(data)
+        do {
+            return try FluxValueJSON.decode(data)
+        } catch {
+            FluxCrashReporter.shared.record(StorageError.decodeFailed(key: key, underlying: error))
+            return nil
+        }
     }
 
     func entries() -> [UInt32: FluxValue] {
@@ -95,9 +101,12 @@ final class UserDefaultsStorageBackend: @unchecked Sendable, StorageBackend {
         for (k, v) in dict {
             guard k.hasPrefix(prefix),
                   let id = UInt32(k.dropFirst(prefix.count)),
-                  let data = v as? Data,
-                  let value = try? FluxValueJSON.decode(data) else { continue }
-            result[id] = value
+                  let data = v as? Data else { continue }
+            do {
+                result[id] = try FluxValueJSON.decode(data)
+            } catch {
+                FluxCrashReporter.shared.record(StorageError.decodeFailed(key: id, underlying: error))
+            }
         }
         return result
     }

@@ -11,7 +11,15 @@ enum FluxValueJSON {
     /// Encodes `value` to JSON `Data`.
     /// - Throws: `VmError.typeMismatch` if the value cannot be represented.
     static func encode(_ value: FluxValue) throws -> Data {
-        try JSONSerialization.data(withJSONObject: box(value))
+        let obj = box(value)
+        // `JSONSerialization` raises an *uncatchable* Obj-C exception on
+        // non-finite numbers (NaN / Infinity) instead of throwing. Guard
+        // up front so the caller's `do/catch` can observe the failure as a
+        // thrown `VmError` (FLUX-081) rather than crashing the host.
+        guard JSONSerialization.isValidJSONObject(obj) else {
+            throw VmError.typeMismatch(offset: 0)
+        }
+        return try JSONSerialization.data(withJSONObject: obj)
     }
 
     /// Decodes `value` from JSON `Data`.
