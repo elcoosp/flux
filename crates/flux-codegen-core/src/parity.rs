@@ -35,6 +35,8 @@ fn registry_covers_every_prelude_primitive() {
         "Grid",
         "Spacer",
         "SafeArea",
+        // PRD-N `ScrollView` (FLUX-056).
+        "ScrollView",
         // FLUX-040 form primitives (PRD-N family).
         "Switch",
         "Checkbox",
@@ -85,6 +87,8 @@ fn registry_has_no_unknown_entries() {
         "Grid",
         "Spacer",
         "SafeArea",
+        // PRD-N `ScrollView` (FLUX-056).
+        "ScrollView",
         // FLUX-040 form primitives (PRD-N family).
         "Switch",
         "Checkbox",

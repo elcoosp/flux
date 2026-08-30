@@ -442,6 +442,25 @@ const PRIMITIVES: &[PrimitiveSpec] = &[
         label_prop: None,
         presentation: None,
     },
+    // --- PRD-N `ScrollView` (FLUX-056) ---
+    // A scrollable viewport for a single scrollable child subtree. The
+    // `orientation` prop selects the scroll axis (`"vertical"` / `"horizontal"`,
+    // defaults to `"vertical"`); the host renders a native scroll view of that
+    // axis carrying the children. Both backends emit the platform scroll
+    // container (`ScrollView` on Kotlin, `ScrollView` on Swift); the dev adapter
+    // kits map it to the equivalent Android `verticalScroll`/`horizontalScroll`
+    // Compose modifier and iOS `UIScrollView`.
+    PrimitiveSpec {
+        flux_name: "ScrollView",
+        node_kind: NodeKind::Primitive,
+        kind: PrimitiveKind::Container,
+        kotlin_view: "ScrollView",
+        swift_view: "ScrollView",
+        primary_prop: None,
+        handler_prop: None,
+        label_prop: None,
+        presentation: None,
+    },
     // --- FLUX-040 form primitives (PRD-N family) ---
     // Each carries a `value` signal + `onChange` callback (same contract as
     // `TextField`). Native hosts map these registry names to their platform
@@ -803,5 +822,14 @@ const HOST_ADAPTERS: &[HostAdapterSpec] = &[
         flux_name: "Gesture",
         kotlin_adapter: Some("GestureAdapter"),
         swift_adapter: Some("GestureAdapter"),
+    },
+    // --- PRD-N `ScrollView` (FLUX-056) ---
+    // A scrollable viewport; the dev adapter kits map it to the platform scroll
+    // container carrying the children. Registered on both hosts (the parity
+    // guard requires the checked-in kits to contain exactly this set).
+    HostAdapterSpec {
+        flux_name: "ScrollView",
+        kotlin_adapter: Some("ScrollViewAdapter"),
+        swift_adapter: Some("ScrollViewAdapter"),
     },
 ];

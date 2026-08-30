@@ -161,6 +161,8 @@ pub(crate) fn prelude(supply: &mut Supply) -> Env {
         "Grid",
         "Spacer",
         "SafeArea",
+        // PRD-N `ScrollView` (FLUX-056).
+        "ScrollView",
         // FLUX-040 form primitives (PRD-N family).
         "Switch",
         "Toggle",

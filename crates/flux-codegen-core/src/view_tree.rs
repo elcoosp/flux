@@ -119,7 +119,7 @@ pub fn normalize_view_name(name: &str) -> String {
 pub fn is_container(name: &str) -> bool {
     matches!(
         name,
-        "Column" | "Row" | "VStack" | "HStack" | "ZStack" | "Stack" | "Provider"
+        "Column" | "Row" | "VStack" | "HStack" | "ZStack" | "Stack" | "Provider" | "ScrollView"
     )
 }
 
