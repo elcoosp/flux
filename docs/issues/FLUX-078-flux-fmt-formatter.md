@@ -1,10 +1,9 @@
 ---
 id: FLUX-078
-status: todo
+status: done
 lane: LANE-L
 phase: "Phase 1"
-blocked_by:
-  - ADR-0029
+blocked_by: []
 labels:
   - cli
   - dx
@@ -69,3 +68,28 @@ so it stays correct as the grammar grows (ADR-0029 is the only grammar surface).
 - A linter (`flux lint`) — separate concern; not required for 1.0 style stability.
 - Auto-fixing semantic issues (unused signals, type errors) — that is the LSP's
   job, not the formatter's.
+
+## Status / Verification
+
+Implemented and verified (FLUX-078 complete):
+
+- **Library**: pretty-printer lives in `crates/flux-parser/src/fmt/{mod,ty,expr,decl}.rs`
+  as a pure printer over the existing AST (no parser reinvention). Public API:
+  `flux_parser::format_ast`, `format_str`, `format_source` — importable by the
+  LSP for "format on save".
+- **CLI**: `flux fmt [--check] [<path>...]` wired into `flux-cli` (`Command::Fmt`
+  in `lib.rs` + `src/fmt.rs`). Write mode rewrites files in place only when they
+  differ; `--check` returns `Err` (CI non-zero exit) without modifying the file.
+- **Canonical rules**: 2-space indentation; `compo` bodies are indented blocks,
+  `fn`/`trait`/`capability` method bodies are braced blocks (matches the parser);
+  `state`/`derived` keywords re-emitted; `Call` with empty args + no trailing emits
+  `()` so it round-trips as `Call` not `Ident`; no intra-body blank lines (blank
+  lines only between top-level declarations); single trailing newline at EOF.
+- **Tests**: `cargo nextest run -p flux-parser -p flux-cli` → 96/96 pass, including
+  - 16 formatter tests (round-trip + idempotence, golden Appendix-B corpus
+    round-trips, unparseable-source rejection, prop-order preservation).
+  - 3 CLI integration tests (`fmt` rewrites in place; `--check` rejects a
+    non-canonical file *and* leaves it untouched; `--check` passes on canonical).
+- `cargo fmt` clean; `cargo clippy -p flux-parser --all-targets` clean on the new
+  `fmt` code (the only remaining workspace clippy warning is a pre-existing
+  `unnecessary_cast` in `flux-syntax/src/ids.rs`, unrelated to this issue).

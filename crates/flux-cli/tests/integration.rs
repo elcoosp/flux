@@ -216,3 +216,67 @@ fn lsp_rejects_non_flux_file() {
     let result = flux_cli::collect_lsp(&file, true);
     assert!(result.is_err(), "non-.flux file must be rejected");
 }
+
+/// `flux fmt` rewrites a non-canonical `.flux` file in place.
+#[tokio::test]
+async fn fmt_rewrites_unformatted_file() {
+    let dir = TempDir::new().expect("temp dir");
+    let file = dir.path().join("main.flux");
+    // Messy but valid: tab indentation, no canonical spacing.
+    std::fs::write(
+        &file,
+        "compo A\n\tstate x: Int = 1\n\tColumn {\n\t\tText(\"hi\")\n\t}\n",
+    )
+    .expect("write fixture");
+
+    run(Command::Fmt {
+        paths: vec![file.clone()],
+        check: false,
+    })
+    .await
+    .expect("fmt succeeds");
+
+    let formatted = std::fs::read_to_string(&file).expect("read back");
+    let expected = "compo A\n  state x: Int = 1\n  Column {\n    Text(\"hi\")\n  }\n";
+    assert_eq!(formatted, expected, "file was canonicalized in place");
+}
+
+/// `flux fmt --check` exits non-zero (returns `Err`) on a non-canonical file
+/// without modifying it — the CI gate contract (FLUX-078).
+#[tokio::test]
+async fn fmt_check_rejects_unformatted_file() {
+    let dir = TempDir::new().expect("temp dir");
+    let file = dir.path().join("main.flux");
+    let original = "compo A\n\tstate x: Int = 1\n\tColumn {\n\t\tText(\"hi\")\n\t}\n";
+    std::fs::write(&file, original).expect("write fixture");
+
+    let result = run(Command::Fmt {
+        paths: vec![file.clone()],
+        check: true,
+    })
+    .await;
+    assert!(result.is_err(), "check must fail on a non-canonical file");
+
+    // `--check` must not modify the file.
+    let after = std::fs::read_to_string(&file).expect("read back");
+    assert_eq!(after, original, "--check must not rewrite the file");
+}
+
+/// `flux fmt --check` passes (returns `Ok`) on an already-canonical file.
+#[tokio::test]
+async fn fmt_check_passes_on_canonical_file() {
+    let dir = TempDir::new().expect("temp dir");
+    let file = dir.path().join("main.flux");
+    std::fs::write(
+        &file,
+        "compo A\n  state x: Int = 1\n  Column {\n    Text(\"hi\")\n  }\n",
+    )
+    .expect("write fixture");
+
+    run(Command::Fmt {
+        paths: vec![file],
+        check: true,
+    })
+    .await
+    .expect("check passes on canonical file");
+}

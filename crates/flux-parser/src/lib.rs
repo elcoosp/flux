@@ -13,6 +13,7 @@
 
 pub mod ast;
 pub mod error;
+pub mod fmt;
 pub mod lexer;
 pub mod parser;
 
@@ -25,6 +26,16 @@ pub use ast::{
 pub use error::{Location, ParseError};
 pub use lexer::{LexError, Token, TokenKind, keyword_kind};
 pub use lexer::{lex, tokenize};
+
+/// Pretty-prints an [`Ast`] to canonical Flux source (FLUX-078 / `flux fmt`).
+///
+/// The LSP "format on save" and the `flux fmt` CLI both call this so styling
+/// decisions live in exactly one place.
+pub use fmt::format_ast;
+/// Parses `source` and pretty-prints it back to canonical Flux.
+pub use fmt::format_source;
+/// Convenience [`format_source`] wrapper using a synthetic `file_id` of `0`.
+pub use fmt::format_str;
 
 use crate::parser::parse_source;
 

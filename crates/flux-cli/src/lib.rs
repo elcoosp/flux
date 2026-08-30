@@ -22,6 +22,7 @@ mod build;
 mod dev;
 mod doc;
 mod doctor;
+mod fmt;
 mod init;
 mod lsp;
 mod sources;
@@ -112,6 +113,22 @@ pub enum Command {
         types: bool,
     },
 
+    /// Format one or more `.flux` files to canonical style (FLUX-078).
+    ///
+    /// With no path, reads `main.flux` in the project root. With `--check`, the
+    /// files are verified but not written; the process exits non-zero when any
+    /// file would change (for CI).
+    Fmt {
+        /// `.flux` files to format. Defaults to `main.flux` in the project root.
+        #[arg(default_value = "main.flux")]
+        paths: Vec<PathBuf>,
+
+        /// Verify canonical style without writing. Exit non-zero when a file would
+        /// change (for CI gating).
+        #[arg(long)]
+        check: bool,
+    },
+
     /// Emit a JSON schema of the stdlib API to stdout.
     Doc,
 
@@ -167,6 +184,7 @@ pub async fn run(command: Command) -> anyhow::Result<()> {
         } => dev::run(&root, &ws_host, ws_port, http_port, token).await,
         Command::Build { platform, root } => build::run(platform, &root),
         Command::Lsp { file, types } => lsp::run(&file, types),
+        Command::Fmt { paths, check } => fmt::run(&paths, check),
         Command::Doc => doc::run(),
         Command::Doctor => doctor::run(),
     }
