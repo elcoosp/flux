@@ -9,8 +9,8 @@
 //!    flux-rust-crate-dev skill's "GREEN ≠ CONFORMANT" gate).
 
 use flux_ir_serde::{
-    DebugCommand, DebugCommandFrame, EnrichedTelemetryEvent, FRAME_DEBUG_COMMAND, FRAME_TELEMETRY,
-    Rect, Registers, TelemetryEvent, TelemetryFrame,
+    DebugCommand, DebugCommandFrame, EnrichedTelemetryEvent, EnrichedTelemetryFrame,
+    FRAME_DEBUG_COMMAND, FRAME_TELEMETRY, Rect, Registers, TelemetryEvent, TelemetryFrame,
 };
 use flux_syntax::{EffectId, NodeId, SignalId, Span, Value};
 
@@ -64,6 +64,21 @@ fn sample_events() -> Vec<TelemetryEvent> {
             handler_id: 5,
             is_start: false,
             gas_used: Some(12),
+        },
+        // FLUX-060 network inspector: an outbound GET plus its resolved response.
+        TelemetryEvent::NetworkRequest {
+            request_id: 1,
+            method: "GET".to_string(),
+            url: "https://api.example.com/users".to_string(),
+            body: None,
+            capability_id: 14,
+        },
+        TelemetryEvent::NetworkResponse {
+            request_id: 1,
+            status_code: 200,
+            latency_ms: 42,
+            body: Some("{\"ok\":true}".to_string()),
+            result_kind: 1,
         },
     ]
 }
@@ -258,7 +273,81 @@ fn debug_command_request_snapshot_payload_is_minimal() {
     assert_eq!(bytes[12], 0x06, "RequestSnapshot tag");
 }
 
-// ── EnrichedTelemetryEvent is a value type (used by Phase 3/6) ──────────────
+// ── FLUX-060 network inspector: NetworkRequest / NetworkResponse codec ──────
+
+#[test]
+fn network_events_carry_expected_wire_tags() {
+    // D.12 telemetry event tags: VmStep=0x01 … HandlerInvocation=0x04,
+    // NetworkRequest=0x05, NetworkResponse=0x06, PerfRecord=0x07. The tags are
+    // the contract a host/DevTools pair must agree on, so assert them directly.
+    let req = TelemetryFrame {
+        version: flux_ir_serde::PROTOCOL_VERSION,
+        event_count: 1,
+        events: vec![TelemetryEvent::NetworkRequest {
+            request_id: 7,
+            method: "POST".to_string(),
+            url: "https://x.test/v1".to_string(),
+            body: Some("q=1".to_string()),
+            capability_id: 14,
+        }],
+    };
+    let bytes = req.to_bytes();
+    // event starts at offset 8 (after header + event_count), length at 8..12,
+    // tag at offset 12.
+    assert_eq!(bytes[12], 0x05, "NetworkRequest tag");
+
+    let resp = TelemetryFrame {
+        version: flux_ir_serde::PROTOCOL_VERSION,
+        event_count: 1,
+        events: vec![TelemetryEvent::NetworkResponse {
+            request_id: 7,
+            status_code: 404,
+            latency_ms: 9,
+            body: None,
+            result_kind: 2,
+        }],
+    };
+    let bytes = resp.to_bytes();
+    assert_eq!(bytes[12], 0x06, "NetworkResponse tag");
+}
+
+#[test]
+fn network_events_round_trip_enriched() {
+    // The DevTools consumes the *enriched* frame; the server attaches a span via
+    // enrich_with_span, which must NOT corrupt the network fields.
+    let raw = TelemetryEvent::NetworkRequest {
+        request_id: 3,
+        method: "GET".to_string(),
+        url: "https://api.test/me".to_string(),
+        body: None,
+        capability_id: 14,
+    };
+    let enriched = flux_ir_serde::enrich_with_span(raw.clone(), Some(Span::new(0, 2, 9)));
+    let frame = EnrichedTelemetryFrame {
+        version: flux_ir_serde::PROTOCOL_VERSION,
+        event_count: 1,
+        events: vec![enriched],
+    };
+    let bytes = frame.to_bytes();
+    let decoded = EnrichedTelemetryFrame::from_bytes(&bytes).expect("enriched network decodes");
+    match &decoded.events[0] {
+        EnrichedTelemetryEvent::NetworkRequest {
+            request_id,
+            method,
+            url,
+            capability_id,
+            source_span,
+            ..
+        } => {
+            assert_eq!(*request_id, 3);
+            assert_eq!(method, "GET");
+            assert_eq!(url, "https://api.test/me");
+            assert_eq!(*capability_id, 14);
+            assert_eq!(*source_span, Some(Span::new(0, 2, 9)));
+        }
+        other => panic!("expected NetworkRequest, got {other:?}"),
+    }
+}
 
 #[test]
 fn enriched_event_carries_source_span() {
@@ -290,4 +379,77 @@ fn enriched_event_carries_source_span() {
             ..
         }
     ));
+}
+
+/// FLUX-060 follow-up: the Android/iOS hosts emit `NetworkRequest`/`NetworkResponse`
+/// around the `Http` capability. This test pins the **exact** byte sequence those
+/// host encoders produce (generated from the identical `Telemetry.swift` /
+/// `Telemetry.kt` encode arms) so the Rust decoder (`TelemetryFrame::from_bytes`)
+/// agrees with the hosts byte-for-byte. If a host changes its encoding, this
+/// canonical array must change in lockstep — it is the wire contract.
+#[test]
+fn host_network_telemetry_decodes_to_network_events() {
+    // MAGIC(58 55 5c 46) version(02) kind(10) event_count(02 00)
+    // Event 1 = NetworkRequest(requestId=7 GET https://api.example.com/users, no body, cap=14)
+    // Event 2 = NetworkResponse(requestId=7 status=200 latency=42 body=`{"ok":true}` kind=1)
+    let bytes: &[u8] = &[
+        0x58, 0x55, 0x5c, 0x46, 0x02, 0x10, 0x02, 0x00, // header + event_count=2
+        // NetworkRequest event
+        0x2e, 0x00, 0x00, 0x00, // length prefix = 0x2e (46)
+        0x05, // tag
+        0x07, 0x00, 0x00, 0x00, // request_id = 7
+        0x03, 0x00, 0x47, 0x45, 0x54, // method = "GET" (len 3)
+        0x1d, 0x00, // url len = 29
+        0x68, 0x74, 0x74, 0x70, 0x73, 0x3a, 0x2f, 0x2f, 0x61, 0x70, 0x69, 0x2e, 0x65, 0x78, 0x61,
+        0x6d, 0x70, 0x6c, 0x65, 0x2e, 0x63, 0x6f, 0x6d, 0x2f, 0x75, 0x73, 0x65, 0x72, 0x73,
+        0x00, // no body
+        0x0e, 0x00, 0x00, 0x00, // capability_id = 14
+        // NetworkResponse event
+        0x1a, 0x00, 0x00, 0x00, // length prefix = 0x1a (26)
+        0x06, // tag
+        0x07, 0x00, 0x00, 0x00, // request_id = 7
+        0xc8, 0x00, // status_code = 200
+        0x2a, 0x00, 0x00, 0x00, // latency_ms = 42
+        0x01, // body present
+        0x0b, 0x00, // body len = 11
+        0x7b, 0x22, 0x6f, 0x6b, 0x22, 0x3a, 0x74, 0x72, 0x75, 0x65,
+        0x7d, // body = `{"ok":true}`
+        0x01, // result_kind = 1 (Ready)
+    ];
+    let frame = TelemetryFrame::from_bytes(bytes).expect("host network frame decodes");
+    assert_eq!(frame.event_count, 2);
+
+    match &frame.events[0] {
+        TelemetryEvent::NetworkRequest {
+            request_id,
+            method,
+            url,
+            body,
+            capability_id,
+        } => {
+            assert_eq!(*request_id, 7);
+            assert_eq!(method, "GET");
+            assert_eq!(url, "https://api.example.com/users");
+            assert_eq!(body, &None);
+            assert_eq!(*capability_id, 14);
+        }
+        other => panic!("expected NetworkRequest, got {other:?}"),
+    }
+
+    match &frame.events[1] {
+        TelemetryEvent::NetworkResponse {
+            request_id,
+            status_code,
+            latency_ms,
+            body,
+            result_kind,
+        } => {
+            assert_eq!(*request_id, 7);
+            assert_eq!(*status_code, 200);
+            assert_eq!(*latency_ms, 42);
+            assert_eq!(body.as_deref(), Some("{\"ok\":true}"));
+            assert_eq!(*result_kind, 1);
+        }
+        other => panic!("expected NetworkResponse, got {other:?}"),
+    }
 }
