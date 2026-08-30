@@ -37,13 +37,31 @@ related_adrs:
 
 The MLP primitives render, but the *language* cannot express a real app concisely. The To-Do example — meant to showcase the framework — is a slot-ladder workaround. The gaps are language/runtime, not example authoring, failures.
 
-### Verification note (must resolve before closing)
-FLUX-051 is marked **done** via ADR-0050, but the actual lower pass still emits an **empty** `Child::Splice`:
+### Verification note (re-grounded 2026-08-30)
 
-- `crates/flux-ir/src/lower/mod.rs:468` → `children: vec![Child::Splice { items: vec![] }]`
-- `crates/flux-vm-ref/src` has **no** list ops (`APPEND` / `LIST_GET` / `LIST_LEN` / `LIST_REMOVE` / `LIST_CLEAR`).
+The earlier claim that `ForEach` emits an empty `Child::Splice` and that the VM
+has no list ops is **stale** — the code has since landed:
 
-So ForEach is parsed and type-checked but does not yet carry data end-to-end. The closure text in FLUX-051 contradicts the code; this issue owns reconciling them.
+- `crates/flux-ir/src/lower/mod.rs:486` now lowers `ForEach` to a **real**
+  `Child::Splice` carrying `(key, child_id)` pairs (was `items: vec![]`).
+- `crates/flux-vm-ref/src/vm.rs` has `ListPush` / `ListInsert` / `ListRemove` /
+  `ListClear` / `ListRemoveItem` ops; `crates/flux-ir/src/lower/bytecode.rs`
+  emits `LIST_INSERT` etc.
+- The `$name` two-way binding sigil is resolved in the type checker
+  (`flux-types/src/checker.rs:897`) **and** emitted as a write-back in the
+  lowering pass (`flux-ir/src/lower/bytecode.rs:1104`). `examples/todo` uses
+  `$newTask` and compiles through the real `Pipeline`.
+
+So the data-driven core (records, `ForEach` by identity, `derived`, `$` two-way
+binding, `List` mutation) is **done end-to-end**. What genuinely remains before
+this issue can close:
+
+- **Parameterized `compo` typed props** — generic component instantiation exists
+  in `flux-ir/src/lower/mono.rs` but the `.flux` authoring surface + the
+  `examples/todo` rewrite to express `TaskRow(task: Task)` as a parameterized
+  component (instead of the current workaround) is unfinished.
+- The todo example still uses the pre-`FLUX-072` shape for some parts; rewrite to
+  the concise form once parameterized compo props land.
 
 ## Target: the example rewritten concisely
 
