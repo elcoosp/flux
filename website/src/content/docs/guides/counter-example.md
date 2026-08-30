@@ -3,17 +3,17 @@ title: The Counter example
 description: Walk through the canonical Flux counter — state, a bound Text, a Button tap — in dev and in both release codegen targets (SwiftUI and Jetpack Compose).
 ---
 
-This is the smallest interesting Flux program. It is the real file shipped at
-`examples/counter/main.flux`, and it is the shape the homepage playground's
-recorded trace is built from.
+This is the smallest interesting Flux program. It mirrors the real file shipped
+at `examples/counter/main.flux`, and the homepage playground's recorded trace is
+built from the same shape.
 
 ```flux
 compo Counter
-    $count: Int = 0
+  $count: Int = 0
 
-    Column gap: 8.0
-        Text text: "tapped {count} times"
-        Button text: "Increment", onClick: || { count = count + 1 }
+  Column gap: 8.0
+    Text text: "tapped {count} times"
+    Button text: "Increment", onPress: || { count = count + 1 }
 ```
 
 `flux build ios` on this exact file emits the Swift below; `flux build android`
@@ -22,19 +22,20 @@ emits the Kotlin. Both are reproducible — run them yourself from
 
 ## What each line means
 
-- `$count: Int = 0` — a mutable signal cell. The **host** owns `count`; the
-  server only ever sees its type and initial value. This is
-  [host-authoritative state](/concepts/host-authoritative-state/).
+- `$count: Int = 0` — a mutable signal cell (the `$` sigil marks it as a signal).
+  The **host** owns `count`; the server only ever sees its type and initial
+  value. This is [host-authoritative state](/concepts/host-authoritative-state/).
 - `Text(text: "tapped {count} times")` — interpolates the signal into a string
   literal. This node's `signal_deps` is exactly the id of `count`.
-- `Button(text: "Increment", onClick: || { count = count + 1 })` — registers a
-  handler closure whose body writes `count`. The closure is shipped to the host as
-  bytecode (Appendix D §D.8) and run in the host VM on tap.
+- `Button(text: "Increment", onPress: || { count = count + 1 })` — registers an
+  `onPress` handler closure (a `Handler` with no arguments) whose body writes
+  `count`. The closure is shipped to the host as bytecode (Appendix D §D.8) and
+  run in the host VM on tap.
 
 ## What happens on a tap
 
-1. The `onClick` closure runs in the host VM, executing
-   `READ_SIGNAL count` → `LOAD 1` → `ADD_I64` → `WRITE_SIGNAL count`.
+1. The `onPress` closure runs in the host VM, executing
+   `READ_SIGNAL count` → `LOAD_INT_CONST` → `ADD_I64` → `WRITE_SIGNAL count`.
 2. The VM reports the written signal id(s), sorted ascending, as the
    `signals` trace event.
 3. The host intersects those signals with each node's `signal_deps`: only the
@@ -54,10 +55,10 @@ the same IR to native source. Running `flux build ios` on the file above produce
 struct Counter: View {
     @State private var count: Int = 0
     var body: some View {
-  VStack(spacing: 8.0) {
+  VStack {
       Text("tapped \(count) times")
-      Button(action: {}) {
-          Text("")
+      Button(action: { count = (count + 1) }) {
+          Text("Increment")
       }
   }
     }
@@ -70,16 +71,16 @@ struct Counter: View {
 @Composable fun Counter(
 ) {
     var count by remember { mutableStateOf<Int>(0) }
-    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.0.dp)) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("tapped ${count} times")
-        Button(onClick = { }) {
-            Text("")
+        Button(onClick = { count = (count + 1) }) {
+            Text("Increment")
         }
     }
 }
 ```
 
-The `component` → `struct`/`@Composable`, `state` → `@State`/`remember {
+The `compo` → `struct`/`@Composable`, `$count` → `@State`/`remember {
 mutableStateOf }`, and `Column(gap:)` → `VStack(spacing:)` /
 `Column(spacedBy(...))` mappings are exactly the
 [Dev vs Release](/concepts/dev-vs-release/) contract. The two outputs are the same

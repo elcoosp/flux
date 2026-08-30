@@ -33,7 +33,7 @@ Esos ids escritos se vuelven el evento de traza `signals` (orden ascendente).
 
 Las variantes de punto flotante (`ADD_F64`, …) existen en la misma banda `0x2x`
 con el sufijo `F64`. El `count = count + 1` del contador compila a `READ_SIGNAL`,
-`LOAD 1`, `ADD_I64`, `WRITE_SIGNAL`.
+`LOAD_INT_CONST`, `ADD_I64`, `WRITE_SIGNAL`.
 
 ## Control de flujo y closures
 

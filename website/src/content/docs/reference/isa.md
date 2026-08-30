@@ -33,7 +33,7 @@ ids become the `signals` trace event (sorted ascending).
 
 Floating-point variants (`ADD_F64`, …) exist in the same `0x2x` band with the
 `F64` suffix. The counter's `count = count + 1` compiles to `READ_SIGNAL`,
-`LOAD 1`, `ADD_I64`, `WRITE_SIGNAL`.
+`LOAD_INT_CONST`, `ADD_I64`, `WRITE_SIGNAL`.
 
 ## Control flow & closures
 

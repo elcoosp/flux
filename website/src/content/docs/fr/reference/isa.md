@@ -33,7 +33,7 @@ Ces ids écrits deviennent l'événement de trace `signals` (triés ascendant).
 | `0x24` | `MOD_I64` | dst, a, b | `dst = a % b` |
 
 Les variantes flottantes (`ADD_F64`, …) existent dans la même bande `0x2x` avec le
-suffixe `F64`. Le `count = count + 1` du compteur compile en `READ_SIGNAL`, `LOAD 1`,
+suffixe `F64`. Le `count = count + 1` du compteur compile en `READ_SIGNAL`, `LOAD_INT_CONST`,
 `ADD_I64`, `WRITE_SIGNAL`.
 
 ## Flux de contrôle & closures

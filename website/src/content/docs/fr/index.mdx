@@ -23,16 +23,13 @@ import { getTranslation } from '../../../components/i18n-helper';
 
 export const i18n = getTranslation('fr');
 export const counterHex = (await import('../../../assets/traces/counter-init.hex?raw')).default;
-export const counterSrc = `component Counter {
-  state count: Int = 0
+export const counterSrc = `compo Counter
+  $count: Int = 0
 
-  Column(gap: 12) {
-    Text("Count: {count}")
-    Button(text: "Increment", onClick: {
-      count = count + 1
-    })
-  }
-}`;
+  Column gap: 12.0
+    Text text: "Count: {count}"
+    Button text: "Increment", onPress: || { count = count + 1 }
+`;
 export const counterTree = (await import('../../../assets/traces/counter-init-tree.json')).default;
 
 <CardGrid stagger>

@@ -31,11 +31,11 @@ output is a normal native app.
 
 <CardGrid>
   <Card title="SwiftUI" icon="seti:swift">
-    `component Counter` → `struct Counter: View`. `state` → `@State`.
+    `compo Counter` → `struct Counter: View`. `state` → `@State`.
     `Column(gap:)` → `VStack(spacing:)`.
   </Card>
   <Card title="Jetpack Compose" icon="seti:kotlin">
-    `component Counter` → `@Composable fun Counter()`. `state` →
+    `compo Counter` → `@Composable fun Counter()`. `state` →
     `remember { mutableStateOf(...) }`. `Column(gap:)` →
     `Column(verticalArrangement = spacedBy(...))`.
   </Card>
