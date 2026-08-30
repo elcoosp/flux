@@ -137,7 +137,16 @@ pub enum Command {
 
     /// Run an environment health check: toolchain, stdlib parse, wire protocol
     /// version, and (best-effort) connected devices/simulators (roadmap §5).
-    Doctor,
+    ///
+    /// Also runs the FLUX-091 local structural checks: approved-dependency
+    /// drift (AGENTS.md §1.3) and AGENTS.md rule violations (§1.2/§2.1/§2.2).
+    Doctor {
+        /// Exit non-zero when any advisory finding (dependency drift or an
+        /// AGENTS.md rule violation) is detected, so `flux doctor` can gate a
+        /// pre-commit hook. Environment probes stay advisory either way.
+        #[arg(long)]
+        strict: bool,
+    },
 }
 
 /// A native build target.
@@ -189,6 +198,6 @@ pub async fn run(command: Command) -> anyhow::Result<()> {
         Command::Lsp { file, types } => lsp::run(&file, types),
         Command::Fmt { paths, check } => fmt::run(&paths, check),
         Command::Doc => doc::run(),
-        Command::Doctor => doctor::run(),
+        Command::Doctor { strict } => doctor::run(strict),
     }
 }
