@@ -1,11 +1,14 @@
 //! `flux` — the Flux command-line interface (FLUX-022, spec §14.3).
 //!
-//! The binary exposes four subcommands:
+//! The binary exposes these subcommands:
 //!
 //! * `flux init <name>` — scaffold a new Flux project.
 //! * `flux dev [--root <path>]` — start the hot-reload dev server.
-//! * `flux build --platform ios|android [--root <path>]` — codegen the project.
+//! * `flux build --platform ios|android [--root <path>]` — codegen the project, then invoke the native toolchain (FLUX-068).
+//! * `flux fmt [<files>...] [--check]` — format `.flux` sources to canonical style (FLUX-078).
+//! * `flux lsp <file> [--types]` — parse + type-check diagnostics as JSON (FLUX-025).
 //! * `flux doc` — emit a JSON schema of the stdlib API.
+//! * `flux doctor` — environment health check.
 //!
 //! All errors are reported through [`anyhow`] at the binary boundary; library
 //! code returns `Result<_, anyhow::Error>` only and never panics.

@@ -16,16 +16,16 @@ views driven by a minimal VM and a reactive signal graph.
 
 ## Badges
 
-![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)
-![Rust](https://img.shields.io/badge/rust-nightly%20%7C%20edition%202024-orange.svg)
-![Crates](https://img.shields.io/badge/workspace-16%20crates-9cf)
-![Tests](https://img.shields.io/badge/runner-cargo%20nextest-brightgreen.svg)
-![Source](https://img.shields.io/badge/rust%20LOC-46k-9cf)
-![ADRs](https://img.shields.io/badge/ADRs-37%20%28MADR%29-blueviolet.svg)
-![Platforms](https://img.shields.io/badge/platforms-iOS%2016%2B%20%7C%20Android-purple.svg)
-![Rust CI](https://github.com/elcoosp/flux/actions/workflows/rust-check.yml/badge.svg)
-![iOS CI](https://github.com/elcoosp/flux/actions/workflows/ios-check.yml/badge.svg)
-![Android CI](https://github.com/elcoosp/flux/actions/workflows/android-check.yml/badge.svg)
+![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg?style=flat)
+![Rust](https://img.shields.io/badge/rust-nightly%20%7C%20edition%202024-orange.svg?style=flat)
+![Crates](https://img.shields.io/badge/workspace-16%20crates-9cf?style=flat)
+![Tests](https://img.shields.io/badge/runner-cargo%20nextest-brightgreen.svg?style=flat)
+![Source](https://img.shields.io/badge/rust%20LOC-51k-9cf?style=flat)
+![ADRs](https://img.shields.io/badge/ADRs-38%20%28MADR%29-blueviolet.svg?style=flat)
+![Platforms](https://img.shields.io/badge/platforms-iOS%2016%2B%20%7C%20Android-purple.svg?style=flat)
+![Rust CI](https://github.com/elcoosp/flux/actions/workflows/rust-check.yml/badge.svg?style=flat)
+![iOS CI](https://github.com/elcoosp/flux/actions/workflows/ios-check.yml/badge.svg?style=flat)
+![Android CI](https://github.com/elcoosp/flux/actions/workflows/android-check.yml/badge.svg?style=flat)
 
 ---
 
@@ -69,22 +69,14 @@ The three normative, versioned contracts are the **wire protocol** (Appendix D o
 contracts** (Appendix F). The `flux-devtools-ui` crate (a gpui desktop app,
 ADR-0041) renders live DevTools telemetry over the same wire.
 
-### Node identity — FNV-1a-32, not blake3
+### Node identity
 
-Node IDs are **FNV-1a-32** hashes computed by `flux_syntax::compute_node_id`
-(`crates/flux-syntax/src/ids.rs`). The input is the 25-byte buffer
-`(parent_id: u32, tag: u8, span.file_id: u32, span.start: u32, span.end: u32,
-key: u64)` — **never sequential**. Two tag families keep their IDs disjoint:
-
-- `ExprTag` (high bit clear, `0..=127`) for expression nodes.
-- `DeclTag` (high bit set, `0x80`, `128..=255`) for declaration nodes.
-
-A node lowered under the wrong family silently matches nothing, which is why the
-codegen node-ID bridge (`flux-codegen-*/bridge.rs`) threads the exact same family
-tag. IDs are **stable across edits where structure doesn't change**, so hot-swap
-preserves component state. `blake3` is used elsewhere in the toolchain — for
-content-addressing on the wire and prop/closure hashes in `flux-ir-serde` and
-`flux-ir` — but it is not the node-ID hash.
+Node IDs are stable, content-derived FNV-1a-32 hashes (never sequential) computed
+by `flux_syntax::compute_node_id`. Two tag families keep expression and
+declaration IDs disjoint so the codegen node-ID bridge
+(`flux-codegen-*/bridge.rs`) threads the exact same family tag. IDs are **stable
+across edits where structure doesn't change**, which is what lets hot-swap
+preserve component state.
 
 ### Prop indexing
 
@@ -147,15 +139,15 @@ flux/
 │   ├── flux-perf-harness/        # Render-perf benchmark harness (PRD-J, ADR-0048)
 │   └── flux-devtools-ui/         # gpui DevTools desktop (ADR-0041)
 ├── runtimes/                     # Host apps (Swift / Kotlin)
-│   ├── ios/                      # 47 Swift files (XcodeGen manifest, iOS 16.0 / Swift 6.0)
-│   └── android/                  # 65 Kotlin files (host = pure-JVM reactive core, app = shell)
+│   ├── ios/                      # SwiftUI/UIKit host (XcodeGen manifest, iOS 16.0 / Swift 6.0)
+│   └── android/                  # Jetpack Compose host (host = pure-JVM reactive core, app = shell)
 ├── adapters/                     # Platform adapter implementations (contract version 1)
 │   ├── ui-swift/
 │   └── ui-kotlin/
-├── stdlib/                       # 13 .flux standard-library components
+├── stdlib/                       # 28 .flux standard-library components
 ├── docs/
 │   ├── spec/                     # mlp-spec.md + mlp-appendices.md (A–G)
-│   └── adr/                      # 37 Architecture Decision Records (MADR), highest ADR-0057
+│   └── adr/                      # 38 Architecture Decision Records (MADR), highest ADR-0057
 ├── tests/                        # Integration + parity + ISA vectors
 └── website/                      # Astro documentation site
 ```
@@ -224,7 +216,8 @@ token during the `Hello` handshake (Appendix D §D.12.1) when exposed on a LAN.
 |---|---|
 | `flux init <name>` | Scaffold a new Flux project at `<name>/`. |
 | `flux dev [--root] [--ws-host] [--ws-port] [--http-port] [--token]` | Start the hot-reload dev server (WS `:7331`, HTTP `:7332` by default). |
-| `flux build --platform ios\|android [--root]` | Codegen the project to `platforms/<platform>/Generated/`. Detects `xcodebuild`/`gradle` but does not invoke them. |
+| `flux build --platform ios\|android [--root]` | Codegen the project to `platforms/<platform>/Generated/`, then invoke the native toolchain when present (FLUX-068); logs the manual build command in emit-only fallback. |
+| `flux fmt [<files>...] [--check]` | Format `.flux` sources to canonical style (FLUX-078). `--check` verifies without writing. |
 | `flux lsp <file> [--types]` | Emit parse + type-check diagnostics for a `.flux` file as JSON (FLUX-025). |
 | `flux doc` | Emit a JSON schema of the stdlib API to stdout. |
 | `flux doctor` | Environment health check: toolchain, stdlib parse, wire protocol version, best-effort connected devices/simulators. |
@@ -256,7 +249,7 @@ This repo follows a strict TDD + quality standard (see `AGENTS.md`):
 
 ## Continuous integration
 
-GitHub Actions guard `main` (13 workflows under `.github/workflows`):
+GitHub Actions guard `main` (12 workflows under `.github/workflows`):
 
 | Workflow | Purpose |
 |---|---|
@@ -281,7 +274,7 @@ GitHub Actions guard `main` (13 workflows under `.github/workflows`):
   [`docs/spec/mlp-appendices.md`](docs/spec/mlp-appendices.md) (grammar, IR
   schema, wire protocol, VM ISA, adapter contracts, glossary — Appendices A–G).
 - **Agent manual:** [`AGENTS.md`](AGENTS.md) — the law of the land for contributors.
-- **Decisions:** [`docs/adr/`](docs/adr/) — 37 MADR records (highest ADR-0057).
+- **Decisions:** [`docs/adr/`](docs/adr/) — 38 MADR records (highest ADR-0057).
 - **Docs site:** [`website/`](website/) — Astro source (`pnpm install && pnpm dev`).
 
 ---
@@ -308,5 +301,5 @@ Licensed under **Apache-2.0** (see the top-level `LICENSE` file and
 ---
 
 <p align="center">
-  <sub>Flux — write once, render native. 566 commits · 16 crates · 37 ADRs · built on <code>main</code>.</sub>
+  <sub>Flux — write once, render native. 633 commits · 16 crates · 38 ADRs · built on <code>main</code>.</sub>
 </p>
