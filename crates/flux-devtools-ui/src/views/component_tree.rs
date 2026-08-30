@@ -4,12 +4,15 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use gpui::{
-    AnyElement, ClickEvent, Context, Entity, InteractiveElement, IntoElement, Render, Window,
+    prelude::*, px, AnyElement, ClickEvent, Context, ElementId, Entity, InteractiveElement,
+    IntoElement, Render, Window,
 };
+use gpui_component::ActiveTheme as _;
 
 use crate::row::{empty_row, into_any, kv_row, rows_column};
 use crate::state::DevToolsState;
 use crate::time_travel::ViewFrame;
+use gpui_component::button::Button;
 
 /// A node in the reconstructed component tree (parent links resolved).
 struct TreeNode {
@@ -54,6 +57,37 @@ impl ComponentTreeView {
         cx.notify();
     }
 
+    /// Collapses or expands every branch in the tree (used by the header
+    /// "Toggle all" button). If any branch is currently expanded it collapses
+    /// all of them; otherwise it expands all.
+    fn toggle_all(&mut self, cx: &mut Context<'_, Self>) {
+        eprintln!("[DT-COLLAPSE] toggle_all called");
+        let tree = self.tree();
+        let mut branches: Vec<u32> = Vec::new();
+        fn collect(nodes: &[TreeNode], out: &mut Vec<u32>) {
+            for n in nodes {
+                if !n.children.is_empty() {
+                    out.push(n.frame.node_id);
+                    collect(&n.children, out);
+                }
+            }
+        }
+        collect(&tree, &mut branches);
+        let any_expanded = branches.iter().any(|id| !self.collapsed.contains(id));
+        for id in &branches {
+            if any_expanded {
+                self.collapsed.insert(*id);
+            } else {
+                self.collapsed.remove(id);
+            }
+        }
+        eprintln!(
+            "[DT-COLLAPSE] toggle_all -> {} branches, collapsed={any_expanded}",
+            branches.len()
+        );
+        cx.notify();
+    }
+
     /// Reconstructs the nested tree from the flat `view_frames` (parent links).
     fn tree(&self) -> Vec<TreeNode> {
         let live = self.state.live.read().clone();
@@ -87,8 +121,9 @@ impl ComponentTreeView {
 
     /// A single tree row. Branches (`has_children`) get a `▾`/`▸` chevron that
     /// flips with the collapsed state; leaves get a `•`. Clicking a branch row
-    /// (closure captures the node id + this entity) toggles its children.
-    fn row(&self, node: &TreeNode, depth: usize, this: Entity<Self>) -> AnyElement {
+    /// (closure captures the node id + this entity) toggles its children. Hover
+    /// tints the row with the theme's `muted` color.
+    fn row(&self, node: &TreeNode, depth: usize, this: Entity<Self>, cx: &Context<'_, Self>) -> AnyElement {
         let has_children = !node.children.is_empty();
         let is_collapsed = self.collapsed.contains(&node.frame.node_id);
         let chevron = if !has_children {
@@ -114,18 +149,20 @@ impl ComponentTreeView {
             name,
             node.frame.node_id
         );
-        let mut row = kv_row(key, geo);
+        let node_id = node.frame.node_id;
+        let mut row = kv_row(key, geo).id(ElementId::from(format!("ct-row-{node_id}")));
         if has_children {
-            let node_id = node.frame.node_id;
-            // `on_click` is provided by `StatefulInteractiveElement` (via
-            // `interactivity()`) in this gpui pin — not as an inherent `Div`
-            // method. `gpui::prelude::*` brings the trait into scope.
-            row.interactivity()
-                .on_click(move |_event: &ClickEvent, _window, cx| {
-                    this.update(cx, |this, cx| this.toggle(node_id, cx));
-                });
+            // Give the row a stable element id so it becomes a `Stateful<Div>`,
+            // which implements `StatefulInteractiveElement` and thus has a
+            // working `.on_click(...)`. (Calling `Div::interactivity().on_click`
+            // discards the listener and never fires — the `Button` component
+            // uses this `Stateful` pattern, which is what actually works.)
+            row = row.on_click(move |_event: &ClickEvent, _window, cx| {
+                this.update(cx, |this, cx| this.toggle(node_id, cx));
+            });
         }
-        into_any(row)
+        let hover_bg = cx.theme().muted;
+        into_any(row.hover(|s| s.bg(hover_bg)))
     }
 
     fn render_tree(
@@ -133,19 +170,20 @@ impl ComponentTreeView {
         nodes: &[TreeNode],
         depth: usize,
         this: Entity<Self>,
+        cx: &Context<'_, Self>,
         out: &mut Vec<AnyElement>,
     ) {
         for n in nodes {
-            out.push(self.row(n, depth, this.clone()));
+            out.push(self.row(n, depth, this.clone(), cx));
             let is_collapsed = self.collapsed.contains(&n.frame.node_id);
             if !n.children.is_empty() && !is_collapsed {
-                self.render_tree(&n.children, depth + 1, this.clone(), out);
+                self.render_tree(&n.children, depth + 1, this.clone(), cx, out);
             }
         }
     }
 
     /// Renders the view as a standalone pane.
-    pub fn render_pane(&mut self, this: Entity<Self>) -> AnyElement {
+    pub fn render_pane(&mut self, this: Entity<Self>, cx: &Context<'_, Self>) -> AnyElement {
         let tree = self.tree();
         if tree.is_empty() {
             return into_any(empty_row("No layout frames received yet."));
@@ -158,14 +196,36 @@ impl ComponentTreeView {
             eprintln!("[DT-TREE] populated roots={} nodes={}", tree.len(), total);
         }
         let mut rows: Vec<AnyElement> = Vec::new();
-        self.render_tree(&tree, 0, this, &mut rows);
-        into_any(rows_column(rows))
+        self.render_tree(&tree, 0, this.clone(), cx, &mut rows);
+        // Header with a real button (proves the click path works independent of
+        // row-level hit-testing) that collapses/expands every branch at once.
+        let header = gpui::div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .mt(px(6.))
+            .child(
+                Button::new("ct-toggle-all")
+                    .label("Toggle all")
+                    .ml(px(8.))
+                    .px(px(12.))
+                    .py(px(6.))
+                    .h_auto()
+                    .text_sm()
+                    .on_click(move |_event: &ClickEvent, _window, cx| {
+                        this.update(cx, |this, cx| this.toggle_all(cx));
+                    }),
+            );
+        let mut content: Vec<AnyElement> = Vec::new();
+        content.push(into_any(header));
+        content.push(into_any(rows_column(rows)));
+        into_any(rows_column(content))
     }
 }
 
 impl Render for ComponentTreeView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
-        self.render_pane(cx.entity())
+        self.render_pane(cx.entity(), cx)
     }
 }
 

@@ -190,6 +190,10 @@ pub struct DevToolsState {
     /// `PerfRecord` telemetry events, in arrival order. This is the backing
     /// store the timeline/flamegraph view renders. Bounded like the timeline.
     pub perf_records: RwLock<Vec<MetricRecord>>,
+    /// The timeline index the user is currently scrubbing to via the time-travel
+    /// slider (`None` = live edge). Shared so other panes can reflect the
+    /// scrubbed state (FLUX-062 time-travel UX).
+    pub scrub_index: RwLock<Option<usize>>,
 }
 
 impl DevToolsState {
@@ -206,7 +210,21 @@ impl DevToolsState {
             sessions: RwLock::new(BTreeMap::new()),
             active: RwLock::new(None),
             perf_records: RwLock::new(Vec::new()),
+            scrub_index: RwLock::new(None),
         }
+    }
+
+    /// The timeline index the time-travel slider is currently scrubbed to, or
+    /// `None` when following the live edge.
+    #[must_use]
+    pub fn scrub_index(&self) -> Option<usize> {
+        *self.scrub_index.read()
+    }
+
+    /// Sets the time-travel scrub index (`None` returns to the live edge) and
+    /// notifies so every pane repaints to the scrubbed state.
+    pub fn set_scrub_index(&self, index: Option<usize>) {
+        *self.scrub_index.write() = index;
     }
 
     /// Records the identity of the host now streaming telemetry.
