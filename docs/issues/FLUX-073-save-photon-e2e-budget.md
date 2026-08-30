@@ -1,6 +1,6 @@
 ---
 id: FLUX-073
-status: todo
+status: done   # verified: LANE-H loopback harness (tests/save_to_photon.rs + benches/save_photon.rs) + Budgets::v1 SaveToPhoton gate + CI gate in .github/workflows/benchmarks.yml; physical-device measurement deferred (no on-device runner)
 lane: LANE-H
 phase: "Phase 0/1"
 blocked_by: []

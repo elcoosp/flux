@@ -1,6 +1,6 @@
 ---
 id: FLUX-029
-status: todo
+status: done   # verified: incremental didChange + debounced re-analysis landed (crates/flux-lsp/src/lib.rs did_change; util.rs apply_incremental_change)
 lane: LANE-O
 phase: "Phase 3"
 blocked_by:

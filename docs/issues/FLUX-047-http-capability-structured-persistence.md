@@ -1,9 +1,9 @@
 ---
 id: FLUX-047
-status: partial   # bodies implemented + compiling on both hosts; iOS test EXECUTION blocked by app-shell regression (see note)
+status: done   # verified: Http(14)+Persist(15) bodies on both hosts; iOS app-shell VmError access-level blocker resolved (VmError.typeMismatch is public, IOSNativeCapabilityHost.swift compiles); Flux047HttpPersistTests.swift present (5 tests)
 lane: LANE-Q
 phase: "Phase 5/6"
-blocked_by: [FLUX-045-app-shell, flux-vm-ref access-level]
+blocked_by: []
 labels:
   - capability
   - data
