@@ -42,6 +42,36 @@ class FormGestureAdapterTest {
         assertEquals(true, view.getProperty(SwitchAdapter.PROP_ENABLED))
     }
 
+    // --- Toggle (FLUX-077) ---
+
+    @Test
+    fun `toggle adapter pushes value and binds onValueChange`() {
+        val adapter = ToggleAdapter.create()
+        val view = adapter.create(3u)
+        adapter.update(view, propsOf(PropsIndex.TOGGLE_VALUE to FluxValue.Bool(true)))
+        assertEquals(true, view.getProperty(ToggleAdapter.PROP_VALUE))
+
+        val executor = FluxExecutorFake()
+        adapter.bindHandler(
+            view,
+            propsOf(PropsIndex.TOGGLE_ON_VALUE_CHANGE to FluxValue.HandlerRef(15u)),
+            WeakReference(executor),
+        )
+        val bound = view.getProperty(ToggleAdapter.PROP_EXECUTOR) as WeakReference<FluxExecutor>
+        bound.get()?.dispatch(HandlerEvent(view.getProperty(ToggleAdapter.PROP_HANDLER) as UInt, FluxValue.Bool(false)))
+        assertEquals(listOf(HandlerEvent(15u, FluxValue.Bool(false))), executor.events)
+    }
+
+    @Test
+    fun `toggle adapter reflects enabled flag`() {
+        val adapter = ToggleAdapter.create()
+        val view = adapter.create(2u)
+        adapter.update(view, propsOf(PropsIndex.TOGGLE_ENABLED to FluxValue.Bool(false)))
+        assertEquals(false, view.getProperty(ToggleAdapter.PROP_ENABLED))
+        adapter.update(view, propsOf(PropsIndex.TOGGLE_ENABLED to FluxValue.Bool(true)))
+        assertEquals(true, view.getProperty(ToggleAdapter.PROP_ENABLED))
+    }
+
     // --- Checkbox (FLUX-040) ---
 
     @Test
@@ -240,7 +270,7 @@ class FormGestureAdapterTest {
 
     @Test
     fun `kit registers every FLUX-040 and FLUX-041 kind`() {
-        for (kind in listOf("switch", "checkbox", "slider", "picker", "datepicker", "textarea", "gesture")) {
+        for (kind in listOf("switch", "toggle", "checkbox", "slider", "picker", "datepicker", "textarea", "gesture")) {
             val adapter = FluxUiKit.adapterFor(kind)
             assertEquals(true, adapter != null, "kind $kind must resolve to an adapter")
             assertEquals(kind, adapter?.kind)
