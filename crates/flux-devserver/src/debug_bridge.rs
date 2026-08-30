@@ -113,6 +113,9 @@ pub struct DevToolsRouter {
     host_announce: Vec<mpsc::UnboundedSender<HostAnnounceFrame>>,
     /// Where host-bound `DebugCommand`s are forwarded.
     host_command: mpsc::UnboundedSender<DebugCommand>,
+    /// The most recent enriched telemetry batch, replayed to DevTools clients
+    /// that subscribe after it was emitted (snapshot-on-connect, FLUX-039).
+    last_enriched: Vec<EnrichedTelemetryEvent>,
 }
 
 impl DevToolsRouter {
@@ -124,7 +127,15 @@ impl DevToolsRouter {
             devtools: Vec::new(),
             host_announce: Vec::new(),
             host_command,
+            last_enriched: Vec::new(),
         }
+    }
+
+    /// Returns the most recent enriched telemetry batch for replay to a freshly
+    /// subscribed DevTools client (snapshot-on-connect, FLUX-039).
+    #[must_use]
+    pub fn replay_last(&self) -> Vec<EnrichedTelemetryEvent> {
+        self.last_enriched.clone()
     }
 
     /// Registers a new DevTools client and returns its event receiver.
@@ -162,6 +173,12 @@ impl DevToolsRouter {
     /// Returns the number of clients reached.
     pub fn route_telemetry(&mut self, event: &TelemetryEvent) -> usize {
         let enriched = enrich(event, &self.source_map);
+        // Cache the last enriched batch so a freshly-connected DevTools client
+        // can replay the current tree without waiting for the next mutation.
+        self.last_enriched.push(enriched.clone());
+        if self.last_enriched.len() > 1024 {
+            self.last_enriched.drain(0..self.last_enriched.len() - 1024);
+        }
         let mut reached = 0;
         self.devtools.retain(|tx| match tx.send(enriched.clone()) {
             Ok(()) => {
@@ -212,10 +229,29 @@ pub async fn serve_devtools(
         // stream. Dropped connections are pruned by `route_telemetry`.
         let mut sub_rx = router.lock().subscribe_devtools();
         let mut host_rx = router.lock().subscribe_host_announce();
+        // Replay the most recent telemetry batch so a freshly-connected DevTools
+        // shows the current tree immediately (snapshot-on-connect, FLUX-039).
+        let replay = router.lock().replay_last();
         // Outbound: enriched telemetry events AND host-identity frames share a
         // single sink (a `SplitSink` is not `Clone`, so we `select!` over both
         // receivers in one task that owns `writer`).
         tokio::spawn(async move {
+            for event in replay {
+                let frame = EnrichedTelemetryFrame {
+                    version: flux_ir_serde::PROTOCOL_VERSION,
+                    event_count: 1,
+                    events: vec![event],
+                };
+                if writer
+                    .send(tokio_tungstenite::tungstenite::Message::Binary(
+                        frame.to_bytes().into(),
+                    ))
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+            }
             loop {
                 tokio::select! {
                     event = sub_rx.recv() => {

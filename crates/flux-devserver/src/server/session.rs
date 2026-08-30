@@ -122,13 +122,20 @@ async fn handle_host_frame(bytes: &[u8], shared: &Arc<Shared>) -> Vec<Vec<u8>> {
         Some(flux_ir_serde::FRAME_TELEMETRY) => {
             match flux_ir_serde::TelemetryFrame::from_bytes(bytes) {
                 Some(frame) => {
+                    eprintln!("[SRV-TEL] host telemetry: {} events", frame.events.len());
                     for event in &frame.events {
                         shared.devtools_router.lock().route_telemetry(event);
                     }
                     Vec::new()
                 }
                 None => {
-                    tracing::warn!("malformed telemetry frame from host");
+                    let hex: Vec<String> =
+                        bytes.iter().take(80).map(|b| format!("{b:02x}")).collect();
+                    eprintln!(
+                        "[SRV-TEL] MALFORMED telemetry frame from host (len={}): {}",
+                        bytes.len(),
+                        hex.join(" ")
+                    );
                     Vec::new()
                 }
             }
