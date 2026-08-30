@@ -75,6 +75,8 @@ public fun FluxRoot(session: FluxSession) {
             rootNode != null -> FluxTreeView(
                 node = rootNode,
                 routerVersion = frameVersion,
+                imageCache = session.imageCache,
+                assetBaseUrl = session.assetBaseUrl,
                 onButtonClick = { handlerId -> executor.dispatch(dev.flux.ui.HandlerEvent(handlerId)) },
                 onTextChange = { handlerId, value ->
                     executor.dispatch(dev.flux.ui.HandlerEvent(handlerId, dev.flux.ui.FluxValue.Str(value)))
