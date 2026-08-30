@@ -16,7 +16,7 @@ use ahash::AHashMap;
 use flux_syntax::{Child, ClosureRef, ComponentId, HandlerId, NodeId, SignalId, Span};
 use flux_syntax::{NodeKind, Props, StringTable, Value};
 
-use crate::builder::Node;
+use crate::builder::{ArenaBuilder, Node};
 use crate::closure::ClosureIR;
 
 /// A packed reactive tree.
@@ -614,6 +614,217 @@ fn hash_children(children: &[Child]) -> u64 {
     accumulator
 }
 
+impl IRArena {
+    /// Remaps every node id in this arena to a **content-addressed** id (FLUX-074,
+    /// item A).
+    ///
+    /// The final id for a node is derived from its structural content — its wire
+    /// `kind`, its `component_id`, its prop *value* hash, its children's content
+    /// hashes (computed bottom-up), its position among its parent's children, and its
+    /// parent's own content id — and ignores source spans. Because the parent/position
+    /// are unchanged by a pure text-above edit (which only shifts spans, never
+    /// content or structure), a node whose source moved but whose content is identical
+    /// keeps its id. That is what lets its view instance survive a hot reload instead
+    /// of being torn down and rebuilt (FLUX-074, the roast's core ask).
+    ///
+    /// `span` is retained for diagnostics; only the *identity* changes. Every other
+    /// field (props, handlers, closure table, string table) is preserved, and the
+    /// ADR-0027 signal-graph side-tables (`signal_deps`/`prop_thunk`/`prop_layout`/
+    /// `item_slot`) are re-keyed under the new ids so they stay attached to the same
+    /// node.
+    ///
+    /// The computation is acyclic in two passes: a bottom-up pass assigns a
+    /// *local* content id (parent-independent), then a top-down pass mixes in the
+    /// parent's final id and the child's position to break sibling collisions while
+    /// Returns the `old_id → content_addressed_id` mapping so callers that keep
+    /// node-id-keyed state outside the arena (e.g. the devserver's
+    /// `prop_thunks` table) can re-key it in lockstep.
+    pub fn content_address(&mut self) -> AHashMap<NodeId, NodeId> {
+        let ids: Vec<NodeId> = self.all_ids().collect();
+
+        // 1. Discover each node's parent (a Flux reactive tree is a tree, not a DAG:
+        //    every node has at most one parent). Roots have no parent → parent id 0.
+        let mut parent_of: AHashMap<NodeId, Option<NodeId>> = AHashMap::new();
+        for &id in &ids {
+            parent_of.insert(id, None);
+        }
+        for &id in &ids {
+            if let Some(view) = self.get(id) {
+                for child in view.children() {
+                    for cid in child.node_ids() {
+                        parent_of.insert(cid, Some(id));
+                    }
+                }
+            }
+        }
+
+        // 2. Bottom-up pass: a parent-independent *local* content id per node, derived
+        //    from its own content and its children's local ids (recursive, acyclic).
+        let mut local_ids: AHashMap<NodeId, NodeId> = AHashMap::with_capacity(ids.len());
+        for &id in &ids {
+            compute_local_id(&mut local_ids, self, id);
+        }
+
+        // 3. Top-down pass: mix the parent's final id + this node's position into the
+        //    final id. Parent is assigned before child, so this never cycles. Roots get
+        //    parent id 0 and position 0.
+        let mut final_ids: AHashMap<NodeId, NodeId> = AHashMap::with_capacity(ids.len());
+        let roots: Vec<NodeId> = ids
+            .iter()
+            .copied()
+            .filter(|id| parent_of.get(id).copied().flatten().is_none())
+            .collect();
+        for root in roots {
+            assign_final_id(0, 0, root, &local_ids, &mut final_ids, self);
+        }
+
+        // 4. Rebuild a fresh arena with remapped ids and remapped child references.
+        let mut builder = ArenaBuilder::new();
+        for &id in &ids {
+            let view = match self.get(id) {
+                Some(v) => v,
+                None => continue,
+            };
+            let new_id = final_ids[&id];
+            let new_children = remap_children(&view.children(), &final_ids);
+            builder.pack(Node {
+                id: new_id,
+                kind: view.kind(),
+                component_id: view.component_id(),
+                props: view.props(),
+                children: new_children,
+                handlers: view.handlers(),
+                span: view.span(),
+            });
+        }
+        let mut new_arena = builder.finish();
+        // `content_address` remaps node ids but must preserve the interning
+        // table — literal strings are content, not structure, and the wire
+        // `Init` frame (Appendix D §D.12.2) ships the full string table so the
+        // host can resolve literal ids. `ArenaBuilder::new()` starts with an
+        // empty table, so carry the original over explicitly.
+        new_arena = new_arena.with_string_table(self.string_table().clone());
+
+        // 5. Re-attach closures and ADR-0027 signal metadata under the new ids.
+        for c in self.closures.values() {
+            new_arena.add_closure(c.clone());
+        }
+        for &id in &ids {
+            let new_id = final_ids[&id];
+            let deps = self.signal_deps_of(id).to_vec();
+            let thunk = self.prop_thunk_of(id).cloned();
+            let layout = self.prop_layout_of(id).to_vec();
+            let item_slot = self.item_slot_of(id);
+            new_arena.set_signal_metadata(new_id, deps, thunk, layout, item_slot);
+        }
+
+        // 6. Swap the rebuilt arena into `self`.
+        *self = new_arena;
+        final_ids
+    }
+}
+
+/// Bottom-up memoised computation of a node's *local* content id.
+///
+/// The local id folds the node's kind/component_id/prop hash and the local ids of
+/// its children (resolved recursively first), but NOT its parent or position — so
+/// identical subtrees share a local id. The top-down pass turns local ids into
+/// final, position-disambiguated ids.
+fn compute_local_id(local: &mut AHashMap<NodeId, NodeId>, arena: &IRArena, id: NodeId) -> NodeId {
+    if let Some(&cached) = local.get(&id) {
+        return cached;
+    }
+    let view = arena
+        .get(id)
+        .expect("node present during content addressing");
+    let remapped_children: Vec<Child> = view
+        .children()
+        .iter()
+        .map(|child| match child {
+            Child::Node(cid) => Child::Node(compute_local_id(local, arena, *cid)),
+            Child::Splice { items } => Child::Splice {
+                items: items
+                    .iter()
+                    .map(|(k, cid)| (*k, compute_local_id(local, arena, *cid)))
+                    .collect(),
+            },
+            other => other.clone(),
+        })
+        .collect();
+    let children_hash = hash_children(&remapped_children);
+    let local_id = flux_syntax::content_addressed_id(
+        0,
+        view.kind().tag(),
+        view.component_id(),
+        view.props_hash(),
+        children_hash,
+        None,
+    );
+    local.insert(id, local_id);
+    local_id
+}
+
+/// Top-down assignment of a node's *final* content id by mixing in its parent's
+/// final id and its own position (index among the parent's children, or the
+/// `ForEach` splice key for spliced items).
+///
+/// Runs parent-before-child, so `parent_final` is always already known — the
+/// recursion never revisits the parent and therefore cannot cycle.
+fn assign_final_id(
+    parent_final: NodeId,
+    position: u64,
+    id: NodeId,
+    local: &AHashMap<NodeId, NodeId>,
+    final_ids: &mut AHashMap<NodeId, NodeId>,
+    arena: &IRArena,
+) {
+    let view = arena
+        .get(id)
+        .expect("node present during content addressing");
+    let children_local = remap_children(&view.children(), local);
+    let children_hash = hash_children(&children_local);
+    let final_id = flux_syntax::content_addressed_id(
+        parent_final,
+        view.kind().tag(),
+        view.component_id(),
+        view.props_hash(),
+        children_hash,
+        Some(position),
+    );
+    final_ids.insert(id, final_id);
+
+    for (pos, child) in view.children().iter().enumerate() {
+        match child {
+            Child::Node(cid) => {
+                assign_final_id(final_id, pos as u64, *cid, local, final_ids, arena)
+            }
+            Child::Splice { items } => {
+                for (k, cid) in items {
+                    assign_final_id(final_id, *k, *cid, local, final_ids, arena);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Returns a copy of `children` with every `NodeId` replaced by `remap(id)`.
+fn remap_children(children: &[Child], remap: &AHashMap<NodeId, NodeId>) -> Vec<Child> {
+    children
+        .iter()
+        .map(|child| match child {
+            Child::Node(cid) => Child::Node(*remap.get(cid).unwrap_or(cid)),
+            Child::Splice { items } => Child::Splice {
+                items: items
+                    .iter()
+                    .map(|(k, cid)| (*k, *remap.get(cid).unwrap_or(cid)))
+                    .collect(),
+            },
+            other => other.clone(),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -703,6 +914,138 @@ mod tests {
             got,
             Value::Record(vec![(PropIdx::from(0u16), Value::Float(3.5))])
         );
+    }
+
+    #[test]
+    fn content_address_keeps_id_stable_across_source_move() {
+        // Two arenas with identical structural content but *different* spans must
+        // receive identical content-addressed ids (FLUX-074, item A). This is the
+        // property that lets a node survive a text-above edit at hot reload.
+        let moved_above = build_two_node_tree(true);
+        let not_moved = build_two_node_tree(false);
+        // Before content addressing the ids differ (spans differ); after, they match.
+        let ids_before: Vec<NodeId> = moved_above.all_ids().collect();
+        let ids_other: Vec<NodeId> = not_moved.all_ids().collect();
+        assert_ne!(
+            ids_before, ids_other,
+            "span-based ids must differ before content addressing"
+        );
+
+        let mut a = moved_above;
+        a.content_address();
+        let mut b = not_moved;
+        b.content_address();
+        let a_ids: Vec<NodeId> = a.all_ids().collect();
+        let b_ids: Vec<NodeId> = b.all_ids().collect();
+        assert_eq!(
+            a_ids, b_ids,
+            "content-addressed ids must match despite span shift"
+        );
+    }
+
+    #[test]
+    fn content_address_changes_when_content_changes() {
+        // Editing a leaf's props must change its content id.
+        let before = build_two_node_tree_with_leaf_text("tap");
+        let after = build_two_node_tree_with_leaf_text("cancel");
+        let mut before = before;
+        let mut after = after;
+        before.content_address();
+        after.content_address();
+        let before_ids: Vec<NodeId> = before.all_ids().collect();
+        let after_ids: Vec<NodeId> = after.all_ids().collect();
+        assert_ne!(
+            before_ids, after_ids,
+            "a prop edit must change at least one content id"
+        );
+        // Note: a content edit to the leaf also re-keys ancestors, because the
+        // parent's `children_hash` folds the (now-changed) child local id. That is
+        // expected — content-addressing only promises id *stability across
+        // content-preserving moves*, not id *immutability across content edits*.
+        // The inverse property (span-only move keeps every id) is covered by
+        // `content_address_keeps_id_stable_across_source_move`.
+    }
+
+    #[test]
+    fn content_address_preserves_metadata_and_closures() {
+        // After content addressing, signal_deps / prop_thunks stay attached to the
+        // re-keyed node, and closures remain queryable.
+        let mut arena = build_two_node_tree(false);
+        let root = arena.all_ids().next().expect("root present");
+        arena.set_signal_metadata(root, vec![SignalId::from(3u32)], None, vec![], None);
+        arena.add_closure(ClosureIR::new(
+            HandlerId::from(9u32),
+            vec![0x00],
+            vec![],
+            Span::new(0, 0, 1),
+        ));
+        arena.content_address();
+        // Exactly one node now carries signal deps (the remapped root).
+        let with_deps: Vec<NodeId> = arena
+            .all_ids()
+            .filter(|id| !arena.signal_deps_of(*id).is_empty())
+            .collect();
+        assert_eq!(with_deps.len(), 1, "signal metadata re-keyed to one node");
+        assert!(
+            arena.closure(HandlerId::from(9u32)).is_some(),
+            "closure preserved"
+        );
+    }
+
+    /// Builds a two-node tree (parent + leaf child) with a `Text`-like leaf whose
+    /// `text` prop is `text`. `span_shift` moves every span by a large offset to
+    /// simulate text being inserted above the tree.
+    fn build_two_node_tree_with_leaf_text(text: &str) -> IRArena {
+        let leaf_text = text.to_owned();
+        build_tree_with_spans(0, leaf_text)
+    }
+
+    /// Builds the same two-node tree; `span_shift` toggles whether spans are at the
+    /// original offsets (false) or shifted (true) — content is identical either way.
+    fn build_two_node_tree(span_shift: bool) -> IRArena {
+        let off = if span_shift { 1000 } else { 0 };
+        build_tree_with_spans(off, "tap".to_owned())
+    }
+
+    fn build_tree_with_spans(offset: u32, leaf_text: String) -> IRArena {
+        // Derive node ids from spans (as the real lower path does) so that the
+        // span-shifted arena has genuinely different ids *before* content
+        // addressing — proving the test's premise (ids differ pre-addressing,
+        // match post-addressing).
+        //
+        // The leaf prop is a `Float` derived from `leaf_text.len()`. In the real
+        // pipeline strings are compared by their *interned id* in a shared string
+        // table, so an isolated per-builder table would collapse "tap" and
+        // "cancel" to the same `StringId(0)`; a length-derived float makes the
+        // content difference observable without depending on cross-builder string
+        // interning.
+        let leaf_span = Span::new(0, offset + 10, offset + 14);
+        let parent_span = Span::new(0, offset, offset + 20);
+        let leaf_id = crate::compute_node_id(0, NodeKind::Primitive, leaf_span, None);
+        let parent_id = crate::compute_node_id(0, NodeKind::Component, parent_span, None);
+        let mut b = ArenaBuilder::new();
+        b.pack(Node {
+            id: leaf_id,
+            kind: NodeKind::Primitive,
+            component_id: ComponentId::from(2u32),
+            props: Props::from_fields(vec![(
+                PropIdx::from(0u16),
+                Value::Float(leaf_text.len() as f64),
+            )]),
+            children: vec![],
+            handlers: vec![],
+            span: leaf_span,
+        });
+        b.pack(Node {
+            id: parent_id,
+            kind: NodeKind::Component,
+            component_id: ComponentId::from(1u32),
+            props: Props::default(),
+            children: vec![Child::Node(leaf_id)],
+            handlers: vec![],
+            span: parent_span,
+        });
+        b.finish()
     }
 
     #[test]
