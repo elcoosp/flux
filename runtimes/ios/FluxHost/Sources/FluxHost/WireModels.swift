@@ -75,6 +75,9 @@ struct NodeSignalMeta: Equatable, Sendable {
     let deps: [UInt32]
     let thunk: ClosureRef?
     let layout: [UInt16]
+    /// Per-`ForEach` node: the `item` signal slot its row thunks read (FLUX-072 / ADR-0050).
+    /// `nil` for every other node kind.
+    let itemSlot: UInt32?
 }
 
 /// A server-side compile/type error delivered via an `Error` (0x03) frame

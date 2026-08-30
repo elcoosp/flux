@@ -56,6 +56,9 @@ struct ShadowTreeReconciler {
     /// The most recent full node table, used to resolve a removed node's
     /// `cleanupHandler` (§18.4) at removal time.
     private var nodeTable: [UInt32: ShadowNode] = [:]
+    /// Cloned `ForEach` row `ShadowNode`s (keyed by derived id), populated during
+    /// expansion so `emitSubtree`/`reconcileDirty` see them like any other node.
+    private var expandedNodeTable: [UInt32: ShadowNode] = [:]
     /// Per-node signal dependencies recorded from the node's props (R1). A prop
     /// whose value is `.int(s)` is treated as a read of signal `s`, so a write to
     /// `s` marks the node dirty. Populated during reconcile and consulted by
@@ -329,7 +332,7 @@ struct ShadowTreeReconciler {
                         height: Double($0.frame.size.height),
                     )
                 }
-                fluxDevtoolsEmit(.viewMutation(nodeId: nodeId, nativeViewId: UInt64(nodeId), parentId: parentId, mutationKind: 0, frame: rect))
+                fluxDevtoolsEmit(.viewMutation(nodeId: nodeId, nativeViewId: UInt64(nodeId), parentId: parentId, mutationKind: 0, frame: rect, componentName: componentNames[node.componentId] ?? "?"))
                 #endif
             }
         } else {
@@ -359,7 +362,7 @@ struct ShadowTreeReconciler {
             // the live node graph. Geometry (frame) is unavailable until the view
             // is laid out, so it is sent on the first update instead.
             #if DEBUG
-            fluxDevtoolsEmit(.viewMutation(nodeId: nodeId, nativeViewId: UInt64(nodeId), parentId: parentId, mutationKind: 0, frame: nil))
+            fluxDevtoolsEmit(.viewMutation(nodeId: nodeId, nativeViewId: UInt64(nodeId), parentId: parentId, mutationKind: 0, frame: nil, componentName: componentNames[node.componentId] ?? "?"))
             #endif
             // Bind handlers once, at build time — re-binding on every frame
             // would stack UIControl actions (ButtonAdapter adds one per call).
@@ -413,6 +416,7 @@ struct ShadowTreeReconciler {
                 parentId: parentId,
                 mutationKind: 0,
                 frame: rect,
+                componentName: componentNames[node.componentId] ?? "?",
             )
         )
         for child in node.children {
@@ -513,7 +517,7 @@ struct ShadowTreeReconciler {
                         height: Double($0.frame.size.height),
                     )
                 }
-                fluxDevtoolsEmit(.viewMutation(nodeId: nodeId, nativeViewId: UInt64(nodeId), parentId: parentId, mutationKind: 0, frame: rect))
+                fluxDevtoolsEmit(.viewMutation(nodeId: nodeId, nativeViewId: UInt64(nodeId), parentId: parentId, mutationKind: 0, frame: rect, componentName: componentNames[node.componentId] ?? "?"))
                 #endif
             }
             // Re-parent children so a dirty descendant lands in this view. For a
@@ -546,6 +550,57 @@ struct ShadowTreeReconciler {
         return true
     }
 
+    /// Expands a `ForEach` node into one cloned row per list element (FLUX-072 / ADR-0050).
+    /// Returns the derived child ids plus a map of cloned `ShadowNode`s (so the
+    /// recursive `reconcile` finds them). For each element it seeds the row's
+    /// `item` signal slot (from `signalMeta[id].itemSlot`) with `list[i]` in the
+    /// live graph, so the template row's thunk materialises the right value.
+    private mutating func expandForEach(
+        nodeId: UInt32,
+        templateChildIds: [UInt32],
+        nodes: [UInt32: ShadowNode]
+    ) -> (childIds: [UInt32], expanded: [UInt32: ShadowNode]) {
+        guard let meta = signalMeta[nodeId],
+              let itemSlot = meta.itemSlot,
+              let listSignal = meta.deps.first,
+              let executor = executorRef else { return (templateChildIds, [:]) }
+        guard case let .list(items) = executor.graph.read(listSignal) else { return (templateChildIds, [:]) }
+        guard let templateId = templateChildIds.first,
+              let template = nodes[templateId] else { return (templateChildIds, [:]) }
+        var childIds: [UInt32] = []
+        var expanded: [UInt32: ShadowNode] = [:]
+        for (index, element) in items.enumerated() {
+            let rowId = deriveForEachRowId(foreachId: nodeId, index: UInt32(index))
+            executor.seedSignal(itemSlot, element)
+            let row = ShadowNode(
+                id: rowId,
+                kind: template.kind,
+                componentId: template.componentId,
+                props: template.props,
+                childCount: 0,
+                children: [],
+                handlerCount: UInt16(template.handlers.count),
+                handlers: template.handlers,
+                span: template.span,
+                mountHandler: template.mountHandler,
+                cleanupHandler: template.cleanupHandler,
+                isPure: template.isPure
+            )
+            expanded[rowId] = row
+            childIds.append(rowId)
+        }
+        return (childIds, expanded)
+    }
+
+    /// Derives a stable per-row id from the `ForEach` id + element index.
+    private func deriveForEachRowId(foreachId: UInt32, index: UInt32) -> UInt32 {
+        // FNV-ish mix; deterministic and collision-resistant for practical trees.
+        var h: UInt32 = foreachId &* 0x0100_0193
+        h = h ^ index
+        h = h &* 0x0100_0193
+        return h | 0x8000_0000 // high bit marks expanded rows
+    }
+
     /// Builds (or refreshes) the children of `node` and returns their views,
     /// in declared order.
     private mutating func collectChildViews(of node: ShadowNode, nodes: [UInt32: ShadowNode], report: inout ReconcileReport) -> [AnyObject] {
@@ -562,9 +617,20 @@ struct ShadowTreeReconciler {
             case let .splice(_, items):
                 childIds = items.map { $0.node }
             }
-            for cid in childIds {
+            let expandedChildIds: [UInt32]
+            let mergedNodes: [UInt32: ShadowNode]
+            if signalMeta[node.id]?.itemSlot != nil {
+                let (ids, expanded) = expandForEach(nodeId: node.id, templateChildIds: childIds, nodes: nodes)
+                expandedChildIds = ids
+                mergedNodes = nodes.merging(expanded) { $1 }
+                expandedNodeTable.merge(expanded) { $1 }
+            } else {
+                expandedChildIds = childIds
+                mergedNodes = nodes
+            }
+            for cid in expandedChildIds {
                 guard activeChildId == nil || cid == activeChildId else { continue }
-                reconcile(nodeId: cid, parentId: node.id, nodes: nodes, report: &report)
+                reconcile(nodeId: cid, parentId: node.id, nodes: mergedNodes, report: &report)
                 if let v = built[cid]?.view { views.append(v) }
             }
         }

@@ -86,27 +86,39 @@ enum FrameDeserializer {
 
     /// Decodes an `Init` frame (Appendix D §D.12.2).
     private static func decodeInit(_ r: inout ByteReader, version: UInt8) throws -> FluxFrame {
+        #if DEBUG
+        let dbg: (String, Int) -> Void = { print("[DEC] \($0) off=\($1)") }
+        #else
+        let dbg: (String, Int) -> Void = { _, _ in }
+        #endif
         // Payload begins after the 6-byte header (magic + version + kind).
         let seq = try r.u32()
+        dbg("seq", r.offset)
         let root = try decodeNode(&r)
+        dbg("root", r.offset)
         // Appendix D §D.12.2: `root` is followed by a `u32` count then every
         // descendant node, flat. Register each in the node table.
         let extraCount = try r.u32()
+        dbg("extraCount=\(extraCount)", r.offset)
         var nodes: [UInt32: ShadowNode] = [root.id: root]
         for _ in 0..<extraCount {
             let node = try decodeNode(&r)
             nodes[node.id] = node
         }
+        dbg("extras", r.offset)
         // signal `state_seed`: u16 count of (u32 signalId, value).
         let seedCount = try r.u16()
+        dbg("seedCount=\(seedCount)", r.offset)
         var state: [StateCell] = []
         for _ in 0..<seedCount {
             let signalId = try r.u32()
             let value = try decodeValue(&r)
             state.append(StateCell(signalId: signalId, value: value))
         }
+        dbg("seed", r.offset)
         // `source_map`: u16 count of (u32 fileId, u16 len + utf8 path).
         let smCount = try r.u16()
+        dbg("smCount=\(smCount)", r.offset)
         var files: [FileEntry] = []
         for _ in 0..<smCount {
             let fileId = try r.u32()
@@ -114,18 +126,19 @@ enum FrameDeserializer {
             let path = try r.utf8(Int(len))
             files.append(FileEntry(fileId: fileId, path: path))
         }
+        dbg("sm", r.offset)
         // `string_count` is a u32 (Appendix D §D.12.2). These are prop string
         // literals only — NOT component names (those follow in `component_names`).
         let strCount = try r.u32()
+        dbg("strCount=\(strCount)", r.offset)
         var strings: [StringEntry] = []
         for _ in 0..<strCount {
             strings.append(try decodeStringEntry(&r))
         }
+        dbg("strings", r.offset)
         // `component_names`: u16 count, then per entry `(u32 cid, u16 name_len, utf8 name)`
-        // (Appendix D §D.12.2, FLUX-019 split). These bind each component id to its
-        // adapter name so the reconciler can resolve primitives (Text/Column/Button).
-        // Kept separate from `strings` to avoid id collisions in the string resolver.
         let compCount = try r.u16()
+        dbg("compCount=\(compCount)", r.offset)
         var componentNames: [StringEntry] = []
         for _ in 0..<compCount {
             let cid = try r.u32()
@@ -133,18 +146,19 @@ enum FrameDeserializer {
             let name = try r.utf8(nameLen)
             componentNames.append(StringEntry(stringId: cid, value: name))
         }
+        dbg("components", r.offset)
         // Handler (closure) section (Appendix D §D.12, Gap G1).
         let handlers = try decodeHandlerSection(&r)
+        dbg("handlers", r.offset)
         // ADR-0027 (FA-IRWIRE): optional `signal_meta` section, gated by a
-        // 1-byte presence marker so back-compatible decoders skip it. The counter
-        // ADR-0027 (FA-IRWIRE): `signal_meta` trails every `Init` frame after
-        // `files`. The section is gated by a `1` marker byte; a `0` marker means
-        // it is absent (no dynamic nodes), which keeps `signalMeta` empty.
+        // 1-byte presence marker so back-compatible decoders skip it.
         var signalMeta: [UInt32: NodeSignalMeta] = [:]
         if r.remaining > 0 {
             let marker = try r.u8()
+            dbg("signalMetaMarker=\(marker)", r.offset)
             if marker == 1 {
                 signalMeta = try decodeSignalMetaSection(&r)
+                dbg("signalMeta", r.offset)
             }
         }
         return FluxFrame(
@@ -456,7 +470,11 @@ enum FrameDeserializer {
             var layout: [UInt16] = []
             layout.reserveCapacity(Int(layoutCount))
             for _ in 0..<layoutCount { layout.append(try r.u16()) }
-            out[nodeId] = NodeSignalMeta(deps: deps, thunk: thunk, layout: layout)
+            // FLUX-072 / ADR-0050: trailing `itemSlot` after layout (matches the Rust
+            // `flux-ir-serde` encoder). `u8` present flag, then `u32` id when present.
+            let itemSlotPresent = try r.u8()
+            let itemSlot: UInt32? = (itemSlotPresent == 1) ? try r.u32() : nil
+            out[nodeId] = NodeSignalMeta(deps: deps, thunk: thunk, layout: layout, itemSlot: itemSlot)
         }
         return out
     }

@@ -142,6 +142,11 @@ public struct CapabilityAsyncResolver: AsyncResolver {
 public final class FluxExecutor: FluxUIKit.FluxExecutor {
     /// The live signal graph.
     private(set) var graph: SignalGraph
+    /// Seeds a signal in the live graph (used by the reconciler to bind a
+    /// `ForEach` row's `item` slot to each list element during expansion).
+    internal func seedSignal(_ id: UInt32, _ value: FluxValue) {
+        graph.write(id, value)
+    }
     /// The reconciler driving the real UIKit views.
     private var reconciler: ShadowTreeReconciler
     /// The interned string table from the most recent Init frame.
@@ -182,6 +187,44 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
     /// (0x03) frame. `nil` until a recompile fails. Surfaced as a banner overlay
     /// while the last successfully-rendered tree stays on screen (Appendix E §E.6).
     public private(set) var serverError: ServerError?
+    /// Resolved source-map paths (file id → path), refreshed each frame.
+    private var sourcePaths: [UInt32: String] = [:]
+    /// The handler currently being dispatched, for mapping a VM fault to its
+    /// closure's source excerpt.
+    private var currentHandlerId: UInt32?
+    /// The unified error surfaced to the overlay (ADR-0057): collapses `lastError`
+    /// (VM fault) and `serverError` (compile error) into one `FluxError` with an
+    /// ADR-0057 source excerpt when available. `nil` when no fault is active.
+    public var lastFluxError: FluxError? {
+        if let server = serverError {
+            var span: SourceSpan?
+            if let s = server.span { span = SourceSpan(fileID: s.fileId, line: s.start, column: s.end) }
+            var excerpt: FluxErrorExcerpt?
+            if let ex = server.excerpt {
+                let path = sourcePaths[ex.fileId] ?? "file \(ex.fileId)"
+                excerpt = FluxErrorExcerpt(path: path, line: ex.line, column: ex.column, snippet: ex.snippet)
+            }
+            return FluxError(message: server.message, kind: .compile, span: span, excerpt: excerpt)
+        }
+        if let vm = lastError {
+            var span: SourceSpan?
+            var excerpt: FluxErrorExcerpt?
+            if let closure = currentHandlerId.flatMap({ handlerClosures[$0]?.closure }) {
+                span = SourceSpan(fileID: closure.span.fileId, line: closure.span.start, column: closure.span.end)
+                if let ex = closure.excerpt {
+                    let path = sourcePaths[ex.fileId] ?? "file \(ex.fileId)"
+                    excerpt = FluxErrorExcerpt(path: path, line: ex.line, column: ex.column, snippet: ex.snippet)
+                }
+            }
+            return FluxError(
+                message: "\(vm.kind.name) at byte offset \(vm.offset)",
+                kind: .vm,
+                span: span,
+                excerpt: excerpt
+            )
+        }
+        return nil
+    }
     /// The report from the most recent `dispatch`'s dirty-set reconcile (R1), for
     /// test assertions; empty when the dispatch touched no signal-dependent node.
     private(set) var lastReconcile: ReconcileReport = ReconcileReport()
@@ -240,6 +283,14 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
     ///   `lastError` so the UI can surface it).
     @discardableResult
     public func applyFrame(_ bytes: Data) throws -> [UInt32] {
+        #if DEBUG
+        if bytes.count > 6, bytes[5] == 0x02 {
+            let hex = bytes.map { String(format: "%02x", $0) }.joined(separator: " ")
+            if let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+                let _ = try? hex.write(to: docs.appendingPathComponent("flux_init_dump.txt"), atomically: true, encoding: .utf8)
+            }
+        }
+        #endif
         let frame = try FrameDeserializer.decode([UInt8](bytes))
         return apply(frame)
     }
@@ -294,6 +345,7 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
         }
         lastError = nil
         serverError = nil
+        sourcePaths = Dictionary(uniqueKeysWithValues: frame.files.map { ($0.fileId, $0.path) })
         for cell in frame.state { graph.seed(cell.signalId, cell.value) }
         for str in frame.strings { table.intern(str.stringId, str.value) }
         if let root = frame.root {
@@ -539,6 +591,7 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
             lastReconcile = ReconcileReport()
             return
         }
+        currentHandlerId = event.handlerId
         // Hand the raw `entry.bytecode` AND the registration-time decoded cache
         // to `runHandlerAsync`, which uses the cache (R3) so the handler is not
         // re-decoded on every tap; it falls back to re-decoding the raw bytes
@@ -635,6 +688,7 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
     /// exclusive-access model). It folds any signal writes back into the graph
     /// (a mount/cleanup block may seed state) and returns.
     func runLifecycle(_ handlerId: UInt32) {
+        currentHandlerId = handlerId
         guard let entry = handlerClosures[handlerId] else {
             // No body registered for this lifecycle hook; nothing to run.
             return
