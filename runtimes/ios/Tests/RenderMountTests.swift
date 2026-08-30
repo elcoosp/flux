@@ -240,7 +240,7 @@ final class RenderMountTests: XCTestCase {
             state: [], files: [], componentNames: [
                 StringEntry(stringId: 5, value: "Router"),
                 StringEntry(stringId: 6, value: "Screen"),
-            ], signalMeta: [20: NodeSignalMeta(deps: [97], thunk: nil, layout: [])]
+            ], signalMeta: [20: NodeSignalMeta(deps: [97], thunk: nil, layout: [], itemSlot: nil)]
         )
 
         let executor = FluxExecutor(graph: graph, registry: AdapterRegistry(table: table))
@@ -333,7 +333,7 @@ final class RenderMountTests: XCTestCase {
             state: [], files: [], componentNames: [
                 StringEntry(stringId: 5, value: "Router"),
                 StringEntry(stringId: 6, value: "Screen"),
-            ], signalMeta: [20: NodeSignalMeta(deps: [97], thunk: nil, layout: [])]
+            ], signalMeta: [20: NodeSignalMeta(deps: [97], thunk: nil, layout: [], itemSlot: nil)]
         )
 
         let executor = FluxExecutor(graph: graph, registry: AdapterRegistry(table: table))
@@ -405,5 +405,42 @@ final class RenderMountTests: XCTestCase {
         // `SwitchAdapterTests` (identical `HandlerTarget`/`UIAction` pattern).
         adapter.bindHandler(15, to: view, nodeId: 1)
         adapter.destroy(view)
+    }
+
+    /// FLUX-077 parity with the Android `LayoutOverlayAdapterTest` registry
+    /// assertion: every FLUX-077 primitive (`Stack`, `Grid`, `Spacer`, `SafeArea`,
+    /// `Modal`, `Sheet`, `Dialog`, `Animate`, `Toggle`) resolves through
+    /// `AdapterRegistry.byName` and, when `create()`d, produces the expected
+    /// native UIKit view — i.e. the node reaches real UI, not a blank container.
+    /// Mirrors `testRegistryResolvesTogglePrimitive` for the full set (Android's
+    /// `FluxUiKit` factory map resolves each of these names → its adapter).
+    @MainActor
+    func testRegistryResolvesAllFlux077Primitives() {
+        var table = StringTable()
+        for (id, name) in [
+            100: "Stack", 101: "Grid", 102: "Spacer", 103: "SafeArea",
+            104: "Modal", 105: "Sheet", 106: "Dialog", 107: "Animate", 108: "Toggle",
+        ] { table.intern(UInt32(id), name) }
+
+        let registry = AdapterRegistry(table: table)
+        let expectations: [(String, AnyClass)] = [
+            ("Stack", UIStackView.self), ("Grid", UIStackView.self),
+            ("Spacer", UIStackView.self), ("SafeArea", UIView.self),
+            ("Modal", UIView.self), ("Sheet", UIView.self),
+            ("Dialog", UIView.self), ("Animate", UIView.self),
+            ("Toggle", UISwitch.self),
+        ]
+        for item in expectations {
+            let name = item.0
+            guard let adapter = registry.make(named: name, executor: nil) else {
+                XCTFail("FLUX-077 primitive '\(name)' must resolve in AdapterRegistry")
+                continue
+            }
+            let view = adapter.create()
+            XCTAssertTrue(
+                view.isKind(of: item.1),
+                "FLUX-077 '\(name)' must create a \(item.1) (got \(type(of: view)))"
+            )
+        }
     }
 }
