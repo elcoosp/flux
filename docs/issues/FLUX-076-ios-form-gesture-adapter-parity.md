@@ -1,6 +1,6 @@
 ---
 id: FLUX-076
-status: todo
+status: done
 lane: LANE-N
 phase: "Phase 2"
 blocked_by: [FLUX-040, FLUX-041]
@@ -76,3 +76,30 @@ no-op, `Gesture` keyed reconciliation).
 
 - The Android side (already landed), the stdlib `.flux` sources (already
   landed), and the signal-graph animation primitive (FLUX-042).
+
+## Implementation Note (2026-08-30)
+
+**Landed — both kits now exist, the FLUX-040/041 parity gate is cleared.**
+
+- `adapters/ui-swift`: seven declarative adapters mirroring the Android shapes
+  exactly, all resolving prop indices through the shared FNV-1a `Props.propIndex`
+  digest (no hardcoded positions, AGENTS.md §3.2): `SwitchAdapter` (`UISwitch`),
+  `CheckboxAdapter` (`UIButton` checkmark — UIKit has no native checkbox),
+  `SliderAdapter` (`UISlider`), `PickerAdapter` (`UIPickerView` + retained
+  delegate), `DatePickerAdapter` (`UIDatePicker` .date), `TextAreaAdapter`
+  (`UITextView` + retained delegate), and `GestureAdapter` (`UIView` container
+  that attaches the matching `UIGestureRecognizer` by `kind` and reconciles
+  children by stable view identity).
+- `Props.swift`: added `getList(named:)` so `Picker` reads its `items` the same
+  way the Android `Props.getList` does.
+- `runtimes/ios/FluxHost/Sources/FluxHost/AdapterKit.swift`: registered all
+  seven in the `AdapterRegistry` factory table (keyed by node name), matching
+  the existing primitive registrations.
+- XCTest: `FormGestureAdapterTests.swift` pins update/handler/executor-disposal/
+  keyed-reconciliation — parity with the Android `FormGestureAdapterTest`. The
+  `:adapters:ui-swift` test target builds + runs on the iOS Simulator (60
+  tests green), and the `FluxApp` host compiles with the new registrations.
+
+Both adapter kits now implement FLUX-040/041, so the primitives satisfy
+AGENTS.md's "both kits before advertising" rule — they can be seeded into the
+public surface / `prelude.flux` now.

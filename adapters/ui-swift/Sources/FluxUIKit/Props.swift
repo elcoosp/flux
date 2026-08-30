@@ -104,6 +104,11 @@ public struct Props: Sendable, Hashable {
     /// Resolve a record prop by name.
     public func getRecord(named name: String) -> Props? { getRecord(Self.propIndex(for: name)) }
 
+    /// Resolve a list prop by name.
+    public func getList(named name: String) -> [FluxValue]? {
+        if case .list(let items) = fields[Self.propIndex(for: name)] ?? .null { items } else { nil }
+    }
+
     /// Resolve a color prop by name.
     public func getColor(named name: String) -> FluxColor? { getColor(Self.propIndex(for: name)) }
 

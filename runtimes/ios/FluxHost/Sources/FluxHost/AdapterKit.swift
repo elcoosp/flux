@@ -384,6 +384,15 @@ public struct AdapterRegistry {
             "Sheet": { AnyFluxAdapter(SheetAdapter(executor: $0)) },
             "Dialog": { AnyFluxAdapter(DialogAdapter(executor: $0)) },
             "Animate": { AnyFluxAdapter(AnimateAdapter(executor: $0)) },
+            // FLUX-040 form primitives (PRD-N family).
+            "Switch": { AnyFluxAdapter(SwitchAdapter(executor: $0)) },
+            "Checkbox": { AnyFluxAdapter(CheckboxAdapter(executor: $0)) },
+            "Slider": { AnyFluxAdapter(SliderAdapter(executor: $0)) },
+            "Picker": { AnyFluxAdapter(PickerAdapter(executor: $0)) },
+            "DatePicker": { AnyFluxAdapter(DatePickerAdapter(executor: $0)) },
+            "TextArea": { AnyFluxAdapter(TextAreaAdapter(executor: $0)) },
+            // FLUX-041 gesture primitive (PRD-N family).
+            "Gesture": { AnyFluxAdapter(GestureAdapter(executor: $0)) },
         ]
         self.table = table
     }

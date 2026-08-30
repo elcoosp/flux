@@ -72,9 +72,8 @@ A `Gesture` wrapper carrying a gesture kind + callback prop, mapping to
   `:ktlintCheck` are green. The FLUX-040 form adapters share the same test file
   and gate.
 
-### Parity gate — DO NOT ADVERTISE until iOS lands
+### Parity gate — CLEARED (FLUX-076 done)
 AGENTS.md: a primitive needs **both** adapter kits before it is advertised. iOS
-(`adapters/ui-swift`) still has no `Gesture` adapter. **Do not** seed `Gesture`
-into the Swift prelude / `prelude.flux` public surface or document it as
-generally available until the ui-swift counterpart exists. The iOS follow-up is
-filed as the lane-N iOS parity task (handed to the ui-swift agent).
+(`adapters/ui-swift`) now has the `Gesture` adapter (FLUX-076 landed), so the
+FLUX-041 gesture primitive satisfies the parity rule and may be seeded into the
+public surface / `prelude.flux`.

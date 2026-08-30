@@ -78,10 +78,8 @@ with a `value`/on-change signal contract and a `flux-parity` trace test. A
   already asserts every registered kind resolves to a fresh instance. The
   module's `:adapters:ui-kotlin:test` + `:ktlintCheck` are green.
 
-### Parity gate — DO NOT ADVERTISE until iOS lands
+### Parity gate — CLEARED (FLUX-076 done)
 AGENTS.md: a primitive needs **both** adapter kits before it is advertised to
-authors. iOS (`adapters/ui-swift`) still has no `Switch`/`Checkbox`/`Slider`/
-`Picker`/`DatePicker`/`TextArea`/`Gesture` adapters. **Do not** seed these into
-the Swift prelude / `prelude.flux` public surface or document them as generally
-available until the ui-swift counterparts exist. The iOS follow-up is filed as
-the lane-N iOS parity task (handed to the ui-swift agent).
+authors. iOS (`adapters/ui-swift`) now has all seven adapters (FLUX-076 landed),
+so the FLUX-040 form primitives satisfy the parity rule and may be seeded into
+the public surface / `prelude.flux`.
