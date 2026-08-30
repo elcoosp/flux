@@ -1,6 +1,6 @@
 ---
 id: FLUX-040
-status: partial
+status: done   # both adapter kits landed (Android FLUX-040 + iOS FLUX-076 parity); seeded into stdlib/prelude.flux per the advertising gate (AGENTS.md §3.5)
 lane: LANE-N
 phase: "Phase 2"
 blocked_by: []

@@ -5,9 +5,12 @@
 // scalar types (Int, Float, Bool, String, Unit), the collection types
 // (List, Map, Option), the stdlib traits (Numeric, Eq, Show — see
 // traits.flux), the adapter components (Text, Button, Column, Row,
-// TextInput, Router, Screen — see the corresponding files), and the
-// auxiliary value types declared in this file are all in scope without an
-// explicit import.
+// TextInput, Router, Screen, Switch, Checkbox, Slider, Picker, DatePicker,
+// TextArea, Gesture — see the corresponding files; Switch/Checkbox/Slider/
+// Picker/DatePicker/TextArea (FLUX-040) and Gesture (FLUX-041) gained their
+// iOS adapter parity in FLUX-076, clearing the both-kits advertising gate),
+// and the auxiliary value types declared in this file are all in scope without
+// an explicit import.
 //
 // This file declares the auxiliary value types referenced by the adapter
 // prop contracts in Appendix F. They are algebraic data types so that the
