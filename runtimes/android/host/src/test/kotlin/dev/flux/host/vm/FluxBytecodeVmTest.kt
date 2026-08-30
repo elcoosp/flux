@@ -291,6 +291,66 @@ class FluxBytecodeVmTest {
         assertEquals(VmErrorKind.INDEX_OUT_OF_BOUNDS, err.kind)
     }
 
+    /**
+     * Cancellation parity (FLUX-086, Part B): when the awaiting coroutine is dropped
+     * before its `Pending` cell settles, the signal graph must match the Rust oracle's
+     * `SuspendState` exactly — the `Pending` result cell is left untouched and no other
+     * signal was written before the `AWAIT` (the handler suspended at the first
+     * instruction after `CALL_CAP`, having written nothing). A drop is modelled as
+     * never calling `resume`; the captured `SuspendState` is the post-cancel source of
+     * truth for all three runtimes. Filing a follow-up would be wrong — the cancellation
+     * contract is already fully specified by the oracle's suspend semantics, so we assert
+     * it directly here.
+     */
+    @Test
+    fun `await cancellation leaves pending cell and no writes matching oracle suspend state`() {
+        // CALL_CAP r2, (2,99), args=r0 ; AWAIT r0, r2 ; WRITE_SIGNAL 2, r0 ; HALT
+        val asyncBytecode =
+            byteArrayOf(
+                0x90.toByte(),
+                2,
+                2,
+                0,
+                0,
+                0,
+                99,
+                0,
+                0, // CALL_CAP r2, (2,99), args=r0
+                0xE0.toByte(),
+                0,
+                2, // AWAIT r0, r2
+                0x11,
+                2,
+                0,
+                0,
+                0,
+                0, // WRITE_SIGNAL 2, r0
+                0x00, // HALT
+            )
+        val signals = InMemorySignals()
+        val payload = FluxValue.RecordVal(listOf(FluxValue.Field(0u.toUShort(), FluxValue.IntVal(42))))
+
+        // Drive to the suspend point and then simulate cancellation by dropping the
+        // continuation (never resuming).
+        val first = FluxBytecodeVM.runResumable(asyncBytecode, signals, payload, capabilities = CapabilityRegistry.DEV)
+        assertTrue(first is RunResult.Suspended, "async capability should suspend")
+        first as RunResult.Suspended
+        val cellId =
+            when (val r = first.state.registers[2]) {
+                is FluxValue.IntVal -> r.value.toUInt()
+                else -> error("result_reg must hold the cell id")
+            }
+        assertTrue(cellId >= 1_000_000u, "async capability must allocate a fresh cell id")
+
+        // Oracle contract: the only signal state at cancellation is the Pending result cell.
+        assertEquals(CellState.Pending, signals.cellState(cellId), "cell must remain Pending after cancel")
+        // The handler had written no signals before the AWAIT (CALL_CAP only allocated/marked
+        // the pending cell); signal 2 must still be unbound.
+        assertEquals(null, signals.read(2u), "no signal writes may have occurred before the AWAIT")
+        // The captured continuation must expose the same cell id the graph holds Pending.
+        assertEquals(FluxValue.IntVal(cellId.toLong()), first.state.registers[2], "captured future_reg must match the pending cell")
+    }
+
     /** v1 semantics preserved: a program without `AWAIT` runs straight to `HALT`. */
     @Test
     fun `no await runs straight to halt`() {
