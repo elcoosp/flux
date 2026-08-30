@@ -1,6 +1,20 @@
 ---
 id: FLUX-077
-status: done   # iOS kit reaches full parity with Android for the FLUX-077 set: Stack/Grid/Spacer/SafeArea/Modal/Sheet/Dialog/Animate (degraded container form, present since af47415, wired in AdapterKit.swift:377-386) + Toggle (added 2026-08-30, both kits). Verified: `xcodebuild build -scheme FluxApp` compiles FluxUIKit (all 9 adapters); RenderMountTests green incl. testRegistryResolvesTogglePrimitive; `:adapters:ui-kotlin:test` green.
+status: partial   # Node-resolution parity LANDED for all 9 FLUX-077 primitives (registered + create expected native views). Prop-CONTRACT parity CLOSED 2026-08-30: the degraded adapters now RECORD the same data props Android records (flex/edges/columns/gap/onDismiss/signal/curve/duration) instead of read-and-discard, and the iOS LayoutOverlayAdapterTests assert them (mirroring Android LayoutOverlayAdapterTest). Remaining: (1) the native PRESENTATION of those props is gated on ADR-0048 — by design, not a gap (degraded container is the correct unified-tier mapping per AGENTS.md §0.2); (2) filer sign-off on "degraded-acceptable vs real parity" is still required before `done`. NOTE: do NOT mark done until the filer settles the intent.
+#
+# BLOCKER FOUND 2026-08-30 (out of scope, blocks runtime-target proof): the
+# `FluxAppTests` / `FluxApp` runtime target does NOT compile — `FluxHost`/
+# `FluxBytecodeVM.swift:738` has a non-exhaustive `switch op` missing the entire
+# arithmetic (addI64 … f64ToI64) and branch (condJump/condJumpNot) opcode
+# families. This is in `runtimes/ios` (the iOS VM core), OUTSIDE FLUX-077's
+# `adapters/ui-swift` scope. It was flagged pre-existing in the original closure
+# note but that note ALSO claimed a green `xcodebuild test`, which is
+# impossible while the target fails to build. Proof of FLUX-077 was therefore
+# run through the in-scope `adapters/ui-swift` SwiftPM package on the iOS
+# Simulator (xcodebuild -scheme FluxUIKit test): 69 tests, 0 failures. The
+# runtime-target registry test could not be added without expanding scope into
+# the broken VM; it should land under a dedicated FLUX-### once FluxHost compiles.
+# Filed upstream: the FluxHost non-exhaustive-switch break.
 lane: LANE-N
 phase: "Phase 2"
 blocked_by:
