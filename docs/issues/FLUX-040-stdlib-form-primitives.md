@@ -1,6 +1,6 @@
 ---
 id: FLUX-040
-status: todo
+status: partial
 lane: LANE-N
 phase: "Phase 2"
 blocked_by: []
@@ -51,3 +51,37 @@ with a `value`/on-change signal contract and a `flux-parity` trace test. A
 ## Out of Scope
 
 - Gestures (FLUX-041), theming (FLUX-043).
+
+## Implementation Note (2026-08-30)
+
+**Android + stdlib landed (NOT yet advertised — see parity gate below).**
+
+- `adapters/ui-kotlin`: seven new declarative adapters, all following the
+  unified-tier contract (AGENTS.md §3.5) and the `TextInputAdapter` shape:
+  `SwitchAdapter`, `CheckboxAdapter`, `SliderAdapter`, `PickerAdapter`,
+  `DatePickerAdapter`, `TextAreaAdapter` (FLUX-040), and `GestureAdapter`
+  (FLUX-041, a container that reconciles children by stable node id and declares
+  its gesture `kind` + `onGesture` handler as view properties).
+  Each adapter resolves its prop indices through `PropsIndex` via the shared
+  `propIndexForName` FNV-1a digest (§3.2) — no hardcoded positions. All seven
+  are registered in `FluxUiKit.adapters` as factories (FLUX-007: per-node fresh
+  instances, never shared singletons).
+- `PropsIndex.kt`: FLUX-040/041 prop indices added (`SWITCH_VALUE`, `SLIDER_*`,
+  `PICKER_ITEMS`, `GESTURE_KIND`, `GESTURE_THRESHOLD`, …).
+- `stdlib/`: `switch.flux`, `checkbox.flux`, `slider.flux`, `picker.flux`,
+  `date_picker.flux`, `text_area.flux` (FLUX-040) and `gesture.flux` (FLUX-041)
+  — `compo` declarations with the same `value`/`onChange` (+ `kind`/`onGesture`)
+  signal contract the existing `text_field.flux` uses.
+- JVM tests: `FormGestureAdapterTest.kt` pins each adapter's `update` prop
+  mapping, handler binding through the weakly-held `FluxExecutor`, executor
+  disposal no-op, and `Gesture` keyed child reconciliation; `FluxUiKitTest`
+  already asserts every registered kind resolves to a fresh instance. The
+  module's `:adapters:ui-kotlin:test` + `:ktlintCheck` are green.
+
+### Parity gate — DO NOT ADVERTISE until iOS lands
+AGENTS.md: a primitive needs **both** adapter kits before it is advertised to
+authors. iOS (`adapters/ui-swift`) still has no `Switch`/`Checkbox`/`Slider`/
+`Picker`/`DatePicker`/`TextArea`/`Gesture` adapters. **Do not** seed these into
+the Swift prelude / `prelude.flux` public surface or document them as generally
+available until the ui-swift counterparts exist. The iOS follow-up is filed as
+the lane-N iOS parity task (handed to the ui-swift agent).

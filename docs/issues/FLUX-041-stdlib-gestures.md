@@ -1,6 +1,6 @@
 ---
 id: FLUX-041
-status: todo
+status: partial
 lane: LANE-N
 phase: "Phase 2"
 blocked_by: []
@@ -49,3 +49,32 @@ A `Gesture` wrapper carrying a gesture kind + callback prop, mapping to
 ## Out of Scope
 
 - The signal-graph animation primitive (FLUX-042).
+
+## Implementation Note (2026-08-30)
+
+**Android + stdlib landed (NOT yet advertised — see parity gate below).**
+
+- `adapters/ui-kotlin`: `GestureAdapter` (a container) maps a `Gesture` node to a
+  native gesture surface. It reconciles its child subtree by stable node id
+  (keyed reconciliation, FLUX-007) and declares the gesture `kind`
+  (longPress/swipe/drag/pinch) + `onGesture` handler as view properties; drag/
+  pinch surface a continuous `threshold` as a host-render-only property. The
+  native recognizer attach/detach is host-side. It follows the unified-tier
+  contract (AGENTS.md §3.5) and reuses the `onClick` handler-prop convention.
+  Registered in `FluxUiKit.adapters` as a factory.
+- `PropsIndex.kt`: `GESTURE_KIND`, `GESTURE_ON_GESTURE`, `GESTURE_THRESHOLD`
+  added via the shared `propIndexForName` FNV-1a digest (§3.2).
+- `stdlib/gesture.flux`: a `compo` wrapper carrying `kind`/`onGesture`/`threshold`
+  — the gesture surface over a caller-supplied child subtree.
+- JVM tests: `FormGestureAdapterTest.kt` pins `Gesture` kind/threshold mapping,
+  handler binding through the weakly-held `FluxExecutor`, executor disposal
+  no-op, and keyed child reconciliation. Module `:adapters:ui-kotlin:test` +
+  `:ktlintCheck` are green. The FLUX-040 form adapters share the same test file
+  and gate.
+
+### Parity gate — DO NOT ADVERTISE until iOS lands
+AGENTS.md: a primitive needs **both** adapter kits before it is advertised. iOS
+(`adapters/ui-swift`) still has no `Gesture` adapter. **Do not** seed `Gesture`
+into the Swift prelude / `prelude.flux` public surface or document it as
+generally available until the ui-swift counterpart exists. The iOS follow-up is
+filed as the lane-N iOS parity task (handed to the ui-swift agent).

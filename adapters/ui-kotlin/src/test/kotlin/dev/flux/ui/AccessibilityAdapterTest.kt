@@ -16,12 +16,13 @@ class AccessibilityAdapterTest {
     fun `text adapter surfaces a11y label role and focusOrder`() {
         val adapter = TextAdapter.create()
         val view = adapter.create(10u)
-        val props = propsOf(
-            PropsIndex.TEXT_TEXT to FluxValue.Str("Count"),
-            PropsIndex.A11Y_LABEL to FluxValue.Str("Tap count"),
-            PropsIndex.A11Y_ROLE to FluxValue.Str("header"),
-            PropsIndex.A11Y_FOCUS_ORDER to FluxValue.Str("3"),
-        )
+        val props =
+            propsOf(
+                PropsIndex.TEXT_TEXT to FluxValue.Str("Count"),
+                PropsIndex.A11Y_LABEL to FluxValue.Str("Tap count"),
+                PropsIndex.A11Y_ROLE to FluxValue.Str("header"),
+                PropsIndex.A11Y_FOCUS_ORDER to FluxValue.Str("3"),
+            )
         adapter.update(view, props)
         assertEquals("Tap count", view.getProperty(FluxNativeView.PROP_ACCESSIBILITY_LABEL))
         assertEquals("header", view.getProperty(FluxNativeView.PROP_ACCESSIBILITY_ROLE))
@@ -50,10 +51,11 @@ class AccessibilityAdapterTest {
     fun `button adapter surfaces a11y props`() {
         val adapter = ButtonAdapter.create()
         val view = adapter.create(12u)
-        val props = propsOf(
-            PropsIndex.BUTTON_TEXT to FluxValue.Str("Go"),
-            PropsIndex.A11Y_LABEL to FluxValue.Str("Navigate"),
-        )
+        val props =
+            propsOf(
+                PropsIndex.BUTTON_TEXT to FluxValue.Str("Go"),
+                PropsIndex.A11Y_LABEL to FluxValue.Str("Navigate"),
+            )
         adapter.update(view, props)
         assertEquals("Navigate", view.getProperty(FluxNativeView.PROP_ACCESSIBILITY_LABEL))
     }

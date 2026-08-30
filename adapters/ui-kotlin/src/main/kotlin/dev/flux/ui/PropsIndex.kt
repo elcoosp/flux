@@ -91,4 +91,49 @@ public object PropsIndex {
     public val A11Y_LABEL: UShort = propIndexForName("label")
     public val A11Y_ROLE: UShort = propIndexForName("role")
     public val A11Y_FOCUS_ORDER: UShort = propIndexForName("focusOrder")
+
+    // FLUX-040 form primitives (PRD-N family). Each carries a controlled
+    // `value` signal + an `onChange` handler, the same contract `TextInput`
+    // uses. Secondary props are resolved by name so the kit stays in lockstep
+    // with the dev server's FNV-1a prop indices (AGENTS.md §3.2).
+    public val SWITCH_VALUE: UShort = propIndexForName("value")
+    public val SWITCH_ON_CHANGE: UShort = propIndexForName("onChange")
+    public val SWITCH_ENABLED: UShort = propIndexForName("enabled")
+
+    public val CHECKBOX_VALUE: UShort = propIndexForName("value")
+    public val CHECKBOX_ON_CHANGE: UShort = propIndexForName("onChange")
+    public val CHECKBOX_ENABLED: UShort = propIndexForName("enabled")
+    public val CHECKBOX_LABEL: UShort = propIndexForName("label")
+
+    public val SLIDER_VALUE: UShort = propIndexForName("value")
+    public val SLIDER_ON_CHANGE: UShort = propIndexForName("onChange")
+    public val SLIDER_MIN: UShort = propIndexForName("min")
+    public val SLIDER_MAX: UShort = propIndexForName("max")
+    public val SLIDER_STEP: UShort = propIndexForName("step")
+    public val SLIDER_ENABLED: UShort = propIndexForName("enabled")
+
+    public val PICKER_VALUE: UShort = propIndexForName("value")
+    public val PICKER_ON_CHANGE: UShort = propIndexForName("onChange")
+    public val PICKER_ITEMS: UShort = propIndexForName("items")
+    public val PICKER_ENABLED: UShort = propIndexForName("enabled")
+
+    public val DATE_PICKER_VALUE: UShort = propIndexForName("value")
+    public val DATE_PICKER_ON_CHANGE: UShort = propIndexForName("onChange")
+    public val DATE_PICKER_MIN: UShort = propIndexForName("min")
+    public val DATE_PICKER_MAX: UShort = propIndexForName("max")
+    public val DATE_PICKER_ENABLED: UShort = propIndexForName("enabled")
+
+    public val TEXT_AREA_VALUE: UShort = propIndexForName("value")
+    public val TEXT_AREA_ON_CHANGE: UShort = propIndexForName("onChange")
+    public val TEXT_AREA_PLACEHOLDER: UShort = propIndexForName("placeholder")
+    public val TEXT_AREA_ENABLED: UShort = propIndexForName("enabled")
+    public val TEXT_AREA_MAX_LINES: UShort = propIndexForName("maxLines")
+
+    // FLUX-041 gesture primitive (PRD-N family). A `Gesture` wrapper carries a
+    // `kind` (longPress/swipe/drag/pinch) + an `onGesture` callback (reuses the
+    // `onClick` handler-prop contract). Secondary props surface continuous
+    // deltas (drag/pinch) as signal streams where useful.
+    public val GESTURE_KIND: UShort = propIndexForName("kind")
+    public val GESTURE_ON_GESTURE: UShort = propIndexForName("onGesture")
+    public val GESTURE_THRESHOLD: UShort = propIndexForName("threshold")
 }

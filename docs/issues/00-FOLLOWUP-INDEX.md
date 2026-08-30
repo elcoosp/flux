@@ -50,6 +50,7 @@ issue, and the LSP work (PRD-O's deferred server) is promoted into its own
 | signal-graph animation primitive | FLUX-042 |
 | design-token theming (codegen into SwiftUI/Compose) | FLUX-043 |
 | a11y props through the adapter contract | FLUX-044 |
+| iOS adapter parity for FLUX-040 form + FLUX-041 gesture primitives | FLUX-076 |
 
 ## Capabilities (PRD-Q deferred — contract locked)
 
@@ -103,7 +104,7 @@ issue, and the LSP work (PRD-O's deferred server) is promoted into its own
 
 ## Counters
 
-- Issues created: **46** (FLUX-024 … FLUX-069).
+- Issues created: **47** (FLUX-024 … FLUX-076).
 - Manifest requests filed: `flux-lsp` (new crate) + `async-lsp` + `lsp-types`
   (FLUX-024/025) in `MANIFEST_REQUESTS.md`.
 - No code changed; these are planning artifacts only. Each issue is self-contained

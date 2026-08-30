@@ -40,6 +40,15 @@ public object FluxUiKit {
             SheetAdapter.KIND to FluxAdapterFactory(SheetAdapter::create),
             DialogAdapter.KIND to FluxAdapterFactory(DialogAdapter::create),
             AnimateAdapter.KIND to FluxAdapterFactory(AnimateAdapter::create),
+            // FLUX-040 form primitives (PRD-N family).
+            SwitchAdapter.KIND to FluxAdapterFactory(SwitchAdapter::create),
+            CheckboxAdapter.KIND to FluxAdapterFactory(CheckboxAdapter::create),
+            SliderAdapter.KIND to FluxAdapterFactory(SliderAdapter::create),
+            PickerAdapter.KIND to FluxAdapterFactory(PickerAdapter::create),
+            DatePickerAdapter.KIND to FluxAdapterFactory(DatePickerAdapter::create),
+            TextAreaAdapter.KIND to FluxAdapterFactory(TextAreaAdapter::create),
+            // FLUX-041 gesture primitive (PRD-N family).
+            GestureAdapter.KIND to FluxAdapterFactory(GestureAdapter::create),
         )
 
     /** Returns the factory registered for [kind], or `null`. */
