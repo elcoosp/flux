@@ -107,14 +107,14 @@ public object TelemetryBridge {
         onBatch = { bytes -> ws.send(okio.ByteString.of(*bytes)) }
     }
 
-    private fun ByteArrayOutputStream.writeUIntLE(v: UInt) {
+    internal fun ByteArrayOutputStream.writeUIntLE(v: UInt) {
         write((v.toInt() and 0xFF))
         write((v.toInt() ushr 8) and 0xFF)
         write((v.toInt() ushr 16) and 0xFF)
         write((v.toInt() ushr 24) and 0xFF)
     }
 
-    private fun ByteArrayOutputStream.writeUShortLE(v: UShort) {
+    internal fun ByteArrayOutputStream.writeUShortLE(v: UShort) {
         write(v.toInt() and 0xFF)
         write((v.toInt() ushr 8) and 0xFF)
     }

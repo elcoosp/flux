@@ -179,9 +179,9 @@ private fun writeLongLE0(
     }
 }
 
-private fun ByteArrayOutputStream.writeUIntLE(v: UInt) = writeUIntLE0(this, v)
+internal fun ByteArrayOutputStream.writeUIntLE(v: UInt) = writeUIntLE0(this, v)
 
-private fun ByteArrayOutputStream.writeUShortLE(v: UShort) = writeUShortLE0(this, v)
+internal fun ByteArrayOutputStream.writeUShortLE(v: UShort) = writeUShortLE0(this, v)
 
 /** Encodes a UTF-8 string as a little-endian `u16` length prefix + bytes (matches Rust `encode_str`). */
 private fun encodeStr(

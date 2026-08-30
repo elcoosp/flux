@@ -1,9 +1,9 @@
 package dev.flux.host.vm.debug
 
 import java.io.ByteArrayOutputStream
-import kotlin.test.Test
-import kotlin.test.assertContentEquals
-import kotlin.test.assertEquals
+import org.junit.jupiter.api.Assertions.assertArrayEquals
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Test
 
 /**
  * FLUX-060 follow-up: the host emits `NetworkRequest` / `NetworkResponse`
@@ -40,7 +40,7 @@ class TelemetryNetworkTest {
                 0x0e, 0x00, 0x00, 0x00, // capability_id = 14
             )
         assertEquals(expected.size, bytes.size)
-        assertContentEquals(expected, bytes)
+        assertArrayEquals(expected, bytes)
     }
 
     @Test
@@ -60,7 +60,7 @@ class TelemetryNetworkTest {
                 0x1a, 0x00, 0x00, 0x00, // length prefix = 0x1a (26)
                 0x06, // tag
                 0x07, 0x00, 0x00, 0x00, // request_id = 7
-                0xc8, 0x00, // status_code = 200
+                0xc8.toByte(), 0x00, // status_code = 200
                 0x2a, 0x00, 0x00, 0x00, // latency_ms = 42
                 0x01, // body present
                 0x0b, 0x00, // body len = 11
@@ -69,7 +69,7 @@ class TelemetryNetworkTest {
                 0x01, // result_kind = 1
             )
         assertEquals(expected.size, bytes.size)
-        assertContentEquals(expected, bytes)
+        assertArrayEquals(expected, bytes)
     }
 
     @Test
