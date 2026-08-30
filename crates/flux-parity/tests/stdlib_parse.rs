@@ -70,6 +70,7 @@ fn required_primitive_declarations_exist() {
         "stack", "grid", "spacer", "safearea", // FLUX-037
         "modal", "sheet", "dialog",  // FLUX-038
         "animate", // FLUX-042
+        "scrollview", // FLUX-056 (PRD-N `ScrollView`)
     ] {
         let path = dir.join(format!("{name}.flux"));
         assert!(

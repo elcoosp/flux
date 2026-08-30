@@ -35,6 +35,30 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
     Build-time emission into the native dirs is intentionally out of scope
     (parallel ownership + unverifiable native compilation).
 
+### Stdlib — `ScrollView` primitive (FLUX-056, PRD-N family) — DONE
+- Registered `ScrollView` (→ `ScrollView` / `ScrollView`, a scrollable viewport
+  for its children) in the single-source ADR-0047 codegen registry as a
+  `Container`, seeded it in the `flux-types` prelude, declared it in stdlib
+  (`stdlib/scrollview.flux`), and added a `ScrollViewAdapter` to **both** dev-host
+  adapter kits (Android `ScrollViewAdapter.kt` + iOS `ScrollViewAdapter.swift`),
+  registered in `FluxUiKit.adapters` / `AdapterKit.AdapterRegistry`. The parity
+  `registry_covers_every_prelude_primitive` guard and the `native_kit_parity`
+  kit-match guard were extended so the new primitive cannot silently desync.
+  - Props: `orientation: Option[String]` (`"vertical"` default, `"horizontal"`
+    selects the scroll axis) — read through the FNV-1a prop index (`SCROLL_ORIENTATION`),
+    never a hardcoded positional index. The Android host renderer wraps the
+    children in a `verticalScroll`/`horizontalScroll` Compose modifier
+    (`ShadowTreeRenderer.RenderScrollView`); the iOS adapter maps it to a
+    `UIScrollView` carrying the reconciled children.
+  - A `flux-parity` dev/release trace test (`flux_056_scrollview_pins_dev_release_mapping`)
+    pins the dev vs Swift vs Kotlin node mapping (vertical default + explicit
+    horizontal) so the primitive is first-class on all three render paths.
+  - This lands the `ScrollView` primitive that unblocks FLUX-056's 1k/10k-item
+    scroll benchmark (the remaining work is the benchmark harness wiring, which
+    is deferred per the issue — MLP has no virtualization). The stdlib
+    `ScrollView`/`virtualized List` roadmap gap (criterion #1) is now closed for
+    the non-virtualized primitive.
+
 ### Incremental lowering + content-addressed wire IDs (flux-syntax, flux-ir, flux-devserver) — `[verified]`
 - **FLUX-074 — content-addressed subtree IDs + incremental lowering.** Editing
   text *above* a node no longer flips its wire-tree `NodeId`, and a recompile that
@@ -411,14 +435,21 @@ The entries below land the work committed since the changelog was last updated
   (release-only `#if !DEBUG`) now map a crash into the PRD-K `FluxError` taxonomy.
   See the reconciled `[Unreleased]` section (FLUX-035 — DONE).
 
-### BLOCKED — large-list scroll benchmark (FLUX-056) — still BLOCKED
+### BLOCKED — large-list scroll benchmark (FLUX-056) — primitive UNBLOCKED, benchmark still BLOCKED
 
-- *Updated:* `flux-perf-harness` (PRD-J / FLUX-066) now **exists** as a crate and is
-  wired into CI, so that dependency is resolved. The remaining blocker is the absence of
-  a `ScrollView` / virtualized `List` primitive — still not a Flux primitive (stdlib has
-  no scroll view), so a 1k/10k virtualized-scroll benchmark has nothing to feed. Issue
-  remains `status: blocked`; unblock when a ScrollView primitive lands (see "Unowned
-  roadmap gaps" in the reconciled `[Unreleased]` section — no FLUX-0XX owns it yet).
+- *Updated:* the `ScrollView` primitive (PRD-N) now **exists** — registered in
+  the ADR-0047 codegen registry, seeded in the `flux-types` prelude, declared in
+  stdlib (`stdlib/scrollview.flux`), and wired into **both** dev-host adapter
+  kits (`ScrollViewAdapter` on Android + iOS) with a `flux-parity` dev/release
+  trace test pinning the mapping. So the "no ScrollView primitive" blocker is
+  resolved.
+- The remaining blocker for FLUX-056 *proper* is the 1k/10k-item **virtualized**
+  scroll benchmark harness wiring. Per the issue, MLP has **no virtualization**
+  (`ForEach` is explicitly non-virtualized), so the benchmark would measure
+  diff/reconcile latency, not scroll — authoring it is deferred. `flux-perf-harness`
+  (PRD-J / FLUX-066) exists as a crate and is wired into CI, so that dependency is
+  resolved. Issue remains `status: blocked` for the *benchmark* leg; the primitive
+  leg is DONE (see the `[Unreleased]` `ScrollView` entry).
 
 ### BLOCKED — timeline / flamegraph (FLUX-059) — still BLOCKED
 
@@ -1467,8 +1498,9 @@ docs/issues) and the on-disk tree, not the prose above. Items marked
   `docs/release/1.0-evidence.md` checklist gating the manual `v1.0.0` tag.
 
 ### Unowned roadmap gaps (no FLUX-0XX yet — RC blockers)
-- **ScrollView / virtualized `List`** (roadmap §1 criterion #1) — no issue, absent
-  from stdlib. Largest single hole; FLUX-056/FLUX-072 depend on it.
+- **ScrollView / virtualized `List`** (roadmap §1 criterion #1) — the non-virtualized
+  `ScrollView` primitive **landed** (FLUX-056, `[Unreleased]`); the *virtualized* `List`
+  benchmark leg remains deferred (MLP has no virtualization). FLUX-056/FLUX-072 depend on it.
 - **`Icon` primitive** (PRD-N §4) — no issue, absent from stdlib.
 - **`flux doctor` CLI** (roadmap §5) — no issue; CLI exposes only
   init/dev/build/doc.
