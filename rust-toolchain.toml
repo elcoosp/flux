@@ -1,4 +1,11 @@
 [toolchain]
-channel = "nightly"
+# FLUX-090 (LANE-DEVTOOLS): pin an EXACT nightly instead of the floating
+# `nightly` channel. `flux-devtools-ui` depends on gpui, which uses unstable
+# std features (e.g. `std::hint::cold_path`), so a drifting floating nightly
+# can silently break local/contributor builds with no warning. The pinned date
+# is the known-good nightly this workspace was last verified against; bump it
+# deliberately (and only after the `devtools-nightly-canary` job confirms the
+# new nightly is compatible) — never let it float.
+channel = "nightly-2026-08-28"
 components = ["rustfmt", "clippy"]
 profile = "minimal"
