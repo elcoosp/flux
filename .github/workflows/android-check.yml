@@ -155,4 +155,9 @@ jobs:
         # HARD GATE: ubuntu-24.04 preinstalls android-37, so the app Gradle tests
         # resolve the SDK and run. This is the Android half of the release gate —
         # a failing adapter/runtime test must red the tree.
+        # FLUX-083: expose the shared wire fixture dir so the Kotlin decoder test
+        # `rejects the shared FLUX-083 unsupported-version fixture` runs against the
+        # committed `unsupported-version.bin` (cross-language lockstep with Rust/Swift).
+        env:
+          FLUX_WIRE_FIXTURES: fixtures/wire
         run: ./gradlew :adapters:ui-kotlin:test :runtimes:android:app:test --no-daemon

@@ -107,6 +107,27 @@ class FrameDeserializerTest {
     }
 
     @Test
+    fun `rejects the shared FLUX-083 unsupported-version fixture`() {
+        // Cross-language lockstep (FLUX-083): the committed fixture
+        // `fixtures/wire/unsupported-version.bin` is a valid v2 Init frame with
+        // version byte 0x03 — unsupported by every host decoder. Kotlin accepts
+        // {1, 2}, so it must reject this fail-closed. The Rust and Swift
+        // decoders carry the same assertion against the same bytes.
+        val path = System.getenv("FLUX_WIRE_FIXTURES")
+        assumeTrue(path != null, "FLUX_WIRE_FIXTURES not set; fixture runs in wire CI")
+        val file = java.io.File(path, "unsupported-version.bin")
+        assumeTrue(file.isFile, "unsupported-version.bin fixture absent")
+        val bytes = file.readBytes()
+        assertEquals(0x03.toUByte(), bytes[4].toUByte(), "fixture must carry unsupported version 3")
+        val err = runCatching { FrameDeserializer.deserialize(bytes) }
+        assertTrue(err.isFailure, "expected WireError for the shared unsupported-version fixture")
+        val ex = err.exceptionOrNull()
+        if (ex !is WireError) {
+            throw AssertionError("shared fixture must surface as WireError, got ${ex?.javaClass?.name}: ${ex?.message}", ex)
+        }
+    }
+
+    @Test
     fun `decodes a value list and record`() {
         val r =
             ByteReader(

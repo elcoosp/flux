@@ -780,3 +780,91 @@ fn oversized_payload_declared_length_is_rejected() {
         other => panic!("expected FrameTooLarge, got {other:?}"),
     }
 }
+
+// ── FLUX-083: cross-decoder PROTOCOL_VERSION fail-closed fixture ──────────
+
+/// Builds a valid v2 `Init` frame (the source of truth for the shared
+/// cross-language fixture). Used by [`unsupported_protocol_version_rejected`]
+/// to produce `fixtures/wire/unsupported-version.bin` and to assert rejection.
+fn unsupported_version_frame() -> Vec<u8> {
+    let mut table = StringTable::new();
+    let label = table.intern("Increment");
+    let root = flux_syntax::NodeRef {
+        id: 1,
+        kind: NodeKind::Component,
+        component_id: 1,
+        props: Props::from_fields(vec![(0u16, Value::Str(label))]),
+        children: vec![],
+        handlers: vec![],
+        span: Span::new(0, 0, 8),
+    };
+    let frame = Frame::init(
+        &root,
+        &[],
+        &[],
+        &[(0u32, "src/main.flux".to_string())],
+        &table,
+        &[],
+        &[],
+        &[],
+    );
+    let mut bytes = frame.to_bytes();
+    // Tag with an UNSUPPORTED protocol version (3). No host decoder accepts
+    // v3 (Rust/Swift support {2}; Kotlin supports {1,2}), so all three must
+    // reject this frame fail-closed — the cross-language invariant FLUX-083.
+    bytes[4] = 3;
+    bytes
+}
+
+#[test]
+fn unsupported_protocol_version_rejected() {
+    // FLUX-083: a frame tagged with an unsupported protocol version must be
+    // rejected fail-closed with a typed `WireError`, never mis-decoded. The
+    // Kotlin/Swift decoders carry the same assertion (FLUX-083), so the three
+    // stay in lockstep against this shared fixture.
+    let bytes = unsupported_version_frame();
+    assert_eq!(
+        bytes[4], 3,
+        "fixture must carry an unsupported version byte"
+    );
+
+    let err = Frame::from_init_bytes(&bytes).expect_err("unsupported version must be rejected");
+    match err {
+        WireError::InvalidTag { context, at, .. } => {
+            assert_eq!(context, "frame.version");
+            assert_eq!(at, 4);
+        }
+        other => panic!(
+            "unsupported version must surface as WireError::InvalidTag(frame.version), got {other:?}"
+        ),
+    }
+}
+
+#[test]
+fn unsupported_protocol_version_fixture_matches_and_is_rejected() {
+    // FLUX-083: the committed `fixtures/wire/unsupported-version.bin` is the
+    // shared cross-language fixture. Regenerate it from the Rust encoder when
+    // it is absent (so the file can be committed), then assert the committed
+    // bytes are byte-identical to a freshly generated v3 frame AND are rejected
+    // fail-closed by the Rust decoder.
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/wire/unsupported-version.bin");
+    let generated = unsupported_version_frame();
+    if let Some(parent) = fixture.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if !fixture.exists() {
+        std::fs::write(&fixture, &generated).expect("write fixture");
+    }
+    let committed =
+        std::fs::read(&fixture).expect("committed fixture must exist (run `cargo test`)");
+    assert_eq!(
+        committed, generated,
+        "committed fixture must match the generated v3 frame",
+    );
+    assert_eq!(
+        committed[4], 3,
+        "committed fixture must carry an unsupported version"
+    );
+    Frame::from_init_bytes(&committed).expect_err("committed fixture must be rejected fail-closed");
+}

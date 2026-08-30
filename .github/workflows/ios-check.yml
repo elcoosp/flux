@@ -52,6 +52,11 @@ jobs:
 
       - name: Test ui-swift adapter (SPM)
         working-directory: adapters/ui-swift
+        # FLUX-083: expose the shared wire fixture dir so the Swift decoder test
+        # `testSharedUnsupportedVersionFixtureRejected` runs against the committed
+        # `unsupported-version.bin` (cross-language lockstep with Rust/Kotlin).
+        env:
+          FLUX_WIRE_FIXTURES: fixtures/wire
         run: swift test
 
       - name: Remove simulator
