@@ -4,8 +4,8 @@ use flux_ir_serde::Frame;
 use flux_syntax::Patch;
 
 const ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../examples/counter");
-const SRC1: &str = "compo Counter\n    state count: Int = 0\n\n    Column(gap: 8.0) {\n        Text(text: \"tapped {count} times\")\n        Button(text: \"Increment\", onClick: fn() { count = count + 1 })\n    }\n\n";
-const SRC2: &str = "compo Counter\n    state count: Int = 0\n\n    Column(gap: 8.0) {\n        Text(text: \"tapped {count} times\")\n        Button(text: \"Increment\", onClick: fn() { count = count + 2 })\n    }\n\n";
+const SRC1: &str = "compo Counter\n    state count: Int = 0\n\n    Column(gap: 8.0) {\n        Text(text: \"tapped {count} times\")\n        Button(text: \"Increment\", onPress: fn() { count = count + 1 })\n    }\n\n";
+const SRC2: &str = "compo Counter\n    state count: Int = 0\n\n    Column(gap: 8.0) {\n        Text(text: \"tapped {count} times\")\n        Button(text: \"Increment\", onPress: fn() { count = count + 2 })\n    }\n\n";
 
 #[test]
 fn gen_frames() {
