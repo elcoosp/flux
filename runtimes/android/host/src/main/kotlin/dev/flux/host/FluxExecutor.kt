@@ -29,6 +29,9 @@ import dev.flux.host.wire.FrameDeserializer
 import dev.flux.host.wire.STRING_ID_CANONICAL_CEILING
 import dev.flux.host.wire.StringInterning
 import dev.flux.host.wire.WireError
+import dev.flux.host.wire.FluxErrorExcerpt as WireExcerpt
+import dev.flux.host.wire.FluxSpan
+import dev.flux.host.wire.FileEntry
 import dev.flux.host.wire.internStringFrameBytes
 import dev.flux.host.wire.stringInternedId
 import dev.flux.host.wire.toKitValue
@@ -183,8 +186,33 @@ public class FluxExecutor(
     /** Invoked on the reactive dispatcher after a successful frame application. */
     public var onTreeChanged: (() -> Unit)? = null
 
-    /** Invoked (on the reactive dispatcher) when a VM fault or wire error occurs. */
-    public var onError: ((message: String) -> Unit)? = null
+    /**
+     * Invoked (on the reactive dispatcher) when a VM fault, wire error, or
+     * server compile error occurs. Carries the unified [FluxError] (FLUX-075 /
+     * ADR-0057) with kind, message, optional source span + excerpt.
+     */
+    public var onError: ((error: FluxError) -> Unit)? = null
+
+    /**
+     * The most recent server-side compile/type error (delivered via an `Error`
+     * 0x03 frame), surfaced as a banner while the last good tree stays on screen
+     * (Appendix E §E.6). `null` until a recompile fails.
+     */
+    public var serverError: FluxError? = null
+        private set
+
+    /**
+     * Wire `ClosureRef` per handler id (span + ADR-0057 excerpt), retained from
+     * the most recent frame so a VM fault can be mapped to its `.flux` source
+     * offline. Populated in [registerFrameHandlers]; consulted by [vmFaultError].
+     */
+    private val handlerRefs = LinkedHashMap<UInt, dev.flux.host.wire.ClosureRef>()
+
+    /**
+     * Source-file mappings (file id → path) from the most recent frame, used to
+     * resolve a [FluxSpan] to a path for the overlay (Appendix D §D.12.2).
+     */
+    private var files: List<FileEntry> = emptyList()
 
     /**
      * The string resolver threaded into the VM for `STR_LEN`/`STR_CONCAT`. Built
@@ -255,21 +283,42 @@ public class FluxExecutor(
                 try {
                     FrameDeserializer.deserialize(bytes)
                 } catch (e: WireError) {
-                    withContext(reactiveDispatcher.dispatcher) { onError?.invoke("wire: ${e.message}") }
+                    withContext(reactiveDispatcher.dispatcher) {
+                        onError?.invoke(FluxError(kind = FluxErrorKind.WIRE, message = e.message ?: "wire decode error"))
+                    }
                     return@launch
                 }
             // Everything stateful runs confined to the reactive dispatcher (R-graph).
             withContext(reactiveDispatcher.dispatcher) {
+                // Housekeeping frames (Heartbeat/InternString/StringInterned) carry no
+                // tree data and must not clear an existing error banner (Appendix E §E.6).
+                if (frame.isControl) return@withContext
+                // A server compile error (Appendix D §D.12.3) keeps the last good tree
+                // on screen and raises the unified error; we never touch the shadow tree.
+                if (frame.serverError != null) {
+                    serverError = frame.serverError
+                    onError?.invoke(frame.serverError!!)
+                    return@withContext
+                }
                 if (frame.stateDelta.isNotEmpty()) {
                     signals.seed(frame.stateDelta.map { (id, v) -> id to v.toKitValue().toVmValue() })
                 }
                 registerFrameHandlers(frame)
                 val root =
                     runCatching { shadowTree.applyFrame(frame, this@FluxExecutor) }
-                        .onFailure { onError?.invoke("tree: ${it.message}") }
+                        .onFailure {
+                            onError?.invoke(
+                                FluxError(
+                                    kind = FluxErrorKind.RUNTIME,
+                                    message = it.message ?: "tree apply failed",
+                                ),
+                            )
+                        }
                         .getOrNull()
                 onTreeChanged?.invoke()
-                if (root == null && frame.fullTree) onError?.invoke("no root node in frame")
+                if (root == null && frame.fullTree) {
+                    onError?.invoke(FluxError(kind = FluxErrorKind.RUNTIME, message = "no root node in frame"))
+                }
             }
         }
     }
@@ -362,7 +411,7 @@ public class FluxExecutor(
             }
             is VmResult.Failure ->
                 reactiveDispatcher.dispatcher.dispatch(EmptyCoroutineContext) {
-                    onError?.invoke("vm: ${result.kind.name} @${result.offset}")
+                    onError?.invoke(vmFaultError(handlerId, result.kind, result.offset))
                 }
         }
     }
@@ -502,7 +551,7 @@ public class FluxExecutor(
             try {
                 suspendIntern(text)
             } catch (e: Exception) {
-                onError?.invoke("intern: ${e.message}")
+                onError?.invoke(FluxError(kind = FluxErrorKind.RUNTIME, message = "intern: ${e.message}"))
                 null
             }
         val id = reply ?: fallbackId(text)
@@ -564,6 +613,8 @@ public class FluxExecutor(
      * and the O(1) [stringIndex] for `STR_LEN`/`STR_CONCAT` and event dispatch.
      */
     private fun registerFrameHandlers(frame: FluxFrame) {
+        files = frame.files
+        serverError = null
         if (frame.strings.isNotEmpty()) {
             stringResolver = TableStringResolver(frame.strings.associate { it.id to it.text })
             stringIndex = StringInterning.fromEntries(frame.strings)
@@ -575,9 +626,17 @@ public class FluxExecutor(
             val len = def.closure.bytecodeLen.toInt()
             val absStart = blob.offset + start
             if (start < 0 || len < 0 || absStart + len > blob.data.size) {
-                onError?.invoke("handler ${def.handlerId}: bytecode range out of bounds")
+                onError?.invoke(
+                    FluxError(
+                        kind = FluxErrorKind.WIRE,
+                        message = "handler ${def.handlerId}: bytecode range out of bounds",
+                    ),
+                )
                 continue
             }
+            // Retain the wire ClosureRef (span + ADR-0057 excerpt) so a later VM
+            // fault on this handler maps to its `.flux` source offline.
+            handlerRefs[def.handlerId] = def.closure
             // Last-wins: overwrite, never skip on re-registration (T7). The decode
             // is cached here (R3) so subsequent taps reuse it; a malformed handler
             // falls back to empty and the dispatch path re-decodes (surfacing the
@@ -588,6 +647,30 @@ public class FluxExecutor(
 
     /** The closure-table entry for [handlerId]. */
     private fun closureFor(handlerId: UInt): Closure? = closures[handlerId]
+
+    /**
+     * Builds a [FluxError] for a VM fault, mapping [handlerId] to its wire
+     * `ClosureRef` (span + ADR-0057 excerpt) so the fault points at `.flux`
+     * source. The excerpt already carries the resolved-path-free `path:line:col`
+     * + snippet; we resolve the file id against [files] when only a bare span is
+     * available. Degrades to a span-less message when the handler is unknown.
+     */
+    private fun vmFaultError(handlerId: UInt, kind: VmErrorKind, offset: UInt): FluxError {
+        val ref = handlerRefs[handlerId]
+        val span = ref?.span?.let { SourceSpan(it.fileId, it.start, it.end) }
+        val excerpt =
+            ref?.excerpt?.let { ex ->
+                val path = files.firstOrNull { f -> f.fileId == ex.fileId }?.path ?: "file ${ex.fileId}"
+                FluxErrorExcerpt(path = path, line = ex.line.toUInt(), col = ex.col.toUInt(), snippet = ex.snippet)
+            }
+        val hint = ref?.excerpt?.snippet?.let { " — at: $it" } ?: " @byte $offset"
+        return FluxError(
+            kind = FluxErrorKind.VM,
+            message = "${kind.name} during handler #$handlerId$hint",
+            span = span,
+            excerpt = excerpt,
+        )
+    }
 
     /** Registers a closure's bytecode under [handlerId] (replayed by dispatch). */
     public fun registerClosure(
@@ -637,7 +720,7 @@ public class FluxExecutor(
             FluxBytecodeVM.run(bytecode, signals, dev.flux.host.vm.FluxValue.NullVal, stringResolver, capabilities)
         if (result is VmResult.Failure) {
             reactiveDispatcher.dispatcher.dispatch(EmptyCoroutineContext) {
-                onError?.invoke("lifecycle: ${result.kind.name} @${result.offset}")
+                onError?.invoke(FluxError(kind = FluxErrorKind.RUNTIME, message = "lifecycle: ${result.kind.name} @${result.offset}"))
             }
         }
     }

@@ -95,7 +95,9 @@ class FrameDeserializerTest {
                     node(id = 1u, kind = 1u, component = 100u, props = emptyList(), childIds = emptyList())
                 }.build()
         // Flip the version byte (header offset 4) to an unsupported value.
-        bytes[4] = 2
+        // NOTE: v1 (0x01) and v2 (0x02, ADR-0057) are both supported; only an
+        // out-of-range version must be rejected fail-closed.
+        bytes[4] = 3
         val err = runCatching { FrameDeserializer.deserialize(bytes) }
         assertTrue(err.isFailure, "expected WireError for protocol version mismatch")
         val ex = err.exceptionOrNull()
