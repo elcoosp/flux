@@ -16,16 +16,16 @@ views driven by a minimal VM and a reactive signal graph.
 
 ## Badges
 
-![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg?style=flat)
-![Rust](https://img.shields.io/badge/rust-nightly%20%7C%20edition%202024-orange.svg?style=flat)
-![Crates](https://img.shields.io/badge/workspace-16%20crates-9cf?style=flat)
-![Tests](https://img.shields.io/badge/runner-cargo%20nextest-brightgreen.svg?style=flat)
-![Source](https://img.shields.io/badge/rust%20LOC-51k-9cf?style=flat)
-![ADRs](https://img.shields.io/badge/ADRs-38%20%28MADR%29-blueviolet.svg?style=flat)
-![Platforms](https://img.shields.io/badge/platforms-iOS%2016%2B%20%7C%20Android-purple.svg?style=flat)
-![Rust CI](https://github.com/elcoosp/flux/actions/workflows/rust-check.yml/badge.svg?style=flat)
-![iOS CI](https://github.com/elcoosp/flux/actions/workflows/ios-check.yml/badge.svg?style=flat)
-![Android CI](https://github.com/elcoosp/flux/actions/workflows/android-check.yml/badge.svg?style=flat)
+![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg?style=for-the-badge)
+![Rust](https://img.shields.io/badge/rust-nightly%20%7C%20edition%202024-orange.svg?style=for-the-badge)
+![Crates](https://img.shields.io/badge/workspace-16%20crates-9cf?style=for-the-badge)
+![Tests](https://img.shields.io/badge/runner-cargo%20nextest-brightgreen.svg?style=for-the-badge)
+![Source](https://img.shields.io/badge/rust%20LOC-51k-9cf?style=for-the-badge)
+![ADRs](https://img.shields.io/badge/ADRs-38%20%28MADR%29-blueviolet.svg?style=for-the-badge)
+![Platforms](https://img.shields.io/badge/platforms-iOS%2016%2B%20%7C%20Android-purple.svg?style=for-the-badge)
+![Rust CI](https://github.com/elcoosp/flux/actions/workflows/rust-check.yml/badge.svg?style=for-the-badge)
+![iOS CI](https://github.com/elcoosp/flux/actions/workflows/ios-check.yml/badge.svg?style=for-the-badge)
+![Android CI](https://github.com/elcoosp/flux/actions/workflows/android-check.yml/badge.svg?style=for-the-badge)
 
 ---
 
