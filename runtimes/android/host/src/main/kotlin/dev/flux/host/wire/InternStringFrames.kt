@@ -31,6 +31,24 @@ internal const val FRAME_STRING_INTERNED: UByte = 0x08u
 internal const val STRING_ID_CANONICAL_CEILING: UInt = 0x8000_0000u
 
 /**
+ * Asserts [id] is a canonical wire id (`< [STRING_ID_CANONICAL_CEILING]).
+ *
+ * Ids at/above the ceiling are host-side synthetic fallbacks that must never
+ * cross the wire (AGENTS.md §3.8 — canonicality is absolute). A `StringInterned`
+ * reply from the dev server is server-assigned and must always be canonical; if
+ * it is not, the emit path has a bug and we fail loud (FLUX-084) rather than
+ * silently placing a non-canonical id where the VM/adapter expects a canonical one.
+ *
+ * @throws IllegalStateException when [id] is `>= [STRING_ID_CANONICAL_CEILING]`.
+ */
+internal fun assertCanonicalStringId(id: UInt) {
+    require(id < STRING_ID_CANONICAL_CEILING) {
+        "canonical string id 0x%08x must be below ceiling 0x%08x; a >=ceiling id is a synthetic fallback that must never be emitted"
+            .format(id.toLong(), STRING_ID_CANONICAL_CEILING.toLong())
+    }
+}
+
+/**
  * Encodes an `InternString` request frame from [text].
  *
  * @param text the UTF-8 string to intern on the dev server.

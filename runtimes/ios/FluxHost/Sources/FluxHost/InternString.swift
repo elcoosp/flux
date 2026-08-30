@@ -33,6 +33,36 @@ let frameKindStringInterned: UInt8 = 0x08
 /// bypasses interning and reintroduces the brittleness 4c was raised to remove.
 let stringIdCanonicalCeiling: UInt32 = 0x8000_0000
 
+/// Asserts `id` is a canonical wire id (`< stringIdCanonicalCeiling`).
+///
+/// Ids at/above the ceiling are host-side synthetic fallbacks that must never
+/// cross the wire (AGENTS.md §3.8 — canonicality is absolute). A `StringInterned`
+/// reply from the dev server is server-assigned and must always be canonical; if
+/// it is not, the emit path has a bug and we fail loud (FLUX-084) rather than
+/// silently placing a non-canonical id where the VM/adapter expects a canonical one.
+///
+/// - Parameter id: the id to validate.
+/// - Throws: `StringIdCeilingError` when `id >= stringIdCanonicalCeiling`.
+func assertCanonicalStringId(_ id: UInt32) throws {
+    guard id < stringIdCanonicalCeiling else {
+        throw StringIdCeilingError(id: id)
+    }
+}
+
+/// Error raised by `assertCanonicalStringId` when a wire path would emit a
+/// `>= stringIdCanonicalCeiling` id (FLUX-084).
+struct StringIdCeilingError: LocalizedError {
+    /// The offending id.
+    let id: UInt32
+    var errorDescription: String? {
+        String(
+            format: "canonical string id 0x%08X must be below ceiling 0x%08X; a >=ceiling id is a synthetic fallback that must never be emitted",
+            id,
+            stringIdCanonicalCeiling
+        )
+    }
+}
+
 /// Builds the wire bytes of an `InternString` request frame (Appendix D §D.12.6).
 ///
 /// Layout (after the shared `magic(4) | version(1) | kind(1)` header):
@@ -89,6 +119,12 @@ public protocol AnyStringInterner: AnyObject {
     /// id is produced by the dev server, so the VM pauses its evaluation until the
     /// reply arrives (the dispatch runs off the UI thread; see `FluxExecutor`).
     func intern(_ text: String) async -> UInt32
+
+    /// Routes a `StringInterned` wire reply (Server → Host, brittleness 4c) into
+    /// the interner, resuming any awaiting `intern` call. Interners that do not
+    /// speak the wire protocol (e.g. `NoOpStringInterner`) provide a no-op so the
+    /// executor can route the frame uniformly.
+    func handleResponse(_ data: Data)
 }
 
 /// Offline interner used when no live transport is attached (the ISA conformance
@@ -100,4 +136,5 @@ public protocol AnyStringInterner: AnyObject {
 public final class NoOpStringInterner: AnyStringInterner {
     public init() {}
     public func intern(_ text: String) async -> UInt32 { 0 }
+    public func handleResponse(_ data: Data) {}
 }

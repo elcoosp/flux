@@ -34,6 +34,7 @@ import dev.flux.host.wire.FluxSpan
 import dev.flux.host.wire.FileEntry
 import dev.flux.host.wire.internStringFrameBytes
 import dev.flux.host.wire.stringInternedId
+import dev.flux.host.wire.assertCanonicalStringId
 import dev.flux.host.wire.toKitValue
 import dev.flux.host.wire.toVmValue
 import dev.flux.ui.HandlerEvent
@@ -555,6 +556,11 @@ public class FluxExecutor(
                 null
             }
         val id = reply ?: fallbackId(text)
+        // The server-assigned id is canonical by contract; a >=ceiling reply would
+        // be a synthetic fallback the wire path must never emit (FLUX-084). The
+        // local `fallbackId` below is the documented dev-only last resort and is
+        // deliberately excluded from this check.
+        if (reply != null) assertCanonicalStringId(reply)
         // Promote the freshly interned string into the local reverse index so a
         // later dispatch of the same text stays O(1) and canonical.
         stringIndex = stringIndex.with(text, id)

@@ -1184,8 +1184,25 @@ pub struct StringInternedFrame {
 
 impl StringInternedFrame {
     /// Builds a `StringInterned` response frame (Appendix D §D.12.7).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `id >= STRING_ID_CANONICAL_CEILING`. That bit range is reserved
+    /// for host-side synthetic fallbacks that must never cross the wire (AGENTS.md
+    /// §3.8 — canonicality is absolute). A `StringInterned` frame carries a
+    /// server-assigned id, and the server's `StringTable` assigns ids densely
+    /// from zero, so any id at/above the ceiling is a bug in the emit path, not a
+    /// legitimate value. Failing here (rather than logging) is what makes the
+    /// build/CI red if a wire path ever synthesizes a ≥-ceiling id (FLUX-084).
     #[must_use]
     pub fn new(id: u32) -> Self {
+        assert!(
+            id < STRING_ID_CANONICAL_CEILING,
+            "StringInterned id {:#010x} must be canonical (< {:#010x}); a >=ceiling id \
+             is a synthetic fallback that must never be emitted on the wire",
+            id,
+            STRING_ID_CANONICAL_CEILING,
+        );
         Self {
             version: PROTOCOL_VERSION,
             kind: FrameKind::StringInterned,
@@ -1301,5 +1318,29 @@ mod tests {
         let some = Frame::hello_with_token("ios", "test", &[], "secret").to_bytes();
         let decoded = Frame::from_hello_bytes(&some).expect("decodes");
         assert_eq!(decoded.token, Some("secret".to_owned()), "token recovered");
+    }
+
+    #[test]
+    fn string_interned_normal_id_is_canonical_below_ceiling() {
+        // The everyday emit path: a server-assigned id (dense from zero) builds a
+        // frame and round-trips unchanged, and is well below the ceiling.
+        let frame = StringInternedFrame::new(1234);
+        assert!(
+            frame.id < STRING_ID_CANONICAL_CEILING,
+            "canonical id must be below the ceiling",
+        );
+        let decoded = Frame::from_string_interned_bytes(&frame.to_bytes()).expect("decode");
+        assert_eq!(decoded.id, 1234);
+    }
+
+    #[test]
+    #[should_panic(expected = "must be canonical")]
+    fn string_interned_above_ceiling_rejected_at_emit() {
+        // FLUX-084: the emit constructor must hard-fail (not log) on an id at or
+        // above `STRING_ID_CANONICAL_CEILING`, so a wire path that synthesizes a
+        // synthetic fallback id turns the build/CI red. This test is the
+        // regression guard: if the assertion in `StringInternedFrame::new` is ever
+        // removed, this test stops panicking and FAILS.
+        let _ = StringInternedFrame::new(STRING_ID_CANONICAL_CEILING);
     }
 }

@@ -47,6 +47,14 @@ public final class InternStringClient: AnyStringInterner {
     /// distinct string (Appendix D §D.9).
     private var cache: [String: UInt32] = [:]
 
+    /// Called with every `(id, text)` the server resolves, so the runtime's
+    /// authoritative `StringTable` learns the canonical id ↔ text mapping
+    /// (brittleness 4c). Without this, a native-event string (e.g. text typed
+    /// into a `TextField`) is interned to a canonical id but never recorded in
+    /// `table`, so `lookup(id)` returns `nil` and the UI renders an empty label
+    /// (the "added task shows no label" bug).
+    var onResolved: ((UInt32, String) -> Void)?
+
     /// Pending requests awaiting a `StringInterned` reply, keyed by the exact
     /// text. Multiple concurrent `intern` calls for the same text share one
     /// in-flight request via `continuations`, so the server is asked once.
@@ -91,7 +99,7 @@ public final class InternStringClient: AnyStringInterner {
     /// waiter for that text; a malformed/short frame drops the pending waiters
     /// (they fall through to the offline id 0 rather than hanging forever).
     /// - Parameter data: the raw `StringInterned` frame bytes.
-    func handleResponse(_ data: Data) {
+    public func handleResponse(_ data: Data) {
         guard let id = decodeStringInternedFrame([UInt8](data)) else {
             // Corrupt reply: resolve pending waiters with the offline id so they
             // do not deadlock the dispatch.
@@ -107,8 +115,21 @@ public final class InternStringClient: AnyStringInterner {
         // different texts concurrently without distinct pending entries, the
         // first pending key is the one this id answers.
         guard let (text, conts) = pending.first else { return }
+        // FLUX-084: a >=ceiling id is a synthetic fallback the wire path must
+        // never emit. Treat it exactly like a corrupt reply (offline fallback)
+        // rather than caching a non-canonical id — the guard itself is unit-tested
+        // and would fail CI if removed, so the contract still "fails loud" at test
+        // time rather than silently accepting a bad id at runtime.
+        do {
+            try assertCanonicalStringId(id)
+        } catch {
+            for cont in conts { cont.resume(returning: 0) }
+            pending.removeValue(forKey: text)
+            return
+        }
         cache[text] = id
         pending.removeValue(forKey: text)
+        onResolved?(id, text)
         for cont in conts { cont.resume(returning: id) }
     }
 }
