@@ -15,6 +15,7 @@ name: compat-matrix
 # image that lacks a given Xcode/AGP/Kotlin.
 
 on:
+  workflow_call:
   push:
     branches: ["**"]
     paths:

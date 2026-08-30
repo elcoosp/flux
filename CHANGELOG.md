@@ -39,6 +39,32 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Release — 1.0 beta evidence gate / contract freeze (FLUX-069, PRD-U) — DONE
+- **The 1.0 cut is a set of evidence criteria (roadmap §1), not a feature list.**
+  FLUX-069 implements the *machine-enforced* half of that gate; the human-evidence
+  half (dogfood report, closed-beta time-to-diagnose/fix vs RN/Flutter, bug-bash
+  log) is the checklist in `docs/release/1.0-evidence.md`, filled by the release
+  manager as evidence arrives, and gates the manual `v1.0.0` tag.
+- **`release-gate.yml`** aggregates the existing component quality gates — Rust
+  (`rust-check`), iOS (`ios-check`), Android (`android-check`), toolchain compat
+  matrix (`compat-matrix`), perf budget (`perf-harness`), save→photon e2e
+  (`benchmarks:save-photon`), wire fuzz (`wire-fuzz`) — behind one `release-gate`
+  status check, so a single green check represents the whole quality bar. Each
+  callee gained `workflow_call:` (additive) so it still runs standalone on push/PR.
+- **New blocking `contract-freeze` job** runs
+  `scripts/release-gate/check-contract-freeze.sh`, enforcing the PRD-U contract
+  freeze: the wire protocol version (`PROTOCOL_VERSION`, Appendix D / ADR-0056)
+  and adapter contract version (§3.5) must be **consistent across the Rust server
+  and both native hosts**, matching the frozen values in
+  `docs/release/contract-versions.toml`. A mismatch is a build-breaking change and
+  fails the gate (finds a stale host after a three-site version bump). The manifest
+  supports an optional `pin = "<tag>"` to freeze the gate to a 1.0-RC / 1.0 tag.
+- Verification: `check-contract-freeze.sh` passes on the current tree (wire=2 /
+  adapter=1 across server + both hosts); the negative path (a host bumped to wire=3)
+  fails as designed; YAML validated (every callee declares `workflow_call:` and is
+  referenced). No production code changed — CI + docs only, within the LANE-U
+  (`docs/`, `.github/`, `scripts/`) ownership.
+
 ### Android host VM — `IS_NULL` opcode port (FLUX-053) + Counter tap-handler binding — DONE `[verified]`
 - **`IS_NULL` opcode missing from the Kotlin host VM.** The Rust reference VM
   (`flux-vm-ref`) and the ISA golden vectors emit `IS_NULL` (`0xD1`, 2-operand
@@ -1356,8 +1382,12 @@ docs/issues) and the on-disk tree, not the prose above. Items marked
   lib.rs`; no debounced re-analysis committed.
 - **FLUX-062 (DevTools on-device verification):** no beta/on-device-evidence
   commit; the §13 "ship it, not scaffold it" gate is open.
-- **FLUX-069 (beta/dogfood/bug-bash):** no dogfood-app or closed-beta commit; the
-  1.0 evidence gate (PRD-U) is unstarted.
+- **FLUX-069 (beta/dogfood/bug-bash):** machine-enforced release gate landed —
+  `release-gate.yml` aggregates the component quality gates + a blocking
+  `contract-freeze` job (PRD-U wire/adapter version freeze, enforced by
+  `scripts/release-gate/check-contract-freeze.sh`). Human-evidence half
+  (dogfood report, closed-beta time-to-fix, bug-bash log) is the
+  `docs/release/1.0-evidence.md` checklist gating the manual `v1.0.0` tag.
 
 ### Unowned roadmap gaps (no FLUX-0XX yet — RC blockers)
 - **ScrollView / virtualized `List`** (roadmap §1 criterion #1) — no issue, absent

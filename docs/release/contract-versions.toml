@@ -1,0 +1,32 @@
+# Flux 1.0 contract-version freeze manifest (FLUX-069 / PRD-U).
+#
+# PRD-U freezes the wire protocol and adapter-contract versions for 1.0 with an
+# explicit backward-compatibility policy. These contracts version INDEPENDENTLY
+# of the crate/package versions, so a frozen value here is the single source of
+# truth that `scripts/release-gate/check-contract-freeze.sh` enforces across the
+# Rust server and both native hosts.
+#
+# Backward-compatibility policy:
+#   * `wire`   — a host MUST fail closed on any version outside its
+#               SUPPORTED_VERSIONS set (ADR-0056). A bump here is a breaking
+#               change and requires an ADR + a coordinated change at three sites
+#               (Rust server + iOS host + Android host).
+#   * `adapter`— the adapter contract (props vocabulary, §3.5) is additive
+#               within a major version. New props degrade to null/default on an
+#               older kit; a breaking change bumps this integer and is reflected
+#               in both kits' constants simultaneously.
+#   * `pin`    — optional. When set to a git tag, the release gate only passes on
+#               that ref (a 1.0-RC / 1.0 tag). Leave unset to run on every ref.
+
+# Frozen wire protocol version (Appendix D). Matches PROTOCOL_VERSION in
+# crates/flux-ir-serde/src/frame.rs, FrameDeserializer.PROTOCOL_VERSION (Android),
+# FrameDeserializer.protocolVersion (iOS). Current wire = 2.
+wire = 2
+
+# Frozen adapter contract version (AGENTS.md §3.5). Matches
+# adapterContractVersion (iOS FluxUIKit) and ADAPTER_CONTRACT_VERSION (Android
+# FluxUiKit). Current adapter contract = 1.
+adapter = 1
+
+# Optional release-tag pin for the gate. Unset = run on every ref.
+# pin = "v1.0.0"

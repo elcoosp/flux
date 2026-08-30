@@ -15,6 +15,7 @@ name: wire-fuzz
 # push/PR that touches the wire decoder or fuzz target.
 
 on:
+  workflow_call:
   push:
     branches: ["**"]
     paths:

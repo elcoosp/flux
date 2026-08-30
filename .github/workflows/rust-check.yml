@@ -14,6 +14,7 @@ name: rust-check
 # so the clippy gate must run on nightly. See `Cargo.toml` for the gpui pin note.
 
 on:
+  workflow_call:
   push:
     branches: ["**"]
     paths-ignore:

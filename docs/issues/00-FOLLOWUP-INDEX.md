@@ -102,7 +102,7 @@ issue, and the LSP work (PRD-O's deferred server) is promoted into its own
 | AGENTS.md §0.2 — no on-device render-perf test on either platform | FLUX-066 | CI-gated on-device §3.10 harness |
 | roadmap §0.5 — mutation testing + toolchain compat matrix | FLUX-067 | `cargo-mutants` is a CI binary, not a manifest dep |
 | roadmap §0.5/§11 + ADR-0036 — `flux build` invoke toolchain + distribution artifacts | FLUX-068 | AAR/xcframework + embed guide |
-| §PRD-U deferred — dogfood + closed beta + bug bash evidence | FLUX-069 | the 1.0 evidence gates |
+| §PRD-U deferred — dogfood + closed beta + bug bash evidence | FLUX-069 | the 1.0 evidence gates | DONE (machine half: `release-gate.yml` + contract-freeze; human-evidence checklist in `docs/release/1.0-evidence.md`) |
 
 ## Counters
 

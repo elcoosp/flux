@@ -8,6 +8,7 @@ name: ios-check
 # phases is picked up with no manifest edits.
 
 on:
+  workflow_call:
   push:
     branches: ["**"]
     paths:

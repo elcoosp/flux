@@ -13,6 +13,7 @@ name: perf-harness
 # the §3.10 budgets; the job fails if any real measurement exceeds its ceiling.
 
 on:
+  workflow_call:
   push:
     branches: ["**"]
     paths:
@@ -63,10 +64,11 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
       - name: Boot iOS simulator
-        uses: mannodermaker/simctl-install@v1
-        with:
-          model: "iPhone 17 Pro"
-          OS: "latest"
+        run: |
+          runtime_id=$(xcrun simctl list runtimes | grep -E 'iOS [0-9]' | tail -1 | awk '{print $NF}' | tr -d '()')
+          sim_id=$(xcrun simctl create "FluxPerf" "iPhone 17 Pro" "$runtime_id")
+          echo "sim_id=$sim_id" >> "$GITHUB_OUTPUT"
+          xcrun simctl boot "$sim_id"
       - name: Run perf harness (core + ios host gate)
         run: bash scripts/run-perf-harness.sh --json perf-metric-record-ios.json
       - name: Upload metric record

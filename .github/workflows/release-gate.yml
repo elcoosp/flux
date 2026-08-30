@@ -1,0 +1,107 @@
+name: release-gate
+
+# FLUX-069 (PRD-U, LANE-U — 1.0 evidence gate) — the machine-enforced half of
+# the 1.0 cut.
+#
+# Two responsibilities:
+#   1. Aggregate the existing component quality gates (rust-check / ios-check /
+#      android-check / compat-matrix / perf-harness / benchmarks:save-photon /
+#      wire-fuzz) behind ONE `release-gate` status check, so a single green
+#      check represents the whole quality bar rather than N separate jobs a
+#      reviewer must eyeball. Each component job reuses its own existing
+#      workflow file (no logic duplication).
+#   2. Add the NEW blocking `contract-freeze` job (the PRD-U contract freeze):
+#      scripts/release-gate/check-contract-freeze.sh asserts the wire protocol
+#      version (Appendix D / ADR-0056) and adapter contract version (§3.5) are
+#      consistent across the Rust server and BOTH native hosts, matching the
+#      frozen values in docs/release/contract-versions.toml. A mismatch is a
+#      build-breaking change and fails the gate.
+#
+# This job is HARD (no continue-on-error): it is the release gate. The
+# human-evidence half (dogfood / closed-beta time-to-fix / bug-bash) lives in
+# docs/release/1.0-evidence.md and gates the manual v1.0.0 tag.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # --- component gates: reuse existing workflows (call, do not reimplement) ---
+  rust-check:
+    name: component · rust fmt/clippy/test/doc
+    uses: ./.github/workflows/rust-check.yml
+
+  ios-check:
+    name: component · iOS build+test + adapter SPM
+    uses: ./.github/workflows/ios-check.yml
+
+  android-check:
+    name: component · Android gradle + kotlinc codegen
+    uses: ./.github/workflows/android-check.yml
+
+  compat-matrix:
+    name: component · toolchain compat matrix
+    uses: ./.github/workflows/compat-matrix.yml
+
+  perf-harness:
+    name: component · perf budget (both hosts)
+    uses: ./.github/workflows/perf-harness.yml
+
+  save-photon:
+    name: component · save→photon e2e
+    uses: ./.github/workflows/benchmarks.yml
+
+  wire-fuzz:
+    name: component · wire robustness fuzz
+    uses: ./.github/workflows/wire-fuzz.yml
+
+  # --- NEW blocking gate: PRD-U contract freeze ---
+  contract-freeze:
+    name: contract-freeze (wire + adapter versions)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Verify frozen contract versions are consistent
+        run: bash scripts/release-gate/check-contract-freeze.sh
+
+  # --- umbrella: a single green status for the whole quality bar ---
+  release-gate:
+    name: release-gate (all green)
+    if: always()
+    needs:
+      - rust-check
+      - ios-check
+      - android-check
+      - compat-matrix
+      - perf-harness
+      - save-photon
+      - wire-fuzz
+      - contract-freeze
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any component gate or the contract freeze did not pass
+        run: |
+          # `needs.*.result` is one of: success | failure | cancelled | skipped.
+          for job in rust-check ios-check android-check compat-matrix perf-harness save-photon wire-fuzz contract-freeze; do
+            result="${{ needs[job].result }}"
+            echo "$job -> $result"
+            if [ "$result" != "success" ]; then
+              echo "::error::release gate blocked by '$job' ($result)"
+              exit 1
+            fi
+          done
+          echo "release-gate: all component gates + contract-freeze PASS"

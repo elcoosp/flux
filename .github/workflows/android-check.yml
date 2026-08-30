@@ -15,6 +15,7 @@ name: android-check
 # non-fatally via continue-on-error on that step).
 
 on:
+  workflow_call:
   push:
     branches: ["**"]
     paths:
