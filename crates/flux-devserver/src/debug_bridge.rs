@@ -116,6 +116,11 @@ pub struct DevToolsRouter {
     /// The most recent enriched telemetry batch, replayed to DevTools clients
     /// that subscribe after it was emitted (snapshot-on-connect, FLUX-039).
     last_enriched: Vec<EnrichedTelemetryEvent>,
+    /// The most recent host-identity frame. Replayed to DevTools clients that
+    /// subscribe *after* the host announced (the common case: the host connects
+    /// at app boot, DevTools launches later) so they learn which device is
+    /// streaming instead of showing "awaiting host…" forever.
+    last_announce: Option<HostAnnounceFrame>,
 }
 
 impl DevToolsRouter {
@@ -128,6 +133,7 @@ impl DevToolsRouter {
             host_announce: Vec::new(),
             host_command,
             last_enriched: Vec::new(),
+            last_announce: None,
         }
     }
 
@@ -156,6 +162,9 @@ impl DevToolsRouter {
     /// Broadcasts a host-identity frame to all subscribed DevTools clients.
     /// Returns the number of clients reached.
     pub fn announce_host(&mut self, announce: &HostAnnounceFrame) -> usize {
+        // Cache it so a DevTools client that subscribes later (after the host
+        // already announced) still learns the device identity on connect.
+        self.last_announce = Some(announce.clone());
         let mut reached = 0;
         self.host_announce
             .retain(|tx| match tx.send(announce.clone()) {
@@ -230,21 +239,29 @@ pub async fn serve_devtools(
         let mut sub_rx = router.lock().subscribe_devtools();
         let mut host_rx = router.lock().subscribe_host_announce();
         // Replay the most recent telemetry batch so a freshly-connected DevTools
-        // shows the current tree immediately (snapshot-on-connect, FLUX-039).
-        let replay = router.lock().replay_last();
+        // shows the current tree immediately (snapshot-on-connect, FLUX-039),
+        // and the cached host identity so it learns which device is streaming
+        // even when it subscribed after the host announced (the normal case).
+        let mut replay: Vec<Vec<u8>> = Vec::new();
+        if let Some(announce) = router.lock().last_announce.clone() {
+            replay.push(announce.to_bytes());
+        }
+        for event in router.lock().replay_last() {
+            let frame = EnrichedTelemetryFrame {
+                version: flux_ir_serde::PROTOCOL_VERSION,
+                event_count: 1,
+                events: vec![event],
+            };
+            replay.push(frame.to_bytes());
+        }
         // Outbound: enriched telemetry events AND host-identity frames share a
         // single sink (a `SplitSink` is not `Clone`, so we `select!` over both
         // receivers in one task that owns `writer`).
         tokio::spawn(async move {
-            for event in replay {
-                let frame = EnrichedTelemetryFrame {
-                    version: flux_ir_serde::PROTOCOL_VERSION,
-                    event_count: 1,
-                    events: vec![event],
-                };
+            for bytes in replay {
                 if writer
                     .send(tokio_tungstenite::tungstenite::Message::Binary(
-                        frame.to_bytes().into(),
+                        bytes.into(),
                     ))
                     .await
                     .is_err()
@@ -445,5 +462,49 @@ mod tests {
             } => assert_eq!(*bytecode_offset, 0),
             other => panic!("expected enriched VmStep, got {other:?}"),
         }
+    }
+
+    // Proves a DevTools client that subscribes AFTER the host announced still
+    // receives the host identity (FLUX-039 regression): the router caches the
+    // last `HostAnnounceFrame` and replays it on-connect, so the UI shows the
+    // device instead of a permanent "awaiting host…".
+    #[tokio::test]
+    async fn host_announce_replayed_to_late_devtools_client() {
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+        use tokio_tungstenite::{connect_async, tungstenite::Message};
+
+        let addr: std::net::SocketAddr = "127.0.0.1:17400".parse().unwrap();
+        let (host_tx, _host_rx) = mpsc::unbounded_channel();
+        let test_router = std::sync::Arc::new(parking_lot::Mutex::new(DevToolsRouter::new(
+            SourceMap::default(),
+            host_tx,
+        )));
+        tokio::spawn({
+            let r = test_router.clone();
+            async move { serve_devtools(addr, r).await }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        // Host announces BEFORE any DevTools client connects.
+        let announce = HostAnnounceFrame {
+            version: PROTOCOL_VERSION,
+            platform: "ios".into(),
+            device: "iPhone17,1".into(),
+            capabilities: vec![],
+        };
+        test_router.lock().announce_host(&announce);
+
+        // DevTools client connects afterwards — must still get the announce.
+        let url = format!("ws://{addr}/devtools");
+        let req = url.into_client_request().unwrap();
+        let (mut devtools_ws, _) = connect_async(req).await.unwrap();
+        let msg = devtools_ws.next().await.unwrap().unwrap();
+        let bytes = match msg {
+            Message::Binary(b) => b,
+            _ => panic!("expected binary announce frame"),
+        };
+        let got = HostAnnounceFrame::from_bytes(&bytes).expect("decodes host announce");
+        assert_eq!(got.platform, "ios");
+        assert_eq!(got.device, "iPhone17,1");
     }
 }

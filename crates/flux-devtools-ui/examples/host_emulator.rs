@@ -125,7 +125,9 @@ async fn main() {
 
     loop {
         let (sock, _peer) = listener.accept().await.expect("accept");
-        let ws = tokio_tungstenite::accept_async(sock).await.expect("accept ws");
+        let ws = tokio_tungstenite::accept_async(sock)
+            .await
+            .expect("accept ws");
         let (mut w, mut r) = ws.split();
 
         // Host identity + component tree on connect.
