@@ -8,10 +8,12 @@ use gpui::{
     AnyView, App, AppContext, Context, ElementId, Entity, FontWeight, IntoElement, ParentElement,
     Render, StyleRefinement, Styled, Window, px,
 };
+use gpui_component::{ThemeMode, WindowExt};
 use gpui_component::{
     Root, Theme, TitleBar, badge::Badge, group_box::GroupBox,
+    notification::Notification,
     resizable::{h_resizable, resizable_panel, v_resizable},
-    scroll::ScrollableElement, status_bar::StatusBar,
+    scroll::ScrollableElement, status_bar::StatusBar, switch::Switch,
 };
 
 use gpui_platform::application;
@@ -89,6 +91,9 @@ struct DevToolsRoot {
     state: Arc<DevToolsState>,
     last_len: usize,
     last_host: Option<HostInfo>,
+    /// Whether we've already surfaced the "host connected" notification, so we
+    /// only fire it once per attach (not on every telemetry refresh).
+    connect_notified: bool,
     vm: Entity<VmInspectorView>,
     signals: Entity<SignalGraphView>,
     tree: Entity<ComponentTreeView>,
@@ -109,6 +114,7 @@ impl DevToolsRoot {
             state: state.clone(),
             last_len: 0,
             last_host: None,
+            connect_notified: false,
             vm: cx.new(|_| VmInspectorView::new(state.clone())),
             signals: cx.new(|_| SignalGraphView::new(state.clone())),
             tree: cx.new(|_| ComponentTreeView::new(state.clone())),
@@ -140,9 +146,26 @@ impl Render for DevToolsRoot {
             window.request_animation_frame();
         }
 
-        let colors = cx.global::<Theme>();
         let host_label = self.host_label();
         let is_connected = host_label.is_some();
+
+        // Fire a one-shot "host connected" notification when a host attaches
+        // (so the developer notices a new device/connection without staring at
+        // the status bar). Pushed from the main thread via `WindowExt`, before
+        // the immutable `colors` borrow below so `cx` is free to be mutably
+        // borrowed here.
+        if is_connected && !self.connect_notified {
+            self.connect_notified = true;
+            let label = host_label.clone().unwrap_or_default();
+            window.push_notification(
+                Notification::new()
+                    .title("Host connected")
+                    .content(move |_, _, _| gpui::div().child(format!("Live session: {label}")).into_any_element()),
+                cx,
+            );
+        }
+
+        let colors = cx.global::<Theme>();
         let host_badge = host.as_ref().map(|host| {
             gpui::div()
                 .flex()
@@ -198,6 +221,36 @@ impl Render for DevToolsRoot {
                                     "no host"
                                 })),
                         )
+                        .child(
+                            // Theme switch (light/dark) + a connecting spinner while
+                            // no host is attached. Kept in the title bar so it's
+                            // always reachable without stealing pane space.
+                            gpui::div()
+                                .flex()
+                                .flex_row()
+                                .items_center()
+                                .gap(px(10.))
+                                .child(
+                                    Switch::new("theme-switch")
+                                        .checked(colors.mode == ThemeMode::Dark)
+                                        .on_click(|checked, window, cx| {
+                                            Theme::change(
+                                                if *checked {
+                                                    ThemeMode::Dark
+                                                } else {
+                                                    ThemeMode::Light
+                                                },
+                                                Some(window),
+                                                cx,
+                                            );
+                                        }),
+                                )
+                                .when(!is_connected, |this| {
+                                    this.child(
+                                        gpui_component::spinner::Spinner::new(),
+                                    )
+                                }),
+                        )
                         .child(host_badge.unwrap_or_else(|| {
                             gpui::div()
                                 .flex()
@@ -217,7 +270,8 @@ impl Render for DevToolsRoot {
             //    Logs / Network; right: VM / Signals / Timeline) separated by a
             //    draggable vertical splitter, each column a vertical resizable
             //    stack of three panes. Users can now resize to prioritise what
-            //    matters instead of a fixed 3×2 grid. ──
+            //    matters instead of a fixed 3×2 grid. Each pane gets a small
+            //    margin so the workspace breathes (gap between panes). ──
             .child(
                 h_resizable("devtools-workspace")
                     .child(
@@ -225,18 +279,18 @@ impl Render for DevToolsRoot {
                             .size(px(380.))
                             .child(
                                 v_resizable("devtools-left")
-                                    .child(devtools_pane!("Component Tree", self.tree.clone(), colors))
-                                    .child(devtools_pane!("Logs", self.logs.clone(), colors))
-                                    .child(devtools_pane!("Network", self.net.clone(), colors)),
+                                    .child(gpui::div().m(px(4.)).child(devtools_pane!("Component Tree", self.tree.clone(), colors)).into_any_element())
+                                    .child(gpui::div().m(px(4.)).child(devtools_pane!("Logs", self.logs.clone(), colors)).into_any_element())
+                                    .child(gpui::div().m(px(4.)).child(devtools_pane!("Network", self.net.clone(), colors)).into_any_element()),
                             ),
                     )
                     .child(
                         resizable_panel()
                             .child(
                                 v_resizable("devtools-right")
-                                    .child(devtools_pane!("VM Inspector", self.vm.clone(), colors))
-                                    .child(devtools_pane!("Signals", self.signals.clone(), colors))
-                                    .child(devtools_pane!("Timeline", self.timeline.clone(), colors)),
+                                    .child(gpui::div().m(px(4.)).child(devtools_pane!("VM Inspector", self.vm.clone(), colors)).into_any_element())
+                                    .child(gpui::div().m(px(4.)).child(devtools_pane!("Signals", self.signals.clone(), colors)).into_any_element())
+                                    .child(gpui::div().m(px(4.)).child(devtools_pane!("Timeline", self.timeline.clone(), colors)).into_any_element()),
                             ),
                     ),
             )
