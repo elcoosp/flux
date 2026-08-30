@@ -1,14 +1,17 @@
 package dev.flux.app
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
@@ -23,7 +26,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import dev.flux.host.media.ImageCache
 import dev.flux.host.shadow.ShadowNode
 import dev.flux.ui.FluxValue
 import dev.flux.ui.PropsIndex
@@ -65,32 +73,38 @@ public fun FluxTreeView(
      * shares the row with its sibling button instead of filling the whole
      * width). Defaults to none. */
     childModifier: Modifier = Modifier,
+    /** Shared host-side image cache (FLUX-039): LRU memory + single-flight
+     * fetch, keyed by resolved asset/remote URL. */
+    imageCache: ImageCache,
+    /** Dev-server asset base used to resolve an `Image` `source` prop. */
+    assetBaseUrl: String = "http://localhost:7332/assets/",
 ) {
     if (node == null) return
     when (node.kind) {
-        "column" -> RenderColumn(node, onButtonClick, routerVersion, onTextChange)
-        "row" -> RenderRow(node, onButtonClick, routerVersion, onTextChange)
-        "stack" -> RenderStack(node, onButtonClick, routerVersion, onTextChange)
-        "grid" -> RenderGrid(node, onButtonClick, routerVersion, onTextChange)
+        "column" -> RenderColumn(node, onButtonClick, routerVersion, onTextChange, imageCache, assetBaseUrl)
+        "row" -> RenderRow(node, onButtonClick, routerVersion, onTextChange, imageCache, assetBaseUrl)
+        "stack" -> RenderStack(node, onButtonClick, routerVersion, onTextChange, imageCache, assetBaseUrl)
+        "grid" -> RenderGrid(node, onButtonClick, routerVersion, onTextChange, imageCache, assetBaseUrl)
         "spacer" -> RenderSpacer(node)
-        "safearea" -> RenderSafeArea(node, onButtonClick, routerVersion, onTextChange)
-        "modal" -> RenderOverlayContainer(node, onButtonClick, routerVersion, onTextChange)
-        "sheet" -> RenderOverlayContainer(node, onButtonClick, routerVersion, onTextChange)
-        "dialog" -> RenderOverlayContainer(node, onButtonClick, routerVersion, onTextChange)
-        "animate" -> RenderOverlayContainer(node, onButtonClick, routerVersion, onTextChange)
+        "safearea" -> RenderSafeArea(node, onButtonClick, routerVersion, onTextChange, imageCache, assetBaseUrl)
+        "modal" -> RenderOverlayContainer(node, onButtonClick, routerVersion, onTextChange, imageCache, assetBaseUrl)
+        "sheet" -> RenderOverlayContainer(node, onButtonClick, routerVersion, onTextChange, imageCache, assetBaseUrl)
+        "dialog" -> RenderOverlayContainer(node, onButtonClick, routerVersion, onTextChange, imageCache, assetBaseUrl)
+        "animate" -> RenderOverlayContainer(node, onButtonClick, routerVersion, onTextChange, imageCache, assetBaseUrl)
         "text" -> RenderText(node)
         "button" -> RenderButton(node, onButtonClick)
         "textinput" -> RenderTextInput(node, onTextChange, childModifier)
+        "image" -> RenderImage(node, imageCache, assetBaseUrl)
         // A router shows exactly one screen — the one whose `route` prop matches
         // the active navigation signal (ADR-0045). Every other screen is hidden,
         // so tapping "Go to Settings" actually swaps the visible view instead of
         // stacking all screens in a column.
-        "router" -> RenderRouter(node, onButtonClick, routerVersion, onTextChange)
+        "router" -> RenderRouter(node, onButtonClick, routerVersion, onTextChange, imageCache, assetBaseUrl)
         // A screen renders the content it wraps (its own children).
-        "screen" -> RenderContainer(node, onButtonClick, routerVersion, onTextChange)
+        "screen" -> RenderContainer(node, onButtonClick, routerVersion, onTextChange, imageCache, assetBaseUrl)
         // TextField/Image have no live adapter subtree in the MLP host; surface
         // a contained placeholder so the tree stays visible.
-        else -> RenderContainer(node, onButtonClick, routerVersion, onTextChange)
+        else -> RenderContainer(node, onButtonClick, routerVersion, onTextChange, imageCache, assetBaseUrl)
     }
 }
 
@@ -107,13 +121,24 @@ private fun RenderRouter(
     onButtonClick: (UInt) -> Unit,
     routerVersion: Int,
     onTextChange: (UInt, String) -> Unit = { _, _ -> },
+    imageCache: ImageCache,
+    assetBaseUrl: String = "http://localhost:7332/assets/",
 ) {
     // `routerVersion` is read by the caller's recomposition: when it changes
     // (every applied frame / dispatch) FluxRoot re-runs and re-invokes this with
     // a new value, so the active child is re-resolved. We forward it down so any
     // nested router also swaps.
     val child = activeChildrenProvider?.invoke(node)
-    if (child != null) FluxTreeView(child, onButtonClick, routerVersion, onTextChange)
+    if (child != null) {
+        FluxTreeView(
+            child,
+            onButtonClick,
+            routerVersion,
+            onTextChange,
+            imageCache = imageCache,
+            assetBaseUrl = assetBaseUrl,
+        )
+    }
 }
 
 /**
@@ -135,12 +160,23 @@ private fun RenderColumn(
     onButtonClick: (UInt) -> Unit,
     routerVersion: Int,
     onTextChange: (UInt, String) -> Unit = { _, _ -> },
+    imageCache: ImageCache,
+    assetBaseUrl: String = "http://localhost:7332/assets/",
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(gapOf(node)),
     ) {
-        for (child in node.children) FluxTreeView(child, onButtonClick, routerVersion, onTextChange)
+        for (child in node.children) {
+            FluxTreeView(
+                child,
+                onButtonClick,
+                routerVersion,
+                onTextChange,
+                imageCache = imageCache,
+                assetBaseUrl = assetBaseUrl,
+            )
+        }
     }
 }
 
@@ -151,6 +187,8 @@ private fun RenderRow(
     onButtonClick: (UInt) -> Unit,
     routerVersion: Int,
     onTextChange: (UInt, String) -> Unit = { _, _ -> },
+    imageCache: ImageCache,
+    assetBaseUrl: String = "http://localhost:7332/assets/",
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -161,7 +199,15 @@ private fun RenderRow(
             // sibling button stays visible instead of being pushed off-screen by
             // fillMaxWidth. Every other child keeps its intrinsic size.
             val childModifier = if (child.kind == "textinput") Modifier.weight(1f) else Modifier
-            FluxTreeView(child, onButtonClick, routerVersion, onTextChange, childModifier)
+            FluxTreeView(
+                child,
+                onButtonClick,
+                routerVersion,
+                onTextChange,
+                childModifier,
+                imageCache = imageCache,
+                assetBaseUrl = assetBaseUrl,
+            )
         }
     }
 }
@@ -198,9 +244,20 @@ private fun RenderContainer(
     onButtonClick: (UInt) -> Unit,
     routerVersion: Int,
     onTextChange: (UInt, String) -> Unit = { _, _ -> },
+    imageCache: ImageCache,
+    assetBaseUrl: String = "http://localhost:7332/assets/",
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        for (child in node.children) FluxTreeView(child, onButtonClick, routerVersion, onTextChange)
+        for (child in node.children) {
+            FluxTreeView(
+                child,
+                onButtonClick,
+                routerVersion,
+                onTextChange,
+                imageCache = imageCache,
+                assetBaseUrl = assetBaseUrl,
+            )
+        }
     }
 }
 
@@ -250,6 +307,90 @@ private fun RenderTextInput(
     )
 }
 
+/**
+ * Renders an `Image` leaf (FLUX-039): fetches the `source` prop over HTTP from
+ * the dev server's asset route, caches the decoded bitmap in the shared
+ * [imageCache] (LRU memory + single-flight fetch), and shows a grey placeholder
+ * until the bitmap arrives or if loading fails (BR-003 — never crash the host).
+ *
+ * Reads `width` / `height` / `resizeMode` props; absent dimensions let the image
+ * fill its parent. The load runs off the main thread (the cache's async fetcher)
+ * and is keyed by the resolved URL, so a repeated `Image` with the same `source`
+ * is served from cache without a second network round-trip.
+ */
+@Composable
+private fun RenderImage(
+    node: ShadowNode,
+    imageCache: ImageCache,
+    assetBaseUrl: String,
+) {
+    val props = node.observeProps()
+    val src = props.getString(PropsIndex.IMAGE_SOURCE).orEmpty()
+    val width = props.getFloat(PropsIndex.IMAGE_WIDTH)?.let { Dp(it.toFloat()) }
+    val height = props.getFloat(PropsIndex.IMAGE_HEIGHT)?.let { Dp(it.toFloat()) }
+    val resizeMode =
+        when (props.getString(PropsIndex.IMAGE_RESIZE_MODE)) {
+            "fit" -> ContentScale.Fit
+            "stretch" -> ContentScale.FillBounds
+            else -> ContentScale.Crop
+        }
+
+    // Placeholder shown until the bitmap arrives or on load failure.
+    var bitmap by remember(node) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    var failed by remember(node) { mutableStateOf(false) }
+
+    LaunchedEffect(src, assetBaseUrl) {
+        if (src.isEmpty()) {
+            bitmap = null
+            failed = false
+            return@LaunchedEffect
+        }
+        failed = false
+        bitmap = null
+        val url = imageCache.resolveUrl(src, assetBaseUrl)
+        when (val result = imageCache.get(url)) {
+            is ImageCache.Result.Success -> {
+                val decoded =
+                    android.graphics.BitmapFactory.decodeByteArray(
+                        result.bytes,
+                        0,
+                        result.bytes.size,
+                    )
+                bitmap = decoded?.asImageBitmap()
+                failed = decoded == null
+            }
+            is ImageCache.Result.Failure -> failed = true
+        }
+    }
+
+    val modifier =
+        Modifier
+            .then(width?.let { Modifier.width(it) } ?: Modifier)
+            .then(height?.let { Modifier.height(it) } ?: Modifier.fillMaxWidth())
+            .then(if (width == null && height == null) Modifier.fillMaxWidth() else Modifier)
+
+    if (bitmap != null) {
+        androidx.compose.foundation.Image(
+            bitmap = bitmap!!,
+            contentDescription = null,
+            contentScale = resizeMode,
+            modifier = modifier,
+        )
+    } else {
+        // Placeholder box — grey while loading, red tint on failure (BR-003).
+        androidx.compose.foundation.Canvas(modifier = modifier) {
+            drawRect(
+                color =
+                    if (failed) {
+                        Color(0xFFFF6B6B)
+                    } else {
+                        Color(0xFF2A2A2E)
+                    },
+            )
+        }
+    }
+}
+
 /** Reads the `gap` spacing prop of a linear container, defaulting to 0dp. */
 private fun gapOf(node: ShadowNode): androidx.compose.ui.unit.Dp {
     val gap = node.props.getFloat(PropsIndex.STACK_GAP) ?: 0.0
@@ -267,6 +408,8 @@ private fun RenderStack(
     onButtonClick: (UInt) -> Unit,
     routerVersion: Int,
     onTextChange: (UInt, String) -> Unit = { _, _ -> },
+    imageCache: ImageCache,
+    assetBaseUrl: String = "http://localhost:7332/assets/",
 ) {
     val gap = gapOf(node)
     Box(modifier = Modifier.fillMaxWidth()) {
@@ -274,7 +417,14 @@ private fun RenderStack(
         val kids = node.children
         for (i in kids.indices) {
             Box(modifier = Modifier.fillMaxWidth().padding(bottom = if (i < kids.lastIndex) gap else 0.dp)) {
-                FluxTreeView(kids[i], onButtonClick, routerVersion, onTextChange)
+                FluxTreeView(
+                    kids[i],
+                    onButtonClick,
+                    routerVersion,
+                    onTextChange,
+                    imageCache = imageCache,
+                    assetBaseUrl = assetBaseUrl,
+                )
             }
         }
     }
@@ -291,6 +441,8 @@ private fun RenderGrid(
     onButtonClick: (UInt) -> Unit,
     routerVersion: Int,
     onTextChange: (UInt, String) -> Unit = { _, _ -> },
+    imageCache: ImageCache,
+    assetBaseUrl: String = "http://localhost:7332/assets/",
 ) {
     val columns = (node.props.getInt(PropsIndex.GRID_COLUMNS) ?: 2L).toInt().coerceAtLeast(1)
     val gap = gapOf(node)
@@ -301,7 +453,14 @@ private fun RenderGrid(
         modifier = Modifier.fillMaxWidth(),
     ) {
         itemsIndexed(node.children) { _, child ->
-            FluxTreeView(child, onButtonClick, routerVersion, onTextChange)
+            FluxTreeView(
+                child,
+                onButtonClick,
+                routerVersion,
+                onTextChange,
+                imageCache = imageCache,
+                assetBaseUrl = assetBaseUrl,
+            )
         }
     }
 }
@@ -333,11 +492,22 @@ private fun RenderSafeArea(
     onButtonClick: (UInt) -> Unit,
     routerVersion: Int,
     onTextChange: (UInt, String) -> Unit = { _, _ -> },
+    imageCache: ImageCache,
+    assetBaseUrl: String = "http://localhost:7332/assets/",
 ) {
     val edges = node.props.getString(PropsIndex.SAFEAREA_EDGES)
     val inset = if (edges == "top") 24.dp else 8.dp
     Column(modifier = Modifier.fillMaxWidth().padding(inset)) {
-        for (child in node.children) FluxTreeView(child, onButtonClick, routerVersion, onTextChange)
+        for (child in node.children) {
+            FluxTreeView(
+                child,
+                onButtonClick,
+                routerVersion,
+                onTextChange,
+                imageCache = imageCache,
+                assetBaseUrl = assetBaseUrl,
+            )
+        }
     }
 }
 
@@ -355,8 +525,19 @@ private fun RenderOverlayContainer(
     onButtonClick: (UInt) -> Unit,
     routerVersion: Int,
     onTextChange: (UInt, String) -> Unit = { _, _ -> },
+    imageCache: ImageCache,
+    assetBaseUrl: String = "http://localhost:7332/assets/",
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
-        for (child in node.children) FluxTreeView(child, onButtonClick, routerVersion, onTextChange)
+        for (child in node.children) {
+            FluxTreeView(
+                child,
+                onButtonClick,
+                routerVersion,
+                onTextChange,
+                imageCache = imageCache,
+                assetBaseUrl = assetBaseUrl,
+            )
+        }
     }
 }
