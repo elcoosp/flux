@@ -1,6 +1,6 @@
 ---
 id: FLUX-039
-status: partial
+status: done
 lane: LANE-N
 phase: "Phase 2"
 blocked_by: []
@@ -8,6 +8,8 @@ labels:
   - stdlib
   - primitive
   - media
+  - android
+  - ios
 source: CHANGELOG.md §PRD-N (deferred: "Image remote caching") + roadmap §4
 related_adrs:
   - ADR-0047
@@ -36,6 +38,26 @@ primitive after `ScrollView`. No app with images works without it.
 - Caching is a host concern (no new wire field); the primitive only carries the
   `src` prop.
 - Pin the dev/release mapping with `flux-parity` like `ScrollView`.
+
+## What shipped
+
+- **Host cache (both platforms):** a single-flight, LRU/in-memory core keyed by
+  resolved asset/remote URL, so a repeat load is served from cache and a list of
+  identical images collapses to one fetch.
+  - Android: `ImageCache` (OkHttp-backed `OkHttpImageFetcher`) in the pure-JVM
+    `:host` module, with 6/6 JVM unit tests (TDD) asserting cache hit on repeat
+    load, single-flight coalescing, failure-not-cached, LRU eviction, clear.
+  - iOS: `ImageCache` actor backed by a dedicated `URLCache` (disk + memory) +
+    single-flight, in `FluxUIKit`; `ImageAdapter` now loads through it instead of
+    an ad-hoc `URLSession.shared` task. Unit tests added.
+- **Android renderer actually renders `Image`:** `ShadowTreeRenderer` had no
+  `image` case, so `Image` silently fell through to an empty container (the
+  "I see nothing" bug). Added `RenderImage` — it resolves and fetches the `src`
+  through the shared `FluxSession.imageCache`, decodes the bitmap, shows a
+  placeholder while loading and a red box on failure (BR-003), and threads the
+  cache + asset base URL through every renderer.
+- **iOS** `ImageAdapter` reuses the shared `ImageCache.shared`; `FluxHost`
+  registers it via `AdapterKit` as before.
 
 ## Testing Decisions
 
