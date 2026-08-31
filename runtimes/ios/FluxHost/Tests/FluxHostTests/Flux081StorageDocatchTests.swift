@@ -15,7 +15,7 @@ import FluxUIKit
 
 final class Flux081StorageDocatchTests: XCTestCase {
     override func tearDown() {
-        FluxCrashReporter.shared.reset()
+        RecoverableErrorReporter.shared.reset()
     }
 
     /// A `FluxValue.float(.nan)` cannot be represented as JSON (`NaN` is not
@@ -23,16 +23,16 @@ final class Flux081StorageDocatchTests: XCTestCase {
     /// the error and NOT silently leave a `nil` value that looks like success.
     func testEncodeFailureIsRecordedAndKeyAbsent() {
         let backend = UserDefaultsStorageBackend()
-        FluxCrashReporter.shared.reset()
+        RecoverableErrorReporter.shared.reset()
 
         backend.put(1234, .float(.nan))
 
         XCTAssertNotNil(
-            FluxCrashReporter.shared.lastRecordedDescription,
+            RecoverableErrorReporter.shared.lastRecordedDescription,
             "encode failure must be recorded, not swallowed"
         )
         XCTAssertTrue(
-            FluxCrashReporter.shared.lastRecordedDescription?.contains("encode failed") ?? false,
+            RecoverableErrorReporter.shared.lastRecordedDescription?.contains("encode failed") ?? false,
             "recorded error names the encode failure"
         )
         XCTAssertNil(backend.get(1234), "key must be absent after a failed encode (no silent no-op)")
@@ -44,7 +44,7 @@ final class Flux081StorageDocatchTests: XCTestCase {
         let suite = "flux.081.decode.\(UUID().uuidString)"
         defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
         let backend = UserDefaultsStorageBackend(suite: suite)
-        FluxCrashReporter.shared.reset()
+        RecoverableErrorReporter.shared.reset()
 
         // Plant a non-JSON payload directly under the backend's namespaced key.
         let defaults = UserDefaults(suiteName: suite)!
@@ -53,11 +53,11 @@ final class Flux081StorageDocatchTests: XCTestCase {
         let result = backend.get(7)
         XCTAssertNil(result, "decode failure yields nil, never a crash")
         XCTAssertNotNil(
-            FluxCrashReporter.shared.lastRecordedDescription,
+            RecoverableErrorReporter.shared.lastRecordedDescription,
             "decode failure must be recorded, not swallowed"
         )
         XCTAssertTrue(
-            FluxCrashReporter.shared.lastRecordedDescription?.contains("decode failed") ?? false,
+            RecoverableErrorReporter.shared.lastRecordedDescription?.contains("decode failed") ?? false,
             "recorded error names the decode failure"
         )
     }
@@ -69,7 +69,7 @@ final class Flux081StorageDocatchTests: XCTestCase {
         let suite = "flux.081.entries.\(UUID().uuidString)"
         defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
         let backend = UserDefaultsStorageBackend(suite: suite)
-        FluxCrashReporter.shared.reset()
+        RecoverableErrorReporter.shared.reset()
 
         let defaults = UserDefaults(suiteName: suite)!
         // Valid entry (id 1) plus a corrupt entry (id 2).
@@ -80,7 +80,7 @@ final class Flux081StorageDocatchTests: XCTestCase {
         XCTAssertEqual(all[1], .int(42), "valid entry is enumerated")
         XCTAssertNil(all[2], "corrupt entry is not enumerated as a value")
         XCTAssertNotNil(
-            FluxCrashReporter.shared.lastRecordedDescription,
+            RecoverableErrorReporter.shared.lastRecordedDescription,
             "corrupt entry decode failure is recorded"
         )
     }

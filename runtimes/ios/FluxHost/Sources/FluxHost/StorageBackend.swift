@@ -81,7 +81,7 @@ final class UserDefaultsStorageBackend: @unchecked Sendable, StorageBackend {
             let encoded = try FluxValueJSON.encode(value)
             defaults.set(encoded, forKey: k)
         } catch {
-            FluxCrashReporter.shared.record(StorageError.encodeFailed(key: key, underlying: error))
+            RecoverableErrorReporter.shared.record(StorageError.encodeFailed(key: key, underlying: error))
         }
     }
 
@@ -90,7 +90,7 @@ final class UserDefaultsStorageBackend: @unchecked Sendable, StorageBackend {
         do {
             return try FluxValueJSON.decode(data)
         } catch {
-            FluxCrashReporter.shared.record(StorageError.decodeFailed(key: key, underlying: error))
+            RecoverableErrorReporter.shared.record(StorageError.decodeFailed(key: key, underlying: error))
             return nil
         }
     }
@@ -105,7 +105,7 @@ final class UserDefaultsStorageBackend: @unchecked Sendable, StorageBackend {
             do {
                 result[id] = try FluxValueJSON.decode(data)
             } catch {
-                FluxCrashReporter.shared.record(StorageError.decodeFailed(key: id, underlying: error))
+                RecoverableErrorReporter.shared.record(StorageError.decodeFailed(key: id, underlying: error))
             }
         }
         return result

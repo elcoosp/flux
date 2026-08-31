@@ -88,7 +88,13 @@ public class FileStorageBackend(
         if (!f.exists()) return null
         return try {
             MessagePack.newDefaultUnpacker(f.inputStream()).use { unpacker -> unpacker.fluxUnpack() }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            // FLUX-081: report decode failures before deleting — a corrupt/torn
+            // storage entry must be observable, never silently swallowed (AGENTS.md §2.2).
+            Log.e(
+                "FluxStorage",
+                "decode failed for key=${f.name.removePrefix("flux.storage.").removeSuffix(".mp")}, deleting corrupt file: ${e.message}"
+            )
             f.delete()
             null
         }

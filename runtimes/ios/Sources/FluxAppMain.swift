@@ -59,6 +59,12 @@ struct FluxRootView: View {
         // pure; the real bodies live in the app target's `IOSNativeCapabilityHost`.
         CapabilityRegistry.realNativeHost = IOSNativeCapabilityHost(table: table)
         let runtime = FluxExecutor(graph: SignalGraph(), registry: registry)
+        // FLUX-035: install the release crash reporter so production crashes surface
+        // as a `FluxError` (PRD-R §9) instead of vanishing. Debug builds use ADR-0040
+        // dev telemetry and never mix with the release reporter.
+        #if !DEBUG
+        CrashReporter.shared.install()
+        #endif
         let connection = HostConnectionState()
         // Dev server endpoint. Resolution order:
         //   1. `FLUX_WS_URL` launch environment variable (lets a simulator or

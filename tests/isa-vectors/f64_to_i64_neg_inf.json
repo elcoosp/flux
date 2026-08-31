@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b100000000000000f0ff390100",
+  "description": "F64_TO_I64 with negative infinity saturates to i64::MIN.",
+  "expected_error": null,
+  "expected_gas_used": 2,
+  "expected_registers": {
+    "r1": {
+      "type": "Int",
+      "value": -9223372036854775808
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "f64_to_i64_neg_inf",
+  "payload": null
+}

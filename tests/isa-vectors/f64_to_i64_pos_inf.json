@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b100000000000000f07f390100",
+  "description": "F64_TO_I64 with positive infinity saturates to i64::MAX.",
+  "expected_error": null,
+  "expected_gas_used": 2,
+  "expected_registers": {
+    "r1": {
+      "type": "Int",
+      "value": 9223372036854775807
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "f64_to_i64_pos_inf",
+  "payload": null
+}

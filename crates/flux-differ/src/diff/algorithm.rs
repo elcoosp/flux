@@ -145,7 +145,32 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
         });
     }
 
+    // FLUX-079: sort patches by (NodeId, Patch::tag) so the emitted stream is
+    // deterministic regardless of hash-set iteration order (AHashSet is not
+    // stable). Downstream code and binary serialisation depend on a stable order.
+    patches.sort_by_key(patch_sort_key);
+
     patches
+}
+
+/// Stable key for sorting patches by target node id.
+fn node_id_for_patch(p: &Patch) -> NodeId {
+    let id: NodeId = match p {
+        Patch::Replace { id, .. } => *id,
+        Patch::Update { id, .. } => *id,
+        Patch::Insert { parent, .. } => *parent,
+        Patch::Remove { id } => *id,
+        Patch::Reorder { parent, .. } => *parent,
+        Patch::Handler { id, .. } => NodeId::from(*id),
+        Patch::Reattach { old_id, .. } => *old_id,
+        _ => NodeId::from(0u32), // exhaustive due to #[non_exhaustive] — unreachable
+    };
+    id
+}
+
+/// Stable key for sorting patches: (target node id, patch tag).
+fn patch_sort_key(p: &Patch) -> (NodeId, u8) {
+    (node_id_for_patch(p), p.tag())
 }
 
 /// Pairs each removed node with an inserted node that denotes the same live
@@ -166,23 +191,49 @@ pub(crate) fn reattach_pairs(
 ) -> Vec<(NodeId, NodeId)> {
     let mut pairs: Vec<(NodeId, NodeId)> = Vec::new();
     let mut taken: AHashSet<NodeId> = AHashSet::new();
-    for old_id in removed {
-        let Some(o) = old.get(*old_id) else { continue };
-        let old_slot = old_index.get(old_id).copied();
-        for new_id in inserted {
-            if taken.contains(new_id) {
+
+    // FLUX-079: bucket `inserted` by (component_id, kind) so the inner loop
+    // over `removed` does O(1) bucket lookup instead of O(|inserted|) per node.
+    // This brings `reattach_pairs` from O(|removed| × |inserted|) down to
+    // O(|removed| + |inserted|) amortized.
+    let mut inserted_buckets: AHashMap<(u32, u8), Vec<NodeId>> = AHashMap::new();
+    for &new_id in inserted {
+        if taken.contains(&new_id) {
+            continue;
+        }
+        let Some(n) = new.get(new_id) else { continue };
+        let key = (n.component_id(), n.kind().tag());
+        inserted_buckets.entry(key).or_default().push(new_id);
+    }
+
+    for &old_id in removed {
+        let Some(o) = old.get(old_id) else { continue };
+        let old_slot = old_index.get(&old_id).copied();
+        let key = (o.component_id(), o.kind().tag());
+        let bucket = match inserted_buckets.get(&key) {
+            Some(b) => b,
+            None => continue,
+        };
+        let mut matched = false;
+        for &new_id in bucket {
+            if taken.contains(&new_id) {
                 continue;
             }
-            let Some(n) = new.get(*new_id) else { continue };
-            if o.component_id() != n.component_id() || o.kind() != n.kind() {
+            if old_slot != new_index.get(&new_id).copied() {
                 continue;
             }
-            if old_slot != new_index.get(new_id).copied() {
-                continue;
-            }
-            taken.insert(*new_id);
-            pairs.push((*old_id, *new_id));
+            taken.insert(new_id);
+            pairs.push((old_id, new_id));
+            matched = true;
             break;
+        }
+        // Clean up the bucket if drained to keep memory bounded.
+        if !matched {
+            let b = inserted_buckets.get_mut(&key).unwrap();
+            b.retain(|&id| !taken.contains(&id));
+            if b.is_empty() {
+                inserted_buckets.remove(&key);
+            }
         }
     }
     pairs

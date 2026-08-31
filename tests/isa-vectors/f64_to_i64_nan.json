@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b100000000000000f87f390100",
+  "description": "F64_TO_I64 with NaN input returns 0.",
+  "expected_error": null,
+  "expected_gas_used": 2,
+  "expected_registers": {
+    "r1": {
+      "type": "Int",
+      "value": 0
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "f64_to_i64_nan",
+  "payload": null
+}

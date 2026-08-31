@@ -8,11 +8,10 @@
 //
 //  ADR-0049 does not apply (new iOS-native type).
 //
-//  RELEASE-TODO: wire `SignalExceptionHandler` / `NSSetUncaughtExceptionHandler`
-//  to capture the raw backtrace, then resolve the top frame to a generated
-//  component id via the embedded source map. This build provides the shape and
-//  the `report(_:)` entry point; the handler registration is a one-line shell
-//  call in `FluxApp` launch.
+//  Wired at app launch in `FluxAppMain.init()` (FLUX-035): calls
+//  `CrashReporter.shared.install()` so production crashes surface as a
+//  `FluxError` (PRD-R §9) instead of vanishing. Debug builds use ADR-0040
+//  dev telemetry and never mix with the release reporter.
 
 import Foundation
 
