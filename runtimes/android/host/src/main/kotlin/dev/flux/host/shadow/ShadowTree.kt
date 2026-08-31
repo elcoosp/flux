@@ -981,6 +981,13 @@ public class ShadowTree(
                 if (record != null) {
                     val fields = ArrayList<dev.flux.ui.Props.Field>(meta.layout.size)
                     for ((pos, propIdx) in meta.layout.withIndex()) {
+                        // The thunk's result `Record` is positional: field `pos`
+                        // holds the value that must be stored under
+                        // `meta.layout[pos]` (the canonical `PropIdx`). Read by
+                        // position, not by key (Appendix C / ADR-0027 prop-thunk
+                        // contract). User *data* records (e.g. an appended `Task`)
+                        // are canonical-keyed but read by the thunk via `GET_FIELD`
+                        // (lookup by canonical key), never positionally here.
                         if (pos >= record.fields.size) break
                         fields.add(
                             dev.flux.ui.Props.Field(

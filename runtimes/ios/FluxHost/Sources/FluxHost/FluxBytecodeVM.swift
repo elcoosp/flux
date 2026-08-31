@@ -387,10 +387,10 @@ enum FluxBytecodeVM {
                     throw VmError.memoryExhausted(offset: instr.offset)
                 }
                 var fields: [(UInt16, FluxValue)] = []
+                // Reserve capacity only; fields are upserted by canonical
+                // `propIndex` via `SET_FIELD` (see `setField`). Records are
+                // keyed by `propIndex`, not position, matching the wire layout.
                 fields.reserveCapacity(count)
-                for i in 0..<count {
-                    fields.append((UInt16(i), .null))
-                }
                 regs[Int(dst)] = .record(fields)
 
             case .getField:
@@ -1485,10 +1485,17 @@ enum FluxBytecodeVM {
         guard case let .record(fields) = obj else {
             throw VmError.typeMismatch(offset: offset)
         }
-        guard idx < fields.count else {
+        // Records are keyed by their canonical `propIndex` (FNV-1a of the field
+        // name, `propIndexForName`), matching the wire layout (Appendix C) and
+        // the static seed path. Look the field up by key rather than position,
+        // so a record built by VM opcodes (e.g. `tasks.append(Task(label:,
+        // done:))`) uses the same indices the host reads by — otherwise readers
+        // miss the field entirely (FLUX-072 #4).
+        let key = UInt16(truncatingIfNeeded: idx)
+        guard let field = fields.first(where: { $0.propIndex == key }) else {
             throw VmError.indexOutOfBounds(offset: offset)
         }
-        return fields[idx].value
+        return field.value
     }
 
     private static func setField(_ obj: inout FluxValue, idx: Int, value: FluxValue, at offset: Int) throws {
@@ -1498,10 +1505,14 @@ enum FluxBytecodeVM {
         guard case var .record(fields) = obj else {
             throw VmError.typeMismatch(offset: offset)
         }
-        guard idx < fields.count else {
-            throw VmError.indexOutOfBounds(offset: offset)
+        // Upsert by canonical `propIndex` key (see `getField`). `ALLOC_RECORD`
+        // only reserves capacity; the first `SET_FIELD` for a key creates it.
+        let key = UInt16(truncatingIfNeeded: idx)
+        if let i = fields.firstIndex(where: { $0.propIndex == key }) {
+            fields[i].value = value
+        } else {
+            fields.append((propIndex: key, value: value))
         }
-        fields[idx].value = value
         obj = .record(fields)
     }
 

@@ -344,7 +344,14 @@ struct ShadowTreeReconciler {
             // resolve through the registry by id; any still-unbound id degrades to
             // a container rather than crashing (B8).
             let adapter: AnyFluxAdapter
-            if node.kind == .component {
+            if signalMeta[nodeId]?.itemSlot != nil {
+                // A `ForEach` node hosts its expanded rows: it must lay them out
+                // vertically (like a `Column`) so the rows get intrinsic height
+                // and become visible. A plain `ContainerAdapter` is a zero-height
+                // `UIView` that clips its children and hides the whole list
+                // (FLUX-072 #3).
+                adapter = AnyFluxAdapter(ColumnAdapter(executor: executorRef))
+            } else if node.kind == .component {
                 adapter = AnyFluxAdapter(ContainerAdapter(executor: executorRef))
             } else if let name = componentNames[node.componentId],
                       let prim = registry.make(named: name, executor: executorRef) {
@@ -483,8 +490,31 @@ struct ShadowTreeReconciler {
         // build a stray template view) — the expansion below handles the real rows.
         var childViews: [AnyObject] = []
         var anyChildDirty = false
-        if signalMeta[nodeId]?.itemSlot != nil {
-            childViews = []
+        if signalMeta[nodeId]?.itemSlot != nil,
+           let itemSlot = signalMeta[nodeId]?.itemSlot,
+           let executor = executorRef {
+            // A `ForEach` node must be re-expanded from the live list signal on
+            // every dirty pass (e.g. when `tasks.push` writes signal 3): the rows
+            // are real views, not the template splice. Seed each row's `itemSlot`
+            // and reconcile it synchronously so the new/changed rows appear
+            // (FLUX-072 #1 — "add task doesn't render"). Without this the list
+            // never re-expands and appended tasks are invisible.
+            var templateChildIds: [UInt32] = []
+            for child in node.children {
+                switch child {
+                case let .node(id): templateChildIds.append(id)
+                case let .splice(_, items): templateChildIds.append(contentsOf: items.map { $0.node })
+                }
+            }
+            let (ids, expanded, elements) = expandForEach(nodeId: nodeId, templateChildIds: templateChildIds, nodes: nodes)
+            expandedNodeTable.merge(expanded) { $1 }
+            let mergedNodes = nodes.merging(expanded) { $1 }
+            for (rowId, element) in zip(ids, elements) {
+                executor.seedSignal(itemSlot, element)
+                let rowDirty = reconcileDirty(nodeId: rowId, parentId: node.id, signalIds: signalIds, nodes: mergedNodes, report: &report)
+                anyChildDirty = anyChildDirty || rowDirty
+                if let v = built[rowId]?.view { childViews.append(v) }
+            }
         } else {
             for child in node.children {
                 let childIds: [UInt32]
@@ -562,37 +592,42 @@ struct ShadowTreeReconciler {
         nodeId: UInt32,
         templateChildIds: [UInt32],
         nodes: [UInt32: ShadowNode]
-    ) -> (childIds: [UInt32], expanded: [UInt32: ShadowNode]) {
+    ) -> (childIds: [UInt32], expanded: [UInt32: ShadowNode], elements: [FluxValue]) {
         guard let meta = signalMeta[nodeId],
               let itemSlot = meta.itemSlot,
               let listSignal = meta.deps.first,
-              let executor = executorRef else { return (templateChildIds, [:]) }
-        guard case let .list(items) = executor.graph.read(listSignal) else { return (templateChildIds, [:]) }
+              let executor = executorRef else { return (templateChildIds, [:], []) }
+        let raw = executor.graph.read(listSignal)
+        guard case let .list(items) = raw else { return (templateChildIds, [:], []) }
         guard let templateId = templateChildIds.first,
-              let template = nodes[templateId] else { return (templateChildIds, [:]) }
+              nodes[templateId] != nil else { return (templateChildIds, [:], []) }
         var childIds: [UInt32] = []
         var expanded: [UInt32: ShadowNode] = [:]
-        for (index, element) in items.enumerated() {
-            let rowId = deriveForEachRowId(foreachId: nodeId, index: UInt32(index))
-            executor.seedSignal(itemSlot, element)
-            let row = ShadowNode(
-                id: rowId,
-                kind: template.kind,
-                componentId: template.componentId,
-                props: template.props,
-                childCount: 0,
-                children: [],
-                handlerCount: UInt16(template.handlers.count),
-                handlers: template.handlers,
-                span: template.span,
-                mountHandler: template.mountHandler,
-                cleanupHandler: template.cleanupHandler,
-                isPure: template.isPure
-            )
-            expanded[rowId] = row
-            childIds.append(rowId)
+        var elements: [FluxValue] = []
+        for (_, element) in items.enumerated() {
+            let rowId = deriveForEachRowId(foreachId: nodeId, index: UInt32(childIds.count))
+            // The id the caller will reconcile is the *cloned template* node
+            // (the inlined row), not the row key: `cloneSubtree` stores the
+            // template clone under `deriveForEachChildId(rowId, templateId)`
+            // (high bits 0xC0…), whereas `rowId` alone (0x80…) is never a key in
+            // `expanded`. Returning `rowId` made `reconcile(rowId)` look up a
+            // missing node and silently build nothing — the blank-list bug
+            // (FLUX-072 #4).
+            let derivedTemplateId = deriveForEachChildId(rowId: rowId, origId: templateId)
+            // Deep-clone the template row (incl. any component body inlined at
+            // the call site) under per-row derived ids, so each row is a distinct
+            // subtree holding its own value instead of sharing the template's
+            // signal. The original `itemSlot` is seeded per row by the caller
+            // (collectChildViews) right before each row is reconciled.
+            var subtree: [UInt32: ShadowNode] = [:]
+            var subtreeMeta: [UInt32: NodeSignalMeta] = [:]
+            cloneSubtree(templateId, rowId: rowId, nodes: nodes, into: &subtree, meta: &subtreeMeta)
+            expanded.merge(subtree) { $1 }
+            signalMeta.merge(subtreeMeta) { $1 }
+            childIds.append(derivedTemplateId)
+            elements.append(element)
         }
-        return (childIds, expanded)
+        return (childIds, expanded, elements)
     }
 
     /// Derives a stable per-row id from the `ForEach` id + element index.
@@ -602,6 +637,67 @@ struct ShadowTreeReconciler {
         h = h ^ index
         h = h &* 0x0100_0193
         return h | 0x8000_0000 // high bit marks expanded rows
+    }
+
+    /// Derives a stable per-row id for a *child* of an expanded `ForEach` row,
+    /// from the row id + the child's original template id. This keeps every
+    /// row's subtree (incl. a component body inlined at the call site) a distinct
+    /// set of node ids, so each row renders its own per-row `itemSlot` value
+    /// instead of the shared template's signal (the multi-row ForEach bug,
+    /// FLUX-072 / ADR-0050).
+    private func deriveForEachChildId(rowId: UInt32, origId: UInt32) -> UInt32 {
+        var h: UInt32 = rowId &* 0x0100_0193
+        h = h ^ origId
+        h = h &* 0x0100_0193
+        h = h ^ 0x5555_5555
+        return h | 0xC000_0000 // distinct high bits mark expanded row children
+    }
+
+    /// Deep-clones the subtree rooted at `origId` into `expanded`, rewriting each
+    /// node's id to a per-row derived id and copying its `signalMeta` so the
+    /// cloned prop thunks resolve against the live graph. The cloned node ids are
+    /// unique per row, which is what lets multiple `ForEach` rows hold distinct
+    /// values instead of sharing one signal.
+    private func cloneSubtree(
+        _ origId: UInt32,
+        rowId: UInt32,
+        nodes: [UInt32: ShadowNode],
+        into expanded: inout [UInt32: ShadowNode],
+        meta: inout [UInt32: NodeSignalMeta]
+    ) {
+        guard let orig = nodes[origId] else { return }
+        let newId = deriveForEachChildId(rowId: rowId, origId: origId)
+        guard expanded[newId] == nil else { return }
+        var childRefs: [Child] = []
+        for child in orig.children {
+            switch child {
+            case let .node(cid):
+                cloneSubtree(cid, rowId: rowId, nodes: nodes, into: &expanded, meta: &meta)
+                childRefs.append(.node(deriveForEachChildId(rowId: rowId, origId: cid)))
+            case let .splice(count, items):
+                let newItems = items.map { (key: $0.key, node: deriveForEachChildId(rowId: rowId, origId: $0.node)) }
+                for it in items {
+                    cloneSubtree(it.node, rowId: rowId, nodes: nodes, into: &expanded, meta: &meta)
+                }
+                childRefs.append(.splice(itemCount: count, items: newItems))
+            }
+        }
+        let clone = ShadowNode(
+            id: newId,
+            kind: orig.kind,
+            componentId: orig.componentId,
+            props: orig.props,
+            childCount: orig.childCount,
+            children: childRefs,
+            handlerCount: orig.handlerCount,
+            handlers: orig.handlers,
+            span: orig.span,
+            mountHandler: orig.mountHandler,
+            cleanupHandler: orig.cleanupHandler,
+            isPure: orig.isPure
+        )
+        expanded[newId] = clone
+        if let m = signalMeta[origId] { meta[newId] = m }
     }
 
     /// Builds (or refreshes) the children of `node` and returns their views,
@@ -622,19 +718,35 @@ struct ShadowTreeReconciler {
             }
             let expandedChildIds: [UInt32]
             let mergedNodes: [UInt32: ShadowNode]
-            if signalMeta[node.id]?.itemSlot != nil {
-                let (ids, expanded) = expandForEach(nodeId: node.id, templateChildIds: childIds, nodes: nodes)
+            if signalMeta[node.id]?.itemSlot != nil,
+               let itemSlot = signalMeta[node.id]?.itemSlot,
+               let executor = executorRef {
+                // `expandForEach` deep-clones each template row (incl. any component
+                // body inlined at the call site) under per-row derived ids and
+                // returns the matching list elements. We must seed each row's
+                // `itemSlot` with its own element and reconcile that row
+                // *synchronously* — interleaving seed+build per row is what keeps
+                // every row bound to its own value. A single shared itemSlot
+                // seeded once for all rows would leave every row showing the last
+                // element (the multi-row ForEach bug, FLUX-072 / ADR-0050).
+                let (ids, expanded, elements) = expandForEach(nodeId: node.id, templateChildIds: childIds, nodes: nodes)
                 expandedChildIds = ids
                 mergedNodes = nodes.merging(expanded) { $1 }
                 expandedNodeTable.merge(expanded) { $1 }
+                for (rowId, element) in zip(ids, elements) {
+                    guard activeChildId == nil || rowId == activeChildId else { continue }
+                    executor.seedSignal(itemSlot, element)
+                    reconcile(nodeId: rowId, parentId: node.id, nodes: mergedNodes, report: &report)
+                    if let v = built[rowId]?.view { views.append(v) }
+                }
             } else {
                 expandedChildIds = childIds
                 mergedNodes = nodes
-            }
-            for cid in expandedChildIds {
-                guard activeChildId == nil || cid == activeChildId else { continue }
-                reconcile(nodeId: cid, parentId: node.id, nodes: mergedNodes, report: &report)
-                if let v = built[cid]?.view { views.append(v) }
+                for cid in expandedChildIds {
+                    guard activeChildId == nil || cid == activeChildId else { continue }
+                    reconcile(nodeId: cid, parentId: node.id, nodes: mergedNodes, report: &report)
+                    if let v = built[cid]?.view { views.append(v) }
+                }
             }
         }
         return views
@@ -783,6 +895,13 @@ struct ShadowTreeReconciler {
             var props: [Prop] = []
             props.reserveCapacity(meta.layout.count)
             for (position, propIdx) in meta.layout.enumerated() {
+                // The thunk's result `Record` is positional: field `position`
+                // holds the value that must be stored under `meta.layout[position]`
+                // (the canonical `PropIdx`). So read by position, not by key
+                // (Appendix C / ADR-0027 prop-thunk contract). User *data* records
+                // (e.g. an appended `Task`) are canonical-keyed, but they are read
+                // by the thunk via `GET_FIELD` (which looks up by canonical key),
+                // never positionally here.
                 guard position < fields.count else { break }
                 props.append(Prop(index: propIdx, value: fields[position].value))
             }

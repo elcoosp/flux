@@ -125,10 +125,14 @@ internal fun getField(
         throw VmError(VmErrorKind.NULL_DEREFERENCE, off)
     }
     if (obj is FluxValue.RecordVal) {
-        val i = idx.toInt()
-        val field =
-            obj.fields.getOrNull(i)
-                ?: throw VmError(VmErrorKind.INDEX_OUT_OF_BOUNDS, off)
+        // Records are keyed by their canonical `propIndex` (FNV-1a of the field
+        // name, `propIndexForName`), matching the wire layout (Appendix C) and
+        // the static seed path. Look the field up by key rather than position,
+        // so a record built by VM opcodes (e.g. `tasks.append(Task(label:,
+        // done:))`) uses the same indices the host reads by — otherwise readers
+        // miss the field entirely (FLUX-072 #4).
+        val field = obj.fields.firstOrNull { it.index == idx }
+            ?: throw VmError(VmErrorKind.INDEX_OUT_OF_BOUNDS, off)
         return field.value
     }
     throw VmError(VmErrorKind.TYPE_MISMATCH, off)
@@ -147,12 +151,15 @@ internal fun setField(
         throw VmError(VmErrorKind.NULL_DEREFERENCE, off)
     }
     if (target is FluxValue.RecordVal) {
-        val i = idx.toInt()
-        if (i < 0 || i >= target.fields.size) {
-            throw VmError(VmErrorKind.INDEX_OUT_OF_BOUNDS, off)
-        }
+        // Upsert by canonical `propIndex` key (see `getField`). `ALLOC_RECORD`
+        // only reserves capacity; the first `SET_FIELD` for a key creates it.
         val newFields = target.fields.toMutableList()
-        newFields[i] = FluxValue.Field(idx, value)
+        val existing = newFields.indexOfFirst { it.index == idx }
+        if (existing >= 0) {
+            newFields[existing] = FluxValue.Field(idx, value)
+        } else {
+            newFields.add(FluxValue.Field(idx, value))
+        }
         regs[obj] = FluxValue.RecordVal(newFields)
         return
     }

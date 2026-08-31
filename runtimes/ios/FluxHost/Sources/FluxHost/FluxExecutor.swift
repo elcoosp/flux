@@ -305,8 +305,9 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
         #endif
         if bytes.count >= 6, bytes[5] == frameKindStringInterned {
             // A `StringInterned` reply is only meaningful for the async
-            // server-intern RPC (brittleness 4c), which is not used by the
-            // current synchronous materialisation path; ignore it here.
+            // server-intern RPC (brittleness 4c), which the current synchronous
+            // materialisation path does not use; ignore it here.
+            return
         } else {
             do {
                 _ = try applyFrame(data)
@@ -579,7 +580,8 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
     /// kit's `dispatch` call returns immediately and never blocks the UI thread.
     public func dispatch(_ event: FluxEvent) {
         #if DEBUG
-        NSLog("[FluxRT] executor.dispatch(event) handlerId=\(event.handlerId) nodeId=\(event.nodeId)")
+        let payloadDesc = event.payload.map { "\($0)" } ?? "nil"
+        NSLog("[fluxdbg:dispatch] handlerId=\(event.handlerId) nodeId=\(event.nodeId) payload=\(payloadDesc)")
         #endif
         guard let entry = handlerClosures[event.handlerId] else {
             lastError = VmError(kind: .invalidDispatch, offset: 0)
@@ -600,6 +602,9 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
             } else {
                 .null
             }
+            #if DEBUG
+            NSLog("[fluxdbg:dispatch] payload->runtime value=\(payload)")
+            #endif
             // Run the handler with resumable semantics (ADR-0044): every `AWAIT`
             // is settled by `asyncResolver` and the handler is resumed until `HALT`.
             // Pass the cached decoded instructions (R3) so the handler is not

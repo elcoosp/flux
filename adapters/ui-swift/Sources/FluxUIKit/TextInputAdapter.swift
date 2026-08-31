@@ -79,6 +79,9 @@ public final class TextInputAdapter: FluxAdapter {
 
         func textFieldDidChangeSelection(_ textField: UITextField) {
             guard let handlerId, let nodeId, let text = textField.text else { return }
+            #if DEBUG
+            NSLog("[fluxdbg:textinput] delegate fired handlerId=\(handlerId) nodeId=\(nodeId) text='\(text)' executorNil=\(adapter?.executor == nil)")
+            #endif
             MainActor.assumeIsolated {
                 adapter?.executor?.dispatch(FluxEvent(handlerId: handlerId, nodeId: nodeId, payload: .str(text)))
             }

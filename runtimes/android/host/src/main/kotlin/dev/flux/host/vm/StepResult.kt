@@ -218,10 +218,10 @@ internal fun executeInstruction(
             if (allocated.add(count.toLong() * 8L)) {
                 throw VmError(VmErrorKind.MEMORY_EXHAUSTED, instr.offset)
             }
+            // Reserve capacity only; fields are upserted by canonical
+            // `propIndex` via `SET_FIELD` (see `setField`). Records are keyed
+            // by `propIndex`, not position, matching the wire layout.
             val fields = ArrayList<FluxValue.Field>(count)
-            for (i in 0 until count) {
-                fields.add(FluxValue.Field(i.toUShort(), FluxValue.NullVal))
-            }
             regs[instr.u8(0)] = FluxValue.RecordVal(fields)
             StepResult.Proceed
         }
