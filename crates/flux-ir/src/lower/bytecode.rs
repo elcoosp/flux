@@ -25,6 +25,7 @@ use flux_types::CapabilityIdl;
 use std::collections::HashSet;
 
 use crate::lower::error::LoweringError;
+use crate::lower::prop_index_for_name;
 
 /// A string interner callback: maps a literal's concatenated text to its
 /// content-addressed [`StringId`]. The emitter stays decoupled from the arena
@@ -673,7 +674,10 @@ impl<'a> Emitter<'a> {
 
     /// Compiles `record.field = value` where `record` is a signal or local
     /// holding a `Value::Record`. Reads the record, sets `field` at its
-    /// type-checked positional index, and writes the record back. FLUX-072 #9.
+    /// canonical `PropIdx` (FNV-1a of the field name, `prop_index_for_name`),
+    /// and writes the record back. This MUST match the GET_FIELD read side and
+    /// the SET_FIELD emit in record construction, otherwise readers miss the
+    /// written field (FLUX-072 #4).
     fn compile_field_assignment(
         &mut self,
         base: &Expr,
@@ -681,12 +685,9 @@ impl<'a> Emitter<'a> {
         value: &Expr,
         span: Span,
     ) -> Result<(), HandlerCompileError> {
-        // Resolve the field's positional index from the type checker's map,
-        // keyed by the `base.field` node id (same key the read side uses).
-        let fid = compute_node_id(0, ExprTag(10), span, None);
-        let idx = *self.field_indices.get(&fid).ok_or_else(|| {
-            HandlerCompileError::new(format!("cannot resolve field index for `.{field}`"), span)
-        })?;
+        // Fields are keyed by their canonical `PropIdx`, not a type-checker
+        // positional slot — records are stored canonical-keyed (Appendix C).
+        let idx = prop_index_for_name(field);
 
         // The record lives in a signal (e.g. `current.done` where `current` is a
         // state signal) or a local register (e.g. a `let task = …` binding).
@@ -1128,18 +1129,12 @@ impl<'a> Emitter<'a> {
                 let base_reg = self.compile_value(base)?;
                 let r = self.alloc_reg();
                 // GET_FIELD dst(u8), idx(u16), src(u8). The field index is the
-                // positional slot resolved by the type checker (records are stored
-                // positionally by the VM), not a name-derived tag — see
-                // `field_indices` on `TypedAST`.
-                let idx = self
-                    .field_indices
-                    .get(&compute_node_id(0, ExprTag(10), expr.span, None))
-                    .copied()
-                    .unwrap_or_else(|| {
-                        // Fallback: derive a stable index from the field name so
-                        // record literals that SET_FIELD by the same name agree.
-                        method_id_for("", &field.name)
-                    });
+                // canonical `PropIdx` derived from the field name
+                // (`prop_index_for_name`), which is exactly what the SET_FIELD
+                // write side emits and what records are keyed by (Appendix C,
+                // FLUX-072 #4). Records are NOT stored positionally, so we must
+                // not use the type checker's positional `field_indices` here.
+                let idx = prop_index_for_name(&field.name);
                 self.code.push(raw::GET_FIELD);
                 self.code.push(r);
                 self.code.extend_from_slice(&idx.to_le_bytes());
@@ -1159,18 +1154,17 @@ impl<'a> Emitter<'a> {
             }
             // An anonymous record literal `{ x: 1, y: 2 }` → ALLOC_RECORD + SET_FIELD
             // per field. Named record construction (`Task(label: …)`) arrives as a
-            // `Call` and is handled by `compile_call`.
+            // `Call` and is handled by `compile_call`. Fields are keyed by their
+            // canonical `PropIdx` (`prop_index_for_name`) so they agree with the
+            // static seed path and the GET_FIELD read side (FLUX-072 #4).
             ExprKind::Record { fields, .. } => {
                 let dst = self.alloc_reg();
                 let count = fields.len() as u16;
                 self.emit_alloc_record(dst, count);
-                for (position, (name, value)) in fields.iter().enumerate() {
+                for (name, value) in fields.iter() {
                     let v = self.compile_value(value)?;
-                    let tag = method_id_for("", &name.name);
-                    self.emit_set_field(dst, position as u16, v);
-                    // Field name → stable tag must match the GET_FIELD side; for
-                    // anonymous records the host resolves by the same derivation.
-                    let _ = tag;
+                    let idx: u16 = prop_index_for_name(&name.name);
+                    self.emit_set_field(dst, idx, v);
                 }
                 Ok(dst)
             }
@@ -1430,11 +1424,28 @@ impl<'a> Emitter<'a> {
             }
             ExprKind::Ident(ident) => {
                 if self.constructors.contains(&ident.name) {
-                    // Value construction: build the record directly.
+                    // Value construction: build the record directly. Fields are
+                    // keyed by their canonical `PropIdx` (FNV-1a of the field
+                    // name, `prop_index_for_name`) so that a runtime-constructed
+                    // record agrees with the static seed path and with the
+                    // GET_FIELD read side — otherwise a record built inside a
+                    // handler (e.g. `tasks.append(Task(label: x, done: y))`)
+                    // would store fields at sequential indices and the reader
+                    // would miss them (FLUX-072 #4).
                     let dst = self.alloc_reg();
                     self.emit_alloc_record(dst, arg_regs.len() as u16);
-                    for (idx, reg) in arg_regs.iter().enumerate() {
-                        self.emit_set_field(dst, idx as u16, *reg);
+                    let mut positional: u16 = 0;
+                    for (arg, reg) in args.iter().zip(arg_regs.iter()) {
+                        let idx: u16 = match arg {
+                            flux_parser::Arg::Named { name, .. } => prop_index_for_name(&name.name),
+                            _ => {
+                                // Positional args keep their sequential slot.
+                                let p = positional;
+                                positional = positional.saturating_add(1);
+                                p
+                            }
+                        };
+                        self.emit_set_field(dst, idx, *reg);
                     }
                     Ok(dst)
                 } else {

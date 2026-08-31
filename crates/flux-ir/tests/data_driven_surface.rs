@@ -82,14 +82,15 @@ fn record_literal_and_field_access_lowers_and_runs() {
     let (bc, _) = first_text_thunk(src, "t.label");
     // Thunk must read the signal, then GET_FIELD (0x71) to project `label`.
     assert!(bc.contains(&0x71), "GET_FIELD missing: {:02x?}", bc);
+    // Records are keyed by canonical `PropIdx` (FNV-1a of the field name),
+    // matching what GET_FIELD/SET_FIELD emit (FLUX-072 #4).
+    let label_idx = flux_ir::lower::prop_index_for_name("label");
+    let done_idx = flux_ir::lower::prop_index_for_name("done");
     let mut signals = InMemorySignals::from_signals([(
         flux_syntax::SignalId::from(1u32),
         Value::Record(vec![
-            (
-                flux_syntax::PropIdx::from(0u16),
-                Value::Str(flux_syntax::StringId::from(1u32)),
-            ),
-            (flux_syntax::PropIdx::from(1u16), Value::Bool(false)),
+            (label_idx, Value::Str(flux_syntax::StringId::from(1u32))),
+            (done_idx, Value::Bool(false)),
         ]),
     )]);
     let out = run(&bc, &mut signals, Value::Null).expect("thunk runs");
@@ -230,11 +231,24 @@ compo C
             assert_eq!(items.len(), 1, "append must add one record");
             match &items[0] {
                 Value::Record(fields) => {
-                    // field 0 is `label`; field 1 is `done`.
+                    // Fields are keyed by their canonical `PropIdx`
+                    // (FNV-1a of the field name via `prop_index_for_name`), the
+                    // same index the static seed path and the GET_FIELD read
+                    // side use — NOT sequential 0/1. A runtime-constructed
+                    // record must agree with the static one or readers miss the
+                    // field (FLUX-072 #4).
                     assert_eq!(fields.len(), 2, "record has two fields");
+                    let label_idx = flux_ir::lower::prop_index_for_name("label");
+                    let done_idx = flux_ir::lower::prop_index_for_name("done");
                     assert_eq!(
-                        fields[1],
-                        (flux_syntax::PropIdx::from(1u16), Value::Bool(false))
+                        fields.iter().find(|(i, _)| *i == label_idx).map(|(_, v)| v),
+                        Some(&Value::Str(flux_syntax::StringId::from(1u32))),
+                        "label must be stored at canonical index {label_idx:?}"
+                    );
+                    assert_eq!(
+                        fields.iter().find(|(i, _)| *i == done_idx).map(|(_, v)| v),
+                        Some(&Value::Bool(false)),
+                        "done must be stored at canonical index {done_idx:?}"
                     );
                 }
                 other => panic!("appended element must be a record, got {other:?}"),
@@ -292,14 +306,15 @@ compo C
     let ast = flux_parser::parse(src, 0, "todo.flux").expect("parse");
     let typed = flux_types::type_check(&ast).expect("type-check");
     let lowered = flux_ir::lower::lower(&ast, &typed).expect("lower");
+    // Records are keyed by canonical `PropIdx` (FNV-1a of the field name),
+    // matching what GET_FIELD/SET_FIELD emit (FLUX-072 #4).
+    let label_idx = flux_ir::lower::prop_index_for_name("label");
+    let done_idx = flux_ir::lower::prop_index_for_name("done");
     let mut signals = flux_vm_ref::InMemorySignals::from_signals([(
         flux_syntax::SignalId::from(1u32),
         Value::Record(vec![
-            (
-                flux_syntax::PropIdx::from(0u16),
-                Value::Str(flux_syntax::StringId::from(1u32)),
-            ),
-            (flux_syntax::PropIdx::from(1u16), Value::Bool(false)),
+            (label_idx, Value::Str(flux_syntax::StringId::from(1u32))),
+            (done_idx, Value::Bool(false)),
         ]),
     )]);
     run_first_handler(&lowered, &mut signals);
@@ -311,10 +326,12 @@ compo C
         .expect("current signal written");
     match current {
         Value::Record(fields) => {
-            assert_eq!(
-                fields[1],
-                (flux_syntax::PropIdx::from(1u16), Value::Bool(true))
-            );
+            let done = fields
+                .iter()
+                .find(|(i, _)| *i == done_idx)
+                .map(|(_, v)| v)
+                .expect("done field present at canonical index");
+            assert_eq!(*done, Value::Bool(true), "done must flip to true");
         }
         other => panic!("current must be a record, got {other:?}"),
     }
@@ -499,4 +516,128 @@ compo C
         "row thunk must capture the item slot signal {item_slot}; captured={:?}",
         thunk.captured_signals
     );
+}
+
+#[test]
+fn todo_example_textinput_has_onchangetext_handler() {
+    // Regression for the "added task shows a blank label" bug. The `TextInput`
+    // contract (stdlib/text_field.flux) requires an explicit `onChangeText`
+    // handler — that is the WRITE side that feeds the typed text back into the
+    // `$newTask` signal. Without it nothing ever writes `newTask`, so every
+    // added task is seeded with an empty label. This test parses, type-checks
+    // and lowers the real `examples/todo/main.flux` and asserts the
+    // `TextInput` node carries at least one handler (the onChangeText one).
+    let src = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../examples/todo/main.flux"
+    ))
+    .expect("read examples/todo/main.flux");
+    let ast = flux_parser::parse(&src, 0, "todo/main.flux").expect("parse");
+    let typed = flux_types::type_check(&ast).expect("type-check");
+    let lowered = flux_ir::lower::lower(&ast, &typed).expect("lower");
+
+    // Resolve the `TextInput` component id from the emitted component names so
+    // we target the TextInput node specifically (the old broken file gave it
+    // zero handlers, so only a name-targeted check catches the regression).
+    let text_input_comp = lowered
+        .component_names
+        .iter()
+        .find(|(_, name)| name == "TextInput")
+        .map(|(id, _)| *id)
+        .expect("TextInput component id present in lowered program");
+
+    let mut text_input_id: Option<flux_syntax::NodeId> = None;
+    for id in lowered.arena.all_ids() {
+        let view = lowered.arena.get(id).expect("node");
+        if view.kind() == NodeKind::Primitive && view.component_id() == text_input_comp {
+            text_input_id = Some(id);
+            break;
+        }
+    }
+    let text_input_id = text_input_id.expect("TextInput node present in lowered tree");
+    let handlers = lowered.arena.get(text_input_id).expect("node").handlers();
+    assert!(
+        !handlers.is_empty(),
+        "TextInput must bind an onChangeText handler so typed text reaches $newTask"
+    );
+    // Each bound handler must have compiled bytecode (i.e. it really writes).
+    for h in &handlers {
+        let closure = lowered.closures.get(h).expect("closure registered");
+        assert!(
+            !closure.bytecode.is_empty(),
+            "handler {h:?} must have bytecode"
+        );
+    }
+}
+
+#[test]
+fn runtime_record_matches_static_canonical_field_index() {
+    // Regression for FLUX-072 #4: a record built at runtime inside a handler
+    // (`tasks.append(Task(label: x, done: y))`) must store its fields at the
+    // SAME canonical `PropIdx` (`prop_index_for_name`) that the static seed
+    // path uses and that the `GET_FIELD` read side reads. If the runtime path
+    // emits sequential 0/1 indices instead, the reader (e.g. `TaskRow`'s
+    // `Text text: task.label`) reads an empty slot and the added task shows a
+    // blank label on device.
+    let src = "record Task { label: String, done: Bool }
+compo C
+    state tasks: List[Task] = [Task(label: \"seed\", done: false)]
+    Button(text: \"Add\", onPress: || { tasks.append(Task(label: \"added\", done: true)) })
+";
+    let ast = parse(src, 0, "todo.flux").expect("parse");
+    let typed = type_check(&ast).expect("type-check");
+    let lowered = lower(&ast, &typed).expect("lower");
+
+    let label_idx = flux_ir::lower::prop_index_for_name("label");
+    let done_idx = flux_ir::lower::prop_index_for_name("done");
+
+    let mut signals = flux_vm_ref::InMemorySignals::from_signals([(
+        flux_syntax::SignalId::from(1u32),
+        Value::List(vec![Value::Record(vec![
+            (
+                flux_ir::lower::prop_index_for_name("label"),
+                Value::Str(flux_syntax::StringId::from(1u32)),
+            ),
+            (
+                flux_ir::lower::prop_index_for_name("done"),
+                Value::Bool(false),
+            ),
+        ])]),
+    )]);
+    run_first_handler(&lowered, &mut signals);
+    let after: Vec<(flux_syntax::SignalId, Value)> = signals.snapshot();
+    let tasks = after
+        .into_iter()
+        .find(|(id, _)| *id == flux_syntax::SignalId::from(1u32))
+        .map(|(_, v)| v)
+        .expect("tasks signal written");
+
+    let Value::List(items) = tasks else {
+        panic!("tasks must be a list, got {tasks:?}");
+    };
+    assert_eq!(items.len(), 2, "append must add one record");
+    for item in &items {
+        let Value::Record(fields) = item else {
+            panic!("element must be a record, got {item:?}");
+        };
+        // Every record (seed AND runtime-appended) must use the canonical index.
+        let label = fields
+            .iter()
+            .find(|(i, _)| *i == label_idx)
+            .map(|(_, v)| v)
+            .expect("label present at canonical index");
+        let done = fields
+            .iter()
+            .find(|(i, _)| *i == done_idx)
+            .map(|(_, v)| v)
+            .expect("done present at canonical index");
+        assert!(
+            matches!(label, Value::Str(_)),
+            "label at canonical index must be a string, got {label:?}"
+        );
+        assert!(
+            matches!(done, Value::Bool(_)),
+            "done at canonical index must be a bool, got {done:?}"
+        );
+    }
 }

@@ -1,11 +1,16 @@
 {
   "name": "set_field_oob",
-  "description": "SET_FIELD beyond the record's field count raises IndexOutOfBounds (mirror of GET_FIELD-oob).",
-  "bytecode_hex": "70010100b0020900000000000000720105000200",
+  "description": "SET_FIELD upserts a field by its canonical PropIdx (FNV-1a of the field name); it never raises IndexOutOfBounds for a key beyond the allocated count (FLUX-072 #4). GET_FIELD reads the same key back. Records are keyed by PropIdx, not position, matching the wire layout (Appendix C) and the static seed path.",
+  "bytecode_hex": "70010200b0020a000000000000007201881302b00314000000000000007201891303a10488130100",
   "initial_signals": [],
   "payload": null,
   "expected_signals": [],
-  "expected_registers": {},
-  "expected_error": "IndexOutOfBounds",
-  "expected_gas_used": 0
+  "expected_registers": {
+    "r4": {
+      "type": "Int",
+      "value": 10
+    }
+  },
+  "expected_error": null,
+  "expected_gas_used": 6
 }

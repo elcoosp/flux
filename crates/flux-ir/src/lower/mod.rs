@@ -35,7 +35,7 @@ pub use bytecode::{HandlerCompileError, compile_handler, compile_handler_with_pa
 pub use error::LoweringError;
 pub use mono::{Monomorphization, mangle_specialised};
 
-use flux_parser::{Ast, Decl, Expr, ExprKind};
+use flux_parser::{Ast, ComponentDecl, Decl, Expr, ExprKind};
 use flux_syntax::{Child, ComponentId, Key, NodeId, NodeKind, Props, Span, Value};
 use flux_types::TypedAST;
 
@@ -183,6 +183,12 @@ struct Lowerer<'a> {
     /// Names of record types declared with `record Name { … }`; calls to these
     /// construct values (FLUX-072), not capability invocations.
     record_ctors: std::collections::HashSet<String>,
+    /// Declared component bodies, retained so `lower_call` can inline a
+    /// component's body at the call site — binding its `prop`s to the call's
+    /// argument signals. This is what lets `TaskRow(task: item, …)` inside a
+    /// `ForEach` read the per-row `itemSlot` directly instead of an unseeded
+    /// component-global prop signal (the "tasks not rendered" bug, FLUX-072).
+    component_decls: std::collections::HashMap<String, flux_parser::ComponentDecl>,
 }
 
 impl<'a> Lowerer<'a> {
@@ -200,6 +206,7 @@ impl<'a> Lowerer<'a> {
             handler_counter: flux_syntax::HandlerId::from(0u32),
             mono: mono::MonoTable::new(typed),
             record_ctors: std::collections::HashSet::new(),
+            component_decls: std::collections::HashMap::new(),
         }
     }
 
@@ -315,7 +322,13 @@ impl<'a> Lowerer<'a> {
     fn lower_decl(&mut self, decl: &Decl) -> Result<(), LoweringError> {
         match decl {
             // Only components produce runtime tree nodes in the MLP.
-            Decl::Component(comp) => self.lower_component(comp),
+            Decl::Component(comp) => {
+                // Retain the declaration so `lower_call` can inline the body
+                // at the call site (binding `prop`s to argument signals).
+                self.component_decls
+                    .insert(comp.name.name.clone(), comp.clone());
+                self.lower_component(comp)
+            }
             // fn / type / trait / capability / import / use / const are
             // type-level only; the type checker handled them, so we skip them.
             Decl::Fn(_)
@@ -346,9 +359,13 @@ impl<'a> Lowerer<'a> {
         }
         let component_id = self.intern_component(&comp.name.name);
 
-        // State cells are scoped per component.
+        // Signal ids are GLOBAL across the program: the VM owns a single signal
+        // graph, so every state cell and component prop must get a unique id.
+        // Do NOT reset `signal_counter` per component — doing so collides
+        // `TodoApp.tasks` (signal 1) with `TaskRow.task` (also signal 1) in the
+        // same graph, so a row's `task.label` reads the list and throws
+        // `nullDereference` (the "tasks not rendered" bug, FLUX-072 / ADR-0050).
         self.signal_scope.clear();
-        self.signal_counter = flux_syntax::SignalId::from(0u32);
 
         // Component props are backed by signals the host writes on each
         // reconcile (props ARE the observable surface per §3.5). Allocating a
@@ -484,7 +501,7 @@ impl<'a> Lowerer<'a> {
             }
             flux_parser::ExprKind::ForEach {
                 items: items_expr,
-                key: _key_expr,
+                key: key_expr,
                 body,
             } => {
                 let id = expr_node_id(expr, ExprNodeKind::ForEach);
@@ -499,7 +516,29 @@ impl<'a> Lowerer<'a> {
                 // per element, seeding a fresh per-row signal with `list[i]` and
                 // rewriting the row thunk's `READ_SIGNAL itemSlot` to that id.
                 let item_slot = self.next_signal();
-                self.signal_scope.push(("item".to_string(), item_slot));
+                // Bind the `ForEach` loop variable to the per-row `itemSlot` so
+                // row-body field accesses like `t.label` resolve to the scoped
+                // signal instead of the enclosing list signal (FLUX-072 /
+                // ADR-0050). The loop variable is declared either as the `key`
+                // lambda's parameter (`ForEach(x, key: |t| …) { … t … }`) or as
+                // a leading `binding =>` in the body block; fall back to "item"
+                // only when neither is present (older `|item|` sources).
+                let loop_var = body
+                    .params
+                    .first()
+                    .and_then(|p| match p {
+                        flux_parser::Pattern::Ident(ident) => Some(ident.name.clone()),
+                        _ => None,
+                    })
+                    .or_else(|| {
+                        if let flux_parser::ExprKind::Lambda { params, .. } = &key_expr.kind {
+                            params.first().map(|p| p.name.name.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| "item".to_string());
+                self.signal_scope.push((loop_var, item_slot));
                 let row_children = self.lower_block(body, owner)?;
                 self.signal_scope.pop();
                 // `Child::Splice` carries the per-item child node ids as
@@ -621,6 +660,20 @@ impl<'a> Lowerer<'a> {
         let interned = self.mono.next_specialised(&name).unwrap_or(name);
         let component_id = self.intern_component(&interned);
 
+        // Inline a declared component's body at the call site when every prop
+        // maps to an in-scope identifier (e.g. `TaskRow(task: item, …)` inside a
+        // `ForEach`, where `item` resolves to the per-row `itemSlot`). This
+        // binds the body's field accesses to the real argument signals instead
+        // of an unseeded component-global prop signal — the "tasks not
+        // rendered" bug (FLUX-072). Falls back to the normal component-instance
+        // path when inlining isn't possible.
+        let inline_children = if self.component_decls.contains_key(&interned) {
+            let comp = self.component_decls.get(&interned).unwrap().clone();
+            self.try_inline_component(&comp, args, trailing, owner)?
+        } else {
+            None
+        };
+
         // Build props from positional + named args, plus any trailing block
         // prop entries. Positional args take the next sequential PropIdx;
         // named args map to a stable PropIdx derived from their name so the
@@ -671,10 +724,15 @@ impl<'a> Lowerer<'a> {
         }
 
         let props = Props::from_fields(fields);
-        let children = if let Some(block) = trailing {
-            self.lower_block(block, owner)?
-        } else {
-            vec![]
+        let children = match &inline_children {
+            Some(c) => c.clone(),
+            None => {
+                if let Some(block) = trailing {
+                    self.lower_block(block, owner)?
+                } else {
+                    vec![]
+                }
+            }
         };
 
         let node = Node {
@@ -689,6 +747,76 @@ impl<'a> Lowerer<'a> {
         self.builder.pack(node);
         self.emit_signal_metadata(id, &prop_exprs, &[])?;
         Ok(Child::Node(id))
+    }
+
+    /// Attempts to inline a component call: lowers the component body with its
+    /// `prop`s bound to the call-site argument signals. Returns `Some(children)`
+    /// when every prop maps to an in-scope identifier (the common case, e.g.
+    /// `TaskRow(task: item, …)` inside a `ForEach` where `item` resolves to the
+    /// per-row `itemSlot`); `None` otherwise, in which case the caller falls
+    /// back to the regular component-instance path.
+    ///
+    /// Inlining is what makes a component used inside a `ForEach` read the
+    /// row's own values instead of an unseeded component-global prop signal
+    /// (the "tasks not rendered" bug, FLUX-072).
+    fn try_inline_component(
+        &mut self,
+        comp: &ComponentDecl,
+        args: &[flux_parser::Arg],
+        trailing: Option<&flux_parser::Block>,
+        owner: ComponentId,
+    ) -> Result<Option<Vec<Child>>, LoweringError> {
+        // Map prop name → argument expression.
+        let mut arg_by_prop: std::collections::HashMap<String, &flux_parser::Expr> =
+            std::collections::HashMap::new();
+        for arg in args {
+            match arg {
+                flux_parser::Arg::Named { name, value } => {
+                    arg_by_prop.insert(name.name.clone(), value);
+                }
+                flux_parser::Arg::Positional(_) => return Ok(None),
+                _ => return Ok(None),
+            }
+        }
+        if let Some(block) = trailing {
+            for item in &block.items {
+                if let flux_parser::BlockItem::Prop { name, value } = item {
+                    arg_by_prop.insert(name.name.clone(), value);
+                }
+            }
+        }
+        // Every prop must map to an in-scope identifier we can resolve to a
+        // signal; otherwise inlining isn't safe and we fall back.
+        let mut bindings: Vec<(String, flux_syntax::SignalId)> =
+            Vec::with_capacity(comp.props.len());
+        for prop in &comp.props {
+            let Some(expr) = arg_by_prop.get(&prop.name.name) else {
+                return Ok(None);
+            };
+            let flux_parser::ExprKind::Ident(ident) = &expr.kind else {
+                return Ok(None);
+            };
+            let Some(sig) = self
+                .signal_scope
+                .iter()
+                .find(|(n, _)| n == &ident.name)
+                .map(|(_, s)| *s)
+            else {
+                return Ok(None);
+            };
+            bindings.push((prop.name.name.clone(), sig));
+        }
+        // Lower the body with the component's props bound to the argument
+        // signals (e.g. `task` → `itemSlot`), so field accesses inside the
+        // body read the per-row values directly.
+        for (name, sig) in &bindings {
+            self.signal_scope.push((name.clone(), *sig));
+        }
+        let children = self.lower_block(&comp.body, owner)?;
+        for _ in &bindings {
+            self.signal_scope.pop();
+        }
+        Ok(Some(children))
     }
 
     /// Lowers an argument value; handler lambdas become [`Value::HandlerRef`]
@@ -733,11 +861,74 @@ impl<'a> Lowerer<'a> {
                 handlers.push(handler);
                 Ok(Value::HandlerRef(handler))
             }
-            // Anything else (an identifier referencing a prop/state, a nested
-            // call, a record literal, …) cannot be serialised as a static
-            // literal for the MLP wire path. The codegen layer recovers the
-            // real expression from the AST, so a `Null` placeholder here keeps
-            // lowering total without inventing a value.
+            flux_parser::ExprKind::List(items) => {
+                // A list literal seeds a real `Value::List` so `state`/`derived`
+                // signals holding collections (e.g. `state tasks: List[Task] = […]`)
+                // materialise as a list, not `null`. Lowering each element
+                // recursively handles nested records/strings (FLUX-072 #1).
+                let mut lowered: Vec<Value> = Vec::with_capacity(items.len());
+                for item in items {
+                    lowered.push(self.lower_value(item, owner, handlers)?);
+                }
+                Ok(Value::List(lowered))
+            }
+            flux_parser::ExprKind::Record { name: _, fields } => {
+                // A record literal (`Task(label: "x", done: false)`) lowers to a
+                // `Value::Record` keyed by stable field `PropIdx`s (Appendix C).
+                // The record type name is unused on the wire — fields are
+                // position-independent, matched by index — so it is dropped here.
+                let mut lowered: Vec<(flux_syntax::PropIdx, Value)> =
+                    Vec::with_capacity(fields.len());
+                for (fname, fexpr) in fields {
+                    let idx = prop_index_for_name(&fname.name);
+                    lowered.push((idx, self.lower_value(fexpr, owner, handlers)?));
+                }
+                Ok(Value::Record(lowered))
+            }
+            flux_parser::ExprKind::Call {
+                callee,
+                args,
+                trailing: _,
+            } => {
+                // A record-constructor call (`Task(label: "x", done: false)`) is a
+                // value literal, not a component call: when its callee names a
+                // record type it lowers to a `Value::Record` so `state`/`derived`
+                // signals holding records (and lists of records) materialise as
+                // real values instead of `null` (FLUX-072 #1). Component calls are
+                // UI nodes and are never lowered as `state_seed` literals, so the
+                // `record_ctors` guard keeps them out of this path.
+                if let flux_parser::ExprKind::Ident(ident) = &callee.kind {
+                    if self.record_ctors.contains(&ident.name) {
+                        let mut lowered: Vec<(flux_syntax::PropIdx, Value)> =
+                            Vec::with_capacity(args.len());
+                        let mut next_positional: u16 = 0;
+                        for arg in args {
+                            let (idx, value) = match arg {
+                                flux_parser::Arg::Named { name, value } => (
+                                    prop_index_for_name(&name.name),
+                                    self.lower_value(value, owner, handlers)?,
+                                ),
+                                flux_parser::Arg::Positional(e) => {
+                                    let idx = flux_syntax::PropIdx::from(next_positional);
+                                    next_positional = next_positional.saturating_add(1);
+                                    (idx, self.lower_value(e, owner, handlers)?)
+                                }
+                                #[allow(unreachable_patterns)]
+                                _ => continue,
+                            };
+                            lowered.push((idx, value));
+                        }
+                        return Ok(Value::Record(lowered));
+                    }
+                }
+                // Non-record calls (component calls, capability invokes, …) cannot
+                // be serialised as a static literal for the MLP wire path.
+                Ok(Value::Null)
+            }
+            // Any other `ExprKind` (incl. future non-exhaustive variants) cannot be
+            // serialised as a static literal for the MLP wire path. The codegen
+            // layer recovers the real expression from the AST, so a `Null`
+            // placeholder here keeps lowering total without inventing a value.
             _ => Ok(Value::Null),
         }
     }

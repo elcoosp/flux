@@ -596,10 +596,10 @@ fn exec_tail(
             Opcode::AllocRecord => {
                 let dst = instr.u8(0);
                 let count = usize::from(instr.u16(1));
-                let mut fields = Vec::with_capacity(count);
-                for i in 0..count {
-                    fields.push((PropIdx::from(i as u16), Value::Null));
-                }
+                // Reserve capacity only; fields are upserted by canonical
+                // `PropIdx` via `SET_FIELD` (see `set_field`). Records are
+                // keyed by `PropIdx`, not position, matching the wire layout.
+                let fields = Vec::with_capacity(count);
                 regs[usize::from(dst)] = Value::Record(fields);
             }
             Opcode::GetField => {
@@ -1004,9 +1004,17 @@ fn get_field(obj: Value, idx: u16, off: u32) -> Result<Value, VmError> {
     }
     match obj {
         Value::Record(fields) => {
-            let i = usize::from(idx);
+            // Records are keyed by their canonical `PropIdx` (FNV-1a of the
+            // field name, `prop_index_for_name`), matching the wire layout in
+            // Appendix C and the static seed path. Look the field up by key
+            // rather than position so a record built by VM opcodes (e.g.
+            // `tasks.append(Task(label:, done:))`) uses the same indices the
+            // host reads by — otherwise readers miss the field entirely
+            // (FLUX-072 #4).
+            let key = flux_syntax::PropIdx::from(idx);
             fields
-                .get(i)
+                .iter()
+                .find(|(k, _)| *k == key)
                 .map(|(_, v)| v.clone())
                 .ok_or_else(|| VmError::at(VmErrorKind::IndexOutOfBounds, off))
         }
@@ -1020,11 +1028,14 @@ fn set_field(obj: &mut Value, idx: u16, val: Value, off: u32) -> Result<(), VmEr
     }
     match obj {
         Value::Record(fields) => {
-            let i = usize::from(idx);
-            if i >= fields.len() {
-                return Err(VmError::at(VmErrorKind::IndexOutOfBounds, off));
+            // Upsert by canonical `PropIdx` key (see `get_field`). `ALLOC_RECORD`
+            // only reserves capacity; the first `SET_FIELD` for a key creates it.
+            let key = flux_syntax::PropIdx::from(idx);
+            if let Some(slot) = fields.iter_mut().find(|(k, _)| *k == key) {
+                slot.1 = val;
+            } else {
+                fields.push((key, val));
             }
-            fields[i].1 = val;
             Ok(())
         }
         _ => Err(VmError::at(VmErrorKind::TypeMismatch, off)),
