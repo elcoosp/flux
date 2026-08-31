@@ -34,7 +34,6 @@ crates/flux-devtools-ui/src/time_travel/reconstruct.rs
 crates/flux-devtools-ui/src/views/component_tree.rs
 crates/flux-devtools-ui/src/wire_client.rs
 crates/flux-differ/benches/diff.rs
-crates/flux-differ/src/diff.rs
 crates/flux-ir-serde/src/frame.rs
 crates/flux-ir-serde/src/telemetry.rs
 
