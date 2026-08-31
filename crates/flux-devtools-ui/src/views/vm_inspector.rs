@@ -7,9 +7,9 @@
 
 use std::sync::Arc;
 
-use gpui::{App, AnyElement, Context, IntoElement, Render, Window, div, prelude::*, px};
+use gpui::{div, prelude::*, px, AnyElement, App, Context, IntoElement, Render, Window};
 use gpui_component::progress::Progress;
-use gpui_component::{ActiveTheme as _, badge::Badge};
+use gpui_component::{badge::Badge, ActiveTheme as _};
 
 use crate::row::{empty_row, into_any, kv_row, rows_column};
 use crate::state::{DevToolsState, VmState};
@@ -57,17 +57,22 @@ impl VmInspectorView {
     }
 
     /// One row: remaining gas as a text value plus a horizontal gauge. The gauge
-    /// fraction is the gas value against a nominal 1000‑unit budget so the bar
-    /// reads as "headroom"; the raw count is always shown alongside it.
+    /// fraction is the gas value against the VM's entry budget (`ENTRY_GAS`,
+    /// mirroring the runtime in `flux-vm-ref`/Kotlin), so the bar reads as real
+    /// headroom; the raw count is always shown alongside it.
     fn gas_row(vm: &VmState, cx: &App) -> impl IntoElement {
+        const ENTRY_GAS: f32 = 100_000.0;
         let (gas_text, pct) = match vm.gas_remaining {
-            Some(g) => (g.to_string(), (g as f32 / 1000.0 * 100.0).clamp(0.0, 100.0)),
+            Some(g) => (
+                g.to_string(),
+                (g as f32 / ENTRY_GAS * 100.0).clamp(0.0, 100.0),
+            ),
             None => ("?".to_string(), 0.0),
         };
         let color = if pct < 20.0 {
             cx.theme().warning
         } else {
-            cx.theme().primary
+            cx.theme().success
         };
         div()
             .flex()

@@ -59,11 +59,15 @@ macro_rules! devtools_pane {
                     .flex()
                     .flex_row()
                     .items_center()
-                    .pt(px(6.))
-                    .pl(px(8.))
+                    .justify_between()
+                    .h(px(34.))
+                    .px(px(12.))
+                    .border_b_1()
+                    .border_color($colors.border)
+                    .bg($colors.background.opacity(0.5))
                     .child(
                         gpui::div()
-                            .text_sm()
+                            .text_base()
                             .font_weight(FontWeight::BOLD)
                             .text_color($colors.foreground)
                             .child(title.to_string()),
@@ -410,13 +414,13 @@ impl Render for DevToolsRoot {
                             .child(
                                 v_resizable("devtools-left")
                                     .when(self.state.is_pane_visible(PaneTarget::Tree), |this| {
-                                        this.child(gpui::div().m(px(4.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("Component Tree", self.tree.clone(), colors)).into_any_element())
+                                        this.child(gpui::div().m(px(8.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("Component Tree", self.tree.clone(), colors)).into_any_element())
                                     })
                                     .when(self.state.is_pane_visible(PaneTarget::Logs), |this| {
-                                        this.child(gpui::div().m(px(4.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("Logs", self.logs.clone(), colors)).into_any_element())
+                                        this.child(gpui::div().m(px(8.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("Logs", self.logs.clone(), colors)).into_any_element())
                                     })
                                     .when(self.state.is_pane_visible(PaneTarget::Network), |this| {
-                                        this.child(gpui::div().m(px(4.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("Network", self.net.clone(), colors)).into_any_element())
+                                        this.child(gpui::div().m(px(8.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("Network", self.net.clone(), colors)).into_any_element())
                                     }),
                             ),
                     )
@@ -425,13 +429,13 @@ impl Render for DevToolsRoot {
                             .child(
                                 v_resizable("devtools-right")
                                     .when(self.state.is_pane_visible(PaneTarget::Vm), |this| {
-                                        this.child(gpui::div().m(px(4.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("VM Inspector", self.vm.clone(), colors)).into_any_element())
+                                        this.child(gpui::div().m(px(8.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("VM Inspector", self.vm.clone(), colors)).into_any_element())
                                     })
                                     .when(self.state.is_pane_visible(PaneTarget::Signals), |this| {
-                                        this.child(gpui::div().m(px(4.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("Signals", self.signals.clone(), colors)).into_any_element())
+                                        this.child(gpui::div().m(px(8.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("Signals", self.signals.clone(), colors)).into_any_element())
                                     })
                                     .when(self.state.is_pane_visible(PaneTarget::Timeline), |this| {
-                                        this.child(gpui::div().m(px(4.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("Timeline", self.timeline.clone(), colors)).into_any_element())
+                                        this.child(gpui::div().m(px(8.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("Timeline", self.timeline.clone(), colors)).into_any_element())
                                     }),
                             ),
                     ),
