@@ -299,6 +299,8 @@ impl ComponentTreeView {
             .flex()
             .flex_row()
             .items_center()
+            .w_full()
+            .min_w(px(0.))
             .child(Input::new(self.search.as_ref().unwrap()));
         // Header with a real button (proves the click path works independent of
         // row-level hit-testing) that collapses/expands every branch at once.
