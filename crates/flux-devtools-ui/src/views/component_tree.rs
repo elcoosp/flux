@@ -258,23 +258,23 @@ impl ComponentTreeView {
         cx: &mut Context<'_, Self>,
     ) -> AnyElement {
         // Lazily build the search box on first render (we need `window`/`cx`
-        // here, which `new` doesn't have). Subscribe once so typing updates the
-        // filter query and repaints.
+        // here, which `new` doesn't have). Subscribe once so typing repaints;
+        // the query is read live from the input below.
         if self.search.is_none() {
             let input = cx.new(|cx| InputState::new(window, cx).placeholder("Search components…"));
-            let input_for_sub = input.clone();
             self._search_sub = Some(cx.subscribe(
                 &input,
-                move |this: &mut Self, _entity: Entity<InputState>, ev: &InputEvent, cx| {
-                    if matches!(ev, InputEvent::Change) {
-                        let q = input_for_sub.read(cx).value().to_string();
-                        this.query = q;
-                        this.last_tree_len = usize::MAX; // force re-log after filter
-                        cx.notify();
-                    }
+                move |_this: &mut Self, _entity: Entity<InputState>, _ev: &InputEvent, cx| {
+                    // The input updates its own state on change; repaint so the
+                    // live query read below reflects the typed text.
+                    cx.notify();
                 },
             ));
             self.search = Some(input);
+        }
+        // Read the live query from the input (authoritative source of truth).
+        if let Some(input) = self.search.as_ref() {
+            self.query = input.read(cx).value().to_string();
         }
 
         let tree = self.tree();

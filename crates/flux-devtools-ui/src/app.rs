@@ -6,15 +6,16 @@ use anyhow::Context as _;
 use gpui::prelude::*;
 use gpui::{
     Action, AnyView, App, AppContext, Context, ElementId, Entity, FontWeight, IntoElement,
-    KeyBinding, ParentElement, Render, StyleRefinement, Styled, Window, px,
+    KeyBinding, ParentElement, Render, Styled, Window, px,
 };
 use gpui_component::{ThemeMode, WindowExt};
 use gpui_component::{
-    Root, Theme, TitleBar, badge::Badge, group_box::GroupBox,
+    Root, Theme, TitleBar, badge::Badge, Icon, IconName,
     notification::Notification,
     resizable::{h_resizable, resizable_panel, v_resizable},
     scroll::ScrollableElement, status_bar::StatusBar, switch::Switch,
 };
+use gpui_component::Sizable as _;
 
 use gpui_platform::application;
 
@@ -26,10 +27,8 @@ use crate::views::{
 };
 use crate::wire_client::{DEFAULT_DEVTOOLS_PORT, connect, run_ingest_loop};
 
-/// A single DevTools pane: a themed, titled, scrollable surface built on
-/// gpui-component's [`GroupBox`] (Normal variant → square `border_1`, no radius,
-/// no padding), with a bold title flush to the left edge and a vertically
-/// scrollable body.
+/// A single DevTools pane: a themed, titled, scrollable surface — a plain
+/// `v_flex` with a flush, bold title bar and a vertically scrollable body.
 ///
 /// **Why a macro (not a function):** gpui-component's `Scrollable` keys its
 /// `ScrollHandle` by `caller_id()` (the source location of the
@@ -38,39 +37,52 @@ use crate::wire_client::{DEFAULT_DEVTOOLS_PORT, connect, run_ingest_loop};
 /// move the Component Tree pane, and vice-versa. A `macro_rules!` expands each
 /// invocation at a DISTINCT source location, so each pane gets its own handle.
 ///
-/// The body is given `flex_1()` inside a GroupBox whose content is forced to
-/// grow (`content_style.flex_grow = 1`), so the scroll viewport has a real
-/// height and a visible vertical scrollbar renders.
+/// The body is given `flex_1()` so the scroll viewport has a real height and a
+/// visible vertical scrollbar renders. The title bar sits flush at the top (no
+/// top margin/padding) so adjacent panes never overflow into each other. Each
+/// pane also renders a `gpui_component::Icon` (passed as `$icon`) before its
+/// title text for quick visual identification.
 macro_rules! devtools_pane {
-    ($title:expr, $view:expr, $colors:expr) => {{
+    ($title:expr, $icon:expr, $view:expr, $colors:expr) => {{
         let title: &'static str = $title;
-        let mut content_style = StyleRefinement::default();
-        content_style.flex_grow = Some(1.0);
-        GroupBox::new()
+        let icon: gpui_component::IconName = $icon;
+        // A plain titled surface: flush title bar (no top margin/padding) +
+        // a scrollable body. Deliberately NOT a `GroupBox` — `GroupBox::Normal`
+        // injects an internal `gap_4()` that leaves dead space above the title
+        // and lets adjacent panes' content overflow across the boundary.
+        gpui::div()
+            .flex()
+            .flex_col()
             .flex_1()
             .h_full()
             .min_h(px(0.))
             .min_w(px(0.))
-            .border_1()
-            .border_color($colors.border)
-            .content_style(content_style)
-            .title(
+            .child(
                 gpui::div()
                     .flex()
                     .flex_row()
                     .items_center()
                     .justify_between()
                     .h(px(34.))
-                    .px(px(12.))
+                    .pl(px(12.))
+                    .pr(px(12.))
                     .border_b_1()
                     .border_color($colors.border)
                     .bg($colors.background.opacity(0.5))
                     .child(
                         gpui::div()
-                            .text_base()
-                            .font_weight(FontWeight::BOLD)
-                            .text_color($colors.foreground)
-                            .child(title.to_string()),
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .gap(px(8.))
+                            .child(Icon::new(icon).size_4().text_color($colors.muted_foreground))
+                            .child(
+                                gpui::div()
+                                    .text_base()
+                                    .font_weight(FontWeight::BOLD)
+                                    .text_color($colors.foreground)
+                                    .child(title.to_string()),
+                            ),
                     ),
             )
             .child(
@@ -414,13 +426,13 @@ impl Render for DevToolsRoot {
                             .child(
                                 v_resizable("devtools-left")
                                     .when(self.state.is_pane_visible(PaneTarget::Tree), |this| {
-                                        this.child(gpui::div().m(px(8.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("Component Tree", self.tree.clone(), colors)).into_any_element())
+                                        this.child(gpui::div().m(px(8.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("Component Tree", IconName::PanelLeft, self.tree.clone(), colors)).into_any_element())
                                     })
                                     .when(self.state.is_pane_visible(PaneTarget::Logs), |this| {
-                                        this.child(gpui::div().m(px(8.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("Logs", self.logs.clone(), colors)).into_any_element())
+                                        this.child(gpui::div().m(px(8.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("Logs", IconName::Inbox, self.logs.clone(), colors)).into_any_element())
                                     })
                                     .when(self.state.is_pane_visible(PaneTarget::Network), |this| {
-                                        this.child(gpui::div().m(px(8.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("Network", self.net.clone(), colors)).into_any_element())
+                                        this.child(gpui::div().m(px(8.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("Network", IconName::ExternalLink, self.net.clone(), colors)).into_any_element())
                                     }),
                             ),
                     )
@@ -429,13 +441,13 @@ impl Render for DevToolsRoot {
                             .child(
                                 v_resizable("devtools-right")
                                     .when(self.state.is_pane_visible(PaneTarget::Vm), |this| {
-                                        this.child(gpui::div().m(px(8.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("VM Inspector", self.vm.clone(), colors)).into_any_element())
+                                        this.child(gpui::div().m(px(8.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("VM Inspector", IconName::Inspector, self.vm.clone(), colors)).into_any_element())
                                     })
                                     .when(self.state.is_pane_visible(PaneTarget::Signals), |this| {
-                                        this.child(gpui::div().m(px(8.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("Signals", self.signals.clone(), colors)).into_any_element())
+                                        this.child(gpui::div().m(px(8.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("Signals", IconName::ChevronsUpDown, self.signals.clone(), colors)).into_any_element())
                                     })
                                     .when(self.state.is_pane_visible(PaneTarget::Timeline), |this| {
-                                        this.child(gpui::div().m(px(8.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("Timeline", self.timeline.clone(), colors)).into_any_element())
+                                        this.child(gpui::div().m(px(8.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("Timeline", IconName::Calendar, self.timeline.clone(), colors)).into_any_element())
                                     }),
                             ),
                     ),
