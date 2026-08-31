@@ -506,7 +506,13 @@ struct ShadowTreeReconciler {
                 case let .splice(_, items): templateChildIds.append(contentsOf: items.map { $0.node })
                 }
             }
+            #if DEBUG
+            NSLog("[FluxRT] ForEach node \(nodeId): expanding \(templateChildIds.count) template children")
+            #endif
             let (ids, expanded, elements) = expandForEach(nodeId: nodeId, templateChildIds: templateChildIds, nodes: nodes)
+            #if DEBUG
+            NSLog("[FluxRT] ForEach node \(nodeId): expanded to \(ids.count) rows, \(expanded.count) nodes, \(elements.count) elements")
+            #endif
             expandedNodeTable.merge(expanded) { $1 }
             let mergedNodes = nodes.merging(expanded) { $1 }
             for (rowId, element) in zip(ids, elements) {

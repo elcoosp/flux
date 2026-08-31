@@ -21,7 +21,12 @@ compo TaskRow(task: Task, tasks: List[Task])
         Button text: "Remove", onPress: || { tasks.remove(task) }
 
 compo TodoApp
-    state tasks: List[Task] = []
+    state tasks: List[Task] = [
+        Task(label: "Buy milk", done: false),
+        Task(label: "Walk dog", done: false),
+        Task(label: "Do taxes", done: false),
+        Task(label: "Call mom", done: false),
+    ]
     state newTask: String = ""
     derived hasTasks = !tasks.isEmpty
 
