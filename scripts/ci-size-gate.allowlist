@@ -53,7 +53,6 @@ crates/flux-parser/src/lexer.rs
 crates/flux-parser/src/parser.rs
 crates/flux-perf-harness/src/metric.rs
 
-crates/flux-types/src/capabilities.rs
 
 crates/flux-vm-ref/src/vm.rs
 fuzz/examples/gen_corpus.rs
