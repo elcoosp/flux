@@ -40,7 +40,6 @@ crates/flux-ir-serde/src/telemetry.rs
 
 crates/flux-ir/src/lower/bytecode.rs
 crates/flux-ir/src/lower/mod.rs
-crates/flux-lsp/src/goto_def.rs
 crates/flux-lsp/src/lib.rs
 crates/flux-parity/src/persistence.rs
 crates/flux-parity/src/reduce.rs
