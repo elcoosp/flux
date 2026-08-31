@@ -46,7 +46,6 @@ crates/flux-parity/src/persistence.rs
 crates/flux-parity/src/reduce.rs
 crates/flux-parity/src/trace.rs
 crates/flux-parity/src/trace/json.rs
-crates/flux-parser/src/ast/expr.rs
 crates/flux-parser/src/fmt/expr.rs
 crates/flux-parser/src/lexer.rs
 crates/flux-parser/src/parser.rs
