@@ -158,7 +158,13 @@ private fun encodeValue(
 private fun writeUIntLE0(
     out: ByteArrayOutputStream,
     v: UInt,
-) = out.write(v.toInt())
+) {
+    val x = v.toInt()
+    out.write(x and 0xFF)
+    out.write((x ushr 8) and 0xFF)
+    out.write((x ushr 16) and 0xFF)
+    out.write((x ushr 24) and 0xFF)
+}
 
 private fun writeUShortLE0(
     out: ByteArrayOutputStream,
