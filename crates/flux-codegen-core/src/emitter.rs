@@ -23,7 +23,7 @@ use std::collections::HashMap;
 use crate::backend::Backend;
 use crate::bridge::Bridge;
 use crate::expressions::{render_expr, render_handler_body};
-use crate::model::{ComponentMeta, native_type};
+use crate::model::{native_type, ComponentMeta};
 use crate::primitives::{PrimitiveKind, PrimitiveSpec};
 use flux_ir::lower::Monomorphization;
 
@@ -75,9 +75,12 @@ impl<'a, B: Backend> Emitter<'a, B> {
         self.out
     }
 
-    /// Emits an entire program: algebraic types first, then one component per
+    /// Emits an entire program: prelude, algebraic types, then one component per
     /// lowered `Component` node, in packing order.
     pub fn emit_program(&mut self) {
+        // FLUX-047: emit the backend's prelude (imports / package decl) first,
+        // so generated sources are self-contained and compile standalone.
+        self.push_raw(&B::prelude());
         self.emit_sum_types();
         // FLUX-043: emit the native design-token theme extension once, before
         // the components, so every component can reference tokens by name
@@ -353,6 +356,25 @@ impl<'a, B: Backend> Emitter<'a, B> {
     /// Emits every algebraic type preceding the components.
     fn emit_sum_types(&mut self) {
         let mut first = true;
+        // FLUX-077: emit record (product type) declarations as native structs
+        // so they can be referenced by name in state/prop types.
+        for rec in self.bridge.records() {
+            if !first {
+                self.push_raw("\n");
+            }
+            first = false;
+            let name = &rec.name.name;
+            let fields: Vec<String> = rec
+                .fields
+                .iter()
+                .map(|field| {
+                    let ty = native_type::<B>(&field.ty, &HashMap::new());
+                    format!("let {}: {}", field.name.name, ty)
+                })
+                .collect();
+            let fields_str = fields.join("\n    ");
+            self.append_line(&format!("struct {name} {{\n    {fields_str}\n}}"));
+        }
         for sum in self.bridge.types() {
             if !first {
                 self.push_raw("\n");
@@ -441,12 +463,27 @@ impl<'a, B: Backend> Emitter<'a, B> {
             }
             PrimitiveKind::Leaf => {
                 let primary = primary_value::<B>(spec, &props, args);
-                let value = primary
-                    .map(render_inline)
-                    .unwrap_or_else(|| "\"\"".to_owned());
                 if spec.flux_name == "Image" {
+                    let value = primary
+                        .map(render_inline)
+                        .unwrap_or_else(|| "\"\"".to_owned());
                     self.line(indent, &B::image_expr(&value));
+                } else if spec.flux_name == "Toggle" {
+                    // SwiftUI Toggle needs `Toggle(isOn: $binding, label: …)`.
+                    // For release-mode rendering with an immutable value, use
+                    // `.constant()` since `task.done` is not a mutable binding.
+                    let value = primary
+                        .map(render_inline)
+                        .unwrap_or_else(|| "\"\"".to_owned());
+                    self.line(indent, &format!("Toggle(isOn: .constant({value})) {{"));
+                    self.emit_trailing_or_children(trailing.as_deref(), id, indent + B::CHILD_STEP);
+                    self.line(indent, "}");
+                } else if spec.flux_name == "Spacer" {
+                    self.line(indent, &B::spacer());
                 } else {
+                    let value = primary
+                        .map(render_inline)
+                        .unwrap_or_else(|| "\"\"".to_owned());
                     self.line(indent, &format!("{native}({value})"));
                 }
             }

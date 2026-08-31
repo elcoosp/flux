@@ -149,6 +149,19 @@ pub trait Backend {
     #[must_use]
     fn list_literal(elements: &[String]) -> String;
 
+    /// Renders the native spelling of the `List[T]` collection type
+    /// (`List<T>` for Kotlin, `[T]` for Swift).
+    #[must_use]
+    fn list_type(element: &str) -> String {
+        format!("List<{element}>")
+    }
+
+    /// Renders a `Spacer` leaf (e.g. `Spacer()` for SwiftUI, `Spacer("")` for Compose).
+    #[must_use]
+    fn spacer() -> &'static str {
+        "Spacer()"
+    }
+
     /// Renders the `unsupported expr` placeholder so generated code stays
     /// honest and parses (`/* unsupported expr */ 0` / `0 /* unsupported */`).
     #[must_use]
@@ -234,4 +247,13 @@ pub trait Backend {
     fn emit_match(em: &mut Emitter<'_, Self>, id: flux_syntax::NodeId, indent: usize)
     where
         Self: Sized;
+
+    /// Source code emitted at the very top of the generated file before any
+    /// other declaration (e.g. `import` statements, package declarations).
+    /// Defaults to the empty string so backends that need no header are not
+    /// forced to implement it.
+    #[must_use]
+    fn prelude() -> &'static str {
+        ""
+    }
 }

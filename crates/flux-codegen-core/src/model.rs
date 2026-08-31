@@ -93,7 +93,11 @@ pub fn native_type<B: Backend>(ty: &Type, subst: &HashMap<String, String>) -> St
             } else {
                 let rendered: Vec<String> =
                     args.iter().map(|a| native_type::<B>(a, subst)).collect();
-                format!("{}<{}>", name.name, rendered.join(", "))
+                if name.name == "List" {
+                    B::list_type(&rendered[0])
+                } else {
+                    format!("{}<{}>", name.name, rendered.join(", "))
+                }
             }
         }
         flux_parser::TypeKindAst::Record(fields) => {

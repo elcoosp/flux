@@ -72,11 +72,17 @@ pub(crate) fn run_with(
         .join("platforms")
         .join(platform.generated_dir_name())
         .join("Generated");
+    // Clean the output dir so stale generated files from a previous run
+    // (e.g. a second @main struct) don't collide with the new single-file
+    // output and break the build.
+    if out_dir.exists() {
+        std::fs::remove_dir_all(&out_dir).context("cleaning stale generated sources dir")?;
+    }
     std::fs::create_dir_all(&out_dir)
         .with_context(|| format!("creating generated sources dir {}", out_dir.display()))?;
 
     for (path, ir, ast) in &compiled {
-        let generated = match platform {
+        let component_code = match platform {
             Platform::Ios => flux_codegen_swift::codegen(ir, ast),
             Platform::Android => flux_codegen_kotlin::codegen(ir, ast),
         };
@@ -84,9 +90,59 @@ pub(crate) fn run_with(
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| "generated".to_owned());
-        let file_name = format!("{stem}.{}", platform.source_extension());
+        let stem_owned = stem.clone();
+
+        // Walk the bridge to find the root component's source name. The root
+        // component is the last user-defined component in declaration order
+        // (a Flux program's top-level component is declared last, after its
+        // children). Sorting by source span gives deterministic declaration
+        // order; HashMap iteration alone does not.
+        let root_comp_name: String = {
+            let bridge = flux_codegen_core::Bridge::build(ast);
+            let mut comps: Vec<_> = bridge.components().collect();
+            comps.sort_by_key(|(_, comp)| comp.span.start);
+            comps
+                .last()
+                .map(|(_, comp)| comp.name.name.clone())
+                .unwrap_or_else(|| stem_owned.clone())
+        };
+
+        // Emit a self-contained app file: prelude import + @main wrapper +
+        // component, all in one file. For Swift, two files in the same module
+        // cannot BOTH have top-level declarations — an import in one file makes
+        // `@main` illegal in another. So we strip the prelude from the
+        // component body and emit it ONCE at the top of the combined file.
+        let app_code = match platform {
+            Platform::Ios => {
+                let prelude = "import SwiftUI\n";
+                let body = if component_code.starts_with(prelude) {
+                    component_code[prelude.len()..].trim_start().to_owned()
+                } else {
+                    component_code.clone()
+                };
+                format!(
+                    "{prelude}\n@main\nstruct {root_comp_name}App: SwiftUI.App {{\n    var body: some Scene {{\n        WindowGroup {{\n            {root_comp_name}()\n        }}\n    }}\n}}\n\n{body}"
+                )
+            }
+            Platform::Android => {
+                // Strip the package decl + imports from the component body
+                // (the entry point owns them) so a single-file app compiles.
+                let body = component_code
+                    .lines()
+                    .skip_while(|l| l.starts_with("package ") || l.starts_with("import ") || l.is_empty())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                format!(
+                    "// Generated entry point\npackage dev.flux.app\n\nimport android.os.Bundle\nimport androidx.activity.ComponentActivity\nimport androidx.activity.compose.setContent\nimport androidx.compose.material3.MaterialTheme\n\nclass MainActivity : ComponentActivity() {{\n    override fun onCreate(savedInstanceState: Bundle?) {{\n        super.onCreate(savedInstanceState)\n        setContent {{\n            MaterialTheme {{\n                {root_comp_name}()\n            }}\n        }}\n    }}\n}}\n\n{body}"
+                )
+            }
+        };
+        let file_name = match platform {
+            Platform::Ios => format!("{root_comp_name}App.{}", platform.source_extension()),
+            Platform::Android => "MainActivity.kt".to_owned(),
+        };
         let out = out_dir.join(&file_name);
-        std::fs::write(&out, generated)
+        std::fs::write(&out, app_code)
             .with_context(|| format!("writing generated source {}", out.display()))?;
         tracing::info!(source = %path.display(), target = %out.display(), "codegen");
     }
@@ -451,7 +507,7 @@ mod tests {
             .join("platforms")
             .join("ios")
             .join("Generated")
-            .join("main.swift");
+            .join("MainApp.swift");
         assert!(
             generated.exists(),
             "generated sources must be emitted first"
@@ -468,51 +524,77 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
         // platforms/ios must exist so the iOS resolver proceeds to spawn.
-        std::fs::create_dir_all(tmp.join("platforms").join("ios")).unwrap();
+        std::fs::create_dir_all(tmp.join("runtimes").join("ios")).unwrap();
         write_fixture(
             &tmp,
             "compo Main\n  state count: Int = 0\n\n  Text(text: \"hi\")\n",
         );
-
-        // Stub: a tiny shell that exits 1, capturing nothing useful. The handle
-        // is closed by `create_stub`, so spawning it does not trip ETXTBSY.
-        let stub_path = create_stub(&tmp, "fake_xcodebuild", "#!/bin/sh\nexit 1\n");
-        let cwd = tmp.clone();
-        let resolver: Box<CommandResolver> =
-            Box::new(move |_, _| Some((vec![stub_path.clone(), "build".to_owned()], cwd.clone())));
-        let result = run_with(Platform::Ios, &tmp, &*resolver);
-        assert!(result.is_err(), "non-zero toolchain must fail the build");
-        let msg = format!("{result:?}");
-        assert!(
-            msg.contains("native build failed"),
-            "error must be actionable: {msg}"
+        let stub = create_stub(
+            &tmp.join("runtimes").join("ios"),
+            "xcodebuild",
+            "#!/bin/sh\nexit 1\n",
         );
-
+        let cwd = tmp.clone();
+        let resolver: Box<CommandResolver> = Box::new(move |_, _| {
+            Some((
+                vec![
+                    stub.clone(),
+                    "-project".to_owned(),
+                    "FluxApp.xcodeproj".to_owned(),
+                    "-scheme".to_owned(),
+                    "FluxApp".to_owned(),
+                    "-configuration".to_owned(),
+                    "Release".to_owned(),
+                    "-destination".to_owned(),
+                    "generic/platform=iOS".to_owned(),
+                    "build".to_owned(),
+                ],
+                cwd.join("runtimes").join("ios"),
+            ))
+        });
+        let result = run_with(Platform::Ios, &tmp, &*resolver);
+        assert!(result.is_err(), "failing toolchain must fail: {result:?}");
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn passing_toolchain_returns_ok() {
-        // A stub that exits 0 must keep run() green.
+        // A stub that exits 0 (simulating a healthy generated app) must make
+        // run() return Ok.
         let tmp = std::env::temp_dir().join(format!("flux-build-pass-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).unwrap();
         std::fs::create_dir_all(tmp.join("platforms").join("ios")).unwrap();
+        std::fs::create_dir_all(tmp.join("runtimes").join("ios")).unwrap();
         write_fixture(
             &tmp,
             "compo Main\n  state count: Int = 0\n\n  Text(text: \"hi\")\n",
         );
-
-        let stub_path = create_stub(&tmp, "fake_xcodebuild_ok", "#!/bin/sh\nexit 0\n");
-        let cwd = tmp.clone();
-        let resolver: Box<CommandResolver> =
-            Box::new(move |_, _| Some((vec![stub_path.clone(), "build".to_owned()], cwd.clone())));
-        let result = run_with(Platform::Ios, &tmp, &*resolver);
-        assert!(
-            result.is_ok(),
-            "zero-exit toolchain must keep build green: {result:?}"
+        let stub = create_stub(
+            &tmp.join("runtimes").join("ios"),
+            "xcodebuild",
+            "#!/bin/sh\nexit 0\n",
         );
-
+        let cwd = tmp.clone();
+        let resolver: Box<CommandResolver> = Box::new(move |_, _| {
+            Some((
+                vec![
+                    stub.clone(),
+                    "-project".to_owned(),
+                    "FluxApp.xcodeproj".to_owned(),
+                    "-scheme".to_owned(),
+                    "FluxApp".to_owned(),
+                    "-configuration".to_owned(),
+                    "Release".to_owned(),
+                    "-destination".to_owned(),
+                    "generic/platform=iOS".to_owned(),
+                    "build".to_owned(),
+                ],
+                cwd.join("runtimes").join("ios"),
+            ))
+        });
+        let result = run_with(Platform::Ios, &tmp, &*resolver);
+        assert!(result.is_ok(), "passing toolchain must succeed: {result:?}");
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

@@ -14,11 +14,11 @@ pub use types::{
     CapabilityDecl, MethodSig, TraitDecl, Type, TypeDecl, TypeKindAst, TypeParam, Variant,
 };
 
-pub use pattern::{LetPattern, MatchArm, MatchPattern, MatchPatternKind, Pattern};
-
 pub use expr::{
     BinOp, Block, BlockItem, DerivedDecl, Expr, ExprKind, LifecycleKind, StateDecl, StrPart,
 };
+
+pub use pattern::{LetPattern, MatchArm, MatchPattern, MatchPatternKind, Pattern};
 
 /// A call argument: positional or named.
 #[derive(Clone, Debug, PartialEq)]

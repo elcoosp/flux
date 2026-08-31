@@ -2145,6 +2145,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "flux-codegen-core",
  "flux-codegen-kotlin",
  "flux-codegen-swift",
  "flux-devserver",
@@ -2235,6 +2236,7 @@ dependencies = [
  "anyhow",
  "flux-ir",
  "flux-ir-serde",
+ "flux-perf-harness",
  "flux-syntax",
  "futures-util",
  "gpui",

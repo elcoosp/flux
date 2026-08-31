@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use flux_codegen_core::backend::Backend;
 use flux_codegen_core::emitter::Emitter;
-use flux_codegen_core::model::{ComponentMeta, native_type};
+use flux_codegen_core::model::{native_type, ComponentMeta};
 use flux_codegen_core::primitives::PrimitiveSpec;
 use flux_parser::{Expr, ExprKind, TypeDecl};
 
@@ -107,6 +107,8 @@ impl Backend for Kotlin {
     }
 
     fn text_field(value: &str, on_change: &str, placeholder: &str) -> String {
+        // The placeholder is already a quoted Kotlin string literal (e.g. `"name"`)
+        // from the AST; do not double-quote it. When empty, emit `""`.
         let value = if value.is_empty() {
             "\"\"".to_owned()
         } else {
@@ -120,9 +122,7 @@ impl Backend for Kotlin {
         if placeholder.is_empty() {
             format!("TextField(value = {value}, onValueChange = {{ {on_change} }})")
         } else {
-            format!(
-                "TextField(value = {value}, onValueChange = {{ {on_change} }}, placeholder = {{ Text(\"{placeholder}\") }})"
-            )
+            format!("TextField(value = {value}, onValueChange = {{ {on_change} }}, placeholder = {{ {placeholder} }})")
         }
     }
 
@@ -155,12 +155,24 @@ impl Backend for Kotlin {
         format!("listOf({})", elements.join(", "))
     }
 
+    fn list_type(element: &str) -> String {
+        format!("List<{element}>")
+    }
+
+    fn spacer() -> &'static str {
+        "Spacer(\"\")"
+    }
+
     fn unsupported_placeholder() -> String {
         "/* unsupported expr */ 0".to_owned()
     }
 
     fn native_name(spec: &PrimitiveSpec) -> &'static str {
         spec.kotlin_view
+    }
+
+    fn prelude() -> &'static str {
+        "package dev.flux.app\n\nimport androidx.compose.foundation.layout.*\nimport androidx.compose.foundation.text.KeyboardActions\nimport androidx.compose.foundation.text.KeyboardOptions\nimport androidx.compose.material3.*\nimport androidx.compose.runtime.*\nimport androidx.compose.ui.Alignment\nimport androidx.compose.ui.Modifier\nimport androidx.compose.ui.text.input.KeyboardType\nimport androidx.compose.ui.unit.dp\nimport androidx.navigation.NavHostController\nimport androidx.navigation.compose.NavHost\nimport androidx.navigation.compose.composable\nimport androidx.navigation.compose.rememberNavController\nimport kotlinx.coroutines.launch\n\n"
     }
 
     fn animation_spec(curve: &str) -> String {

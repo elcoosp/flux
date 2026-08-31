@@ -31,7 +31,7 @@
     unreachable_pub
 )]
 
-mod backend_impl;
+pub mod backend_impl;
 mod codegen;
 
 pub use codegen::codegen;

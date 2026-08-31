@@ -9,12 +9,12 @@ use std::collections::HashMap;
 
 use flux_codegen_core::backend::Backend;
 use flux_codegen_core::emitter::Emitter;
-use flux_codegen_core::model::{ComponentMeta, native_type};
+use flux_codegen_core::model::{native_type, ComponentMeta};
 use flux_codegen_core::primitives::PrimitiveSpec;
 use flux_parser::{Expr, ExprKind, TypeDecl};
 
 /// The SwiftUI backend.
-pub(crate) struct Swift;
+pub struct Swift;
 
 impl Backend for Swift {
     const INDENT_UNIT: usize = 1;
@@ -105,22 +105,24 @@ impl Backend for Swift {
     }
 
     fn text_field(value: &str, on_change: &str, placeholder: &str) -> String {
+        // The placeholder is already a quoted Swift string literal (e.g. `"name"`)
+        // from the AST; do not double-quote it. When empty, emit `""`.
         let value = if value.is_empty() {
-            "\"\"".to_owned()
+            "String()".to_owned()
         } else {
             value.to_owned()
         };
         let on_change = if on_change.is_empty() {
-            "{}".to_owned()
+            "(_: Bool) in".to_owned()
         } else {
             on_change.to_owned()
         };
-        let title = if placeholder.is_empty() {
+        let placeholder = if placeholder.is_empty() {
             "\"\"".to_owned()
         } else {
-            format!("\"{placeholder}\"")
+            placeholder.to_owned()
         };
-        format!("TextField({title}, text: .constant({value}), onEditingChanged: {{ {on_change} }})")
+        format!("TextField({placeholder}, text: .constant({value}), onEditingChanged: {{ {on_change} }})")
     }
 
     fn key_extractor(key: &Expr) -> String {
@@ -152,12 +154,20 @@ impl Backend for Swift {
         format!("[{}]", elements.join(", "))
     }
 
+    fn list_type(element: &str) -> String {
+        format!("[{}]", element)
+    }
+
     fn unsupported_placeholder() -> String {
         "0 /* unsupported */".to_owned()
     }
 
     fn native_name(spec: &PrimitiveSpec) -> &'static str {
         spec.swift_view
+    }
+
+    fn prelude() -> &'static str {
+        "import SwiftUI\n"
     }
 
     fn animation_spec(curve: &str) -> String {

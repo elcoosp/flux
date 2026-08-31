@@ -11,6 +11,7 @@
 //! This bridge is shared by both backends (FLUX-047): it owns no language
 //! specifics, only the deterministic ID reconstruction the lowering pass uses.
 
+use flux_parser::ast::{RecordDecl, RecordField};
 use flux_parser::{Ast, ComponentDecl, Decl, Expr, TypeDecl};
 use flux_syntax::{DeclTag, ExprTag, NodeId, Span};
 
@@ -39,8 +40,10 @@ pub struct Bridge {
     pub(crate) exprs: std::collections::HashMap<NodeId, Expr>,
     /// Component declarations.
     pub(crate) components: std::collections::HashMap<NodeId, ComponentDecl>,
-    /// Algebraic data type declarations, in source order.
+    /// Algebraic data type declarations (sum types), in source order.
     pub(crate) types: Vec<TypeDecl>,
+    /// Record (product type) declarations, in source order.
+    pub(crate) records: Vec<RecordDecl>,
 }
 
 impl Bridge {
@@ -57,6 +60,7 @@ impl Bridge {
                     walk_block(&comp.body, &mut bridge);
                 }
                 Decl::Type(sum) => bridge.types.push(sum.clone()),
+                Decl::Record(rec) => bridge.records.push(rec.clone()),
                 _ => {}
             }
         }
@@ -76,10 +80,22 @@ impl Bridge {
         self.components.get(&id)
     }
 
+    /// Returns all component declarations in insertion order.
+    #[must_use]
+    pub fn components(&self) -> impl Iterator<Item = (NodeId, &ComponentDecl)> + '_ {
+        self.components.iter().map(|(k, v)| (*k, v))
+    }
+
     /// Returns the algebraic data type declarations in source order.
     #[must_use]
     pub(crate) fn types(&self) -> &[TypeDecl] {
         &self.types
+    }
+
+    /// Returns the record (product type) declarations in source order.
+    #[must_use]
+    pub(crate) fn records(&self) -> &[RecordDecl] {
+        &self.records
     }
 }
 

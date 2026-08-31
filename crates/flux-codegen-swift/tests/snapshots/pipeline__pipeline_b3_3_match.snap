@@ -2,6 +2,7 @@
 source: crates/flux-codegen-swift/tests/pipeline.rs
 expression: "codegen_example(name, src)"
 ---
+import SwiftUI
 enum Shape {
  case Circle(field0: Int)
  case Rect(field0: Int, field1: Int)

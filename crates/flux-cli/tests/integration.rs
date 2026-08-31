@@ -122,7 +122,7 @@ async fn build_ios_writes_generated_swift() {
     .await
     .expect("ios build succeeds");
 
-    let generated = dir.path().join("platforms/ios/Generated/main.swift");
+    let generated = dir.path().join("platforms/ios/Generated/HelloApp.swift");
     assert!(generated.is_file(), "generated swift file exists");
     let source = std::fs::read_to_string(&generated).expect("readable");
     assert!(!source.is_empty(), "generated source is non-empty");
@@ -145,7 +145,7 @@ async fn build_android_writes_generated_kotlin() {
     .await
     .expect("android build succeeds");
 
-    let generated = dir.path().join("platforms/android/Generated/main.kt");
+    let generated = dir.path().join("platforms/android/Generated/MainActivity.kt");
     assert!(generated.is_file(), "generated kotlin file exists");
     let source = std::fs::read_to_string(&generated).expect("readable");
     assert!(!source.is_empty(), "generated source is non-empty");
