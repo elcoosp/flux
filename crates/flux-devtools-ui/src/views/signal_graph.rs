@@ -63,7 +63,7 @@ impl SignalGraphView {
             let is_selected = selected == Some(*id);
             let sig_id = *id;
             let mut row = div()
-                .id(ElementId::from(format!("sig-row-{id}")))
+                .id(ElementId::from(format!("sigrow-{id}")))
                 .px(crate::row::ROW_PAD_X)
                 .py(crate::row::ROW_PAD_Y)
                 .border_b(px(1.0))
@@ -86,7 +86,7 @@ impl SignalGraphView {
                     }
                 })
                 .child(format!("sig#{id}"))
-                .child(value_label(value));
+                .child(value_label(value, cx));
             if is_selected {
                 row = row.bg(colors.primary.opacity(0.22));
             }
@@ -127,7 +127,7 @@ impl SignalGraphView {
 }
 
 /// Render a signal value compactly (ints inline; strings by id; null as —).
-fn value_label(value: &Value) -> AnyElement {
+fn value_label(value: &Value, cx: &gpui::App) -> AnyElement {
     let text = match value {
         Value::Int(i) => format!("{i}"),
         Value::Float(f) => format!("{f}"),
@@ -137,7 +137,7 @@ fn value_label(value: &Value) -> AnyElement {
         other => format!("{other:?}"),
     };
     div()
-        .text_color(gpui::white().opacity(0.7))
+        .text_color(cx.theme().foreground)
         .child(text)
         .into_any_element()
 }

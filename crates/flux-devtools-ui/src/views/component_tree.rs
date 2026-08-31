@@ -204,21 +204,20 @@ impl ComponentTreeView {
             .clone()
             .unwrap_or_else(|| "(unnamed)".to_string());
         let geo = match &node.frame.frame {
-            Some(rect) => format!(
-                "{:.2}×{:.2} @ ({:.2}, {:.2})",
-                rect.width, rect.height, rect.x, rect.y
-            ),
-            None => "geometry pending".to_string(),
+            Some(rect) => format!(" [{:.2}×{:.2}]", rect.width, rect.height,),
+            None => " [pending]".to_string(),
         };
         let key = format!(
-            "{}{} {}  #{}",
+            "{}{} {}{}  #{}",
             "  ".repeat(depth),
             chevron,
             name,
-            node.frame.node_id
+            geo,
+            node.frame.node_id,
         );
         let node_id = node.frame.node_id;
-        let mut row = kv_row(key, geo).id(ElementId::from(format!("ct-row-{node_id}")));
+        let row = kv_row(key, "").id(ElementId::from(format!("ctrow-{node_id}")));
+        let mut row = row;
         if has_children {
             // Give the row a stable element id so it becomes a `Stateful<Div>`,
             // which implements `StatefulInteractiveElement` and thus has a

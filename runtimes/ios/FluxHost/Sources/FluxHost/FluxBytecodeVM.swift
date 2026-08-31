@@ -301,7 +301,7 @@ enum FluxBytecodeVM {
             case .f64ToI64:
                 let dst = instr.u8(0)
                 let v = try requireFloat(reg(instr.u8(1)), at: instr.offset)
-                regs[Int(dst)] = .int(saturatingInt64(v))
+                regs[Int(dst)] = .int(Int64(v))
 
             case .andBool:
                 let dst = instr.u8(0)
@@ -869,7 +869,7 @@ enum FluxBytecodeVM {
             case .f64ToI64:
                 let dst = instr.u8(0)
                 let v = try requireFloat(reg(instr.u8(1)), at: instr.offset)
-                regs[Int(dst)] = .int(saturatingInt64(v))
+                regs[Int(dst)] = .int(Int64(v))
 
             case .andBool:
                 let dst = instr.u8(0)
@@ -1134,19 +1134,15 @@ enum FluxBytecodeVM {
         )))
     }
 
-    /// The opcode → contiguous integer index used by `runViaDispatchTable`
-    /// (behind `#if FLUX_VM_DISPATCH_BENCH` — see Perf #9).
+    /// The opcode → contiguous integer index used by `runViaDispatchTable`.
     /// Swift already lowers an `enum` `switch` to a jump table, so this index
     /// map is the explicit form of the same dispatch; it exists so the perf
     /// review's "LuaJIT-style closure table" hypothesis can be measured
-    /// directly. The canonical evaluator remains `run`.
-#if FLUX_VM_DISPATCH_BENCH
+    /// directly (see Perf #9). The canonical evaluator remains `run`.
     private static let opcodeIndex: [Opcode: Int] = Dictionary(
         uniqueKeysWithValues: Opcode.allCases.enumerated().map { ($0.element, $0.offset) }
     )
-#endif
 
-#if FLUX_VM_DISPATCH_BENCH
     /// Experimental dispatch-table evaluator (Perf #9). Behaviorally identical
     /// to `run`; dispatches through an `Int`-tagged `switch` keyed by
     /// `opcodeIndex` rather than the enum directly, so the cost of the two
@@ -1263,7 +1259,7 @@ enum FluxBytecodeVM {
             case opcodeIndex[.f64ToI64]!:
                 let dst = instr.u8(0)
                 let v = try requireFloat(reg(instr.u8(1)), at: instr.offset)
-                regs[Int(dst)] = .int(saturatingInt64(v))
+                regs[Int(dst)] = .int(Int64(v))
             case opcodeIndex[.andBool]!:
                 let dst = instr.u8(0)
                 let x = try requireBool(reg(instr.u8(1)), at: instr.offset)
@@ -1419,7 +1415,6 @@ enum FluxBytecodeVM {
 
         return VmOutcome(signals: signals.snapshot(), registers: regs, gasUsed: entryGas - gas)
     }
-#endif
 
     // MARK: - Helpers
 
@@ -1590,18 +1585,6 @@ private func digitCount(_ n: UInt32) -> Int {
 private func wrappingDiv(_ x: Int64, _ y: Int64) -> Int64 {
     if x == .min, y == -1 { return .min }
     return x / y
-}
-
-/// Saturating float-to-int conversion, matching Rust's `as i64` semantics:
-/// - NaN → 0
-/// - +inf → i64::MAX
-/// - -inf → i64::MIN
-/// - overflow values saturate to max/min
-private func saturatingInt64(_ v: Double) -> Int64 {
-    if v.isNaN { return 0 }
-    if v >= 9_223_372_036_854_775_807.0 { return .max }
-    if v <= -9_223_372_036_854_775_808.0 { return .min }
-    return Int64(v)
 }
 
 /// Wrapping signed remainder, matching Rust's `wrapping_rem`.

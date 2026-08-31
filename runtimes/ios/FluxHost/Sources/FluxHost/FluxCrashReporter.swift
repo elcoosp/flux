@@ -17,11 +17,9 @@ import Foundation
 import os.log
 
 /// Observability sink for recoverable host errors (FLUX-081).
-/// Renamed from `FluxCrashReporter` (FLUX-081 hygiene: avoid name collision
-/// with `CrashReporter` — the release uncaught-exception reporter).
-final class RecoverableErrorReporter: @unchecked Sendable {
+final class FluxCrashReporter: @unchecked Sendable {
     /// The shared reporter.
-    static let shared = RecoverableErrorReporter()
+    static let shared = FluxCrashReporter()
 
     private let log = OSLog(subsystem: "dev.flux.host", category: "storage")
     private let queue = DispatchQueue(label: "dev.flux.crashreporter")

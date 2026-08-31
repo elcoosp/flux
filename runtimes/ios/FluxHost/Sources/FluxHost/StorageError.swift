@@ -6,7 +6,7 @@
 //  silently no-op (which would make `Storage.set` appear to succeed while
 //  storing nothing), and a `get`/`entries` hit on corrupt bytes must surface
 //  rather than be skipped unnoticed. Both paths log the error through
-//  `RecoverableErrorReporter` and treat the key as absent, matching Android's
+//  `FluxCrashReporter` and treat the key as absent, matching Android's
 //  corrupt-treat-as-absent contract.
 
 import Foundation
