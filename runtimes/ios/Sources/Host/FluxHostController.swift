@@ -46,6 +46,13 @@ final class FluxHostController: UIViewController {
         executor.onTreeChanged = { [weak self] in
             self?.presentRoot()
         }
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // Present after the view has its final frame so the root view's
+        // constraints resolve to a non-zero size. viewDidLoad runs before
+        // the view is laid out, so presenting there gives a (0 0; 0 0) frame.
         presentRoot()
     }
 

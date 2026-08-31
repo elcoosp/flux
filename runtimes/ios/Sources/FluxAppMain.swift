@@ -81,6 +81,14 @@ struct FluxRootView: View {
         // client by the `onFrame` handler below.
         let interner = InternStringClient(transport: transport)
         runtime.setInterner(interner)
+        // Wire the interner's onResolved callback so canonical string ids
+        // (from the dev server's InternString RPC reply) are stored in the
+        // reconciler's MaterializationStringTable. Without this, a derived
+        // string (e.g. a user-typed task label) gets a canonical id the kit
+        // can't resolve → null dereference during materialize.
+        interner.onResolved = { [weak runtime] id, text in
+            runtime?.storeResolvedString(id: id, value: text)
+        }
         _executor = State(initialValue: runtime)
         _connection = StateObject(wrappedValue: connection)
         _transport = State(initialValue: transport)

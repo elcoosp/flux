@@ -53,7 +53,7 @@ public final class InternStringClient: AnyStringInterner {
     /// into a `TextField`) is interned to a canonical id but never recorded in
     /// `table`, so `lookup(id)` returns `nil` and the UI renders an empty label
     /// (the "added task shows no label" bug).
-    var onResolved: ((UInt32, String) -> Void)?
+    public var onResolved: ((UInt32, String) -> Void)?
 
     /// Pending requests awaiting a `StringInterned` reply, keyed by the exact
     /// text. Multiple concurrent `intern` calls for the same text share one

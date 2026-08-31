@@ -759,6 +759,14 @@ struct ShadowTreeReconciler {
         table
     }
 
+    /// Stores a server-resolved canonical string id in the materialization
+    /// string table. Called when the `InternString` RPC replies with a
+    /// canonical id for a host-derived string (brittleness 4c). Without this,
+    /// lookups during thunk materialization fail → null dereference.
+    mutating func storeResolvedString(id: UInt32, value: String) {
+        table.store(id: id, value: value)
+    }
+
     /// FNV-1a (32-bit) hash of [name], truncated to `UInt16` — matches the wire
     /// encoder's `prop_index_for_name` (Appendix C), so a `route` prop decoded
     /// from the server resolves to the same index here.
@@ -863,6 +871,28 @@ struct ShadowTreeReconciler {
         guard let meta = signalMeta[nodeId], let thunk = meta.thunk else {
             #if DEBUG
             NSLog("[materialize] node \(nodeId) no thunk (meta=\(signalMeta[nodeId] != nil)) -> shipped \(fallbackProps.count) props")
+            #endif
+            return fallbackProps
+        }
+        // Skip thunk evaluation if any dependency signal is unseeded (null).
+        // This happens for template children of a ForEach: their thunks
+        // reference the ForEach's itemSlot signal, which is only seeded
+        // per-row during ForEach expansion (which happens after this node's
+        // props are materialized). Running the thunk here would read null →
+        // nullDereference crash. The per-row reconcile (with seeded itemSlot)
+        // will materialize these props correctly.
+        let hasUnseededDeps = meta.deps.contains { dep in
+            guard let value = executorRef?.graph.read(dep) else {
+                return true // unseeded signal
+            }
+            if case .null = value {
+                return true // explicitly null
+            }
+            return false
+        }
+        if hasUnseededDeps {
+            #if DEBUG
+            NSLog("[materialize] node \(nodeId) thunk deps unseeded (deps=\(meta.deps)) -> shipped \(fallbackProps.count) props")
             #endif
             return fallbackProps
         }

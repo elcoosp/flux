@@ -676,6 +676,16 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
         reconciler.setInterner(interner)
     }
 
+    /// Stores a server-resolved canonical string id in the reconciler's
+    /// `MaterializationStringTable` so subsequent lookups during thunk
+    /// materialization succeed. Called by `InternStringClient.onResolved`
+    /// when the dev server replies to an `InternString` RPC (brittleness 4c).
+    /// Without this, a derived string (e.g. a user-typed task label) gets a
+    /// canonical id the kit can't resolve → null dereference during materialize.
+    public func storeResolvedString(id: UInt32, value: String) {
+        reconciler.storeResolvedString(id: id, value: value)
+    }
+
     /// Evaluates a lifecycle handler (e.g. `onMount`/`onCleanup`, §18.4) by its
     /// handler id, without a native event payload. Used by the reconciler when a
     /// node is created or removed. A missing or unregistered id is a no-op

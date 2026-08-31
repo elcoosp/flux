@@ -115,6 +115,17 @@ final class MaterializationStringTable: StringResolver {
 
     func lookup(_ id: UInt32) -> String? { strings[id] }
 
+    /// Stores a server-assigned canonical string id, so the reconciler can
+    /// resolve it during prop materialisation. Called when the `InternString`
+    /// RPC replies with a canonical id for a host-derived string
+    /// (brittleness 4c). Without this, a derived string (e.g. a user-typed
+    /// task label) is interned to a canonical id the kit can't look up →
+    /// null dereference during materialize.
+    func store(id: UInt32, value: String) {
+        strings[id] = value
+        reverseLookup[value] = id
+    }
+
     /// Mints a host-local id for a freshly-derived string (e.g. a `STR_CONCAT`
     /// result), so the kit resolves the same id later.
     func intern(_ value: String) -> UInt32 {
