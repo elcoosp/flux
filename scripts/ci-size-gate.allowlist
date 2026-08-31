@@ -38,7 +38,6 @@ crates/flux-differ/src/diff.rs
 crates/flux-ir-serde/src/frame.rs
 crates/flux-ir-serde/src/telemetry.rs
 
-crates/flux-ir/src/instance.rs
 crates/flux-ir/src/lower/bytecode.rs
 crates/flux-ir/src/lower/mod.rs
 crates/flux-lsp/src/goto_def.rs
