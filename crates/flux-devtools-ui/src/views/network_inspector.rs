@@ -8,11 +8,9 @@
 
 use std::sync::Arc;
 
-use gpui::{
-    App, Context, Entity, IntoElement, ParentElement, Render, Window, div, prelude::*, px,
-};
-use gpui_component::table::{Column, DataTable, TableDelegate, TableState};
+use gpui::{App, Context, Entity, IntoElement, ParentElement, Render, Window, div, prelude::*, px};
 use gpui_component::ActiveTheme as _;
+use gpui_component::table::{Column, DataTable, TableDelegate, TableState};
 
 use crate::state::DevToolsState;
 use crate::time_travel::{NetworkPhase, NetworkRecord};
@@ -110,10 +108,19 @@ impl Render for NetworkInspectorView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         if self.state.network_snapshot().is_empty() {
             return div()
-                .px(px(12.))
-                .py(px(8.))
-                .text_color(cx.theme().muted_foreground)
-                .child("No network traffic yet.");
+                .flex()
+                .flex_col()
+                .flex_1()
+                .overflow_hidden()
+                .bg(cx.theme().background)
+                .child(
+                    div()
+                        .px(px(12.))
+                        .py(px(8.))
+                        .text_color(cx.theme().muted_foreground)
+                        .child("No network traffic yet."),
+                )
+                .into_any_element();
         }
         if self.table.is_none() {
             let delegate = NetworkDelegate {
@@ -123,8 +130,13 @@ impl Render for NetworkInspectorView {
         }
         let table = self.table.clone().unwrap();
         div()
-            .size_full()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .overflow_hidden()
+            .bg(cx.theme().background)
             .child(DataTable::new(&table).bordered(true))
+            .into_any_element()
     }
 }
 
@@ -139,8 +151,20 @@ mod tests {
         // Proven without a display: the view surfaces exactly the exchanges the
         // wire client retained, in FIFO order, with status once resolved.
         let state = DevToolsState::new();
-        state.ingest_network_request(1, "GET".into(), "https://api.example.com/a".into(), None, 14);
-        state.ingest_network_request(2, "POST".into(), "https://api.example.com/b".into(), Some("x=1".into()), 14);
+        state.ingest_network_request(
+            1,
+            "GET".into(),
+            "https://api.example.com/a".into(),
+            None,
+            14,
+        );
+        state.ingest_network_request(
+            2,
+            "POST".into(),
+            "https://api.example.com/b".into(),
+            Some("x=1".into()),
+            14,
+        );
         state.ingest_network_response(1, 200, 42, Some("ok".into()), 1);
 
         let view = NetworkInspectorView::new(Arc::new(state));

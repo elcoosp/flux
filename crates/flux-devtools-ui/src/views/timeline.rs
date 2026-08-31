@@ -13,6 +13,7 @@ use gpui::{
     AnyElement, Context, Entity, IntoElement, ParentElement, Render, Subscription, Window, div,
     prelude::*, px,
 };
+use gpui_component::ActiveTheme as _;
 use gpui_component::slider::{Slider, SliderEvent, SliderState, SliderValue};
 
 use flux_perf_harness::MetricRecord;
@@ -68,7 +69,7 @@ impl TimelineView {
     }
 
     /// Renders the view as a standalone pane.
-    pub fn render_pane(&mut self, _cx: &mut Context<'_, Self>) -> impl IntoElement {
+    pub fn render_pane(&mut self, cx: &mut Context<'_, Self>) -> impl IntoElement {
         let len = self.timeline_len();
         let live = len.max(1) - 1;
         let scrub = self.state.scrub_index().unwrap_or(live);
@@ -98,17 +99,25 @@ impl TimelineView {
 
         let records: Vec<MetricRecord> = self.state.perf_records();
         rows.extend(render_pane_rows(&records));
-
+        // Background color and overflow clipping for clean pane isolation.
         div()
+            .flex()
             .flex_col()
-            .gap(px(6.))
+            .flex_1()
+            .overflow_hidden()
+            .bg(cx.theme().background)
             .child(
                 div()
-                    .px(crate::row::ROW_PAD_X)
-                    .py(px(4.))
-                    .child(Slider::new(&self.slider)),
+                    .flex_col()
+                    .gap(px(6.))
+                    .child(
+                        div()
+                            .px(crate::row::ROW_PAD_X)
+                            .py(px(4.))
+                            .child(Slider::new(&self.slider)),
+                    )
+                    .child(rows_column(rows)),
             )
-            .child(rows_column(rows))
             .into_any_element()
     }
 }

@@ -4,11 +4,11 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use gpui::{
-    prelude::*, px, AnyElement, ClickEvent, Context, ElementId, Entity, Focusable,
-    InteractiveElement, IntoElement, Render, Window,
+    AnyElement, ClickEvent, Context, ElementId, Entity, Focusable, InteractiveElement, IntoElement,
+    Render, Window, prelude::*, px,
 };
-use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::ActiveTheme as _;
+use gpui_component::input::{Input, InputEvent, InputState};
 
 use crate::row::{empty_row, into_any, kv_row, rows_column};
 use crate::state::DevToolsState;
@@ -300,40 +300,42 @@ impl ComponentTreeView {
             .flex()
             .flex_row()
             .items_center()
-            .mt(px(6.))
             .child(Input::new(self.search.as_ref().unwrap()));
         // Header with a real button (proves the click path works independent of
         // row-level hit-testing) that collapses/expands every branch at once.
-        let header = gpui::div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .mt(px(6.))
-            .child(
-                Button::new("ct-toggle-all")
-                    .label("Toggle all")
-                    .ml(px(8.))
-                    .px(px(12.))
-                    .py(px(6.))
-                    .h_auto()
-                    .text_sm()
-                    .on_click(move |_event: &ClickEvent, _window, cx| {
-                        // Defer the state mutation: the click handler runs while
-                        // this entity is already mid-update, so a direct
-                        // re-entrant `update` would panic and blank the pane
-                        // (the button "disappears"). `App::defer` runs it after
-                        // the current event settles — the safe gpui pattern.
-                        let this = this.clone();
-                        cx.defer(move |cx| {
-                            this.update(cx, |this, cx| this.toggle_all(cx));
-                        });
-                    }),
-            );
+        let header = gpui::div().flex().flex_row().items_center().child(
+            Button::new("ct-toggle-all")
+                .label("Toggle all")
+                .ml(px(8.))
+                .px(px(12.))
+                .py(px(6.))
+                .h_auto()
+                .text_sm()
+                .on_click(move |_event: &ClickEvent, _window, cx| {
+                    // Defer the state mutation: the click handler runs while
+                    // this entity is already mid-update, so a direct
+                    // re-entrant `update` would panic and blank the pane
+                    // (the button "disappears"). `App::defer` runs it after
+                    // the current event settles — the safe gpui pattern.
+                    let this = this.clone();
+                    cx.defer(move |cx| {
+                        this.update(cx, |this, cx| this.toggle_all(cx));
+                    });
+                }),
+        );
         let mut content: Vec<AnyElement> = Vec::new();
         content.push(into_any(search_box));
         content.push(into_any(header));
         content.push(into_any(rows_column(rows)));
-        into_any(rows_column(content))
+        // Background color and overflow clipping for clean pane isolation.
+        gpui::div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .overflow_hidden()
+            .bg(cx.theme().background)
+            .child(rows_column(content))
+            .into_any_element()
     }
 }
 

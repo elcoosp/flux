@@ -5,7 +5,7 @@
 //! gpui-component's `pub(crate)` list primitives, which are not exposed to
 //! downstream crates in the current release.
 
-use gpui::{px, AnyElement, Div, IntoElement, ParentElement, Pixels, Styled};
+use gpui::{AnyElement, Div, InteractiveElement, IntoElement, ParentElement, Pixels, Styled, px};
 
 /// Standard horizontal padding for pane rows.
 pub(crate) const ROW_PAD_X: Pixels = gpui::px(12.0);
@@ -32,6 +32,7 @@ pub fn kv_row(label: impl IntoElement, value: impl IntoElement) -> Div {
             gpui::div()
                 .flex_1()
                 .min_w(px(0.))
+                .overflow_hidden()
                 .whitespace_nowrap()
                 .text_ellipsis()
                 .child(label),
@@ -40,8 +41,10 @@ pub fn kv_row(label: impl IntoElement, value: impl IntoElement) -> Div {
             gpui::div()
                 .flex_shrink(1.0)
                 .min_w(px(0.))
+                .overflow_hidden()
                 .whitespace_nowrap()
                 .text_ellipsis()
+                .debug_selector(|| "kv-value".to_string())
                 .child(value),
         )
 }
@@ -60,6 +63,8 @@ pub fn empty_row(message: &str) -> Div {
 /// [`gpui_component::scroll::Scrollable`] body.
 pub fn rows_column(rows: impl IntoIterator<Item = impl IntoElement>) -> impl IntoElement {
     gpui::div()
+        .w_full()
+        .min_w(px(0.))
         .flex()
         .flex_col()
         .children(rows.into_iter().map(|r| r.into_any_element()))

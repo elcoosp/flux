@@ -10,12 +10,12 @@ use std::sync::Arc;
 
 use flux_syntax::{EffectId, SignalId, Value};
 use gpui::{
-    div, prelude::*, px, AnyElement, ClickEvent, Context, ElementId, InteractiveElement,
-    IntoElement, ParentElement, Render, Styled, Window,
+    AnyElement, ClickEvent, Context, ElementId, InteractiveElement, IntoElement, ParentElement,
+    Render, Styled, Window, div, prelude::*, px,
 };
+use gpui_component::ActiveTheme as _;
 use gpui_component::menu::ContextMenuExt as _;
 use gpui_component::menu::PopupMenu;
-use gpui_component::ActiveTheme as _;
 
 use crate::row::{empty_row, into_any, kv_row, rows_column};
 use crate::state::DevToolsState;
@@ -43,7 +43,14 @@ impl SignalGraphView {
         let live = self.live();
         let selected = self.state.selected_signal();
         if live.signals.is_empty() && live.signal_edges.is_empty() {
-            return rows_column(vec![into_any(empty_row("no signals yet"))]);
+            return div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .overflow_hidden()
+                .bg(cx.theme().background)
+                .child(rows_column(vec![into_any(empty_row("no signals yet"))]))
+                .into_any_element();
         }
 
         // Index readers (effect ids) per signal for O(1) lookup on click.
@@ -107,7 +114,15 @@ impl SignalGraphView {
                 }
             }
         }
-        rows_column(rows)
+        // Background color and overflow clipping for clean pane isolation.
+        gpui::div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .overflow_hidden()
+            .bg(cx.theme().background)
+            .child(rows_column(rows))
+            .into_any_element()
     }
 }
 

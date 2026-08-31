@@ -8,24 +8,26 @@ use gpui::{
     Action, AnyView, App, AppContext, Context, ElementId, Entity, FontWeight, IntoElement,
     KeyBinding, ParentElement, Render, Styled, Window, px,
 };
-use gpui_component::{ThemeMode, WindowExt};
 use gpui_component::{
-    Root, Theme, TitleBar, badge::Badge, Icon, IconName,
+    Icon, IconName, Root, Theme, TitleBar,
+    badge::Badge,
     notification::Notification,
     resizable::{h_resizable, resizable_panel, v_resizable},
-    scroll::ScrollableElement, status_bar::StatusBar, switch::Switch,
+    scroll::ScrollableElement,
+    status_bar::StatusBar,
+    switch::Switch,
 };
-use gpui_component::Sizable as _;
+use gpui_component::{ThemeMode, WindowExt};
 
 use gpui_platform::application;
 
 use crate::state::{DevToolsState, HostInfo, PaneTarget};
-use flux_syntax::SignalId;
 use crate::views::{
     ComponentTreeView, LogViewerView, NetworkInspectorView, SignalGraphView, TimelineView,
     VmInspectorView,
 };
 use crate::wire_client::{DEFAULT_DEVTOOLS_PORT, connect, run_ingest_loop};
+use flux_syntax::SignalId;
 
 /// A single DevTools pane: a themed, titled, scrollable surface — a plain
 /// `v_flex` with a flush, bold title bar and a vertically scrollable body.
@@ -55,8 +57,9 @@ macro_rules! devtools_pane {
             .flex_col()
             .flex_1()
             .h_full()
-            .min_h(px(0.))
-            .min_w(px(0.))
+            .min_h_0()
+            .min_w_0()
+            .overflow_hidden()
             .child(
                 gpui::div()
                     .flex()
@@ -75,7 +78,11 @@ macro_rules! devtools_pane {
                             .flex_row()
                             .items_center()
                             .gap(px(8.))
-                            .child(Icon::new(icon).size_4().text_color($colors.muted_foreground))
+                            .child(
+                                Icon::new(icon)
+                                    .size_4()
+                                    .text_color($colors.muted_foreground),
+                            )
                             .child(
                                 gpui::div()
                                     .text_base()
@@ -90,7 +97,9 @@ macro_rules! devtools_pane {
                     .id(ElementId::from(title))
                     .flex_col()
                     .flex_1()
-                    .min_h(px(0.))
+                    .min_h_0()
+                    .min_w_0()
+                    .overflow_x_hidden()
                     .overflow_y_scrollbar()
                     .child($view),
             )
@@ -188,18 +197,58 @@ impl DevToolsRoot {
         // handlers below react to the dispatched actions and mutate shared
         // state, then repaint. Time-travel shortcuts step/jump the scrubber;
         // `cmd-f` focuses the component-tree search; `cmd-1..6` toggle panes.
-        let cmd = if cfg!(target_os = "macos") { "cmd-" } else { "ctrl-" };
+        let cmd = if cfg!(target_os = "macos") {
+            "cmd-"
+        } else {
+            "ctrl-"
+        };
         cx.bind_keys(vec![
             KeyBinding::new(&format!("{cmd}["), StepBack, None),
             KeyBinding::new(&format!("{cmd}]"), StepForward, None),
             KeyBinding::new(&format!("{cmd}\\"), JumpToLive, None),
             KeyBinding::new(&format!("{cmd}f"), FocusSearch, None),
-            KeyBinding::new(&format!("{cmd}1"), TogglePane { target: PaneTarget::Tree }, None),
-            KeyBinding::new(&format!("{cmd}2"), TogglePane { target: PaneTarget::Logs }, None),
-            KeyBinding::new(&format!("{cmd}3"), TogglePane { target: PaneTarget::Network }, None),
-            KeyBinding::new(&format!("{cmd}4"), TogglePane { target: PaneTarget::Vm }, None),
-            KeyBinding::new(&format!("{cmd}5"), TogglePane { target: PaneTarget::Signals }, None),
-            KeyBinding::new(&format!("{cmd}6"), TogglePane { target: PaneTarget::Timeline }, None),
+            KeyBinding::new(
+                &format!("{cmd}1"),
+                TogglePane {
+                    target: PaneTarget::Tree,
+                },
+                None,
+            ),
+            KeyBinding::new(
+                &format!("{cmd}2"),
+                TogglePane {
+                    target: PaneTarget::Logs,
+                },
+                None,
+            ),
+            KeyBinding::new(
+                &format!("{cmd}3"),
+                TogglePane {
+                    target: PaneTarget::Network,
+                },
+                None,
+            ),
+            KeyBinding::new(
+                &format!("{cmd}4"),
+                TogglePane {
+                    target: PaneTarget::Vm,
+                },
+                None,
+            ),
+            KeyBinding::new(
+                &format!("{cmd}5"),
+                TogglePane {
+                    target: PaneTarget::Signals,
+                },
+                None,
+            ),
+            KeyBinding::new(
+                &format!("{cmd}6"),
+                TogglePane {
+                    target: PaneTarget::Timeline,
+                },
+                None,
+            ),
         ]);
         // Time-travel stepping: read the current scrub index (None = live edge)
         // and step within the timeline bounds.
@@ -303,7 +352,11 @@ impl Render for DevToolsRoot {
             window.push_notification(
                 Notification::new()
                     .title("Host connected")
-                    .content(move |_, _, _| gpui::div().child(format!("Live session: {label}")).into_any_element()),
+                    .content(move |_, _, _| {
+                        gpui::div()
+                            .child(format!("Live session: {label}"))
+                            .into_any_element()
+                    }),
                 cx,
             );
         }
@@ -390,9 +443,7 @@ impl Render for DevToolsRoot {
                                         }),
                                 )
                                 .when(!is_connected, |this| {
-                                    this.child(
-                                        gpui_component::spinner::Spinner::new(),
-                                    )
+                                    this.child(gpui_component::spinner::Spinner::new())
                                 }),
                         )
                         .child(host_badge.unwrap_or_else(|| {
@@ -421,35 +472,110 @@ impl Render for DevToolsRoot {
             .child(
                 h_resizable("devtools-workspace")
                     .child(
-                        resizable_panel()
-                            .size(px(380.))
-                            .child(
-                                v_resizable("devtools-left")
-                                    .when(self.state.is_pane_visible(PaneTarget::Tree), |this| {
-                                        this.child(gpui::div().m(px(8.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("Component Tree", IconName::PanelLeft, self.tree.clone(), colors)).into_any_element())
-                                    })
-                                    .when(self.state.is_pane_visible(PaneTarget::Logs), |this| {
-                                        this.child(gpui::div().m(px(8.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("Logs", IconName::Inbox, self.logs.clone(), colors)).into_any_element())
-                                    })
-                                    .when(self.state.is_pane_visible(PaneTarget::Network), |this| {
-                                        this.child(gpui::div().m(px(8.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("Network", IconName::ExternalLink, self.net.clone(), colors)).into_any_element())
-                                    }),
-                            ),
+                        resizable_panel().size(px(380.)).child(
+                            v_resizable("devtools-left")
+                                .when(self.state.is_pane_visible(PaneTarget::Tree), |this| {
+                                    this.child(
+                                        gpui::div()
+                                            .m(px(8.))
+                                            .flex_1()
+                                            .min_h_0()
+                                            .flex_col()
+                                            .child(devtools_pane!(
+                                                "Component Tree",
+                                                IconName::PanelLeft,
+                                                self.tree.clone(),
+                                                colors
+                                            ))
+                                            .into_any_element(),
+                                    )
+                                })
+                                .when(self.state.is_pane_visible(PaneTarget::Logs), |this| {
+                                    this.child(
+                                        gpui::div()
+                                            .m(px(8.))
+                                            .flex_1()
+                                            .min_h_0()
+                                            .flex_col()
+                                            .child(devtools_pane!(
+                                                "Logs",
+                                                IconName::Inbox,
+                                                self.logs.clone(),
+                                                colors
+                                            ))
+                                            .into_any_element(),
+                                    )
+                                })
+                                .when(self.state.is_pane_visible(PaneTarget::Network), |this| {
+                                    this.child(
+                                        gpui::div()
+                                            .m(px(8.))
+                                            .flex_1()
+                                            .min_h_0()
+                                            .flex_col()
+                                            .child(devtools_pane!(
+                                                "Network",
+                                                IconName::ExternalLink,
+                                                self.net.clone(),
+                                                colors
+                                            ))
+                                            .into_any_element(),
+                                    )
+                                }),
+                        ),
                     )
                     .child(
-                        resizable_panel()
-                            .child(
-                                v_resizable("devtools-right")
-                                    .when(self.state.is_pane_visible(PaneTarget::Vm), |this| {
-                                        this.child(gpui::div().m(px(8.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("VM Inspector", IconName::Inspector, self.vm.clone(), colors)).into_any_element())
-                                    })
-                                    .when(self.state.is_pane_visible(PaneTarget::Signals), |this| {
-                                        this.child(gpui::div().m(px(8.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("Signals", IconName::ChevronsUpDown, self.signals.clone(), colors)).into_any_element())
-                                    })
-                                    .when(self.state.is_pane_visible(PaneTarget::Timeline), |this| {
-                                        this.child(gpui::div().m(px(8.)).flex_1().h_full().min_h(px(0.)).child(devtools_pane!("Timeline", IconName::Calendar, self.timeline.clone(), colors)).into_any_element())
-                                    }),
-                            ),
+                        resizable_panel().child(
+                            v_resizable("devtools-right")
+                                .when(self.state.is_pane_visible(PaneTarget::Vm), |this| {
+                                    this.child(
+                                        gpui::div()
+                                            .m(px(8.))
+                                            .flex_1()
+                                            .min_h_0()
+                                            .flex_col()
+                                            .child(devtools_pane!(
+                                                "VM Inspector",
+                                                IconName::Inspector,
+                                                self.vm.clone(),
+                                                colors
+                                            ))
+                                            .into_any_element(),
+                                    )
+                                })
+                                .when(self.state.is_pane_visible(PaneTarget::Signals), |this| {
+                                    this.child(
+                                        gpui::div()
+                                            .m(px(8.))
+                                            .flex_1()
+                                            .min_h_0()
+                                            .flex_col()
+                                            .child(devtools_pane!(
+                                                "Signals",
+                                                IconName::ChevronsUpDown,
+                                                self.signals.clone(),
+                                                colors
+                                            ))
+                                            .into_any_element(),
+                                    )
+                                })
+                                .when(self.state.is_pane_visible(PaneTarget::Timeline), |this| {
+                                    this.child(
+                                        gpui::div()
+                                            .m(px(8.))
+                                            .flex_1()
+                                            .min_h_0()
+                                            .flex_col()
+                                            .child(devtools_pane!(
+                                                "Timeline",
+                                                IconName::Calendar,
+                                                self.timeline.clone(),
+                                                colors
+                                            ))
+                                            .into_any_element(),
+                                    )
+                                }),
+                        ),
                     ),
             )
             // ── Bottom status bar ──

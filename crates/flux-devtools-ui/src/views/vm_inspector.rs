@@ -7,9 +7,9 @@
 
 use std::sync::Arc;
 
-use gpui::{div, prelude::*, px, AnyElement, App, Context, IntoElement, Render, Window};
+use gpui::{AnyElement, App, Context, IntoElement, Render, Window, div, prelude::*, px};
 use gpui_component::progress::Progress;
-use gpui_component::{badge::Badge, ActiveTheme as _};
+use gpui_component::{ActiveTheme as _, badge::Badge};
 
 use crate::row::{empty_row, into_any, kv_row, rows_column};
 use crate::state::{DevToolsState, VmState};
@@ -104,7 +104,15 @@ impl VmInspectorView {
         for (i, val) in vm.registers.iter().enumerate() {
             rows.push(into_any(kv_row(format!("r{i}"), format!("{val:?}"))));
         }
-        rows_column(rows)
+        // Background color and overflow clipping for clean pane isolation.
+        gpui::div()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .overflow_hidden()
+            .bg(cx.theme().background)
+            .child(rows_column(rows))
+            .into_any_element()
     }
 }
 

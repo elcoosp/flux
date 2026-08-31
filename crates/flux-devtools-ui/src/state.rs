@@ -9,8 +9,8 @@ use flux_perf_harness::MetricRecord;
 use flux_syntax::SignalId;
 
 use crate::time_travel::{
-    reconstruct_state, LogBuffer, LogEntry, LogLevel, NetworkLog, NetworkRecord,
-    ReconstructedState, TimelineBuffer, ViewFrame,
+    LogBuffer, LogEntry, LogLevel, NetworkLog, NetworkRecord, ReconstructedState, TimelineBuffer,
+    ViewFrame, reconstruct_state,
 };
 
 /// Snapshot of the VM register/instruction view.

@@ -8,10 +8,10 @@
 
 use std::sync::Arc;
 
-use gpui::{div, prelude::*, px, App, Context, Entity, IntoElement, ParentElement, Render, Window};
+use gpui::{App, Context, Entity, IntoElement, ParentElement, Render, Window, div, prelude::*, px};
 use gpui_component::button::Button;
 use gpui_component::table::{Column, DataTable, TableDelegate, TableState};
-use gpui_component::{popover::Popover, ActiveTheme as _};
+use gpui_component::{ActiveTheme as _, popover::Popover};
 
 use crate::state::DevToolsState;
 use crate::time_travel::LogLevel;
@@ -166,13 +166,22 @@ impl Render for LogViewerView {
             .child(clear_button);
 
         if !has_logs {
-            return div().flex().flex_col().size_full().child(header).child(
-                div()
-                    .px(px(12.))
-                    .py(px(8.))
-                    .text_color(cx.theme().muted_foreground)
-                    .child("No log output yet."),
-            );
+            return div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .overflow_hidden()
+                .bg(cx.theme().background)
+                .child(
+                    div().flex().flex_col().size_full().child(header).child(
+                        div()
+                            .px(px(12.))
+                            .py(px(8.))
+                            .text_color(cx.theme().muted_foreground)
+                            .child("No log output yet."),
+                    ),
+                )
+                .into_any_element();
         }
         if self.table.is_none() {
             let delegate = LogsDelegate {
@@ -184,9 +193,12 @@ impl Render for LogViewerView {
         div()
             .flex()
             .flex_col()
-            .size_full()
+            .flex_1()
+            .overflow_hidden()
+            .bg(cx.theme().background)
             .child(header)
             .child(DataTable::new(&table).bordered(true))
+            .into_any_element()
     }
 }
 
