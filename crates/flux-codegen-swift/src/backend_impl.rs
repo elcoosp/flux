@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use flux_codegen_core::backend::Backend;
 use flux_codegen_core::emitter::Emitter;
-use flux_codegen_core::model::{native_type, ComponentMeta};
+use flux_codegen_core::model::{ComponentMeta, native_type};
 use flux_codegen_core::primitives::PrimitiveSpec;
 use flux_parser::{Expr, ExprKind, TypeDecl};
 
@@ -23,6 +23,11 @@ impl Backend for Swift {
     /// Swift inlines a `Screen` body at the same indent as its `// Screen`
     /// comment, so the body step is 0.
     const SCREEN_BODY_STEP: usize = 0;
+
+    /// Swift renders destinations inside a `navigationDestination` modifier that
+    /// follows the `NavigationStack` close-brace, so children are emitted after
+    /// `router_close`.
+    const ROUTER_CHILDREN_AFTER_CLOSE: bool = true;
 
     fn int_type() -> &'static str {
         "Int"
@@ -55,20 +60,34 @@ impl Backend for Swift {
     }
 
     fn router_open() -> String {
-        // SwiftUI NavigationStack bound to the route state variable for programmatic
-        // navigation. Screens are emitted as conditionals matching the route value.
+        // SwiftUI NavigationStack bound to the route path for programmatic
+        // navigation. The destination modifier is chained by router_close.
         "NavigationStack(path: $route) {".to_owned()
     }
 
     fn router_close() -> String {
+        // Close the NavigationStack root view, then chain the destination
+        // modifier that maps route strings to screen destinations.
+        "}.navigationDestination(for: String.self) { route in".to_owned()
+    }
+
+    fn router_destination_close() -> String {
+        // Close the navigationDestination closure.
         "}".to_owned()
     }
 
+    fn router_navigate_expr(target: &str) -> String {
+        // Push the target route onto the NavigationPath stack.
+        // SwiftUI reads the appended String value via
+        // `.navigationDestination(for: String.self)`.
+        format!("route.append({target})")
+    }
+
     fn screen_open(route: &str) -> String {
-            // Emit a conditional that shows only the matching screen.
-            // The route is already a quoted Swift string literal (e.g. "home").
-            format!("if route == {route} {{")
-        }
+        // Emit a conditional that shows only the matching screen.
+        // The route is already a quoted Swift string literal (e.g. "home").
+        format!("if route == {route} {{")
+    }
 
     fn screen_close() -> String {
         // Close the screen conditional opened by screen_open.
@@ -126,7 +145,9 @@ impl Backend for Swift {
         } else {
             placeholder.to_owned()
         };
-        format!("TextField({placeholder}, text: .constant({value}), onEditingChanged: {{ {on_change} }})")
+        format!(
+            "TextField({placeholder}, text: .constant({value}), onEditingChanged: {{ {on_change} }})"
+        )
     }
 
     fn key_extractor(key: &Expr) -> String {
@@ -265,7 +286,13 @@ impl Backend for Swift {
         init: &str,
         _subst: &HashMap<String, String>,
     ) {
-        em.append_line(&format!("    @State private var {name}: {ty} = {init}"));
+        // The Flux `route` state drives the NavigationStack path; it must be a
+        // `NavigationPath` so `route.append(...)` pushes properly.
+        if name == "route" {
+            em.append_line("    @State private var route = NavigationPath()");
+        } else {
+            em.append_line(&format!("    @State private var {name}: {ty} = {init}"));
+        }
     }
 
     fn emit_sum_type(em: &mut Emitter<'_, Self>, sum: &TypeDecl) {

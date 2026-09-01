@@ -65,13 +65,33 @@ pub trait Backend {
     #[must_use]
     fn image_expr(value: &str) -> String;
 
-    /// Opens a `Router` navigation container (`NavHost(…) {` / `NavigationStack {`).
+    /// Opens a `Router` navigation container.
+    /// Swift emits `NavigationStack { EmptyView() };` with a root content;
+    /// Kotlin emits `NavHost(navController = ..., startDestination = ...) {`.
     #[must_use]
     fn router_open() -> String;
 
-    /// Closes a `Router` navigation container (`}`).
+    /// Closes the body of a `Router` navigation container and optionally opens
+    /// the destination binding.
+    /// Swift emits `}.navigationDestination(for: String.self) { route in` —
+    /// screens become destination cases inside this closure;
+    /// Kotlin emits `}` (NavHost handles destinations via `composable`).
     #[must_use]
     fn router_close() -> String;
+
+    /// Whether Screen children are emitted AFTER `router_close` rather than
+    /// between `router_open` and `router_close`. Swift emits destinations inside
+    /// the `navigationDestination` modifier (after the stack closes); Kotlin emits
+    /// destinations as `composable(...)` children inside `NavHost` (before close).
+    const ROUTER_CHILDREN_AFTER_CLOSE: bool;
+
+    /// Closes the destination binding closure opened by [`router_close`]
+    /// (`}` for Swift). Called by the emitter after the last `screen_close`.
+    /// Kotlin returns empty (NavHost closed in `router_close`).
+    ///
+    /// [`router_close`]: Backend::router_close
+    #[must_use]
+    fn router_destination_close() -> String;
 
     /// How far a `Screen` body is indented relative to its `screen_open` line.
     /// Swift inlines the body at the same indent (0); Kotlin nests it one level.
@@ -79,17 +99,23 @@ pub trait Backend {
 
     /// Renders a `Screen` destination's opening line(s) given its route string.
     /// The shared emitter emits the screen's children and [`screen_close`]
-    /// afterwards. Swift emits the route as a comment and no brace; Kotlin opens
-    /// a `composable(route) {` block.
+    /// afterwards. Swift emits a route-typed conditional (`if route == "name" {`).
+    /// Kotlin opens a `composable(route) {` block.
     ///
     /// [`screen_close`]: Backend::screen_close
     #[must_use]
     fn screen_open(route: &str) -> String;
 
     /// The closing line for a `Screen` destination body (`}` for Kotlin, empty
-    /// for the Swift comment form, which needs no brace).
+    /// for the Swift conditional form, which needs no brace).
     #[must_use]
     fn screen_close() -> String;
+
+    /// Native emission for `Router.navigate("target")`: pushes the target route.
+    /// Swift: `route.append("target")` (NavigationPath push); Kotlin:
+    /// `navController.navigate("target")`.
+    #[must_use]
+    fn router_navigate_expr(target: &str) -> String;
 
     /// Renders the opening of an `if`/`when` block given the rendered condition.
     /// Differs per backend (`if ({cond}) {` / `if {cond} {`).
@@ -128,12 +154,12 @@ pub trait Backend {
     fn text_field(value: &str, on_change: &str, placeholder: &str) -> String;
 
     /// The `key`-extractor fragment for a `ForEach` collection (`{ it.id }` /
-    /// `\.id`).
+    /// `\\.id`).
     #[must_use]
     fn key_extractor(key: &Expr) -> String;
 
     /// The opening punctuation of a string interpolation (`${` for Kotlin,
-    /// `\(` for Swift). The closing `}` is shared.
+    /// `\\(` for Swift). The closing `}` is shared.
     #[must_use]
     fn interp_open() -> &'static str;
 

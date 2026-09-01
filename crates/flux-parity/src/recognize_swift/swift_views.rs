@@ -35,32 +35,31 @@ pub(crate) fn parse_if(
         else_branch = els;
         i = after_else;
     }
-    
+
     // Check if this is a screen selection pattern: `if route == "route_name" { ... }`
     // When inside a NavigationStack (Router), screens are emitted as conditionals
     // that match on the route state. Convert these to Screen nodes for parity.
     let if_tokens: Vec<String> = cond.split_whitespace().map(|s| s.to_string()).collect();
-    if if_tokens.len() == 3 
-        && if_tokens[0] == "route" 
-        && (if_tokens[1] == "==" || if_tokens[1] == "!=") 
+    if if_tokens.len() == 3
+        && if_tokens[0] == "route"
+        && (if_tokens[1] == "==" || if_tokens[1] == "!=")
     {
-        // Extract the route from the condition (third token, which may be a quoted string)
+        // Extract the route from the condition. The third token may be a quoted
+        // string like `"home"`. We canonicalize it WITH quotes so it matches
+        // the dev path's canonical form (which renders route strings as `"home"`).
         let route_text = &if_tokens[2];
-        let route = route_text
-            .trim_start_matches('"')
-            .trim_end_matches('"')
-            .to_owned();
+        let route = canonicalize_expr(route_text);
         if !route.is_empty() {
             return Ok((
                 ViewNode::Screen {
-                    route: canonicalize_expr(&route),
+                    route,
                     children: then_branch,
                 },
                 i,
             ));
         }
     }
-    
+
     Ok((
         ViewNode::If {
             cond: canonicalize_expr(&cond),
@@ -138,37 +137,41 @@ pub(crate) fn parse_for_each(
     ))
 }
 
-/// Parses `NavigationStack { … }` (the `Router` node). Screen destinations are
-/// now emitted as `if route == "..."` conditionals (matching the new codegen pattern).
-///
-/// ```text
-/// NavigationStack(path: $route) {
-///     if route == "home" { ... }
-///     if route == "settings" { ... }
-/// }
-/// ```
-///
-/// Each `if route == "..."` conditional opens a new `Screen` node; the view call(s)
-/// inside the conditional become that screen's children — mirroring the dev path,
-/// where `Screen` nodes are nested directly under `Router`.
+/// Parses `NavigationStack(path: $route) { }.navigationDestination(for: String.self) { route in … }`
+/// (the `Router` node). Screens are emitted as `if route == "..."` conditionals
+/// inside the `navigationDestination` closure, which `parse_if` will recognize
+/// and convert to `Screen` nodes — mirroring the dev path where `Screen` nodes
+/// are nested directly under `Router`.
 pub(crate) fn parse_navigation_stack(
     tokens: &[Token],
     start: usize,
 ) -> Result<(ViewNode, usize), SwiftRecognitionError> {
+    // Find the opening brace of the NavigationStack root view body.
     let mut j = start + 1;
     while j < tokens.len() && tokens[j].text != "{" {
         j += 1;
+    }
+    if j >= tokens.len() {
+        return Ok((ViewNode::Router { children: vec![] }, j));
     }
     let open = j;
     let close =
         match_brace(tokens, open).ok_or_else(|| SwiftRecognitionError("nav unbalanced".into()))?;
 
-    // Parse children inside NavigationStack. The emit_router function now
-    // emits screens as `if route == "name" { ... }` conditionals, which
-    // parse_if will recognize and convert to Screen nodes.
-    let (children, _) = parse_body(tokens, open)?;
-    
-    Ok((ViewNode::Router { children }, close + 1))
+    // After the NavigationStack root `}`, the `.navigationDestination` modifier
+    // opens another brace group whose children are the screen conditionals.
+    let mut i = close + 1;
+    while i < tokens.len() && tokens[i].text != "{" {
+        i += 1;
+    }
+    let mut children = vec![];
+    if i < tokens.len() {
+        let (nav_children, after) = parse_body(tokens, i)?;
+        children = nav_children;
+        i = after;
+    }
+
+    Ok((ViewNode::Router { children }, i))
 }
 
 /// Parses a `// Screen route: "..."` comment into a [`ViewNode::Screen`] with an
@@ -176,7 +179,7 @@ pub(crate) fn parse_navigation_stack(
 /// recovered as a normal child of the Router).
 ///
 /// NOTE: This is kept for backwards compatibility with existing fixtures that
-/// may still use the old emission pattern. The new pattern uses `if route == "..."` 
+/// may still use the old emission pattern. The new pattern uses `if route == "..."`
 /// conditionals instead.
 pub(crate) fn parse_screen_comment(tokens: &[Token], start: usize) -> Option<ViewNode> {
     let joined = tokens[start..]

@@ -181,6 +181,8 @@ pub(crate) fn is_non_view(text: &str) -> bool {
             | "named"
             | "listOf"
             | "mutableStateListOf"
+            | "rememberNavController"
+            | "navController"
     )
 }
 

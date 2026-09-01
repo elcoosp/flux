@@ -15,6 +15,22 @@ use flux_parser::{BinOp, Expr, ExprKind, StrPart};
 
 use crate::backend::Backend;
 
+/// Returns `true` when `callee` is the `Router.navigate` call form.
+///
+/// `Router.navigate(...)` parses as `Field { base: Ident("Router"), field: "navigate" }`
+/// — not as a single `Ident` with a dotted name — so we check the field-access shape.
+fn is_router_navigate(callee: &Expr) -> bool {
+    match &callee.kind {
+        ExprKind::Field { base, field, .. } => {
+            matches!(&base.kind, ExprKind::Ident(i) if i.name == "Router")
+                && field.name == "navigate"
+        }
+        // Also accept a dotted-ident form that some parser paths may produce.
+        ExprKind::Ident(ident) => ident.name == "Router.navigate",
+        _ => false,
+    }
+}
+
 /// Renders `expr` as a native expression fragment.
 #[must_use]
 pub(crate) fn render_expr<B: Backend>(expr: &Expr) -> String {
@@ -109,22 +125,18 @@ fn render_stmt<B: Backend>(stmt: &Expr) -> String {
         }
         ExprKind::Await(inner) => format!("await {}", render_expr::<B>(inner)),
         ExprKind::Call { callee, args, .. } => {
-                    // `Router.navigate("settings")` is parsed as `Field { base: "Router", field: "navigate" }`.
-                    // Must become a state assignment (`route = "settings"`) in the release path so
-                    // the NavigationStack destination binding actually switches screens.
-                    // The dev VM writes the target to signal 97; the release SwiftUI path writes
-                    // it to the `@State` `route` variable that `navigationDestination` is bound to.
-                    if let ExprKind::Field { base, field, .. } = &callee.kind {
-                        if let ExprKind::Ident(base_id) = &base.kind {
-                            if base_id.name == "Router" && field.name == "navigate" {
-                                if let Some(target) = args.first() {
-                                    return format!("route = {}", render_expr::<B>(target.value()));
-                                }
-                            }
-                        }
-                    }
-                    B::unsupported_placeholder()
+            // `Router.navigate("settings")` must become a native navigation
+            // push in the release path. The dev VM writes the target to signal
+            // 97 (routerActiveChildId); the release path pushes it via the
+            // backend's navigation API.
+            if is_router_navigate(callee) {
+                if let Some(target) = args.first() {
+                    let rendered = render_expr::<B>(target.value());
+                    return B::router_navigate_expr(&rendered);
                 }
+            }
+            B::unsupported_placeholder()
+        }
         _ => render_expr::<B>(stmt),
     }
 }

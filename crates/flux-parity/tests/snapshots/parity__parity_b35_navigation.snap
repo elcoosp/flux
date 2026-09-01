@@ -1,5 +1,6 @@
 ---
 source: crates/flux-parity/tests/parity.rs
+assertion_line: 41
 expression: serialized
 ---
 verdict: equivalent
@@ -105,7 +106,7 @@ swift  == [
             Router {
                 children: [
                     Screen {
-                        route: "home",
+                        route: "\"home\"",
                         children: [
                             Primitive {
                                 name: "Home",
@@ -115,7 +116,7 @@ swift  == [
                         ],
                     },
                     Screen {
-                        route: "profile",
+                        route: "\"profile\"",
                         children: [
                             Primitive {
                                 name: "Profile",
@@ -125,7 +126,7 @@ swift  == [
                         ],
                     },
                     Screen {
-                        route: "settings",
+                        route: "\"settings\"",
                         children: [
                             Primitive {
                                 name: "Settings",

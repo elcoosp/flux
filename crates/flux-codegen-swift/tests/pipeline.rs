@@ -327,8 +327,8 @@ fn flux_043_theme_extension_codegen() {
     }
 }
 
-/// FLUX-079: Router.navigate("settings") must become a route state assignment
-/// (`route = "settings"`) so SwiftUI NavigationStack responds correctly.
+/// FLUX-079: Router.navigate("settings") must become a native NavigationPath push
+/// so SwiftUI NavigationStack responds with proper push/pop semantics.
 #[test]
 fn router_navigate_emits_state_assignment() {
     let src = r#"compo App
@@ -346,23 +346,28 @@ fn router_navigate_emits_state_assignment() {
 
 "#;
     let out = codegen_example("router_navigate", src);
-    // Verify route state is declared
+    // Verify route state is declared as NavigationPath for NavigationStack(path:)
     assert!(
-        out.contains("@State private var route: String"),
-        "missing @State route:\n{out}"
+        out.contains("@State private var route = NavigationPath()"),
+        "missing @State route NavigationPath:\n{out}"
     );
-    // Verify NavigationStack is bound to route
+    // Verify NavigationStack is bound to route via path
     assert!(
         out.contains("NavigationStack(path: $route)"),
         "NavigationStack not bound to route:\n{out}"
     );
-    // Verify Router.navigate turns into route assignment
+    // Verify navigationDestination is registered for String destinations
     assert!(
-        out.contains("route = \"settings\""),
-        "Router.navigate('settings') not emitted as route assignment:\n{out}"
+        out.contains(".navigationDestination(for: String.self)"),
+        "missing navigationDestination modifier:\n{out}"
+    );
+    // Verify Router.navigate turns into route.append (NavigationPath push)
+    assert!(
+        out.contains("route.append(\"settings\")"),
+        "Router.navigate('settings') not emitted as route.append:\n{out}"
     );
     assert!(
-        out.contains("route = \"home\""),
-        "Router.navigate('home') not emitted as route assignment:\n{out}"
+        out.contains("route.append(\"home\")"),
+        "Router.navigate('home') not emitted as route.append:\n{out}"
     );
 }

@@ -1,5 +1,6 @@
 ---
 source: crates/flux-codegen-kotlin/tests/pipeline.rs
+assertion_line: 155
 expression: "codegen_example(name, src)"
 ---
 package dev.flux.app
@@ -33,8 +34,9 @@ object FluxTheme {
 @Composable fun App(
 ) {
     var route by remember { mutableStateOf<String>("home") }
+    val navController = rememberNavController()
     NavHost(
-        navController = rememberNavController(),
+        navController = navController,
         startDestination = "home"
     ) {
         composable("home") {

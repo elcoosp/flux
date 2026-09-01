@@ -23,7 +23,7 @@ use std::collections::HashMap;
 use crate::backend::Backend;
 use crate::bridge::Bridge;
 use crate::expressions::{render_expr, render_handler_body};
-use crate::model::{native_type, ComponentMeta};
+use crate::model::{ComponentMeta, native_type};
 use crate::primitives::{PrimitiveKind, PrimitiveSpec};
 use flux_ir::lower::Monomorphization;
 
@@ -635,11 +635,23 @@ impl<'a, B: Backend> Emitter<'a, B> {
     }
 
     /// Emits a `Router` navigation container.
+    ///
+    /// For Kotlin (children before close): `router_open()` → children → `router_close()` → (no-op `router_destination_close`).
+    /// For Swift (children after close): `router_open()` → `router_close()` → children → `router_destination_close()`.
     fn emit_router(&mut self, id: NodeId, indent: usize) {
         let _node = self.lowered.arena.get(id);
         self.line(indent, &B::router_open());
-        self.emit_children_under_router(id, indent + B::CHILD_STEP);
-        self.line(indent, &B::router_close());
+        if !B::ROUTER_CHILDREN_AFTER_CLOSE {
+            self.emit_children_under_router(id, indent + B::CHILD_STEP);
+            self.line(indent, &B::router_close());
+        } else {
+            self.line(indent, &B::router_close());
+            self.emit_children_under_router(id, indent + B::CHILD_STEP);
+        }
+        let dest_close = B::router_destination_close();
+        if !dest_close.is_empty() {
+            self.line(indent, &dest_close);
+        }
     }
 
     /// Emits the children of a `Router` node (its Screen destinations).

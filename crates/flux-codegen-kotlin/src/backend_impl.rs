@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use flux_codegen_core::backend::Backend;
 use flux_codegen_core::emitter::Emitter;
-use flux_codegen_core::model::{native_type, ComponentMeta};
+use flux_codegen_core::model::{ComponentMeta, native_type};
 use flux_codegen_core::primitives::PrimitiveSpec;
 use flux_parser::{Expr, ExprKind, TypeDecl};
 
@@ -23,6 +23,10 @@ impl Backend for Kotlin {
 
     /// Kotlin nests a `Screen` body one level inside its `composable(...) {`.
     const SCREEN_BODY_STEP: usize = 1;
+
+    /// Kotlin's NavHost destinations are embedded as children inside the
+    /// NavHost brace, not after a separate destination modifier.
+    const ROUTER_CHILDREN_AFTER_CLOSE: bool = false;
 
     fn int_type() -> &'static str {
         "Int"
@@ -57,12 +61,25 @@ impl Backend for Kotlin {
     }
 
     fn router_open() -> String {
-        "NavHost(\n        navController = rememberNavController(),\n        startDestination = \"home\"\n    ) {"
+        // Declare a navController variable so that `Router.navigate(target)`
+        // (rendered by router_navigate_expr) can call navController.navigate.
+        "val navController = rememberNavController()\n    NavHost(\n        navController = navController,\n        startDestination = \"home\"\n    ) {"
             .to_owned()
     }
 
     fn router_close() -> String {
         "}".to_owned()
+    }
+
+    fn router_destination_close() -> String {
+        // Kotlin's NavHost closes in `router_close`; no separate destination
+        // closure to close (NavHost handles destinations via `composable`).
+        String::new()
+    }
+
+    fn router_navigate_expr(target: &str) -> String {
+        // Kotlin's NavHost uses a NavController for programmatic navigation.
+        format!("navController.navigate({target})")
     }
 
     fn screen_open(route: &str) -> String {
@@ -122,7 +139,9 @@ impl Backend for Kotlin {
         if placeholder.is_empty() {
             format!("TextField(value = {value}, onValueChange = {{ {on_change} }})")
         } else {
-            format!("TextField(value = {value}, onValueChange = {{ {on_change} }}, placeholder = {{ {placeholder} }})")
+            format!(
+                "TextField(value = {value}, onValueChange = {{ {on_change} }}, placeholder = {{ {placeholder} }})"
+            )
         }
     }
 

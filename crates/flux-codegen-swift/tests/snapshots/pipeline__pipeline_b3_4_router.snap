@@ -16,9 +16,10 @@ enum FluxTheme {
 }
 
 struct App: View {
-    @State private var route: String = "home"
+    @State private var route = NavigationPath()
     var body: some View {
   NavigationStack(path: $route) {
+  }.navigationDestination(for: String.self) { route in
       if route == "home" {
       Text("Home")
       }
