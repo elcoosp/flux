@@ -13,23 +13,6 @@ import FluxUIKit
 
 @testable import FluxHost
 
-/// A deterministic offline `AnyStringInterner` for unit tests that exercise the
-/// VM's derived-string path without a live dev server. It allocates sequential
-/// low ids (1, 2, 3, …) — all `< stringIdCanonicalCeiling` — so a test can seed
-/// the same id into its `StringTable` and observe the interned string resolve
-/// through `STR_LEN` (the canonical-id contract brittleness 4c introduced).
-@MainActor
-final class DeterministicInterner: AnyStringInterner {
-    /// The next id to hand out.
-    private var next: UInt32 = 1
-    /// Resolves `text` to a fresh sequential low id, caching repeats.
-    func intern(_ text: String) async -> UInt32 {
-        let id = next
-        next &+= 1
-        return id
-    }
-}
-
 // MARK: - Test support
 
 /// Builds a primitive `ShadowNode` (mirrors the helper in RuntimeE2ETests).
@@ -69,15 +52,15 @@ private func gapFrame(
     strings: [StringEntry] = [],
     state: [StateCell] = []
 ) -> FluxFrame {
-    var table = StringTable()
-    table.intern(0, "Text")
-    table.intern(1, "Button")
-    table.intern(2, "Column")
-    table.intern(3, "Row")
-    table.intern(4, "TextField")
-    table.intern(5, "Router")
-    table.intern(6, "Screen")
-    for s in strings { table.intern(s.stringId, s.value) }
+    let table = MaterializationStringTable()
+    table.store(id: 0, value: "Text")
+    table.store(id: 1, value: "Button")
+    table.store(id: 2, value: "Column")
+    table.store(id: 3, value: "Row")
+    table.store(id: 4, value: "TextField")
+    table.store(id: 5, value: "Router")
+    table.store(id: 6, value: "Screen")
+    for s in strings { table.store(id: s.stringId, value: s.value) }
 
     var nodes: [UInt32: ShadowNode] = [root.id: root]
     for n in descendantNodes { nodes[n.id] = n }
@@ -94,14 +77,14 @@ private func gapFrame(
 /// A registry seeded with the stdlib primitive names.
 @MainActor
 private func gapRegistry() -> AdapterRegistry {
-    var table = StringTable()
-    table.intern(0, "Text")
-    table.intern(1, "Button")
-    table.intern(2, "Column")
-    table.intern(3, "Row")
-    table.intern(4, "TextField")
-    table.intern(5, "Router")
-    table.intern(6, "Screen")
+    let table = MaterializationStringTable()
+    table.store(id: 0, value: "Text")
+    table.store(id: 1, value: "Button")
+    table.store(id: 2, value: "Column")
+    table.store(id: 3, value: "Row")
+    table.store(id: 4, value: "TextField")
+    table.store(id: 5, value: "Router")
+    table.store(id: 6, value: "Screen")
     return AdapterRegistry(table: table)
 }
 
@@ -197,8 +180,8 @@ final class GapG2MemoryCapTests: XCTestCase {
 final class GapG3StringOpsTests: XCTestCase {
     @MainActor
     func testStrLenResolvesRealString() async throws {
-        var table = StringTable()
-        table.intern(5, "hello") // 5 bytes
+        let table = MaterializationStringTable()
+        table.store(id: 5, value: "hello") // 5 bytes
         var signals: any SignalStore = InMemorySignals()
         // LOAD_STR_CONST r1, 5 ; STR_LEN r0, r1 ; HALT
         let bc: [UInt8] = [
@@ -212,18 +195,16 @@ final class GapG3StringOpsTests: XCTestCase {
 
     @MainActor
     func testStrConcatInternsResult() async throws {
-        var table = StringTable()
-        table.intern(5, "hello")
-        table.intern(6, "world")
-        // The deterministic offline interner hands the concatenated "helloworld"
-        // id 1; seed the same id so STR_LEN can resolve it back to text.
-        table.intern(1, "helloworld")
+        let table = MaterializationStringTable()
+        table.store(id: 5, value: "hello")
+        table.store(id: 6, value: "world")
+        // STR_CONCAT will intern "helloworld" into the shared table via
+        // `intern(_:)`; a second `STR_LEN` against that id resolves it back to
+        // text, proving the derived string was interned and is visible to the
+        // same table instance the VM mutates.
         var signals: any SignalStore = InMemorySignals()
         // LOAD_STR_CONST r1, 5 ; LOAD_STR_CONST r2, 6 ;
         // STR_CONCAT r3, r1, r2 ; STR_LEN r0, r3 ; HALT
-        // The concatenation interns "helloworld"; its length (10) is observable
-        // in r0 from within the same run, proving the real string was resolved
-        // and concatenated (not the faked id arithmetic).
         let bc: [UInt8] = [
             0xB3, 0x01, 0x05, 0x00, 0x00, 0x00,
             0xB3, 0x02, 0x06, 0x00, 0x00, 0x00,
@@ -233,7 +214,7 @@ final class GapG3StringOpsTests: XCTestCase {
         ]
         let out = try FluxBytecodeVM.run(
             bc, signals: &signals, payload: .null,
-            stringTable: table, interner: DeterministicInterner()
+            stringTable: table
         )
         XCTAssertEqual(out.registers[0], .int(10))
     }

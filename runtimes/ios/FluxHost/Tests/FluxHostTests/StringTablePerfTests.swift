@@ -1,5 +1,5 @@
 //  StringTablePerfTests.swift
-//  Perf #7 / R4 — O(1) reverse string lookup in `StringTable`.
+//  Perf #7 / R4 — O(1) reverse string lookup in `MaterializationStringTable`.
 //
 //  `id(for:)` previously did a linear `strings.first(where:)` scan per native
 //  event, which is O(n) over the whole table. It must now resolve via a
@@ -14,10 +14,10 @@ final class StringTablePerfTests: XCTestCase {
     /// Interning many strings then resolving them by value must hit the O(1)
     /// reverse index, not a linear scan.
     func testReverseLookupIsConstantTime() {
-        var table = StringTable()
+        let table = MaterializationStringTable()
         let count = 500
         for i in 0..<count {
-            table.intern(UInt32(i), "value-\(i)")
+            table.store(id: UInt32(i), value: "value-\(i)")
         }
 
         // Every reverse lookup must return the correct id.
@@ -36,16 +36,16 @@ final class StringTablePerfTests: XCTestCase {
         XCTAssertLessThan(elapsed, 0.05, "reverse lookup of 50k values took \(elapsed)s; expected O(1)")
     }
 
-    /// Forward `intern(id:value)` and reverse `id(for:value)` must agree and
+    /// Forward `store(id:value)` and reverse `id(for:)` must agree and
     /// stay consistent after many interleaved operations.
     func testForwardAndReverseConsistency() {
-        var table = StringTable()
-        table.intern(1, "alpha")
-        table.intern(2, "beta")
+        let table = MaterializationStringTable()
+        table.store(id: 1, value: "alpha")
+        table.store(id: 2, value: "beta")
         XCTAssertEqual(table.id(for: "alpha"), 1)
         XCTAssertEqual(table.id(for: "beta"), 2)
         // A brand-new value interns under a fresh high-range id.
-        let fresh = table.id(for: "gamma")
+        let fresh = table.intern("gamma")
         XCTAssertNotEqual(fresh, 0)
         XCTAssertEqual(table.lookup(fresh), "gamma")
     }

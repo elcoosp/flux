@@ -1,49 +1,16 @@
 //  InternStringTests.swift
-//  TDD coverage for the `InternString` RPC (brittleness 4c) and the release
-//  compile-out of the devtools "trace" sink (brittleness 8c).
+//  TDD coverage for the `InternString` / `StringInterned` wire-frame encoding
+//  and the canonical-id ceiling guard (Appendix D §D.12.6 / §D.12.7, FLUX-084).
 //
-//  These tests pin the new canonical-id contract: derived strings are interned
-//  through the dev server and receive a low (< STRING_ID_CANONICAL_CEILING) id;
-//  the host never mints a synthetic high-range id locally. They also assert the
-//  wire encoding/decoding of the `InternString` / `StringInterned` frames.
+//  Under the current local-interning model (§AGENTS.md §3.8) the host interns
+//  derived strings into the shared `MaterializationStringTable` — no `InternString`
+//  RPC to the dev server. These tests pin the wire-frame encoding/decoding
+//  helpers (retained for wire compatibility) and the canonical-id guard so the
+//  frame format and ceiling contract stay exact.
 
 import XCTest
 import Foundation
 @testable import FluxHost
-
-/// A controllable `InternStringTransport` that records every frame the interner
-/// sends and automatically delivers a `StringInterned` reply so `intern` resolves
-/// deterministically (no resume-before-register race on the main actor).
-@MainActor
-final class StubTransport: InternStringTransport {
-    /// Frames the interner pushed via `send`.
-    private(set) var sent: [Data] = []
-    /// The next canonical id a reply will carry, incremented per reply.
-    var nextId: UInt32 = 1
-    /// Sink the test wires to `InternStringClient.handleResponse`, so a simulated
-    /// server reply resumes the awaiting `intern` call.
-    var onReply: (@MainActor (Data) -> Void)?
-
-    func send(_ bytes: Data) {
-        sent.append(bytes)
-        replyNext()
-    }
-
-    /// Delivers a `StringInterned` reply for the most recent sent frame, using
-    /// `nextId` (and advancing it) so repeated inters get distinct canonical ids.
-    /// `send` calls this automatically; tests may also call it directly.
-    func replyNext() {
-        let id = nextId
-        nextId &+= 1
-        var data = Data()
-        data.append(0x58); data.append(0x55); data.append(0x5C); data.append(0x46) // MAGIC
-        data.append(1) // version
-        data.append(frameKindStringInterned)
-        data.append(contentsOf: [UInt8(id & 0xFF), UInt8((id >> 8) & 0xFF),
-                                  UInt8((id >> 16) & 0xFF), UInt8((id >> 24) & 0xFF)])
-        onReply?(data)
-    }
-}
 
 @MainActor
 final class InternStringTests: XCTestCase {
@@ -96,70 +63,4 @@ final class InternStringTests: XCTestCase {
     func testCanonicalIdAboveCeilingThrows() {
         XCTAssertThrowsError(try assertCanonicalStringId(0xFFFF_FFFF))
     }
-
-    // MARK: RPC round-trip + cache
-
-    func testInternResolvesCanonicalIdViaTransport() async {
-        let transport = StubTransport()
-        let client = InternStringClient(transport: transport)
-        transport.onReply = { client.handleResponse($0) }
-        let t = Task { await client.intern("hello") }
-        // The interner must have sent an InternString frame before resolving.
-        XCTAssertEqual(transport.sent.count, 1)
-        XCTAssertEqual(decodeStringInternedFrameBehind(transport.sent[0]), "hello")
-        transport.replyNext()
-        let id = await t.value
-        XCTAssertEqual(id, 1)
-        XCTAssertLessThan(id, stringIdCanonicalCeiling)
-    }
-
-    func testInternCachesCanonicalId() async {
-        let transport = StubTransport()
-        let client = InternStringClient(transport: transport)
-        transport.onReply = { client.handleResponse($0) }
-        // Kick the first intern, deliver the server reply, then it must cache.
-        let t = Task { await client.intern("repeat") }
-        transport.replyNext()
-        let first = await t.value
-        XCTAssertEqual(first, 1)
-        // Second intern of the same text must NOT hit the wire again.
-        let second = await client.intern("repeat")
-        XCTAssertEqual(second, first)
-        XCTAssertEqual(transport.sent.count, 1, "cache hit must not re-send")
-    }
-
-    func testOfflineInternDegradesToZero() async {
-        // No transport attached: the interner must not trap, returning the
-        // offline id 0 (mirrors EmptyStringTable behaviour).
-        let client = InternStringClient(transport: BrokenTransport())
-        let id = await client.intern("anything")
-        XCTAssertEqual(id, 0)
-    }
-
-    // MARK: release compile-out
-
-    #if DEBUG
-    func testTelemetrySinkSymbolExistsInDebug() {
-        // In DEBUG the devtools "trace" sink is compiled; the emit entry point
-        // must be callable. (Verified by the call sites in the VM / signal graph.)
-        fluxDevtoolsSetSink(nil)
-        XCTAssertTrue(true)
-    }
-    #endif
-}
-
-/// A transport that loses its reference immediately, exercising the offline
-/// degradation path of `InternStringClient`.
-@MainActor
-final class BrokenTransport: InternStringTransport {
-    func send(_ bytes: Data) {}
-}
-
-/// Decodes the UTF-8 payload of a captured `InternString` frame (test helper).
-private func decodeStringInternedFrameBehind(_ data: Data) -> String? {
-    // magic(4) version(1) kind(1) len(2) payload
-    guard data.count >= 8 else { return nil }
-    let len = Int(data[6]) | (Int(data[7]) << 8)
-    guard data.count >= 8 + len else { return nil }
-    return String(bytes: data.subdata(in: 8..<(8 + len)), encoding: .utf8)
 }

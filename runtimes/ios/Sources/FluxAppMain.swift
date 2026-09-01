@@ -43,14 +43,14 @@ struct FluxRootView: View {
         // Seed the standard-library component names so the registry can resolve
         // each primitive's adapter once an Init frame interns them. The dev
         // host starts with an empty graph until the first Init frame arrives.
-        var table = StringTable()
-        table.intern(0, "Text")
-        table.intern(1, "Button")
-        table.intern(2, "Column")
-        table.intern(3, "Row")
-        table.intern(4, "TextField")
-        table.intern(5, "Router")
-        table.intern(6, "Screen")
+        let table = MaterializationStringTable()
+        table.store(id: 0, value: "Text")
+        table.store(id: 1, value: "Button")
+        table.store(id: 2, value: "Column")
+        table.store(id: 3, value: "Row")
+        table.store(id: 4, value: "TextField")
+        table.store(id: 5, value: "Router")
+        table.store(id: 6, value: "Screen")
         let registry = AdapterRegistry(table: table)
         // FLUX-045: inject the real device-OS capability host so the six concrete
         // caps (6..=11) perform genuine Apple-framework work (UNUserNotificationCenter /
@@ -74,21 +74,6 @@ struct FluxRootView: View {
             fatalError("FLUX_WS_URL is not a valid WebSocket URL: \(wsUrlString)")
         }
         let transport = FluxWebSocketTransport(url: wsUrl)
-        // Wire the VM's string interner to the live transport so derived strings
-        // (STR_CONCAT / TO_STRING results, native event payloads) are interned
-        // through the dev server's `InternString` RPC and receive a canonical id
-        // (brittleness 4c). `StringInterned` replies are routed back into the
-        // client by the `onFrame` handler below.
-        let interner = InternStringClient(transport: transport)
-        runtime.setInterner(interner)
-        // Wire the interner's onResolved callback so canonical string ids
-        // (from the dev server's InternString RPC reply) are stored in the
-        // reconciler's MaterializationStringTable. Without this, a derived
-        // string (e.g. a user-typed task label) gets a canonical id the kit
-        // can't resolve → null dereference during materialize.
-        interner.onResolved = { [weak runtime] id, text in
-            runtime?.storeResolvedString(id: id, value: text)
-        }
         _executor = State(initialValue: runtime)
         _connection = StateObject(wrappedValue: connection)
         _transport = State(initialValue: transport)

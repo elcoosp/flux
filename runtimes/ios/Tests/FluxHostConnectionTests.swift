@@ -59,11 +59,14 @@ final class FluxHostConnectionTests: XCTestCase {
         // native tree on the runtime.
         let frame = makeCounterInitFrame()
 
-        var table = StringTable()
-        table.intern(0, "Text"); table.intern(1, "Button")
-        table.intern(2, "Column"); table.intern(3, "Row")
-        table.intern(4, "TextField"); table.intern(5, "Router")
-        table.intern(6, "Screen")
+        let table = MaterializationStringTable()
+        table.store(id: 0, value: "Text")
+        table.store(id: 1, value: "Button")
+        table.store(id: 2, value: "Column")
+        table.store(id: 3, value: "Row")
+        table.store(id: 4, value: "TextField")
+        table.store(id: 5, value: "Router")
+        table.store(id: 6, value: "Screen")
         let runtime = FluxExecutor(graph: SignalGraph(), registry: AdapterRegistry(table: table))
         runtime.apply(frame)
 

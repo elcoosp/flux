@@ -85,12 +85,6 @@ struct ShadowTreeReconciler {
     /// the kit resolves from.
     private var table: MaterializationStringTable = MaterializationStringTable()
 
-    /// The async string interner that publishes derived strings to the dev server
-    /// (brittleness 4c). Wired from the executor at startup so a prop-thunk that
-    /// builds `tapped \(count) times` receives a canonical id the kit can look up.
-    /// Defaults to `NoOpStringInterner` for offline reconciliation.
-    private var interner: any AnyStringInterner = NoOpStringInterner()
-
     /// Per-node signal-graph metadata (ADR-0027 §T13/T14), captured from the
     /// most recently applied frame. Drives thunk materialisation on reconcile.
     private var signalMeta: [UInt32: NodeSignalMeta] = [:]
@@ -104,9 +98,12 @@ struct ShadowTreeReconciler {
     private var thunkBlobs: [Data: [UInt8]] = [:]
 
     /// Creates a reconciler bound to `registry` and `executor`.
-    init(registry: AdapterRegistry, executor: FluxExecutor? = nil) {
+    /// `table` is the shared string table (same instance as the executor's)
+    /// so strings interned at dispatch time resolve at materialize time.
+    init(registry: AdapterRegistry, executor: FluxExecutor? = nil, table: MaterializationStringTable) {
         self.registry = registry
         self.executorRef = executor
+        self.table = table
         self.built = [:]
     }
 
@@ -115,12 +112,6 @@ struct ShadowTreeReconciler {
     /// the runtime.
     mutating func setExecutor(_ executor: FluxExecutor?) {
         executorRef = executor
-    }
-
-    /// Replaces the string interner used when materialising prop thunks
-    /// (brittleness 4c). Called by the executor once the live transport exists.
-    mutating func setInterner(_ interner: any AnyStringInterner){
-        self.interner = interner
     }
 
     /// Reconciles a freshly decoded frame against the current view set.
@@ -765,14 +756,6 @@ struct ShadowTreeReconciler {
         table
     }
 
-    /// Stores a server-resolved canonical string id in the materialization
-    /// string table. Called when the `InternString` RPC replies with a
-    /// canonical id for a host-derived string (brittleness 4c). Without this,
-    /// lookups during thunk materialization fail → null dereference.
-    mutating func storeResolvedString(id: UInt32, value: String) {
-        table.store(id: id, value: value)
-    }
-
     /// FNV-1a (32-bit) hash of [name], truncated to `UInt16` — matches the wire
     /// encoder's `prop_index_for_name` (Appendix C), so a `route` prop decoded
     /// from the server resolves to the same index here.
@@ -912,9 +895,9 @@ struct ShadowTreeReconciler {
         do {
             // The thunk only reads signals; run it against a copy of the live
             // graph so materialisation never mutates graph state. Derived strings
-            // (e.g. `STR_CONCAT` results) are interned through the dev server's
-            // canonical string table via `interner` (brittleness 4c) — no local
-            // synthetic id is ever minted.
+            // (e.g. `STR_CONCAT` results) are interned synchronously into the
+            // shared `MaterializationStringTable` (brittleness 4c) — no server
+            // round-trip for local strings.
             var store = runtime.graph
             let outcome = try FluxBytecodeVM.run(
                 bytecode,

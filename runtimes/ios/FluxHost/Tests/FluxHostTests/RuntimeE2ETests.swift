@@ -36,15 +36,15 @@ private func node(_ id: UInt32, componentId: UInt32, props: [Prop] = [], childre
 /// and the provided strings.
 @MainActor
 private func initFrame(root: ShadowNode, descendantNodes: [ShadowNode] = [], strings: [StringEntry] = [], state: [StateCell] = []) -> FluxFrame {
-    var table = StringTable()
-    table.intern(0, "Text")
-    table.intern(1, "Button")
-    table.intern(2, "Column")
-    table.intern(3, "Row")
-    table.intern(4, "TextField")
-    table.intern(5, "Router")
-    table.intern(6, "Screen")
-    for s in strings { table.intern(s.stringId, s.value) }
+    let table = MaterializationStringTable()
+    table.store(id: 0, value: "Text")
+    table.store(id: 1, value: "Button")
+    table.store(id: 2, value: "Column")
+    table.store(id: 3, value: "Row")
+    table.store(id: 4, value: "TextField")
+    table.store(id: 5, value: "Router")
+    table.store(id: 6, value: "Screen")
+    for s in strings { table.store(id: s.stringId, value: s.value) }
 
     var nodes: [UInt32: ShadowNode] = [root.id: root]
     for n in descendantNodes { nodes[n.id] = n }
@@ -109,7 +109,8 @@ final class RuntimeE2ETests: XCTestCase {
             root: textNode,
             strings: [StringEntry(stringId: 7, value: "Hello, Flux")]
         )
-        var reconciler = ShadowTreeReconciler(registry: buildRegistry())
+        let table = MaterializationStringTable()
+        var reconciler = ShadowTreeReconciler(registry: buildRegistry(), table: table)
         let first = reconciler.apply(frame)
         XCTAssertEqual(Set(first.built), [10])
 
@@ -257,15 +258,15 @@ final class RuntimeE2ETests: XCTestCase {
     /// AdapterRegistry resolves the `Image` primitive (registered for P1).
     @MainActor
     func testRegistryResolvesImage() async {
-        var table = StringTable()
-        table.intern(0, "Text")
-        table.intern(1, "Button")
-        table.intern(2, "Column")
-        table.intern(3, "Row")
-        table.intern(4, "TextField")
-        table.intern(5, "Router")
-        table.intern(6, "Screen")
-        table.intern(9, "Image")
+        let table = MaterializationStringTable()
+        table.store(id: 0, value: "Text")
+        table.store(id: 1, value: "Button")
+        table.store(id: 2, value: "Column")
+        table.store(id: 3, value: "Row")
+        table.store(id: 4, value: "TextField")
+        table.store(id: 5, value: "Router")
+        table.store(id: 6, value: "Screen")
+        table.store(id: 9, value: "Image")
         let registry = AdapterRegistry(table: table)
         XCTAssertNotNil(registry.make(for: 9, executor: nil), "Image component id 9 should resolve")
     }
@@ -273,14 +274,14 @@ final class RuntimeE2ETests: XCTestCase {
     /// AdapterRegistry resolves every stdlib ComponentId the Init frame declares.
     @MainActor
     func testRegistryResolvesAllStdlibComponents() async {
-        var table = StringTable()
-        table.intern(0, "Text")
-        table.intern(1, "Button")
-        table.intern(2, "Column")
-        table.intern(3, "Row")
-        table.intern(4, "TextField")
-        table.intern(5, "Router")
-        table.intern(6, "Screen")
+        let table = MaterializationStringTable()
+        table.store(id: 0, value: "Text")
+        table.store(id: 1, value: "Button")
+        table.store(id: 2, value: "Column")
+        table.store(id: 3, value: "Row")
+        table.store(id: 4, value: "TextField")
+        table.store(id: 5, value: "Router")
+        table.store(id: 6, value: "Screen")
         let registry = AdapterRegistry(table: table)
         XCTAssertEqual(Set(registry.resolvedComponentIds), Set([0, 1, 2, 3, 4, 5, 6]))
         for id in 0...6 {
@@ -312,13 +313,13 @@ final class RuntimeE2ETests: XCTestCase {
 /// A registry seeded with the stdlib primitive names.
 @MainActor
 private func buildRegistry() -> AdapterRegistry {
-    var table = StringTable()
-    table.intern(0, "Text")
-    table.intern(1, "Button")
-    table.intern(2, "Column")
-    table.intern(3, "Row")
-    table.intern(4, "TextField")
-    table.intern(5, "Router")
-    table.intern(6, "Screen")
+    let table = MaterializationStringTable()
+    table.store(id: 0, value: "Text")
+    table.store(id: 1, value: "Button")
+    table.store(id: 2, value: "Column")
+    table.store(id: 3, value: "Row")
+    table.store(id: 4, value: "TextField")
+    table.store(id: 5, value: "Router")
+    table.store(id: 6, value: "Screen")
     return AdapterRegistry(table: table)
 }

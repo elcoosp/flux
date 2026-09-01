@@ -81,7 +81,8 @@ final class RenderPerfHarnessTests: XCTestCase {
             signalMeta: meta
         )
 
-        var reconciler = ShadowTreeReconciler(registry: AdapterRegistry(table: StringTable()))
+        let table = MaterializationStringTable()
+        var reconciler = ShadowTreeReconciler(registry: AdapterRegistry(table: table), table: table)
         _ = reconciler.apply(frame)
         return reconciler
     }

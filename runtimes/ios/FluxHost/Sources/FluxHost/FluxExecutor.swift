@@ -150,13 +150,7 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
     /// The reconciler driving the real UIKit views.
     private var reconciler: ShadowTreeReconciler
     /// The interned string table from the most recent Init frame.
-    private(set) var table: StringTable
-    /// The async string internerer that publishes freshly-derived strings to the
-    /// dev server (brittleness 4c). Replaces the local `synthetic_str_id` fallback:
-    /// every id the VM publishes is now canonical (`< stringIdCanonicalCeiling`),
-    /// minted by the server's authoritative string table. Defaults to the offline
-    /// `NoOpStringInterner` (id `0`) so headless evaluation needs no transport.
-    private(set) var interner: any AnyStringInterner = NoOpStringInterner()
+    private(set) var table = MaterializationStringTable()
     /// The async-future resolver for `await` (ADR-0044). Defaults to the synchronous
     /// pass-through; a live host replaces it with a bridge to its real async
     /// capability surface (network/timer/etc.).
@@ -247,8 +241,8 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
     /// `table`.
     public init(graph: SignalGraph, registry: AdapterRegistry) {
         self.graph = graph
-        self.table = StringTable()
-        self.reconciler = ShadowTreeReconciler(registry: registry, executor: nil)
+        self.table = MaterializationStringTable()
+        self.reconciler = ShadowTreeReconciler(registry: registry, executor: nil, table: table)
         self.handlerClosures = [:]
         self.currentNodes = [:]
         self.currentRootId = nil
@@ -266,7 +260,7 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
             store: httpRequests,
             transport: httpTransport,
             tableProvider: { [weak self] in
-                MainActor.assumeIsolated { self?.table ?? StringTable() }
+                MainActor.assumeIsolated { self?.table ?? MaterializationStringTable() }
             }
         )
         // When DevTools connects, replay the current shadow tree so its component
@@ -292,10 +286,11 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
 
     /// Routes one received wire frame to the right consumer.
     ///
-    /// A `StringInterned` reply (brittleness 4c) is delivered to the `InternString`
-    /// client, which resumes the awaiting VM intern; any other frame is decoded
-    /// and applied to the tree. The app shell's transport `onFrame` calls this, so
-    /// the interner stays encapsulated inside the runtime.
+    /// A `StringInterned` reply (frame kind 0x08, brittleness 4c) is a no-op
+    /// under the current local-interning model: the host never sends an
+    /// `InternString` request, so a reply is unexpected and is dropped without
+    /// reaching the tree. Any other frame kind is decoded and applied to the
+    /// shadow tree.
     /// - Parameter data: the raw frame bytes from the transport.
     public func handleFrame(_ data: Data) {
         let bytes = [UInt8](data)
@@ -303,19 +298,18 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
         let kind: UInt8 = bytes.count > 5 ? bytes[5] : 0
         NSLog("[FluxRT] handleFrame: \(bytes.count) bytes, kind=\(kind)")
         #endif
+        // A `StringInterned` reply (0x08) is irrelevant under local interning —
+        // the host never issued an `InternString` request. Drop it so it cannot
+        // disturb the live tree; every other frame is decoded + applied below.
         if bytes.count >= 6, bytes[5] == frameKindStringInterned {
-            // A `StringInterned` reply is only meaningful for the async
-            // server-intern RPC (brittleness 4c), which the current synchronous
-            // materialisation path does not use; ignore it here.
             return
-        } else {
-            do {
-                _ = try applyFrame(data)
-            } catch {
-                #if DEBUG
-                NSLog("[frame] applyFrame threw: \(error)")
-                #endif
-            }
+        }
+        do {
+            _ = try applyFrame(data)
+        } catch {
+            #if DEBUG
+            NSLog("[frame] applyFrame threw: \(error)")
+            #endif
         }
     }
 
@@ -343,7 +337,7 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
         serverError = nil
         sourcePaths = Dictionary(uniqueKeysWithValues: frame.files.map { ($0.fileId, $0.path) })
         for cell in frame.state { graph.seed(cell.signalId, cell.value) }
-        for str in frame.strings { table.intern(str.stringId, str.value) }
+        for str in frame.strings { table.store(id: str.stringId, value: str.value) }
         if let root = frame.root {
             currentNodes = frame.nodes
             currentRootId = root.id
@@ -595,10 +589,10 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
         // only when the cache is absent.
         Task { @MainActor in
             // Convert the native event payload to the runtime's id-based value,
-            // interning any resolved string through the dev server's canonical
-            // string table (brittleness 4c).
+            // interning any resolved string locally into the shared table — no
+            // round-trip to the dev server (brittleness 4c).
             let payload: FluxValue = if let kitPayload = event.payload {
-                await toRuntime(kitPayload, interner: interner)
+                toRuntime(kitPayload, table: &table)
             } else {
                 .null
             }
@@ -665,25 +659,6 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
     func registerHandler(_ id: UInt32, closure: ClosureRef, bytecode: [UInt8]) {
         let decoded = try? Instruction.decode(bytecode)
         handlerClosures[id] = (closure: closure, bytecode: bytecode, decoded: decoded)
-    }
-
-    /// Replaces the string interner (brittleness 4c). Called once at host startup
-    /// once the live transport exists, so the VM publishes derived strings through
-    /// the dev server's `InternString` RPC instead of synthesizing ids locally.
-    /// Passing `NoOpStringInterner()` (the default) keeps evaluation offline-safe.
-    public func setInterner(_ interner: any AnyStringInterner) {
-        self.interner = interner
-        reconciler.setInterner(interner)
-    }
-
-    /// Stores a server-resolved canonical string id in the reconciler's
-    /// `MaterializationStringTable` so subsequent lookups during thunk
-    /// materialization succeed. Called by `InternStringClient.onResolved`
-    /// when the dev server replies to an `InternString` RPC (brittleness 4c).
-    /// Without this, a derived string (e.g. a user-typed task label) gets a
-    /// canonical id the kit can't resolve → null dereference during materialize.
-    public func storeResolvedString(id: UInt32, value: String) {
-        reconciler.storeResolvedString(id: id, value: value)
     }
 
     /// Evaluates a lifecycle handler (e.g. `onMount`/`onCleanup`, §18.4) by its

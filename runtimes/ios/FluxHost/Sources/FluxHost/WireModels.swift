@@ -47,9 +47,9 @@ struct HandlerDef: Equatable, Sendable {
 }
 
 /// An interned string entry (Appendix D §D.9).
-struct StringEntry: Equatable, Sendable {
-    let stringId: UInt32
-    let value: String
+public struct StringEntry: Equatable, Sendable {
+    public let stringId: UInt32
+    public let value: String
 }
 
 /// A file mapping in a source-map delta (Appendix D §D.11).

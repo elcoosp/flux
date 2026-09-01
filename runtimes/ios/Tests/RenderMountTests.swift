@@ -44,12 +44,12 @@ private func counterExecutor() async -> FluxHost.FluxExecutor {
     let button = mountNode(11, componentId: 1, props: [Prop(index: 0, value: .str(8))])
     let column = mountNode(20, componentId: 2, children: [.node(10), .node(11)])
 
-    var table = StringTable()
-    table.intern(0, "Text")
-    table.intern(1, "Button")
-    table.intern(2, "Column")
-    table.intern(7, "tapped 0 times")
-    table.intern(8, "Increment")
+    let table = MaterializationStringTable()
+    table.store(id: 0, value: "Text")
+    table.store(id: 1, value: "Button")
+    table.store(id: 2, value: "Column")
+    table.store(id: 7, value: "tapped 0 times")
+    table.store(id: 8, value: "Increment")
 
     let frame = FluxFrame(
         version: 1, seq: 0, flags: 0x01,
@@ -127,11 +127,11 @@ final class RenderMountTests: XCTestCase {
             props: [Prop(index: routeIndex, value: .str(8))]) // route: "settings"
         let router = mountNode(20, componentId: 5, kind: .router, children: [.node(10), .node(11)])
 
-        var table = StringTable()
-        table.intern(5, "Router")
-        table.intern(6, "Screen")
-        table.intern(7, "home")
-        table.intern(8, "settings")
+        let table = MaterializationStringTable()
+        table.store(id: 5, value: "Router")
+        table.store(id: 6, value: "Screen")
+        table.store(id: 7, value: "home")
+        table.store(id: 8, value: "settings")
 
         var graph = SignalGraph()
         if let route = initialRoute {
@@ -221,11 +221,11 @@ final class RenderMountTests: XCTestCase {
             props: [Prop(index: routeIndex, value: .str(8))]) // route: "settings"
         let router = mountNode(20, componentId: 5, kind: .router, children: [.node(10), .node(11)])
 
-        var table = StringTable()
-        table.intern(5, "Router")
-        table.intern(6, "Screen")
-        table.intern(7, "home")
-        table.intern(8, "settings")
+        let table = MaterializationStringTable()
+        table.store(id: 5, value: "Router")
+        table.store(id: 6, value: "Screen")
+        table.store(id: 7, value: "home")
+        table.store(id: 8, value: "settings")
 
         let graph = SignalGraph()
         let frame = FluxFrame(
@@ -314,11 +314,11 @@ final class RenderMountTests: XCTestCase {
             props: [Prop(index: 0, value: .str(8))]) // route at POSITIONAL index 0
         let router = mountNode(20, componentId: 5, kind: .router, children: [.node(10), .node(11)])
 
-        var table = StringTable()
-        table.intern(5, "Router")
-        table.intern(6, "Screen")
-        table.intern(7, "home")
-        table.intern(8, "settings")
+        let table = MaterializationStringTable()
+        table.store(id: 5, value: "Router")
+        table.store(id: 6, value: "Screen")
+        table.store(id: 7, value: "home")
+        table.store(id: 8, value: "settings")
 
         let graph = SignalGraph()
         let frame = FluxFrame(
@@ -385,8 +385,8 @@ final class RenderMountTests: XCTestCase {
     /// iOS-only, so the adapter's behaviour is driven here).
     @MainActor
     func testRegistryResolvesTogglePrimitive() {
-        var table = StringTable()
-        table.intern(0, "Toggle")
+        let table = MaterializationStringTable()
+        table.store(id: 0, value: "Toggle")
         let registry = AdapterRegistry(table: table)
         guard let adapter = registry.make(named: "Toggle", executor: nil) else {
             XCTFail("registry must resolve the Toggle primitive")
@@ -416,11 +416,11 @@ final class RenderMountTests: XCTestCase {
     /// `FluxUiKit` factory map resolves each of these names → its adapter).
     @MainActor
     func testRegistryResolvesAllFlux077Primitives() {
-        var table = StringTable()
+        let table = MaterializationStringTable()
         for (id, name) in [
             100: "Stack", 101: "Grid", 102: "Spacer", 103: "SafeArea",
             104: "Modal", 105: "Sheet", 106: "Dialog", 107: "Animate", 108: "Toggle",
-        ] { table.intern(UInt32(id), name) }
+        ] { table.store(id: UInt32(id), value: name) }
 
         let registry = AdapterRegistry(table: table)
         let expectations: [(String, AnyClass)] = [
@@ -473,11 +473,11 @@ final class RenderMountTests: XCTestCase {
             props: [Prop(index: 0, value: .str(7))]
         )
 
-        var table = StringTable()
-        table.intern(0, "Text")
-        table.intern(1, "Button")
-        table.intern(2, "Column")
-        table.intern(7, "todo")
+        let table = MaterializationStringTable()
+        table.store(id: 0, value: "Text")
+        table.store(id: 1, value: "Button")
+        table.store(id: 2, value: "Column")
+        table.store(id: 7, value: "todo")
 
         let frame = FluxFrame(
             version: 1, seq: 0, flags: 0x01,
@@ -500,7 +500,7 @@ final class RenderMountTests: XCTestCase {
         _ = executor.apply(frame)
 
         // Empty list => no rows rendered initially.
-        XCTAssertNil(executor.view(for: deriveRowId(forEachId, index: 0)),
+        XCTAssertNil(executor.view(for: deriveRowId(forEachId, index: 0, templateId: templateRowId)),
                      "empty list must render zero rows initially")
 
         // Handler that appends a new element to the list signal:
@@ -537,16 +537,23 @@ final class RenderMountTests: XCTestCase {
         XCTAssertEqual(items.count, 1, "list signal must have grown to 1 element (got \(items.count))")
 
         // ...and the ForEach must have re-expanded to one row view.
-        XCTAssertNotNil(executor.view(for: deriveRowId(forEachId, index: 0)),
+        XCTAssertNotNil(executor.view(for: deriveRowId(forEachId, index: 0, templateId: templateRowId)),
                         "ForEach must re-expand to 1 row after append")
     }
 
-    /// Mirrors `ShadowTreeReconciler.deriveForEachRowId` so the test can address
-    /// the derived row id without reaching into the reconciler's internals.
-    private func deriveRowId(_ foreachId: UInt32, index: UInt32) -> UInt32 {
+    /// Mirrors `ShadowTreeReconciler.deriveForEachRowId` + `deriveForEachChildId`
+    /// so the test can address the expanded row's template clone (the id under
+    /// which `built[…]` stores its view) without reaching into the reconciler.
+    private func deriveRowId(_ foreachId: UInt32, index: UInt32, templateId: UInt32) -> UInt32 {
         var h: UInt32 = foreachId &* 0x0100_0193
         h = h ^ index
         h = h &* 0x0100_0193
-        return h | 0x8000_0000
+        let rowId = h | 0x8000_0000
+        // Row views live under the derived child id (0xC0…), not the raw row id.
+        h = rowId &* 0x0100_0193
+        h = h ^ templateId
+        h = h &* 0x0100_0193
+        h = h ^ 0x5555_5555
+        return h | 0xC000_0000
     }
 }

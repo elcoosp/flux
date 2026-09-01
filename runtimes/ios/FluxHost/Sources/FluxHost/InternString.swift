@@ -1,17 +1,18 @@
 //  InternString.swift
-//  Host-side `InternString` / `StringInterned` wire frames (Appendix D §D.12.6 /
-//  §D.12.7, brittleness 4c) plus the async interning abstraction the VM uses to
-//  retire the local high-range `synthetic_str_id` fallback.
+//  Host-side `InternString` / `StringInterned` wire-frame constants and the
+//  canonical-id ceiling guard (Appendix D §D.12.6 / §D.12.7, brittleness 4c).
 //
-//  Previously, when the VM needed to intern a freshly-derived string (a
-//  `STR_CONCAT` result or a `TO_STRING` rendering) it generated a synthetic id
-//  in the high half (`>= 0x8000_0000`) of the id space — a `StringTable` that
-//  never consulted the dev server. Those ids were non-canonical: the same text
-//  interned on the server (which owns the authoritative `StringTable`, Appendix
-//  C) would get a different, low id, so a host-derived string could never match
-//  a server-interned one. `InternString`/`StringInterned` removes that
-//  divergence: the host asks the server for the canonical id and caches it
-//  locally, so every id that flows across the wire is `< STRING_ID_CANONICAL_CEILING`.
+//  Under the current local-interning model (§AGENTS.md §3.8 + ADR-0027 T14), the
+//  host interns freshly-derived strings (STR_CONCAT results, TO_STRING renders,
+//  native event payloads) synchronously into the shared
+//  `MaterializationStringTable` — no `InternString` RPC round-trip to the dev
+//  server. The wire frame types and constants below are retained so the host can
+//  recognize and drop any `StringInterned` reply a legacy/connected server might
+//  still emit (it is a no-op under local interning, handled in
+//  `FluxExecutor.handleFrame`). The canonical-id ceiling guard
+//  (`assertCanonicalStringId`) remains active: host-local derived ids are `>=
+//  0xC000_0000` and must never be placed into a `FluxValue.str` the host
+//  publishes on the Init/Delta path — only server-seeded ids cross the wire.
 
 import Foundation
 
@@ -29,17 +30,18 @@ let frameKindStringInterned: UInt8 = 0x08
 ///
 /// Ids below this bit are assigned by the server's string table (Appendix D
 /// §D.9) and are stable across edits. The host must only ever place ids `<
-/// this` into a `FluxValue.str` it publishes, since anything at or above silently
-/// bypasses interning and reintroduces the brittleness 4c was raised to remove.
+/// this` into a `FluxValue.str` it publishes on the Init/Delta path, since
+/// anything at or above is a host-local derived id (see `MaterializationStringTable`)
+/// that must never cross the wire (AGENTS.md §3.8 — canonicality is absolute).
 let stringIdCanonicalCeiling: UInt32 = 0x8000_0000
 
 /// Asserts `id` is a canonical wire id (`< stringIdCanonicalCeiling`).
 ///
 /// Ids at/above the ceiling are host-side synthetic fallbacks that must never
-/// cross the wire (AGENTS.md §3.8 — canonicality is absolute). A `StringInterned`
-/// reply from the dev server is server-assigned and must always be canonical; if
-/// it is not, the emit path has a bug and we fail loud (FLUX-084) rather than
-/// silently placing a non-canonical id where the VM/adapter expects a canonical one.
+/// be emitted on the Init/Delta path. A server `InternString` reply is
+/// server-assigned and must always be canonical; if it is not, the emit path
+/// has a bug and we fail loud (FLUX-084) rather than silently placing a
+/// non-canonical id where the VM/adapter expects a canonical one.
 ///
 /// - Parameter id: the id to validate.
 /// - Throws: `StringIdCeilingError` when `id >= stringIdCanonicalCeiling`.
@@ -69,6 +71,11 @@ struct StringIdCeilingError: LocalizedError {
 /// `len(u16 LE) | bytes(len UTF-8)`. The host sends raw UTF-8 for the string it
 /// needs a canonical id for and awaits a `StringInternedFrame` carrying the
 /// server-assigned id.
+///
+/// Under the current local-interning model this is **not called** by the host
+/// (strings are interned into the shared table directly); the helper is retained
+/// for wire-compatibility and test coverage of the frame encoding.
+///
 /// - Parameter text: the string to intern. Must be valid UTF-8 (the VM only ever
 ///   interns concrete Swift `String`s, which are valid UTF-8 by construction).
 /// - Returns: the frame bytes to send over the transport.
@@ -90,6 +97,7 @@ func internStringFrameBytes(_ text: String) -> Data {
 /// Layout (after the shared header): `id(u32 LE)`. Returns `nil` on a
 /// malformed/short buffer or a non-matching frame kind, so a corrupt response is
 /// treated as "no canonical id" rather than crashing the decode.
+///
 /// - Parameter bytes: the raw frame bytes received from the server.
 /// - Returns: the server-assigned canonical string id, or `nil`.
 func decodeStringInternedFrame(_ bytes: [UInt8]) -> UInt32? {
@@ -99,42 +107,4 @@ func decodeStringInternedFrame(_ bytes: [UInt8]) -> UInt32? {
     guard bytes[5] == frameKindStringInterned else { return nil }
     let id = UInt32(bytes[6]) | (UInt32(bytes[7]) << 8) | (UInt32(bytes[8]) << 16) | (UInt32(bytes[9]) << 24)
     return id
-}
-
-/// An asynchronous string interner the VM consults whenever it must publish a
-/// freshly-derived string (a `STR_CONCAT` result or a `TO_STRING` rendering).
-///
-/// This replaces the synchronous, high-range `synthetic_str_id` fallback the VM
-/// used to generate locally. The production implementation (`InternStringClient`)
-/// sends an `InternString` frame over the host transport and awaits the server's
-/// `StringInterned` reply, caching the canonical id so repeated strings reuse the
-/// same low id the server assigned. A `NoOpStringInterner` provides the offline
-/// (conformance-vector / unit-test) behaviour where interning is not exercised.
-@MainActor
-public protocol AnyStringInterner: AnyObject {
-    /// Resolves `text` to its canonical `StringId`, interning it on first sight.
-    ///
-    /// Implementations must return an id `< stringIdCanonicalCeiling`; a synthetic
-    /// high-range id is never acceptable. The call is `async` because the canonical
-    /// id is produced by the dev server, so the VM pauses its evaluation until the
-    /// reply arrives (the dispatch runs off the UI thread; see `FluxExecutor`).
-    func intern(_ text: String) async -> UInt32
-
-    /// Routes a `StringInterned` wire reply (Server → Host, brittleness 4c) into
-    /// the interner, resuming any awaiting `intern` call. Interners that do not
-    /// speak the wire protocol (e.g. `NoOpStringInterner`) provide a no-op so the
-    /// executor can route the frame uniformly.
-    func handleResponse(_ data: Data)
-}
-
-/// Offline interner used when no live transport is attached (the ISA conformance
-/// vectors and the bulk of the unit suite). Interning is a no-op that yields id 0
-/// (Appendix E §E.1: offline evaluation never publishes derived strings, so this
-/// mirrors the prior `EmptyStringTable` behaviour and keeps the conformance
-/// vectors deterministic).
-@MainActor
-public final class NoOpStringInterner: AnyStringInterner {
-    public init() {}
-    public func intern(_ text: String) async -> UInt32 { 0 }
-    public func handleResponse(_ data: Data) {}
 }

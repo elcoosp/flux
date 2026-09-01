@@ -30,7 +30,7 @@ final class AsyncResolverTests: XCTestCase {
 
     @MainActor
     private func executor(resolver: any AsyncResolver) -> FluxHost.FluxExecutor {
-        let executor = FluxExecutor(graph: SignalGraph(), registry: AdapterRegistry(table: StringTable()))
+        let executor = FluxExecutor(graph: SignalGraph(), registry: AdapterRegistry(table: MaterializationStringTable()))
         executor.asyncResolver = resolver
         let closure = ClosureRef(
             hash: [], bytecodeOffset: 0,

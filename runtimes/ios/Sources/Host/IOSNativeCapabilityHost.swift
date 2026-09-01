@@ -36,14 +36,14 @@ public final class IOSNativeCapabilityHost: NativeCapabilityHost {
     /// The live string table, seeded by the app shell (`FluxAppMain`) so this host
     /// can resolve interned path/url ids the VM passes in and intern real result
     /// text. The pure `FluxHost` core has no global table; the app shell owns it.
-    nonisolated(unsafe) private var table: StringTable
+    nonisolated(unsafe) private var table: MaterializationStringTable
 
     /// Mirrors the last push-authorization outcome (set from the
     /// `UNUserNotificationCenter` completion, which fires off the main actor).
     nonisolated(unsafe) private var pushAuthorized: Bool = false
 
-    /// Creates the host with the live `StringTable` the executor resolves against.
-    public init(table: StringTable = StringTable()) {
+    /// Creates the host with the live `MaterializationStringTable` the executor resolves against.
+    public init(table: MaterializationStringTable = MaterializationStringTable()) {
         self.table = table
     }
 
@@ -57,9 +57,7 @@ public final class IOSNativeCapabilityHost: NativeCapabilityHost {
             hash ^= UInt32(byte)
             hash = hash &* prime
         }
-        var t = table
-        t.intern(hash, text)
-        table = t
+        table.store(id: hash, value: text)
         return hash
     }
 

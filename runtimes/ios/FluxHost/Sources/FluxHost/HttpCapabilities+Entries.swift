@@ -100,7 +100,7 @@ extension CapabilityRegistry {
     static func makeHttpResolver(
         store: HttpRequestStore,
         transport: HttpTransport,
-        tableProvider: @Sendable @escaping () -> StringTable
+        tableProvider: @Sendable @escaping () -> MaterializationStringTable
     ) -> any AsyncResolver {
         return HttpAsyncResolver(store: store, transport: transport, tableProvider: tableProvider)
     }
@@ -114,7 +114,7 @@ extension CapabilityRegistry {
 internal struct HttpAsyncResolver: AsyncResolver {
     let store: HttpRequestStore
     let transport: HttpTransport
-    let tableProvider: @Sendable () -> StringTable
+    let tableProvider: @Sendable () -> MaterializationStringTable
 
     func resolve(_ future: FluxValue) async -> FluxValue {
         guard case let .int(cellId) = future else { return future }

@@ -9,6 +9,7 @@
 //  unified sync/async contract, ADR-0045); the VM stores that id in the result
 //  register and the impl has already written the value into the cell. So these
 //  tests assert the returned cell id AND the value written into the cell.
+//
 
 import XCTest
 import FluxUIKit
@@ -316,18 +317,24 @@ final class CapabilityRoundTripTests: XCTestCase {
     }
 
     func testHttpGetJsonResolvesToRecordViaResolver() async throws {
-        var mutableTable = StringTable()
-        mutableTable.intern(42, "http://example.test/data.json")
-        let table = mutableTable
+        // Use the shared table so URL id 42 resolves to its URL string.
+        let table = MaterializationStringTable()
+        table.store(id: 42, value: "http://example.test/data.json")
+        // Build capability entries bound to the SAME store the resolver reads from,
+        // so the parked HttpRequest survives from CALL_CAP through resolve().
+        // (CapabilityRegistry.dev creates its own internal store that the test can't
+        // access — only httpPersistEntries lets the test inject the store.)
         let store = HttpRequestStore()
-        let transport = MockHttpTransport(response: #"{"ok":true,"n":3}"#)
+        let transport = MockHttpTransport(response: "{\"ok\":true,\"n\":3}")
+        let entries = CapabilityRegistry.httpPersistEntries(store: store, transport: transport)
+        let getJsonImpl = try XCTUnwrap(entries.first { $0.0 == 14 && $0.1 == 2 }?.2)
         let resolver = CapabilityRegistry.makeHttpResolver(
             store: store,
             transport: transport,
             tableProvider: { table }
         )
         var signals: any SignalStore = InMemorySignals()
-        let cell = try CapabilityRegistry.dev.lookup(14, 2)!(14, 2, .record([(0, .str(42))]), &signals)
+        let cell = try getJsonImpl(14, 2, .record([(0, .str(42))]), &signals)
         XCTAssertEqual(signals.cellState(cell), .pending, "Http.getJson parks the cell")
         let settled = await resolver.resolve(.int(Int64(cell)))
         guard case .record = settled else {

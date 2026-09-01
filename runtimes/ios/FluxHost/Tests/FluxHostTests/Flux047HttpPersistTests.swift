@@ -61,8 +61,8 @@ final class Flux047HttpPersistTests: XCTestCase {
     }
 
     func testHttpGetJsonResolvesToRecordViaResolver() async throws {
-        var table = StringTable()
-        table.intern(42, "http://example.test/data.json")
+        let table = MaterializationStringTable()
+        table.store(id: 42, value: "http://example.test/data.json")
         let store = HttpRequestStore()
         let transport = MockHttpTransport(response: #"{"ok":true,"n":3}"#)
         let resolver = CapabilityRegistry.makeHttpResolver(

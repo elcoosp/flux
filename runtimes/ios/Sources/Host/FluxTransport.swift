@@ -27,7 +27,7 @@ public enum ConnectionStatus: Equatable, Sendable {
 /// to raw frame bytes and may push dispatch events back. The concrete
 /// implementation (`FluxWebSocketTransport`) uses `URLSessionWebSocketTask`.
 @MainActor
-public protocol FluxTransport: AnyObject, InternStringTransport {
+public protocol FluxTransport: AnyObject {
     /// The latest connection status (drives the reconnect banner).
     var status: ConnectionStatus { get }
 
