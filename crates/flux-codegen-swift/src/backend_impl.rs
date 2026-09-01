@@ -55,7 +55,9 @@ impl Backend for Swift {
     }
 
     fn router_open() -> String {
-        "NavigationStack {".to_owned()
+        // SwiftUI NavigationStack bound to the route state variable for programmatic
+        // navigation. Screens are emitted as conditionals matching the route value.
+        "NavigationStack(path: $route) {".to_owned()
     }
 
     fn router_close() -> String {
@@ -63,12 +65,14 @@ impl Backend for Swift {
     }
 
     fn screen_open(route: &str) -> String {
-        // Swift emits the route as a comment; the destination body needs no brace.
-        format!("// Screen route: {route}")
-    }
+            // Emit a conditional that shows only the matching screen.
+            // The route is already a quoted Swift string literal (e.g. "home").
+            format!("if route == {route} {{")
+        }
 
     fn screen_close() -> String {
-        String::new()
+        // Close the screen conditional opened by screen_open.
+        "}".to_owned()
     }
 
     fn if_open(cond: &str) -> String {

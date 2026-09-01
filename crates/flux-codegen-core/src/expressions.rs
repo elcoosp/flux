@@ -108,6 +108,23 @@ fn render_stmt<B: Backend>(stmt: &Expr) -> String {
             format!("{} = {}", render_expr::<B>(target), render_expr::<B>(value))
         }
         ExprKind::Await(inner) => format!("await {}", render_expr::<B>(inner)),
+        ExprKind::Call { callee, args, .. } => {
+                    // `Router.navigate("settings")` is parsed as `Field { base: "Router", field: "navigate" }`.
+                    // Must become a state assignment (`route = "settings"`) in the release path so
+                    // the NavigationStack destination binding actually switches screens.
+                    // The dev VM writes the target to signal 97; the release SwiftUI path writes
+                    // it to the `@State` `route` variable that `navigationDestination` is bound to.
+                    if let ExprKind::Field { base, field, .. } = &callee.kind {
+                        if let ExprKind::Ident(base_id) = &base.kind {
+                            if base_id.name == "Router" && field.name == "navigate" {
+                                if let Some(target) = args.first() {
+                                    return format!("route = {}", render_expr::<B>(target.value()));
+                                }
+                            }
+                        }
+                    }
+                    B::unsupported_placeholder()
+                }
         _ => render_expr::<B>(stmt),
     }
 }
