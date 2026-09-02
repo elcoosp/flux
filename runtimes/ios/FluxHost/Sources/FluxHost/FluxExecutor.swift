@@ -596,6 +596,18 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
             lastReconcile = ReconcileReport()
             return
         }
+        // For a handler inside an expanded ForEach row, re-seed the shared
+        // `itemSlot` with that row's element before the VM reads it. Every
+        // derived row shares the same slot id; without this the slot holds
+        // the last row's value and `tasks.remove(task)` removes the wrong
+        // element (last instead of tapped). The reconciler tracks the per-row
+        // (slot, element) for every derived node id.
+        if let ctx = reconciler.itemContext(for: event.nodeId) {
+            #if DEBUG
+            NSLog("[FluxRT] dispatch: seeding ForEach itemSlot \(ctx.slot) with element for node \(event.nodeId)")
+            #endif
+            graph.write(ctx.slot, ctx.element)
+        }
         currentHandlerId = event.handlerId
         // Hand the raw `entry.bytecode` AND the registration-time decoded cache
         // to `runHandlerAsync`, which uses the cache (R3) so the handler is not

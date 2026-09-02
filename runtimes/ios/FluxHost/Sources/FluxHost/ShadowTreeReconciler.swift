@@ -96,6 +96,13 @@ struct ShadowTreeReconciler {
     /// from the frame's shared handler blob. Populated on every applied frame so
     /// a dirty node can re-run its thunk against the live signal graph.
     private var thunkBlobs: [Data: [UInt8]] = [:]
+    /// Per-row ForEach item context: every derived node id inside an expanded
+    /// ForEach row maps to the (itemSlot, element) that row was seeded with.
+    /// Used to re-seed the shared `itemSlot` with the tapped row's element
+    /// before dispatching a handler that captures `task` (the ForEach loop var).
+    /// Without this, all rows share the last seeded value and `remove(task)`
+    /// always removes the last element (FLUX-072 remove bug).
+    private var forEachRowContext: [UInt32: (slot: UInt32, element: FluxValue)] = [:]
 
     /// Creates a reconciler bound to `registry` and `executor`.
     /// `table` is the shared string table (same instance as the executor's)
@@ -621,6 +628,15 @@ struct ShadowTreeReconciler {
             cloneSubtree(templateId, rowId: rowId, nodes: nodes, into: &subtree, meta: &subtreeMeta)
             expanded.merge(subtree) { $1 }
             signalMeta.merge(subtreeMeta) { $1 }
+            // Track per-row element for handler dispatch: every derived node
+            // inside this row maps to the same (slot, element) so a tap on any
+            // child (e.g. Button's derived id) can re-seed `itemSlot` with the
+            // correct row value before the VM reads it. Without this the shared
+            // slot holds the last row's value and `remove(task)` removes the
+            // wrong task.
+            for derivedId in subtree.keys {
+                forEachRowContext[derivedId] = (itemSlot, element)
+            }
             childIds.append(derivedTemplateId)
             elements.append(element)
         }
@@ -695,6 +711,14 @@ struct ShadowTreeReconciler {
         )
         expanded[newId] = clone
         if let m = signalMeta[origId] { meta[newId] = m }
+    }
+
+    /// Returns the ForEach row context for a derived node id (the (itemSlot,
+    /// element) that row was seeded with), or nil when the node is not inside
+    /// an expanded ForEach row. Used to re-seed the shared `itemSlot` before
+    /// dispatching a handler that captures the loop var.
+    func itemContext(for nodeId: UInt32) -> (slot: UInt32, element: FluxValue)? {
+        forEachRowContext[nodeId]
     }
 
     /// Builds (or refreshes) the children of `node` and returns their views,
