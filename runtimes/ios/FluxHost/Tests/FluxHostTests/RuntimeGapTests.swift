@@ -15,6 +15,17 @@ import FluxUIKit
 
 // MARK: - Test support
 
+/// Waits for an async `dispatch(_:)` Task to complete by polling for a
+/// condition. `dispatch(_ event:)` is non-async (fires-and-forgets via Task);
+/// tests must `await` before asserting signal writes.
+@MainActor
+func waitForDispatch(executor: FluxHost.FluxExecutor, timeoutMs: Int = 500, where condition: () -> Bool) async {
+    let deadline = DispatchTime.now() + .milliseconds(timeoutMs)
+    while !condition() && DispatchTime.now() < deadline {
+        try? await Task.sleep(nanoseconds: 1_000_000)
+    }
+}
+
 /// Builds a primitive `ShadowNode` (mirrors the helper in RuntimeE2ETests).
 @MainActor
 private func gapNode(
@@ -126,6 +137,7 @@ final class GapG1RegisterHandlersTests: XCTestCase {
         XCTAssertEqual(executor.graph.read(1), .int(0))
 
         executor.dispatch(FluxEvent(handlerId: 1, nodeId: 11))
+        await waitForDispatch(executor: executor) { executor.graph.read(1) == .int(1) }
         XCTAssertEqual(executor.graph.read(1), .int(1))
     }
 }
@@ -399,6 +411,7 @@ final class GapR1DirtySetTests: XCTestCase {
         )
 
         executor.dispatch(FluxEvent(handlerId: 1, nodeId: 20))
+        await waitForDispatch(executor: executor) { !executor.lastReconcile.built.isEmpty || !executor.lastReconcile.updated.isEmpty }
 
         // Only the signal-dependent node (10) must have been reconciled; the
         // unrelated node (11) must be untouched (R1).
@@ -435,6 +448,7 @@ final class GapR3CacheTests: XCTestCase {
             bytecode: writeSignal(5, 2)
         )
         executor.dispatch(FluxEvent(handlerId: 1, nodeId: 0))
+        await waitForDispatch(executor: executor) { executor.graph.read(5) == .int(2) }
         XCTAssertEqual(executor.graph.read(5), .int(2), "first handler must write signal 5 = 2")
 
         // Re-registering the same id with different bytecode must invalidate the
@@ -445,6 +459,7 @@ final class GapR3CacheTests: XCTestCase {
             bytecode: writeSignal(5, 3)
         )
         executor.dispatch(FluxEvent(handlerId: 1, nodeId: 0))
+        await waitForDispatch(executor: executor) { executor.graph.read(5) == .int(3) }
         XCTAssertEqual(executor.graph.read(5), .int(3), "re-registered handler must run NEW bytecode (R3 cache invalidation)")
 
         // A different handler id keeps its own cached decode (signal 6 = 9).
@@ -454,6 +469,7 @@ final class GapR3CacheTests: XCTestCase {
             bytecode: writeSignal(6, 9)
         )
         executor.dispatch(FluxEvent(handlerId: 2, nodeId: 0))
+        await waitForDispatch(executor: executor) { executor.graph.read(6) == .int(9) }
         XCTAssertEqual(executor.graph.read(6), .int(9), "independent handler keeps its own cached decode")
     }
 }
@@ -559,12 +575,12 @@ final class CapabilityRoundTripTests: XCTestCase {
     /// with `WireError.unsupportedVersion` — never mis-decoded into a tree.
     /// (Drives the real `FrameDeserializer`.)
     func testRejectsProtocolVersionMismatchFailClosed() {
-        // magic(4) | version(1)=2 (unsupported) | kind(1)=0x02 (Init) | seq(4)=0
+        // magic(4) | version(1)=0x03 (unsupported) | kind(1)=0x02 (Init) | seq(4)=0
         // plus a minimal-but-valid-looking tail. The version gate fires before
         // any tree decoding, so the rest of the buffer need not be well-formed.
         var bytes: [UInt8] = []
         bytes += [0x58, 0x55, 0x5C, 0x46] // FLUX magic (LE)
-        bytes += [0x02] // unsupported version
+        bytes += [0x03] // unsupported version (protocolVersion is 2)
         bytes += [0x02] // frame kind = Init
         bytes += [0x00, 0x00, 0x00, 0x00] // seq = 0
         bytes += [0x00, 0x00, 0x00, 0x00] // root node id

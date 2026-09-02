@@ -75,14 +75,14 @@ final class WireDecodeTests: XCTestCase {
 
         let frame = cat([
             u32(FrameDeserializer.magic), // magic
-            [0x01],                       // version
+            [FrameDeserializer.protocolVersion], // version
             u32(0),                       // seq
             [0x09],                       // flags: full_tree (bit0) | has_state_delta (bit3)
             body,
         ])
 
         let decoded = try FrameDeserializer.decode(frame)
-        XCTAssertEqual(decoded.version, 1)
+        XCTAssertEqual(decoded.version, FrameDeserializer.protocolVersion)
         XCTAssertEqual(decoded.seq, 0)
         XCTAssertNotNil(decoded.root)
         let root = try XCTUnwrap(decoded.root)
@@ -131,7 +131,7 @@ final class WireDecodeTests: XCTestCase {
 
         let frame = cat([
             u32(FrameDeserializer.magic),
-            [0x01], u32(7), [0x00], // version, seq, flags=delta
+            [FrameDeserializer.protocolVersion], u32(7), [0x00], // version, seq, flags=delta
             body,
         ])
 
@@ -164,7 +164,7 @@ final class WireDecodeTests: XCTestCase {
         let body = cat([u16(0), u16(0), u16(0), node])
         let frame = cat([
             u32(FrameDeserializer.magic),
-            [0x01], u32(0), [0x01],       // full_tree
+            [FrameDeserializer.protocolVersion], u32(0), [0x01],       // version, seq, full_tree
             body,
         ])
         let decoded = try FrameDeserializer.decode(frame)
@@ -181,7 +181,7 @@ final class WireDecodeTests: XCTestCase {
 
     /// A truncated frame must fail with a precise `WireError`.
     func testTruncatedFrameFails() {
-        let frame = cat([u32(FrameDeserializer.magic), [0x01], u32(0), [0x09]]) // cut before body
+        let frame = cat([u32(FrameDeserializer.magic), [FrameDeserializer.protocolVersion], u32(0), [0x09]]) // version, seq, flags
         XCTAssertThrowsError(try FrameDeserializer.decode(frame)) { error in
             XCTAssertTrue(error is WireError)
         }
@@ -189,7 +189,7 @@ final class WireDecodeTests: XCTestCase {
 
     /// A frame without the magic prefix must be rejected.
     func testBadMagicFails() {
-        let frame = cat([u32(0xDEADBEEF), [0x01], u32(0), [0x00], u16(0), u16(0), u16(0)])
+        let frame = cat([u32(0xDEADBEEF), [FrameDeserializer.protocolVersion], u32(0), [0x00], u16(0), u16(0), u16(0)]) // bad magic: decoder fails before version
         XCTAssertThrowsError(try FrameDeserializer.decode(frame)) { error in
             guard let we = error as? WireError,
                   case let .badMagic(_, value) = we else {
@@ -223,7 +223,7 @@ final class WireDecodeTests: XCTestCase {
             u32(3), u32(4), u32(9),
         ])
         let frame = cat([
-            u32(FrameDeserializer.magic), [0x01], [0x03], // version, kind=Error
+            u32(FrameDeserializer.magic), [FrameDeserializer.protocolVersion], [0x03], // version, kind=Error
             payload,
         ])
         let decoded = try FrameDeserializer.decode(frame)
@@ -240,7 +240,7 @@ final class WireDecodeTests: XCTestCase {
     /// A `Heartbeat` (0x05) frame decodes to a control no-op rather than an error.
     func testHeartbeatFrameIsControl() throws {
         let frame = cat([
-            u32(FrameDeserializer.magic), [0x01], [0x05], u32(42), // version, kind, seq
+            u32(FrameDeserializer.magic), [FrameDeserializer.protocolVersion], [0x05], u32(42), // version, kind, seq
         ])
         let decoded = try FrameDeserializer.decode(frame)
         XCTAssertTrue(decoded.isControl)
@@ -292,7 +292,7 @@ final class WireDecodeTests: XCTestCase {
     func testInternFramesAreControl() throws {
         // InternString: len(u16)=3, bytes("abc").
         let intern = cat([
-            u32(FrameDeserializer.magic), [0x01], [0x07],
+            u32(FrameDeserializer.magic), [FrameDeserializer.protocolVersion], [0x07],
             u16(3), Array("abc".utf8),
         ])
         let d1 = try FrameDeserializer.decode(intern)
@@ -300,7 +300,7 @@ final class WireDecodeTests: XCTestCase {
 
         // StringInterned: id(u32)=77.
         let interned = cat([
-            u32(FrameDeserializer.magic), [0x01], [0x08], u32(77),
+            u32(FrameDeserializer.magic), [FrameDeserializer.protocolVersion], [0x08], u32(77),
         ])
         let d2 = try FrameDeserializer.decode(interned)
         XCTAssertTrue(d2.isControl)

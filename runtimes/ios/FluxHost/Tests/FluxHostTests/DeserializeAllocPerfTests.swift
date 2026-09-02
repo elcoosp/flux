@@ -37,7 +37,7 @@ private func makeFrame(propCount: Int, childCount: Int) -> [UInt8] {
     node += u32(0) + u32(0) + u32(0) // span
 
     let body = u16(0) + u16(0) + u16(0) + node
-    return u32(FrameDeserializer.magic) + [0x01] + u32(0) + [0x01] + body
+    return u32(FrameDeserializer.magic) + [FrameDeserializer.protocolVersion] + u32(0) + [0x01] + body
 }
 
 final class DeserializeAllocPerfTests: XCTestCase {

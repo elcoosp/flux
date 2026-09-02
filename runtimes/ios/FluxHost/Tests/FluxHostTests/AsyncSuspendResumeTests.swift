@@ -23,19 +23,18 @@ final class AsyncSuspendResumeTests: XCTestCase {
     /// CALL_CAP(cap 1,1) writes `arg[0]` into signal 99 (Ready) and returns 99;
     /// AWAIT on that cell is Ready → continues with the value in r0.
     private let syncBytecode: [UInt8] = [
-        0x90, 0x02, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, // CALL_CAP r2, (1,1), args=r0
-        0xE0, 0x00, 0x02,                                           // AWAIT r0, r2 (future = cell id in r2)
-        0x11, 0x02, 0x00, 0x00, 0x00, 0x00,                         // WRITE_SIGNAL 2, r0
-        0x00,                                                        // HALT
+        0x90, 0x02, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, // CALL_CAP r2, (1,1), args=r0
+        0xE0, 0x00, 0x02,                                       // AWAIT r0, r2 (future = cell id in r2)
+        0x11, 0x02, 0x00, 0x00, 0x00, 0x00,                     // WRITE_SIGNAL 2, r0
+        0x00,                                                    // HALT
     ]
-
     /// CALL_CAP(cap 2,99) allocates a fresh Pending cell and returns its id;
     /// AWAIT on it Parks; the host resolveCell(...) then Resume.
     private let asyncBytecode: [UInt8] = [
-        0x90, 0x02, 0x02, 0x00, 0x00, 0x00, 0x63, 0x00, 0x00, 0x00, // CALL_CAP r2, (2,99), args=r0
-        0xE0, 0x00, 0x02,                                           // AWAIT r0, r2
-        0x11, 0x02, 0x00, 0x00, 0x00, 0x00,                         // WRITE_SIGNAL 2, r0
-        0x00,                                                        // HALT
+        0x90, 0x02, 0x02, 0x00, 0x00, 0x00, 0x63, 0x00, 0x00, // CALL_CAP r2, (2,99), args=r0
+        0xE0, 0x00, 0x02,                                       // AWAIT r0, r2
+        0x11, 0x02, 0x00, 0x00, 0x00, 0x00,                     // WRITE_SIGNAL 2, r0
+        0x00,                                                    // HALT
     ]
 
     /// A synchronous capability resolves immediately: CALL_CAP returns the cell id,
@@ -43,7 +42,7 @@ final class AsyncSuspendResumeTests: XCTestCase {
     @MainActor
     func testSyncCapabilityDoesNotSuspend() {
         var graph = SignalGraph()
-        let payload = FluxValue.record([(0, .int(42))])
+        let payload = FluxValue.record([(0 as UInt16, .int(42))])
 
         let first = FluxBytecodeVM.runResumable(syncBytecode, signals: &graph, payload: payload)
         guard case let .success(.halt(outcome)) = first else {
@@ -65,7 +64,15 @@ final class AsyncSuspendResumeTests: XCTestCase {
         var graph = SignalGraph()
         let payload = FluxValue.record([(0, .int(42))])
 
-        let first = FluxBytecodeVM.runResumable(asyncBytecode, signals: &graph, payload: payload)
+        // (2,99) is an async capability: allocate a Pending cell, return its id.
+        let asyncRegistry = CapabilityRegistry(entries: [
+            (2, 99, { _, _, _, signals in
+                let cellId = signals.allocateCell()
+                signals.markPending(cellId)
+                return cellId
+            }),
+        ])
+        let first = FluxBytecodeVM.runResumable(asyncBytecode, signals: &graph, payload: payload, capRegistry: asyncRegistry)
         guard case let .success(.suspended(state)) = first else {
             XCTFail("async capability should suspend, got \(String(describing: first))")
             return
@@ -103,7 +110,14 @@ final class AsyncSuspendResumeTests: XCTestCase {
         var graph = SignalGraph()
         let payload = FluxValue.record([(0, .int(42))])
 
-        let first = FluxBytecodeVM.runResumable(asyncBytecode, signals: &graph, payload: payload)
+        let asyncRegistry = CapabilityRegistry(entries: [
+            (2, 99, { _, _, _, signals in
+                let cellId = signals.allocateCell()
+                signals.markPending(cellId)
+                return cellId
+            }),
+        ])
+        let first = FluxBytecodeVM.runResumable(asyncBytecode, signals: &graph, payload: payload, capRegistry: asyncRegistry)
         guard case let .success(.suspended(state)) = first else {
             XCTFail("async capability should suspend, got \(String(describing: first))")
             return
