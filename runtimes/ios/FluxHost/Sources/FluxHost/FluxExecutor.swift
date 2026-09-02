@@ -596,24 +596,25 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
             lastReconcile = ReconcileReport()
             return
         }
-        // For a handler inside an expanded ForEach row, re-seed the shared
-        // `itemSlot` with that row's element before the VM reads it. Every
-        // derived row shares the same slot id; without this the slot holds
-        // the last row's value and `tasks.remove(task)` removes the wrong
-        // element (last instead of tapped). The reconciler tracks the per-row
-        // (slot, element) for every derived node id.
-        if let ctx = reconciler.itemContext(for: event.nodeId) {
-            #if DEBUG
-            NSLog("[FluxRT] dispatch: seeding ForEach itemSlot \(ctx.slot) with element for node \(event.nodeId)")
-            #endif
-            graph.write(ctx.slot, ctx.element)
-        }
+        // For a handler inside an expanded ForEach row, capture the per-row
+        // (slot, element) now (read-only) so the Task can re-seed the shared
+        // `itemSlot` before the VM reads it. We must NOT write `graph` here
+        // while also capturing `self` for the Task — that trips Swift's
+        // exclusivity checker (Fatal access conflict, SIGABRT in 181350.ips).
+        // Seeding happens inside the Task before runHandlerAsync.
+        let rowContext = reconciler.itemContext(for: event.nodeId)
         currentHandlerId = event.handlerId
         // Hand the raw `entry.bytecode` AND the registration-time decoded cache
         // to `runHandlerAsync`, which uses the cache (R3) so the handler is not
         // re-decoded on every tap; it falls back to re-decoding the raw bytes
         // only when the cache is absent.
         Task { @MainActor in
+            if let ctx = rowContext {
+                #if DEBUG
+                NSLog("[FluxRT] dispatch: seeding ForEach itemSlot \(ctx.slot) with element for node \(event.nodeId)")
+                #endif
+                self.graph.write(ctx.slot, ctx.element)
+            }
             // Convert the native event payload to the runtime's id-based value,
             // interning any resolved string locally into the shared table — no
             // round-trip to the dev server (brittleness 4c).
