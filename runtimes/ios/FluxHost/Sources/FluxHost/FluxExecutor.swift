@@ -623,8 +623,8 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
             let written = outcome.signals
             for (id, value) in written { graph.write(id, value) }
             #if DEBUG
-            let writtenDesc = written.map { "\($0.0)=\($0.1)" }.joined(separator: ", ")
-            NSLog("[FluxRT] dispatch wrote signals: [\(writtenDesc)] currentRootId=\(currentRootId.map { String($0) } ?? "nil")")
+            let writtenDesc = written.map { "S\($0.0)=\(FluxExecutor.describe($0.1, table: table))" }.joined(separator: ", ")
+            NSLog("[FluxRT] dispatch wrote signals: [ \(writtenDesc) ] currentRootId=\(currentRootId.map { String($0) } ?? "nil")")
             #endif
             // R1: re-reconcile only the nodes whose signal dependencies were just
             // written, instead of re-walking the whole tree on every tap.
@@ -644,6 +644,41 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
             // A signal-dependent reconcile may have re-parented native views; the
             // host should re-present the (unchanged-identity) root view.
             onTreeChanged?()
+        }
+    }
+
+        // MARK: - Debug instrumentation (Phase 0)
+
+    /// Human-readable description of a `FluxValue`, resolving interned string
+    /// ids through the shared string `table` so signal writes can be inspected
+    /// in `NSLog` output without manual id→text lookup.
+    ///
+    /// - Parameter value: the runtime value to describe.
+    /// - Parameter table: the shared string table used for resolution.
+    /// - Returns: a debug string with resolved string text; unresolved ids are
+    ///   shown as `<unresolved:id>` so they are immediately visible.
+    @MainActor
+    static func describe(_ value: FluxValue, table: MaterializationStringTable) -> String {
+        switch value {
+        case .null:
+            return "null"
+        case .int(let n):
+            return "\(n)"
+        case .float(let f):
+            return "\(f)"
+        case .bool(let b):
+            return "\(b)"
+        case .str(let id):
+            let resolved = table.lookup(id)
+            return "\"\(resolved ?? "<unresolved:0x\(String(id, radix: 16))>")\""
+        case .handlerRef(let h):
+            return "handler(\(h))"
+        case .list(let items):
+            let elems = items.map { describe($0, table: table) }.joined(separator: ", ")
+            return "[ \(elems) ]"
+        case .record(let fields):
+            let flds = fields.map { "\($0.propIndex): \(describe($0.value, table: table))" }.joined(separator: ", ")
+            return "{ \(flds) }"
         }
     }
 

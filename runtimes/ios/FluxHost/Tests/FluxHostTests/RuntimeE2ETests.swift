@@ -308,9 +308,258 @@ final class RuntimeE2ETests: XCTestCase {
         XCTAssertNotNil(result.error)
         XCTAssertEqual(result.error?.kind, .gasExhausted)
     }
+
+    /// S5: ForEach dynamic-prop materialization (FLUX-072).
+    ///
+    /// Simulates `examples/todo/main.flux`: a ForEach over `tasks` whose row body
+    /// is an inlined TaskRow containing `Text text: task.label`. The AddTask
+    /// handler appends a new Task record to the list; the expanded row's Text
+    /// must resolve `label` from the per-row itemSlot.
+    ///
+    /// This is a headless E2E test — no dev-server socket. Bytecode is hand-built
+    /// in `ForEachBytecode` and verified against the Rust `hash_closure` output.
+    @MainActor
+    func testTodoAddTaskRendersLabel() async throws {
+        let labelIdx = ForEachBytecode.labelIdx
+        let itemSlot = ForEachBytecode.itemSlot
+        let newTask = ForEachBytecode.newTask
+        let tasksSignal = ForEachBytecode.tasksSignal
+
+        // The initial Task record: { label: "initial", done: false }
+        let initialTask: FluxHost.FluxValue = .record([
+            (propIndex: labelIdx, value: .str(8)),
+            (propIndex: ForEachBytecode.doneIdx, value: .bool(false)),
+        ])
+
+        let textNode = ShadowNode(
+            id: 10, kind: .primitive, componentId: 0, // Text
+            props: [Prop(index: ForEachBytecode.textIdx, value: .null)],
+            childCount: 0, children: [], handlerCount: 0, handlers: [],
+            span: FluxSpan(fileId: 0, start: 0, end: 0)
+        )
+
+        let forEach = ShadowNode(
+            id: 1000, kind: .forEach, componentId: 3, // Row (ColumnAdapter layout)
+            props: [], childCount: 1,
+            children: [.splice(itemCount: 1, items: [(key: 0, node: 10)])],
+            handlerCount: 0, handlers: [],
+            span: FluxSpan(fileId: 0, start: 0, end: 0)
+        )
+
+        let frame = FluxFrame(
+            version: 1, seq: 0, flags: 0x01,
+            root: forEach,
+            nodes: [1000: forEach, 10: textNode],
+            patches: [],
+            handlers: [
+                HandlerDef(
+                    handlerId: 99,
+                    closure: ForEachBytecode.thunkClosure,
+                    bytecode: ForEachBytecode.textThunkBytecode
+                ),
+                HandlerDef(
+                    handlerId: 1,
+                    closure: ForEachBytecode.addHandlerClosure,
+                    bytecode: ForEachBytecode.addTaskBytecode
+                ),
+            ],
+            strings: [
+                StringEntry(stringId: 0, value: "Text"),
+                StringEntry(stringId: 1, value: "Button"),
+                StringEntry(stringId: 2, value: "Column"),
+                StringEntry(stringId: 3, value: "Row"),
+                StringEntry(stringId: 4, value: "TextField"),
+                StringEntry(stringId: 5, value: "Router"),
+                StringEntry(stringId: 6, value: "Screen"),
+                StringEntry(stringId: 8, value: "initial"),
+                StringEntry(stringId: 10, value: ""),
+            ],
+            state: [
+                StateCell(signalId: tasksSignal, value: .list([initialTask])),
+                StateCell(signalId: newTask, value: .str(8)),
+            ],
+            files: [],
+            componentNames: [
+                StringEntry(stringId: 0, value: "Text"),
+                StringEntry(stringId: 1, value: "Button"),
+                StringEntry(stringId: 2, value: "Column"),
+                StringEntry(stringId: 3, value: "Row"),
+                StringEntry(stringId: 4, value: "TextField"),
+                StringEntry(stringId: 5, value: "Router"),
+                StringEntry(stringId: 6, value: "Screen"),
+            ],
+            signalMeta: [
+                1000: NodeSignalMeta(deps: [tasksSignal], thunk: nil, layout: [], itemSlot: itemSlot),
+                10: NodeSignalMeta(deps: [itemSlot], thunk: ForEachBytecode.thunkClosure, layout: [ForEachBytecode.textIdx], itemSlot: nil),
+            ]
+        )
+
+        let executor = FluxExecutor(graph: SignalGraph(), registry: buildRegistry())
+        let built = executor.apply(frame)
+
+        // ForEach root (1000) is built as a ColumnAdapter-hosted container.
+        XCTAssertTrue(built.contains(1000), "ForEach root should be built")
+
+        // Row 0 expanded: deriveRowId(1000, 0) then deriveChildId(rowId, 10).
+        let row0: UInt32 = (((1000 &* 0x0100_0193) ^ 0) &* 0x0100_0193) | 0x8000_0000
+        let child0: UInt32 = ((((row0 &* 0x0100_0193) ^ 10) &* 0x0100_0193) ^ 0x5555_5555) | 0xC000_0000
+
+        let row1View = executor.view(for: child0)
+        XCTAssertNotNil(row1View, "Row 0's Text view should be built (childId=0x\(String(child0, radix: 16)))")
+        if let label = row1View as? UILabel {
+            XCTAssertEqual(label.text, "initial",
+                "Row 0's Text should show the task's label from the initial Task record")
+        } else if let v = row1View {
+            XCTFail("Expected UILabel for row 0's Text, got \(type(of: v))")
+        }
+
+        // Dispatch the AddTask handler. It reads newTask(200) = .str(8) ("initial"),
+        // builds a Task record, appends it to tasks(201), and resets newTask.
+        // dispatch launches a Task internally; yield to let it reconcile.
+        executor.dispatch(FluxEvent(handlerId: 1, nodeId: 1000))
+
+        // After dispatch, tasks has 2 elements. Row 1's Text should render "initial".
+        let row1: UInt32 = (((1000 &* 0x0100_0193) ^ 1) &* 0x0100_0193) | 0x8000_0000
+        let child1: UInt32 = ((((row1 &* 0x0100_0193) ^ 10) &* 0x0100_0193) ^ 0x5555_5555) | 0xC000_0000
+
+        // Poll for the dispatch Task to complete and reconcile the new row.
+        for _ in 0..<100 {
+            try await Task.sleep(nanoseconds: 1_000_000) // 1ms
+            if executor.view(for: child1) != nil { break }
+        }
+
+        let row2View = executor.view(for: child1)
+        XCTAssertNotNil(row2View, "Row 1's Text view should be built after AddTask (childId=0x\(String(child1, radix: 16)))")
+        if let label2 = row2View as? UILabel {
+            XCTAssertEqual(label2.text, "initial",
+                "Row 1's Text should show the new task's label (from newTask signal)")
+        } else if let v = row2View {
+            XCTFail("Expected UILabel for row 1's Text, got \(type(of: v))")
+        }
+    }
+    /// A patch frame (root == nil) that only carries patches.
+    @MainActor
+    private func patchFrame(seq: UInt32, patches: [Patch]) -> FluxFrame {
+        FluxFrame(
+            version: 1, seq: seq, flags: 0x00,
+            root: nil, nodes: [:],
+            patches: patches, handlers: [],
+            strings: [], state: [], files: [], componentNames: [], signalMeta: [:]
+        )
+    }
 }
 
-/// A registry seeded with the stdlib primitive names.
+// MARK: - ForEach dynamic-prop materialization (FLUX-072)
+
+/// Bytecode + hash helpers for the ForEach E2E test.
+///
+/// The scenario mirrors `examples/todo/main.flux`:
+/// ```
+/// ForEach in tasks { task in
+///     TaskRow(task: task, tasks: tasks)   // inlined
+/// }
+/// ```
+/// where `TaskRow` contains `Text text: task.label`.
+///
+/// We hand-build the prop thunk and handler bytecode so the test stays
+/// headless (no dev-server needed).
+@MainActor
+private enum ForEachBytecode {
+    /// FNV-1a prop indices (match the server and the kit's `Props.propIndex(for:)`).
+    static let labelIdx: UInt16 = { fnv1a16("label") }()
+    static let textIdx: UInt16 = { fnv1a16("text") }()
+    static let doneIdx: UInt16 = { fnv1a16("done") }()
+
+    /// Signal ids chosen to stay clear of the stdlib range (0..=6) and the
+    /// capability/result-cell range (97, 99, 95).
+    static let itemSlot: UInt32 = 100   // ForEach's per-row item signal
+    static let newTask: UInt32 = 200   // $newTask binding
+    static let tasksSignal: UInt32 = 201 // tasks list signal
+
+    /// `READ_SIGNAL r0, itemSlot ; GET_FIELD r1, label, r0 ; ALLOC_RECORD r2, 1 ;
+    ///  SET_FIELD r2, 0, r1 ; MOV r1, r2 ; HALT`
+    /// Reads the task record, extracts `label`, stores it at position 0 of the
+    /// result record (layout maps position 0 → `textIdx`), then moves the result
+    /// into r1 — the register `materializeProps` reads (ShadowTreeReconciler T14).
+    static let textThunkBytecode: [UInt8] = {
+        let itemSlotBytes = [UInt8](withUnsafeBytes(of: Self.itemSlot.littleEndian, Array.init))
+        let labelIdxBytes = [UInt8](withUnsafeBytes(of: Self.labelIdx.littleEndian, Array.init))
+        return [
+            0x10, 0x00] + itemSlotBytes + [                   // READ_SIGNAL r0, 100
+            0x71, 0x01] + labelIdxBytes + [0x00,              // GET_FIELD r1, labelIdx, r0
+            0x70, 0x02, 0x01, 0x00,                        // ALLOC_RECORD r2, 1
+            0x72, 0x02, 0x00, 0x00, 0x01,                   // SET_FIELD r2, 0, r1
+            0xB5, 0x01, 0x02,                               // MOV r1, r2
+            0x00                                              // HALT
+        ]
+    }()
+
+    /// `READ_SIGNAL r0, newTask ; ALLOC_RECORD r1, 2 ;
+    ///  SET_FIELD r1, label, r0 ; LOAD_BOOL_CONST r2, 0 ;
+    ///  SET_FIELD r1, done, r2 ; READ_SIGNAL r3, tasks ;
+    ///  LIST_PUSH r3, r1 ; WRITE_SIGNAL tasks, r3 ;
+    ///  LOAD_STR_CONST r4, 10 ; WRITE_SIGNAL newTask, r4 ; HALT`
+    /// Creates a Task record from $newTask and appends it to tasks.
+    static let addTaskBytecode: [UInt8] = {
+        let newTaskBytes = [UInt8](withUnsafeBytes(of: Self.newTask.littleEndian, Array.init))
+        let labelIdxBytes = [UInt8](withUnsafeBytes(of: Self.labelIdx.littleEndian, Array.init))
+        let doneIdxBytes = [UInt8](withUnsafeBytes(of: Self.doneIdx.littleEndian, Array.init))
+        let tasksBytes = [UInt8](withUnsafeBytes(of: Self.tasksSignal.littleEndian, Array.init))
+        return [
+            0x10, 0x00] + newTaskBytes + [                 // READ_SIGNAL r0, 200
+            0x70, 0x01, 0x02, 0x00,                         // ALLOC_RECORD r1, 2
+            0x72, 0x01] + labelIdxBytes + [0x00,           // SET_FIELD r1, labelIdx, r0
+            0xB2, 0x02, 0x00,                               // LOAD_BOOL_CONST r2, 0
+            0x72, 0x01] + doneIdxBytes + [0x02,            // SET_FIELD r1, doneIdx, r2
+            0x10, 0x03] + tasksBytes + [                   // READ_SIGNAL r3, 201
+            0x81, 0x03, 0x01,                               // LIST_PUSH r3, r1
+            0x11] + tasksBytes + [0x03,                    // WRITE_SIGNAL 201, r3
+            0xB3, 0x04, 0x0A, 0x00, 0x00, 0x00,            // LOAD_STR_CONST r4, 10
+            0x11] + newTaskBytes + [0x04,                  // WRITE_SIGNAL 200, r4
+            0x00                                          // HALT
+        ]
+    }()
+
+    private static let thunkHash: [UInt8] = [151, 236, 188, 124, 224, 156, 253, 77]
+    private static let addHandlerHash: [UInt8] = [223, 52, 163, 83, 140, 66, 124, 241]
+
+    /// ClosureRef for the text prop thunk (used in both `signalMeta` and `HandlerDef`).
+    @MainActor
+    static var thunkClosure: ClosureRef {
+        ClosureRef(
+            hash: thunkHash,
+            bytecodeOffset: 0,
+            bytecodeLen: UInt16(textThunkBytecode.count),
+            signalCount: 1,
+            signals: [itemSlot],
+            span: FluxSpan(fileId: 0, start: 0, end: 0),
+            excerpt: nil
+        )
+    }
+
+    /// ClosureRef for the AddTask handler (used in `HandlerDef`).
+    @MainActor
+    static var addHandlerClosure: ClosureRef {
+        ClosureRef(
+            hash: addHandlerHash,
+            bytecodeOffset: 0,
+            bytecodeLen: UInt16(addTaskBytecode.count),
+            signalCount: 0,
+            signals: [],
+            span: FluxSpan(fileId: 0, start: 0, end: 0),
+            excerpt: nil
+        )
+    }
+
+    private static func fnv1a16(_ name: String) -> UInt16 {
+        var h: UInt32 = 0x811c_9dc5
+        for b in name.utf8 {
+            h ^= UInt32(b)
+            h = h &* 0x0100_0193
+        }
+        return UInt16(truncatingIfNeeded: h)
+    }
+}
 @MainActor
 private func buildRegistry() -> AdapterRegistry {
     let table = MaterializationStringTable()

@@ -232,7 +232,7 @@ final class GapG4CapRegistryTests: XCTestCase {
         let registry = CapabilityRegistry(entries: [
             (7, 9, { _, _, arg, signals in
                 signals.write(50, arg)
-                return arg
+                return 50
             }),
         ])
         var signals: any SignalStore = InMemorySignals()
@@ -248,8 +248,8 @@ final class GapG4CapRegistryTests: XCTestCase {
         ]
         full.append(contentsOf: bc)
         let out = try FluxBytecodeVM.run(full, signals: &signals, payload: .null, capRegistry: registry)
-        XCTAssertEqual(signals.read(50), .int(42))
-        XCTAssertEqual(out.registers[0], .int(42))
+        XCTAssertEqual(signals.read(50), FluxHost.FluxValue.int(42))
+        XCTAssertEqual(out.registers[0], FluxHost.FluxValue.int(42))
     }
 
     @MainActor
@@ -531,13 +531,13 @@ final class CapabilityRoundTripTests: XCTestCase {
         // Write with the first registry (persistent backend).
         var firstSignals: any SignalStore = InMemorySignals()
         let first = CapabilityRegistry.makeDev(backend: UserDefaultsStorageBackend(suite: suite))
-        _ = first.lookup(2, 1)!(2, 1, value, &firstSignals)
+        _ = try first.lookup(2, 1)!(2, 1, value, &firstSignals)
 
         // Drop the registry instance entirely; only the disk suite survives.
         // A second registry over the same suite must observe the persisted value.
         var secondSignals: any SignalStore = InMemorySignals()
         let second = CapabilityRegistry.makeDev(backend: UserDefaultsStorageBackend(suite: suite))
-        let gotCell = second.lookup(2, 2)!(2, 2, key, &secondSignals)
+        let gotCell = try second.lookup(2, 2)!(2, 2, key, &secondSignals)
         XCTAssertEqual(gotCell, 95, "Storage.get returns its result-cell id after recreation")
         XCTAssertEqual(
             secondSignals.read(95),
@@ -546,10 +546,10 @@ final class CapabilityRoundTripTests: XCTestCase {
         )
 
         // Delete via the recreated registry; a fresh read must be null on disk.
-        _ = second.lookup(2, 3)!(2, 3, key, &secondSignals)
+        _ = try second.lookup(2, 3)!(2, 3, key, &secondSignals)
         var thirdSignals: any SignalStore = InMemorySignals()
         let third = CapabilityRegistry.makeDev(backend: UserDefaultsStorageBackend(suite: suite))
-        _ = third.lookup(2, 2)!(2, 2, key, &thirdSignals)
+        _ = try third.lookup(2, 2)!(2, 2, key, &thirdSignals)
         XCTAssertEqual(thirdSignals.read(95), .null, "Storage.delete must clear the persisted value")
     }
 
@@ -580,7 +580,7 @@ final class CapabilityRoundTripTests: XCTestCase {
             XCTFail("expected WireError.unsupportedVersion for version mismatch")
         } catch let err as WireError {
             guard case .unsupportedVersion = err else {
-                XCTFail("version mismatch must surface as .unsupportedVersion, got \(err)")
+                XCTFail("version mismatch must surface as .unsupportedVersion, got \(err)"); return
             }
         } catch {
             XCTFail("version mismatch must surface as WireError, got \(error)")

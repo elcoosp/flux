@@ -129,7 +129,11 @@ func toKit(_ value: FluxValue, table: any StringResolver) -> FluxUIKit.FluxValue
     case .null:
         return .null
     case let .str(id):
-        return .str(table.lookup(id) ?? "str(\(id))")
+        let resolved = table.lookup(id)
+        if resolved == nil {
+            NSLog("[FluxRT] UNRESOLVED str id=0x\(String(id, radix: 16)) — string-store seam!")
+        }
+        return .str(resolved ?? "⟨unresolved:0x\(String(id, radix: 16))⟩")
     case let .handlerRef(h):
         return .handlerRef(h)
     case let .list(items):

@@ -17,7 +17,7 @@
 
 import XCTest
 
-@Testable import FluxHost
+@testable import FluxHost
 
 final class AsyncSuspendResumeTests: XCTestCase {
     /// CALL_CAP(cap 1,1) writes `arg[0]` into signal 99 (Ready) and returns 99;
@@ -77,10 +77,10 @@ final class AsyncSuspendResumeTests: XCTestCase {
             return
         }
         XCTAssert(cellId >= 1_000_000, "async capability must allocate a fresh cell id")
-        XCTAssertEqual(graph.cellState(cellId), .pending, "cell must be Pending after async cap")
+        XCTAssertEqual(graph.cellState(UInt32(cellId)), .pending, "cell must be Pending after async cap")
 
         // Host resolves the cell, then resumes.
-        graph.resolveCell(cellId, .int(7))
+        graph.resolveCell(UInt32(cellId), .int(7))
         let resumed = FluxBytecodeVM.resume(state, signals: &graph, value: .int(7))
         guard case let .success(.halt(outcome)) = resumed else {
             XCTFail("expected .halt after resolve+resume, got \(String(describing: resumed))")
@@ -116,7 +116,7 @@ final class AsyncSuspendResumeTests: XCTestCase {
 
         // Oracle contract: at cancellation the only signal state is the Pending cell; the
         // handler had written nothing before the AWAIT (signal 2 must remain unbound).
-        XCTAssertEqual(graph.cellState(cellId), .pending, "cell must remain Pending after cancel")
+        XCTAssertEqual(graph.cellState(UInt32(cellId)), .pending, "cell must remain Pending after cancel")
         XCTAssertNil(graph.read(2), "no signal writes may have occurred before the AWAIT")
         XCTAssertEqual(state.registers[2], .int(cellId), "captured future_reg must match the pending cell")
     }

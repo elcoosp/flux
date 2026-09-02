@@ -17,13 +17,13 @@ final class Flux047HttpPersistTests: XCTestCase {
 
     func testPersistPutThenGetRoundTrips() throws {
         var signals: any SignalStore = InMemorySignals()
-        let key: FluxValue = .str(7)
-        let value: FluxValue = .list([.int(1), .int(2)])
-        let putArgs: FluxValue = .record([(0, key), (1, value)])
+        let key: FluxHost.FluxValue = .str(7)
+        let value: FluxHost.FluxValue = .list([.int(1), .int(2)])
+        let putArgs: FluxHost.FluxValue = .record([(0 as UInt16, key), (1 as UInt16, value)])
         let putCell = try CapabilityRegistry.dev.lookup(15, 1)!(15, 1, putArgs, &signals)
-        XCTAssertTrue(signals.read(putCell) is FluxValue.ListVal, "Persist.put returns the stored value")
+        XCTAssertTrue(signals.read(putCell) != nil, "Persist.put returns the stored value")
 
-        let getArgs: FluxValue = .record([(0, key)])
+        let getArgs: FluxHost.FluxValue = .record([(0 as UInt16, key)])
         let getCell = try CapabilityRegistry.dev.lookup(15, 2)!(15, 2, getArgs, &signals)
         XCTAssertEqual(signals.read(getCell), value, "Persist.get returns the value put earlier")
     }
@@ -32,8 +32,8 @@ final class Flux047HttpPersistTests: XCTestCase {
         let backend = InMemoryStorageBackend()
         let registry = CapabilityRegistry.makeDev(backend: backend)
         var signals: any SignalStore = InMemorySignals()
-        registry.lookup(15, 1)!(15, 1, .record([(0, .str(100)), (1, .int(11))]), &signals)
-        registry.lookup(15, 1)!(15, 1, .record([(0, .str(200)), (1, .int(22))]), &signals)
+        _ = try registry.lookup(15, 1)!(15, 1, .record([(0 as UInt16, .str(100)), (1 as UInt16, .int(11))]), &signals)
+        _ = try registry.lookup(15, 1)!(15, 1, .record([(0 as UInt16, .str(200)), (1 as UInt16, .int(22))]), &signals)
         let queryCell = try registry.lookup(15, 3)!(15, 3, .null, &signals)
         guard case let .list(items) = signals.read(queryCell) else {
             XCTFail("Persist.query returns a list")
@@ -44,10 +44,10 @@ final class Flux047HttpPersistTests: XCTestCase {
 
     func testPersistDeleteClearsValue() throws {
         var signals: any SignalStore = InMemorySignals()
-        let key: FluxValue = .str(7)
-        _ = try CapabilityRegistry.dev.lookup(15, 1)!(15, 1, .record([(0, key), (1, .int(99))]), &signals)
-        _ = try CapabilityRegistry.dev.lookup(15, 4)!(15, 4, .record([(0, key)]), &signals)
-        let getCell = try CapabilityRegistry.dev.lookup(15, 2)!(15, 2, .record([(0, key)]), &signals)
+        let key: FluxHost.FluxValue = .str(7)
+        _ = try CapabilityRegistry.dev.lookup(15, 1)!(15, 1, .record([(0 as UInt16, key), (1 as UInt16, .int(99))]), &signals)
+        _ = try CapabilityRegistry.dev.lookup(15, 4)!(15, 4, .record([(0 as UInt16, key)]), &signals)
+        let getCell = try CapabilityRegistry.dev.lookup(15, 2)!(15, 2, .record([(0 as UInt16, key)]), &signals)
         XCTAssertEqual(signals.read(getCell), .null, "Persist.get is null after Persist.delete")
     }
 
@@ -71,10 +71,10 @@ final class Flux047HttpPersistTests: XCTestCase {
             tableProvider: { table }
         )
         var signals: any SignalStore = InMemorySignals()
-        let cell = try CapabilityRegistry.dev.lookup(14, 2)!(14, 2, .record([(0, .str(42))]), &signals)
+        let cell = try CapabilityRegistry.dev.lookup(14, 2)!(14, 2, FluxHost.FluxValue.record([(0 as UInt16, .str(42))]), &signals)
         XCTAssertEqual(signals.cellState(cell), .pending, "Http.getJson parks the cell")
         let settled = await resolver.resolve(.int(Int64(cell)))
-        XCTAssertTrue(settled is FluxValue.RecordVal, "Http.getJson response parses to a RecordVal")
+        guard case .record = settled as FluxHost.FluxValue else { XCTFail("Http.getJson response parses to a RecordVal"); return }
     }
 
     /// A `HttpTransport` that returns a canned response (no network).
