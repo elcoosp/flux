@@ -175,6 +175,8 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
     private var currentNodes: [UInt32: ShadowNode]
     /// The most recent full root id.
     private var currentRootId: UInt32?
+    /// Monotonic counter for FLUX_FRAME_DUMP filenames.
+    private var frameSequenceNumber: Int = 0
     /// The most recent VM error, surfaced to the UI overlay.
     public private(set) var lastError: VmError?
     /// The most recent server-side compile/type error, delivered via an `Error`
@@ -278,7 +280,19 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
     @discardableResult
     public func applyFrame(_ bytes: Data) throws -> [UInt32] {
         #if DEBUG
-        // Decode and apply the frame (see below). No debug dump retained.
+        // FLUX_FRAME_DUMP: writes the received frame bytes to a file for offline
+        // inspection. Set the env var to a directory path before app launch.
+        if let dumpDir = ProcessInfo.processInfo.environment["FLUX_FRAME_DUMP"] {
+            let seq = frameSequenceNumber
+            frameSequenceNumber += 1
+            let path = (dumpDir as NSString).appendingPathComponent("frame_\(seq)_init.bin")
+            do {
+                try (bytes as Data).write(to: URL(fileURLWithPath: path))
+                NSLog("[FluxRT] frame dump written to %@ (%d bytes)", path, bytes.count)
+            } catch {
+                NSLog("[FluxRT] frame dump FAILED: %@", error.localizedDescription)
+            }
+        }
         #endif
         let frame = try FrameDeserializer.decode([UInt8](bytes))
         return apply(frame)

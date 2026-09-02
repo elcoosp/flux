@@ -905,6 +905,11 @@ struct ShadowTreeReconciler {
                 payload: .null,
                 stringTable: currentTable()
             )
+            #if DEBUG
+            let regs = (0..<16).map { FluxExecutor.describe(outcome.registers[$0], table: currentTable()) }
+                .enumerated().map { "r\($0.offset)=\($0.element)" }
+            NSLog("[FluxRT] thunk HALT node %d regs: %@", nodeId, regs.joined(separator: " "))
+            #endif
             guard case let .record(fields) = outcome.registers[1] else {
                 #if DEBUG
                 NSLog("[materialize] node \(nodeId) thunk result r1 not a record: \(outcome.registers[1])")
