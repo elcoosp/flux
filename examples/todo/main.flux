@@ -1,12 +1,4 @@
 // main.flux — Flux To-Do example (FLUX-072 concise data-driven surface).
-//
-// ~28 lines (vs the old 111) by using the data-driven primitives FLUX-072
-// delivers: a `record` product type, a `List[Task]` state, a real `ForEach`
-// that reconciles by identity, `$newTask` two-way input binding, Toggle + Spacer
-// primitives, `derived` computed signals, and `task.done = !task.done` field
-// mutation. The list is dynamic: "Add task" appends a row and clears the field;
-// "Toggle"/"Remove" mutate the correct item by identity; "Reset" clears the
-// list. Router navigation is preserved.
 
 record Task {
     label: String,
@@ -35,7 +27,7 @@ compo TodoApp
             Column gap: 16.0
                 Text text: "Flux To-Do"
                 Row gap: 8.0
-                    TextInput text: $newTask, placeholder: "What needs doing?"
+                    TextInput text: $newTask, onChangeText: fn(v) { newTask = v }, placeholder: "What needs doing?"
                     Button text: "Add task", onPress: || {
                         tasks.append(Task(label: newTask, done: false))
                         newTask = ""
