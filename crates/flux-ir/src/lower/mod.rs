@@ -659,6 +659,14 @@ impl<'a> Lowerer<'a> {
         // instantiation (roadmap Phase 1). Non-generic calls keep their name.
         let interned = self.mono.next_specialised(&name).unwrap_or(name);
         let component_id = self.intern_component(&interned);
+        // A user-defined `compo` call lowers as `NodeKind::Component` (tag 0) so
+        // the host's `adapterFor` resolves it through the component table and,
+        // when no adapter exists, degrades to the container fallback. Primitive
+        // calls (`Text`, `Column`, …) lower as `NodeKind::Primitive` (tag 1) so
+        // the host maps them to their registered adapter. The `component_id` is
+        // always set to the interned component name regardless, preserving the
+        // shared-component table for both paths.
+        let is_user_compo = self.component_decls.contains_key(&interned);
 
         // Inline a declared component's body at the call site when every prop
         // maps to an in-scope identifier (e.g. `TaskRow(task: item, …)` inside a
@@ -667,7 +675,7 @@ impl<'a> Lowerer<'a> {
         // of an unseeded component-global prop signal — the "tasks not
         // rendered" bug (FLUX-072). Falls back to the normal component-instance
         // path when inlining isn't possible.
-        let inline_children = if self.component_decls.contains_key(&interned) {
+        let inline_children = if is_user_compo {
             let comp = self.component_decls.get(&interned).unwrap().clone();
             self.try_inline_component(&comp, args, trailing, owner)?
         } else {
@@ -737,7 +745,7 @@ impl<'a> Lowerer<'a> {
 
         let node = Node {
             id,
-            kind: NodeKind::Primitive,
+            kind: if is_user_compo { NodeKind::Component } else { NodeKind::Primitive },
             component_id,
             props,
             children,

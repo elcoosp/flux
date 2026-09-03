@@ -739,10 +739,11 @@ impl Pipeline {
         component_names: &[(flux_syntax::ComponentId, String)],
     ) -> Vec<u8> {
         let root = root_node(arena);
-        // Appendix D §D.12.2: the Init frame carries `root` followed by every
-        // descendant node, flat, so a host rebuilds the full node table from one
-        // frame. Gather the descendants (children first, breadth-first) here.
         let extra_nodes = flatten_extra_nodes(&root, arena);
+        tracing::debug!("build_init root id={} kind={:?} component_id={} extra={}", root.id, root.kind, root.component_id, extra_nodes.len());
+        for (i, n) in extra_nodes.iter().enumerate() {
+            tracing::debug!("build_init extra[{}] id={} kind={:?} component_id={}", i, n.id, n.kind, n.component_id);
+        }
         let source_map = self.source_map();
         let signal_meta = signal_meta_for(arena);
         let mut frame: InitFrame = Frame::init(

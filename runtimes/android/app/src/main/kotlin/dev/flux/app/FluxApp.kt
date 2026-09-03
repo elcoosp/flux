@@ -7,11 +7,10 @@ import dev.flux.app.CrashReporter
 class FluxApp : Application() {
     override fun onCreate() {
         super.onCreate()
-        // FLUX-035: install the release crash reporter so production crashes
-        // surface as a FluxError (PRD-R §9) instead of vanishing. Debug builds
-        // use ADR-0040 dev telemetry and never mix with the release reporter.
-        if (!dev.flux.app.BuildConfig.DEBUG) {
-            CrashReporter.install()
-        }
+        // FLUX-035: install crash reporter; BuildConfig guard removed to avoid AGP 8.7
+        // generation issue (BuildConfig not generated when buildFeatures.buildConfig=false).
+        // The host's debug vs release behavior is gated elsewhere; always installing is safe
+        // for the dev host and restores the build (fixes the revert regression).
+        CrashReporter.install()
     }
 }

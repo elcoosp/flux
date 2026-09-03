@@ -6,7 +6,7 @@ package dev.flux.host.wire
  * `flux_ir_serde::HelloFrame::to_bytes` exactly:
  *
  * ```
- * MAGIC(u32 LE = 0x465C5558) | version(u8 = 1) | kind(u8 = 0x01)
+ * MAGIC(u32 LE = 0x465C5558) | version(u8 = 2) | kind(u8 = 0x01)
  *   | platform(u16 len + utf8) | device(u16 len + utf8)
  *   | cap_count(u16) [cap triples…] | token(u16 len + utf8)
  * ```
@@ -36,7 +36,7 @@ public fun helloFrameBytes(
     out.add(0x55.toByte())
     out.add(0x5C.toByte())
     out.add(0x46.toByte())
-    out.add(1) // protocol version
+    out.add(2) // protocol version (must match flux_ir_serde::PROTOCOL_VERSION = 2, iOS sends 0x02)
     out.add(0x01) // FrameKind::Hello
     writeStr(out, platform)
     writeStr(out, device)
