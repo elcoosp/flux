@@ -828,7 +828,10 @@ public class ShadowTree(
             val clonedWire = cloneWireNode(templateRow, rowId = rowId, outIds = childIds, index = index)
             expandedIndex[rowId] = clonedWire
             if (templateMeta != null) signalMetaOverride[rowId] = templateMeta
-            elem?.let { element -> childIds.forEach { forEachRowContext[it] = itemSlot to element } }
+            elem?.let { element ->
+                childIds.forEach { forEachRowContext[it] = itemSlot to element }
+                forEachRowContext[rowId] = itemSlot to element
+            }
             expanded.add(rowId)
         }
         return expanded
@@ -868,6 +871,7 @@ public class ShadowTree(
                 if (templateMeta != null) signalMetaOverride[rowId] = templateMeta
                 elem?.let { element ->
                     childIds.forEach { forEachRowContext[it] = itemSlot to element }
+                    forEachRowContext[rowId] = itemSlot to element
                 }
                 rowId
             }.toSet()
@@ -899,9 +903,8 @@ public class ShadowTree(
                     }
                 // Seed the shared itemSlot with this row's element before
                 // re-materialising — mirrors iOS `graph.write(ctx.slot, ctx.element)`
-                // (FLUX-092). For new rows `build` already seeds via
-                // forEachRowContext; for existing rows this is the only seed.
-                forEachRowContext[rowId]?.second?.let { element ->
+                // (FLUX-092): the element is in scope, write it directly (iOS parity).
+                elem?.let { element ->
                     host.materializationSignals.write(itemSlot, element)
                 }
                 val kit = materializeProps(child.wireProps.fields, child.id)
