@@ -65,13 +65,13 @@ import dev.flux.ui.PropsIndex
 @Composable
 public fun FluxTreeView(
     node: ShadowNode?,
-    onButtonClick: (handlerId: UInt) -> Unit,
+    onButtonClick: (handlerId: UInt, nodeId: UInt) -> Unit,
     /** Bumped on every applied frame / dispatch so routers re-read the active
      * route (signal 97) and swap the visible screen even though a router node's
      * own props do not change on navigation. */
     routerVersion: Int = 0,
     /** Fired with a text-input's `onChangeText` handler id and the new value. */
-    onTextChange: (UInt, String) -> Unit = { _, _ -> },
+    onTextChange: (UInt, UInt, String) -> Unit = { _, _, _ -> },
     /** Layout weight applied to this node by a parent [Row] (so a [TextInput]
      * shares the row with its sibling button instead of filling the whole
      * width). Defaults to none. */
@@ -122,9 +122,9 @@ public fun FluxTreeView(
 @Composable
 private fun RenderRouter(
     node: ShadowNode,
-    onButtonClick: (UInt) -> Unit,
+    onButtonClick: (UInt, UInt) -> Unit,
     routerVersion: Int,
-    onTextChange: (UInt, String) -> Unit = { _, _ -> },
+    onTextChange: (UInt, UInt, String) -> Unit = { _, _, _ -> },
     imageCache: ImageCache,
     assetBaseUrl: String = "http://localhost:7332/assets/",
 ) {
@@ -161,9 +161,9 @@ private fun ShadowNode.observeProps(): dev.flux.ui.Props = propsState.value
 @Composable
 private fun RenderColumn(
     node: ShadowNode,
-    onButtonClick: (UInt) -> Unit,
+    onButtonClick: (UInt, UInt) -> Unit,
     routerVersion: Int,
-    onTextChange: (UInt, String) -> Unit = { _, _ -> },
+    onTextChange: (UInt, UInt, String) -> Unit = { _, _, _ -> },
     imageCache: ImageCache,
     assetBaseUrl: String = "http://localhost:7332/assets/",
 ) {
@@ -188,9 +188,9 @@ private fun RenderColumn(
 @Composable
 private fun RenderRow(
     node: ShadowNode,
-    onButtonClick: (UInt) -> Unit,
+    onButtonClick: (UInt, UInt) -> Unit,
     routerVersion: Int,
-    onTextChange: (UInt, String) -> Unit = { _, _ -> },
+    onTextChange: (UInt, UInt, String) -> Unit = { _, _, _ -> },
     imageCache: ImageCache,
     assetBaseUrl: String = "http://localhost:7332/assets/",
 ) {
@@ -231,12 +231,12 @@ private fun RenderText(node: ShadowNode) {
 @Composable
 private fun RenderButton(
     node: ShadowNode,
-    onButtonClick: (UInt) -> Unit,
+    onButtonClick: (UInt, UInt) -> Unit,
 ) {
     val props = node.observeProps()
     val label = props.getString(PropsIndex.BUTTON_TEXT).orEmpty()
     val handlerId = props.getHandler(PropsIndex.BUTTON_ON_PRESS)
-    Button(onClick = { onButtonClick(handlerId) }) {
+    Button(onClick = { onButtonClick(handlerId, node.id) }) {
         Text(label)
     }
 }
@@ -245,9 +245,9 @@ private fun RenderButton(
 @Composable
 private fun RenderContainer(
     node: ShadowNode,
-    onButtonClick: (UInt) -> Unit,
+    onButtonClick: (UInt, UInt) -> Unit,
     routerVersion: Int,
-    onTextChange: (UInt, String) -> Unit = { _, _ -> },
+    onTextChange: (UInt, UInt, String) -> Unit = { _, _, _ -> },
     imageCache: ImageCache,
     assetBaseUrl: String = "http://localhost:7332/assets/",
 ) {
@@ -277,7 +277,7 @@ private fun RenderContainer(
 @Composable
 private fun RenderTextInput(
     node: ShadowNode,
-    onTextChange: (UInt, String) -> Unit,
+    onTextChange: (UInt, UInt, String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val props = node.observeProps()
@@ -304,7 +304,7 @@ private fun RenderTextInput(
         value = textState,
         onValueChange = {
             textState = it
-            onTextChange(handlerId, it)
+            onTextChange(handlerId, node.id, it)
         },
         placeholder = { Text(placeholder) },
         modifier = modifier.fillMaxWidth().padding(4.dp).focusRequester(focusRequester),
@@ -409,9 +409,9 @@ private fun gapOf(node: ShadowNode): androidx.compose.ui.unit.Dp {
 @Composable
 private fun RenderStack(
     node: ShadowNode,
-    onButtonClick: (UInt) -> Unit,
+    onButtonClick: (UInt, UInt) -> Unit,
     routerVersion: Int,
-    onTextChange: (UInt, String) -> Unit = { _, _ -> },
+    onTextChange: (UInt, UInt, String) -> Unit = { _, _, _ -> },
     imageCache: ImageCache,
     assetBaseUrl: String = "http://localhost:7332/assets/",
 ) {
@@ -442,9 +442,9 @@ private fun RenderStack(
 @Composable
 private fun RenderGrid(
     node: ShadowNode,
-    onButtonClick: (UInt) -> Unit,
+    onButtonClick: (UInt, UInt) -> Unit,
     routerVersion: Int,
-    onTextChange: (UInt, String) -> Unit = { _, _ -> },
+    onTextChange: (UInt, UInt, String) -> Unit = { _, _, _ -> },
     imageCache: ImageCache,
     assetBaseUrl: String = "http://localhost:7332/assets/",
 ) {
@@ -493,9 +493,9 @@ private fun RenderSpacer(node: ShadowNode) {
 @Composable
 private fun RenderSafeArea(
     node: ShadowNode,
-    onButtonClick: (UInt) -> Unit,
+    onButtonClick: (UInt, UInt) -> Unit,
     routerVersion: Int,
-    onTextChange: (UInt, String) -> Unit = { _, _ -> },
+    onTextChange: (UInt, UInt, String) -> Unit = { _, _, _ -> },
     imageCache: ImageCache,
     assetBaseUrl: String = "http://localhost:7332/assets/",
 ) {
@@ -525,9 +525,9 @@ private fun RenderSafeArea(
 @Composable
 private fun RenderScrollView(
     node: ShadowNode,
-    onButtonClick: (UInt) -> Unit,
+    onButtonClick: (UInt, UInt) -> Unit,
     routerVersion: Int,
-    onTextChange: (UInt, String) -> Unit = { _, _ -> },
+    onTextChange: (UInt, UInt, String) -> Unit = { _, _, _ -> },
     imageCache: ImageCache,
     assetBaseUrl: String = "http://localhost:7332/assets/",
 ) {
@@ -562,9 +562,9 @@ private fun RenderScrollView(
 @Composable
 private fun RenderOverlayContainer(
     node: ShadowNode,
-    onButtonClick: (UInt) -> Unit,
+    onButtonClick: (UInt, UInt) -> Unit,
     routerVersion: Int,
-    onTextChange: (UInt, String) -> Unit = { _, _ -> },
+    onTextChange: (UInt, UInt, String) -> Unit = { _, _, _ -> },
     imageCache: ImageCache,
     assetBaseUrl: String = "http://localhost:7332/assets/",
 ) {

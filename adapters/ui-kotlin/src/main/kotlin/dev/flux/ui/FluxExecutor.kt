@@ -14,6 +14,7 @@ package dev.flux.ui
  */
 public data class HandlerEvent(
     val handlerId: UInt,
+    val nodeId: UInt = 0u,
     val payload: FluxValue? = null,
 )
 

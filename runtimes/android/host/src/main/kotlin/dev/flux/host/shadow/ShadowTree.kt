@@ -77,11 +77,22 @@ public class ShadowTree(
     /** Per-frame clones of expanded ForEach row `WireNode`s, keyed by derived id. */
     private val expandedIndex = LinkedHashMap<UInt, WireNode>()
     /** Expansion-time `signalMeta` overrides for derived ForEach row ids. */
-    private val signalMetaOverride = LinkedHashMap<UInt, NodeSignalMeta>()
+    internal val signalMetaOverride = LinkedHashMap<UInt, NodeSignalMeta>()
+    /**
+     * Per-row (itemSlot, element) captured so a handler tap inside a ForEach row
+     * can re-seed the shared `itemSlot` before the VM reads it — removing the
+     * correct row instead of the last one (FLUX-092). Mirrors iOS
+     * `forEachRowContext`.
+     */
+    internal val forEachRowContext = LinkedHashMap<UInt, Pair<UInt, FluxValue>>()
     /** Template row `WireNode` for each ForEach node id, captured at build time so
      *  [reconcileForEach] can re-expand rows on list-signal change without a frame. */
     private val forEachTemplate = LinkedHashMap<UInt, WireNode>()
     internal var root: ShadowNode? = null
+    /** Snapshot of the Init frame's wire index, stored so [reconcileForEach]
+     * can deep-clone ForEach template children with per-row derived ids
+     * (FLUX-092). */
+    internal var wireIndex: Map<UInt, WireNode> = emptyMap()
     internal var executorRef: FluxExecutor? = null
 
     // Resolves interned string ids (wire `StrVal`) to their text. Rebuilt from
@@ -282,6 +293,7 @@ public class ShadowTree(
             val index = LinkedHashMap<UInt, WireNode>()
             index[frame.root.id] = frame.root
             for (n in frame.extraNodes) index[n.id] = n
+            wireIndex = index
             emitTrace(
                 TraceEvent.Frame(
                     seq = frame.seq,
@@ -661,7 +673,12 @@ public class ShadowTree(
         executor: FluxExecutor,
         depth: UInt,
     ): ShadowNode {
-        val adapter = adapterFor(wire.kind, wire.componentId)
+        val isForEach = signalMeta[wire.id]?.itemSlot != null || signalMetaOverride[wire.id]?.itemSlot != null
+        val adapter = if (isForEach) {
+            FluxUiKit.adapters["container"]?.create()
+        } else {
+            adapterFor(wire.kind, wire.componentId)
+        }
         // ADR-0027 (FA-IRWIRE): materialise dynamic props (interpolations, signal
         // reads) by running the node's prop thunk against the live graph. Stored
         // `wireProps` keep the shipped (raw) fields for diffing; the adapter
@@ -691,7 +708,9 @@ public class ShadowTree(
         // `Screen` is visible (see `routerActiveChild`).
         val isRouter = adapter?.kind == ROUTER_KIND
         val deps =
-            (signalMeta[wire.id]?.deps?.toMutableSet() ?: mutableSetOf()).apply {
+            (signalMeta[wire.id]?.deps?.toMutableSet()
+                ?: signalMetaOverride[wire.id]?.deps?.toMutableSet()
+                ?: mutableSetOf()).apply {
                 addAll(signalDepsFrom(wire.props))
                 if (isRouter) add(NAVIGATION_ROUTE_SIGNAL_ID)
             }
@@ -715,7 +734,7 @@ public class ShadowTree(
         builtCount++
         emitTrace(TraceEvent.Build(seq = lastSeq, id = wire.id))
         val childWireIds =
-            if (signalMeta[wire.id]?.itemSlot != null) {
+            if (isForEach) {
                 // Capture the template row so a later dispatch that appends to /
                 // removes from the list can re-expand the ForEach without a fresh
                 // frame (FLUX-072 / ADR-0050 dynamic re-expansion).
@@ -727,6 +746,13 @@ public class ShadowTree(
             }
         for (childId in childWireIds) {
             val childWire = expandedIndex[childId] ?: index[childId] ?: continue
+            // Per-row itemSlot seeding: for ForEach rows, write the row's element
+            // into the shared `itemSlot` signal IMMEDIATELY before building that
+            // row — not in a batch before the loop. Otherwise all rows materialise
+            // against the last element's value (FLUX-092).
+            forEachRowContext[childId]?.let { (slot, element) ->
+                (executor as? HostExecutor)?.materializationSignals?.write(slot, element)
+            }
             node.children.add(build(childWire, index, executor, depth + 1u))
         }
         withAdapter(wire.kind, wire.componentId, view) { a, v ->
@@ -798,17 +824,11 @@ public class ShadowTree(
         val expanded = mutableListOf<UInt>()
         for ((i, elem) in list.items.withIndex()) {
             val rowId = deriveForEachRowId(wire.id, i.toUInt())
-            // Seed the row's `item` signal so the template's prop thunk (registered
-            // under `rowId` below) resolves `item` to `list[i]` when `build`
-            // materialises this row. We keep the template's *raw* props and let
-            // `build` run the thunk — no wire round-trip needed.
-            (executor as? HostExecutor)?.materializationSignals?.write(itemSlot, elem)
-            expandedIndex[rowId] =
-                templateRow.copy(
-                    id = rowId,
-                    children = emptyList(),
-                )
+            val childIds = linkedSetOf<UInt>()
+            val clonedWire = cloneWireNode(templateRow, rowId = rowId, outIds = childIds, index = index)
+            expandedIndex[rowId] = clonedWire
             if (templateMeta != null) signalMetaOverride[rowId] = templateMeta
+            elem?.let { element -> childIds.forEach { forEachRowContext[it] = itemSlot to element } }
             expanded.add(rowId)
         }
         return expanded
@@ -843,9 +863,12 @@ public class ShadowTree(
         val desired =
             list.items.mapIndexed { i, elem ->
                 val rowId = deriveForEachRowId(foreachId, i.toUInt())
-                host.materializationSignals.write(itemSlot, elem)
-                expandedIndex[rowId] = template.copy(id = rowId, children = emptyList())
+                val childIds = linkedSetOf<UInt>()
+                expandedIndex[rowId] = cloneWireNode(template, rowId, childIds, wireIndex)
                 if (templateMeta != null) signalMetaOverride[rowId] = templateMeta
+                elem?.let { element ->
+                    childIds.forEach { forEachRowContext[it] = itemSlot to element }
+                }
                 rowId
             }.toSet()
         // Tear down rows that no longer exist in the list.
@@ -861,15 +884,26 @@ public class ShadowTree(
         val newChildren =
             list.items.mapIndexed { i, elem ->
                 val rowId = deriveForEachRowId(foreachId, i.toUInt())
-                host.materializationSignals.write(itemSlot, elem)
                 val child =
                     nodes[rowId] ?: run {
-                        val wire = expandedIndex[rowId] ?: template.copy(id = rowId, children = emptyList())
-                        val built = build(wire, emptyMap(), host, 1u)
+                        val childIds = linkedSetOf<UInt>()
+                        val wire = expandedIndex[rowId]
+                            ?: cloneWireNode(template, rowId, childIds, wireIndex)
+                        elem?.let { element ->
+                            childIds.forEach { forEachRowContext[it] = itemSlot to element }
+                        }
+                        val built = build(wire, wireIndex, host, 1u)
                         nodes[rowId] = built
                         parents[rowId] = foreachId
                         built
                     }
+                // Seed the shared itemSlot with this row's element before
+                // re-materialising — mirrors iOS `graph.write(ctx.slot, ctx.element)`
+                // (FLUX-092). For new rows `build` already seeds via
+                // forEachRowContext; for existing rows this is the only seed.
+                forEachRowContext[rowId]?.second?.let { element ->
+                    host.materializationSignals.write(itemSlot, element)
+                }
                 val kit = materializeProps(child.wireProps.fields, child.id)
                 child.props = kit
                 reconciled[child.id] = (reconciled[child.id] ?: 0) + 1
@@ -888,12 +922,71 @@ public class ShadowTree(
 
     /** Stable derived id for the `i`-th row of ForEach node `foreachId`. */
     private fun deriveForEachRowId(foreachId: UInt, i: UInt): UInt = foreachId * 2654435761u + i * 40503u + 0x9E3779B9u
+    private fun deriveForEachChildId(rowId: UInt, origId: UInt): UInt =
+        ((rowId * 2654435761u).xor(origId * 40503u)).xor(0x55555555u)
+
+    /**
+     * Recursively deep-clones [template] into a per-row wire subtree, rewriting
+     * each node's id via [deriveForEachChildId]. Populate [outIds] with every
+     * derived id (the row root + all descendants) so the caller can register
+     * them in [forEachRowContext]. Mirrors iOS `cloneSubtree`.
+     * Also populates [expandedIndex] with each cloned child WireNode so that
+     * `build` can look them up by their derived id.
+     */
+    private fun cloneWireNode(
+        template: WireNode,
+        rowId: UInt,
+        outIds: MutableSet<UInt>,
+        index: Map<UInt, WireNode>,
+    ): WireNode {
+        val newId = deriveForEachChildId(rowId, template.id)
+        outIds.add(newId)
+        // Mirror iOS cloneSubtree: copy the original node's signalMeta for the
+        // derived id so prop-thunk materialisation resolves against the live graph.
+        signalMeta[template.id]?.let { signalMetaOverride[newId] = it }
+        val newChildren = template.children.map { child ->
+            when (child) {
+                is WireChild.Node -> {
+                    val childId = deriveForEachChildId(rowId, child.id)
+                    val childWire = expandedIndex[child.id] ?: index[child.id]
+                    if (childWire != null) {
+                        val cloned = cloneWireNode(childWire, rowId, outIds, index)
+                        expandedIndex[cloned.id] = cloned
+                    }
+                    WireChild.Node(childId)
+                }
+                is WireChild.Splice -> {
+                    val newItems = child.items.map { (key, nodeId) ->
+                        val childId = deriveForEachChildId(rowId, nodeId)
+                        val childWire = expandedIndex[nodeId] ?: index[nodeId]
+                        if (childWire != null) {
+                            val cloned = cloneWireNode(childWire, rowId, outIds, index)
+                            expandedIndex[cloned.id] = cloned
+                        }
+                        key to childId
+                    }
+                    WireChild.Splice(newItems)
+                }
+            }
+        }
+        return template.copy(id = newId, children = newChildren)
+    }
 
     /** True when [node]'s resolved child id list differs from [fresh] (T5). */
-    private fun childListChanged(
-        node: ShadowNode,
-        fresh: List<UInt>,
-    ): Boolean = node.wireProps.childIds != fresh
+    private fun childListChanged(node: ShadowNode, fresh: List<UInt>): Boolean =
+        node.wireProps.childIds != fresh
+
+    /**
+     * Seeds a ForEach row's `itemSlot` signal with the element for [nodeId]
+     * before a handler dispatch, so the VM reads the correct per-row value
+     * (e.g. `remove(task)` removes the tapped row, not the last). Mirrors iOS
+     * `reconciler.itemContext` + `graph.write`. No-op if [nodeId] is not inside
+     * a ForEach row.
+     */
+    public fun seedRowContext(nodeId: UInt) {
+        val (slot, element) = forEachRowContext[nodeId] ?: return
+        (executorRef as? HostExecutor)?.materializationSignals?.write(slot, element)
+    }
 
     /** The int-valued props of [props] are treated as reads of those signal ids (R1, iOS parity). */
     private fun signalDepsFrom(props: List<Pair<UShort, dev.flux.host.wire.WireValue>>): MutableSet<UInt> {

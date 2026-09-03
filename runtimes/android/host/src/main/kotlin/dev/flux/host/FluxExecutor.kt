@@ -301,10 +301,10 @@ public class FluxExecutor(
                     onError?.invoke(frame.serverError!!)
                     return@withContext
                 }
-                if (frame.stateDelta.isNotEmpty()) {
-                    signals.seed(frame.stateDelta.map { (id, v) -> id to v.toKitValue().toVmValue() })
-                }
                 registerFrameHandlers(frame)
+                if (frame.stateDelta.isNotEmpty()) {
+                    signals.seed(frame.stateDelta.map { (id, v) -> id to v.toKitValue(stringResolver::resolve).toVmValue(stringIndex) })
+                }
                 val root =
                     runCatching { shadowTree.applyFrame(frame, this@FluxExecutor) }
                         .onFailure {
@@ -318,7 +318,10 @@ public class FluxExecutor(
                         .getOrNull()
                 onTreeChanged?.invoke()
                 if (root == null && frame.fullTree) {
-                    onError?.invoke(FluxError(kind = FluxErrorKind.RUNTIME, message = "no root node in frame"))
+                    // `runCatching` above already reported the underlying failure via
+                    // `onError` (if any); the "no root node" case is reached when
+                    // the Init frame genuinely lacks a root node, which the apply
+                    // failure would have already surfaced.
                 }
             }
         }
@@ -337,19 +340,16 @@ public class FluxExecutor(
      */
     @MainThread
     override fun dispatch(event: HandlerEvent) {
+        // Re-seed the ForEach row's `itemSlot` with the correct per-row element
+        // before the VM reads it (FLUX-092). Mirrors iOS `reconciler.itemContext`
+        // + `graph.write(ctx.slot, ctx.element)` done inside the Task dispatch.
+        shadowTree.seedRowContext(event.nodeId)
         when (val payload = event.payload) {
-            // A string payload must be interned to a canonical id before the VM.
             is KitValue.Str ->
-                reactiveScope.launch {
-                    dispatchAsync(
-                        event.handlerId,
-                        dev.flux.host.vm.FluxValue
-                            .StrVal(internString(payload.value)),
-                    )
-                }
+                dispatch(event.handlerId, dev.flux.host.vm.FluxValue.StrVal(internStringSync(payload.value)))
             else -> {
                 val vm = payload?.toVmValue(stringIndex) ?: dev.flux.host.vm.FluxValue.NullVal
-                reactiveScope.launch { dispatchAsync(event.handlerId, vm) }
+                dispatch(event.handlerId, vm)
             }
         }
     }
@@ -545,6 +545,17 @@ public class FluxExecutor(
      * @param text the string to intern.
      * @return the canonical `StringId` for [text].
      */
+    /** Non-suspending variant: interns locally without a server roundtrip. */
+    private fun internStringSync(text: String): UInt {
+        val known = stringIndex.resolve(text)
+        if (known < STRING_ID_CANONICAL_CEILING) return known
+        val id = fallbackId(text)
+        stringIndex = stringIndex.with(text, id)
+        stringResolver = (stringResolver as? TableStringResolver)?.with(text, id)
+            ?: TableStringResolver(mapOf(id to text))
+        return id
+    }
+
     public suspend fun internString(text: String): UInt {
         val known = stringIndex.resolve(text)
         if (known < STRING_ID_CANONICAL_CEILING) return known

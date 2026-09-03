@@ -38,6 +38,21 @@ private fun ShadowTree.depthOf(id: UInt): UInt {
     return d
 }
 
+/** Returns all descendant ids of [nodeId], including itself. */
+private fun ShadowTree.subtreeOf(nodeId: UInt): Set<UInt> {
+    val result = LinkedHashSet<UInt>()
+    val queue = ArrayDeque<UInt>().apply { add(nodeId) }
+    while (queue.isNotEmpty()) {
+        val cur = queue.removeFirst()
+        result.add(cur)
+        val node = nodes[cur] ?: continue
+        for (child in node.children) {
+            if (result.add(child.id)) queue.addLast(child.id)
+        }
+    }
+    return result
+}
+
 /**
  * Re-reconciles only the nodes whose recorded signal dependencies intersect
  * [writtenSignals] (R1) — the signals a handler just wrote. The walk descends only
@@ -64,13 +79,22 @@ public fun ShadowTree.reconcileDirty(
     // are merely re-parented are NOT reported as dirty.
     val ordered = dirty.sortedWith(compareBy({ depthOf(it) }, { it }))
     emitTrace(TraceEvent.Dirty(seq = lastSeq, ids = ordered))
+    // Track ForEach subtrees that were just re-expanded so their children —
+    // already re-materialised by `reconcileForEach` — are skipped below.
+    // Without this, `materializeProps` runs again for each child after the
+    // ForEach's `itemSlot` was last seeded to the final row's element,
+    // overwriting each row's label with the last value (or empty). (FLUX-082)
+    val forEachSubtrees = mutableSetOf<UInt>()
     for (id in ordered) {
+        // Skip nodes that are descendants of a ForEach re-expanding right now.
+        if (forEachSubtrees.any { id in subtreeOf(it) }) continue
         val node = nodes[id] ?: continue
         // A `ForEach` whose list signal changed must re-expand its rows (append /
         // remove / clear), not just re-materialise its own (empty) props — this is
         // the dynamic list re-expansion that was missing (FLUX-072 / ADR-0050).
-        if (signalMeta[id]?.itemSlot != null) {
+        if (signalMeta[id]?.itemSlot != null || signalMetaOverride[id]?.itemSlot != null) {
             reconcileForEach(node)
+            forEachSubtrees.add(id)
         }
         // ADR-0027 (FA-IRWIRE): re-materialise dynamic props against the freshly
         // written signals before sending the kit to the adapter.

@@ -77,9 +77,11 @@ public fun FluxRoot(session: FluxSession) {
                 routerVersion = frameVersion,
                 imageCache = session.imageCache,
                 assetBaseUrl = session.assetBaseUrl,
-                onButtonClick = { handlerId -> executor.dispatch(dev.flux.ui.HandlerEvent(handlerId)) },
-                onTextChange = { handlerId, value ->
-                    executor.dispatch(dev.flux.ui.HandlerEvent(handlerId, dev.flux.ui.FluxValue.Str(value)))
+                onButtonClick = { handlerId, nodeId ->
+                    executor.dispatch(dev.flux.ui.HandlerEvent(handlerId, nodeId))
+                },
+                onTextChange = { handlerId, nodeId, value ->
+                    executor.dispatch(dev.flux.ui.HandlerEvent(handlerId, nodeId, dev.flux.ui.FluxValue.Str(value)))
                 },
             )
             else -> Text("Flux — connecting…", modifier = Modifier.align(Alignment.Center))
