@@ -9,6 +9,7 @@ import dev.flux.host.vm.Instruction
 import dev.flux.host.wire.FrameBuilder
 import dev.flux.host.wire.FrameDeserializer
 import dev.flux.host.wire.WireValue
+import dev.flux.ui.HandlerEvent
 import dev.flux.ui.PropsIndex
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -141,7 +142,7 @@ class ForEachReexpandE2ETest {
             // Tap "Add task": append a new element to the list signal.
             val closure = appendClosure(listSignal, FluxValue.StrVal(50u))
             executor.registerClosure(5u, closure)
-            executor.dispatch(5u)
+            executor.dispatch(dev.flux.ui.HandlerEvent(5u, 0u))
             dispatcher.scheduler.runCurrent()
             signals.flush()
 

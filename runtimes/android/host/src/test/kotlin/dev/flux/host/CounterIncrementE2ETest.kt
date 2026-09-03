@@ -83,7 +83,7 @@ class CounterIncrementE2ETest {
             println("E2E text before=$textBefore")
 
             // Simulate the tap.
-            executor.dispatch(dev.flux.ui.HandlerEvent(handlerId))
+            executor.dispatch(dev.flux.ui.HandlerEvent(handlerId, 0u))
             dispatcher.scheduler.runCurrent()
             signals.flush()
 

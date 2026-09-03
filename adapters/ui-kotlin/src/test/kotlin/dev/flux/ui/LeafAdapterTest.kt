@@ -29,9 +29,9 @@ class LeafAdapterTest {
         // Simulate a tap: the host view fires the bound handler.
         val handlerId = view.getProperty(ButtonAdapter.PROP_HANDLER) as UInt
         val bound = view.getProperty(ButtonAdapter.PROP_EXECUTOR) as WeakReference<FluxExecutor>
-        bound.get()?.dispatch(HandlerEvent(handlerId))
+        bound.get()?.dispatch(HandlerEvent(handlerId, 0u))
 
-        assertEquals(listOf(HandlerEvent(7u)), executor.events)
+        assertEquals(listOf(HandlerEvent(7u, 0u)), executor.events)
     }
 
     @Test
@@ -43,7 +43,7 @@ class LeafAdapterTest {
         adapter.bindHandler(view, propsOf(PropsIndex.BUTTON_ON_PRESS to FluxValue.HandlerRef(9u)), WeakReference(executor))
         val handlerId = view.getProperty(ButtonAdapter.PROP_HANDLER) as UInt
         val bound = view.getProperty(ButtonAdapter.PROP_EXECUTOR) as WeakReference<FluxExecutor>
-        bound.get()?.dispatch(HandlerEvent(handlerId))
+        bound.get()?.dispatch(HandlerEvent(handlerId, 0u))
         assertEquals(emptyList<HandlerEvent>(), executor.events)
     }
 
@@ -68,9 +68,9 @@ class LeafAdapterTest {
         adapter.bindHandler(view, propsOf(PropsIndex.TEXT_INPUT_ON_CHANGE_TEXT to FluxValue.HandlerRef(3u)), WeakReference(executor))
         val handlerId = view.getProperty(TextInputAdapter.PROP_HANDLER) as UInt
         val bound = view.getProperty(TextInputAdapter.PROP_EXECUTOR) as WeakReference<FluxExecutor>
-        bound.get()?.dispatch(HandlerEvent(handlerId, FluxValue.Str("def")))
+        bound.get()?.dispatch(HandlerEvent(handlerId, 0u, FluxValue.Str("def")))
 
-        assertEquals(listOf(HandlerEvent(3u, FluxValue.Str("def"))), executor.events)
+        assertEquals(listOf(HandlerEvent(3u, 0u, FluxValue.Str("def"))), executor.events)
     }
 
     @Test

@@ -112,7 +112,7 @@ class RuntimeFixesPart2Test {
             // A closure that writes signal 1 = 1 when handler 5 runs.
             executor.registerClosure(5u, counterSetClosure())
             // Adapter reports a tap carrying a runtime string; the host must intern it.
-            executor.dispatch(HandlerEvent(5u, KitValue.Str("tap text")))
+            executor.dispatch(HandlerEvent(5u, nodeId = 0u, payload = KitValue.Str("tap text")))
 
             // The fire-and-forget launch registers its InternString listener and
             // suspends awaiting the reply — pump so it is listening before we reply.

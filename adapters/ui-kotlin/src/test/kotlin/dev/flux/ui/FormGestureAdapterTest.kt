@@ -28,8 +28,8 @@ class FormGestureAdapterTest {
         val executor = FluxExecutorFake()
         adapter.bindHandler(view, propsOf(PropsIndex.SWITCH_ON_CHANGE to FluxValue.HandlerRef(11u)), WeakReference(executor))
         val bound = view.getProperty(SwitchAdapter.PROP_EXECUTOR) as WeakReference<FluxExecutor>
-        bound.get()?.dispatch(HandlerEvent(view.getProperty(SwitchAdapter.PROP_HANDLER) as UInt, FluxValue.Bool(false)))
-        assertEquals(listOf(HandlerEvent(11u, FluxValue.Bool(false))), executor.events)
+        bound.get()?.dispatch(HandlerEvent(view.getProperty(SwitchAdapter.PROP_HANDLER) as UInt, 0u, FluxValue.Bool(false)))
+        assertEquals(listOf(HandlerEvent(11u, 0u, FluxValue.Bool(false))), executor.events)
     }
 
     @Test
@@ -58,8 +58,8 @@ class FormGestureAdapterTest {
             WeakReference(executor),
         )
         val bound = view.getProperty(ToggleAdapter.PROP_EXECUTOR) as WeakReference<FluxExecutor>
-        bound.get()?.dispatch(HandlerEvent(view.getProperty(ToggleAdapter.PROP_HANDLER) as UInt, FluxValue.Bool(false)))
-        assertEquals(listOf(HandlerEvent(15u, FluxValue.Bool(false))), executor.events)
+        bound.get()?.dispatch(HandlerEvent(view.getProperty(ToggleAdapter.PROP_HANDLER) as UInt, 0u, FluxValue.Bool(false)))
+        assertEquals(listOf(HandlerEvent(15u, 0u, FluxValue.Bool(false))), executor.events)
     }
 
     @Test
@@ -91,8 +91,8 @@ class FormGestureAdapterTest {
         val executor = FluxExecutorFake()
         adapter.bindHandler(view, propsOf(PropsIndex.CHECKBOX_ON_CHANGE to FluxValue.HandlerRef(5u)), WeakReference(executor))
         val bound = view.getProperty(CheckboxAdapter.PROP_EXECUTOR) as WeakReference<FluxExecutor>
-        bound.get()?.dispatch(HandlerEvent(view.getProperty(CheckboxAdapter.PROP_HANDLER) as UInt, FluxValue.Bool(false)))
-        assertEquals(listOf(HandlerEvent(5u, FluxValue.Bool(false))), executor.events)
+        bound.get()?.dispatch(HandlerEvent(view.getProperty(CheckboxAdapter.PROP_HANDLER) as UInt, 0u, FluxValue.Bool(false)))
+        assertEquals(listOf(HandlerEvent(5u, 0u, FluxValue.Bool(false))), executor.events)
     }
 
     // --- Slider (FLUX-040) ---
@@ -118,8 +118,8 @@ class FormGestureAdapterTest {
         val executor = FluxExecutorFake()
         adapter.bindHandler(view, propsOf(PropsIndex.SLIDER_ON_CHANGE to FluxValue.HandlerRef(8u)), WeakReference(executor))
         val bound = view.getProperty(SliderAdapter.PROP_EXECUTOR) as WeakReference<FluxExecutor>
-        bound.get()?.dispatch(HandlerEvent(view.getProperty(SliderAdapter.PROP_HANDLER) as UInt, FluxValue.Float(0.8)))
-        assertEquals(listOf(HandlerEvent(8u, FluxValue.Float(0.8))), executor.events)
+        bound.get()?.dispatch(HandlerEvent(view.getProperty(SliderAdapter.PROP_HANDLER) as UInt, 0u, FluxValue.Float(0.8)))
+        assertEquals(listOf(HandlerEvent(8u, 0u, FluxValue.Float(0.8))), executor.events)
     }
 
     // --- Picker (FLUX-040) ---
@@ -142,8 +142,8 @@ class FormGestureAdapterTest {
         val executor = FluxExecutorFake()
         adapter.bindHandler(view, propsOf(PropsIndex.PICKER_ON_CHANGE to FluxValue.HandlerRef(9u)), WeakReference(executor))
         val bound = view.getProperty(PickerAdapter.PROP_EXECUTOR) as WeakReference<FluxExecutor>
-        bound.get()?.dispatch(HandlerEvent(view.getProperty(PickerAdapter.PROP_HANDLER) as UInt, FluxValue.Int(0L)))
-        assertEquals(listOf(HandlerEvent(9u, FluxValue.Int(0L))), executor.events)
+        bound.get()?.dispatch(HandlerEvent(view.getProperty(PickerAdapter.PROP_HANDLER) as UInt, 0u, FluxValue.Int(0L)))
+        assertEquals(listOf(HandlerEvent(9u, 0u, FluxValue.Int(0L))), executor.events)
     }
 
     // --- DatePicker (FLUX-040) ---
@@ -167,8 +167,8 @@ class FormGestureAdapterTest {
         val executor = FluxExecutorFake()
         adapter.bindHandler(view, propsOf(PropsIndex.DATE_PICKER_ON_CHANGE to FluxValue.HandlerRef(12u)), WeakReference(executor))
         val bound = view.getProperty(DatePickerAdapter.PROP_EXECUTOR) as WeakReference<FluxExecutor>
-        bound.get()?.dispatch(HandlerEvent(view.getProperty(DatePickerAdapter.PROP_HANDLER) as UInt, FluxValue.Int(1500L)))
-        assertEquals(listOf(HandlerEvent(12u, FluxValue.Int(1500L))), executor.events)
+        bound.get()?.dispatch(HandlerEvent(view.getProperty(DatePickerAdapter.PROP_HANDLER) as UInt, 0u, FluxValue.Int(1500L)))
+        assertEquals(listOf(HandlerEvent(12u, 0u, FluxValue.Int(1500L))), executor.events)
     }
 
     // --- TextArea (FLUX-040) ---
@@ -192,8 +192,8 @@ class FormGestureAdapterTest {
         val executor = FluxExecutorFake()
         adapter.bindHandler(view, propsOf(PropsIndex.TEXT_AREA_ON_CHANGE to FluxValue.HandlerRef(6u)), WeakReference(executor))
         val bound = view.getProperty(TextAreaAdapter.PROP_EXECUTOR) as WeakReference<FluxExecutor>
-        bound.get()?.dispatch(HandlerEvent(view.getProperty(TextAreaAdapter.PROP_HANDLER) as UInt, FluxValue.Str("updated")))
-        assertEquals(listOf(HandlerEvent(6u, FluxValue.Str("updated"))), executor.events)
+        bound.get()?.dispatch(HandlerEvent(view.getProperty(TextAreaAdapter.PROP_HANDLER) as UInt, 0u, FluxValue.Str("updated")))
+        assertEquals(listOf(HandlerEvent(6u, 0u, FluxValue.Str("updated"))), executor.events)
     }
 
     // --- Gesture (FLUX-041) ---
@@ -215,8 +215,8 @@ class FormGestureAdapterTest {
         val executor = FluxExecutorFake()
         adapter.bindHandler(view, propsOf(PropsIndex.GESTURE_ON_GESTURE to FluxValue.HandlerRef(21u)), WeakReference(executor))
         val bound = view.getProperty(GestureAdapter.PROP_EXECUTOR) as WeakReference<FluxExecutor>
-        bound.get()?.dispatch(HandlerEvent(view.getProperty(GestureAdapter.PROP_HANDLER) as UInt))
-        assertEquals(listOf(HandlerEvent(21u)), executor.events)
+        bound.get()?.dispatch(HandlerEvent(view.getProperty(GestureAdapter.PROP_HANDLER) as UInt, 0u))
+        assertEquals(listOf(HandlerEvent(21u, 0u)), executor.events)
     }
 
     @Test
@@ -244,7 +244,7 @@ class FormGestureAdapterTest {
         executor.dispose()
         adapter.bindHandler(view, propsOf(PropsIndex.GESTURE_ON_GESTURE to FluxValue.HandlerRef(3u)), WeakReference(executor))
         val bound = view.getProperty(GestureAdapter.PROP_EXECUTOR) as WeakReference<FluxExecutor>
-        bound.get()?.dispatch(HandlerEvent(view.getProperty(GestureAdapter.PROP_HANDLER) as UInt))
+        bound.get()?.dispatch(HandlerEvent(view.getProperty(GestureAdapter.PROP_HANDLER) as UInt, 0u))
         assertEquals(emptyList<HandlerEvent>(), executor.events)
     }
 
