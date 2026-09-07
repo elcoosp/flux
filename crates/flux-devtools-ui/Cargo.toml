@@ -10,6 +10,7 @@ repository.workspace = true
 default = []
 
 [dependencies]
+flux-perf-harness = "workspace (= path crate)"
 flux-syntax.workspace = true
 flux-ir-serde.workspace = true
 flux-ir.workspace = true
