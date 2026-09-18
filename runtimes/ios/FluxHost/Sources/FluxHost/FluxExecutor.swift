@@ -165,6 +165,8 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
     private let httpRequests = HttpRequestStore()
     /// The production `Http` transport (FLUX-047); `URLSessionHttpTransport`.
     private let httpTransport: HttpTransport = URLSessionHttpTransport()
+    /// The capability registry (audit C10: shares store with async resolver).
+    private var capRegistry = CapabilityRegistry()
     /// Handler id → (closure descriptor + bytecode blob + pre-decoded instruction
     /// stream). The decoded `[Instruction]` is produced once at registration (R3)
     /// and reused on every dispatch, so the per-tap hot path never re-decodes. A
@@ -275,7 +277,7 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
         ).table
         // Remove any existing http/persist entries (caps 14/15) and add shared ones
         devEntries.removeAll { $0.capId == 14 || $0.capId == 15 }
-        devEntries.append(contentsOf: HttpCapabilities.httpPersistEntries(
+        devEntries.append(contentsOf: CapabilityRegistry.httpPersistEntries(
             store: httpRequests,
             transport: httpTransport
         ))
@@ -450,7 +452,7 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
                 signals: &store,
                 payload: payload,
                 stringTable: table,
-                capRegistry: .dev,
+                capRegistry: self.capRegistry,
                 permissions: permissionChecker
             )
             return (outcome, nil)

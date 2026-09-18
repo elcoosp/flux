@@ -55,7 +55,7 @@ typealias CapabilityStore = InMemoryStorageBackend
 /// `inout` parameter is `Sendable`, hence the explicit opt-out.
 public final class CapabilityRegistry: @unchecked Sendable {
     /// The backing `(capId, methodId)` → impl table.
-    private let table: [(capId: UInt32, methodId: UInt16, impl: CapabilityImpl)]
+    let table: [(capId: UInt32, methodId: UInt16, impl: CapabilityImpl)]
 
     /// Stateful capability backing store (e.g. `Storage`), shared by impls.
     private let store: any StorageBackend
