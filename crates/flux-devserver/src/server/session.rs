@@ -55,18 +55,40 @@ pub(crate) async fn serve_client(stream: TcpStream, shared: Arc<Shared>) -> Resu
     // handshake and receive uncompressed frames — enabling compression is
     // backward-compatible and never breaks a connection.
     let socket = accept_async_with_config(stream, Some(websocket_config())).await?;
-    let queue = shared.register();
-    run_session(socket, queue, shared).await
-}
-
-/// The read/write select loop for one upgraded connection.
-async fn run_session(
-    socket: HostSocket,
-    mut queue: UnboundedReceiver<Vec<u8>>,
-    shared: Arc<Shared>,
-) -> Result<(), WsError> {
+    // Audit C7: register the client into the broadcast list ONLY after a
+    // successful Hello. A rejected handshake must close the socket, never
+    // leave the client subscribed to Init/Delta traffic.
     let (mut writer, mut reader) = socket.split();
-    let mut handshook = false;
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    let mut queue = None;
+    loop {
+        let next = tokio::time::timeout_at(deadline, reader.next()).await;
+        match next {
+            Err(_) => return Ok(()), // handshake timeout: drop silent clients
+            Ok(None) => return Ok(()),
+            Ok(Some(Ok(Message::Binary(bytes)))) => {
+                if is_hello(&bytes) {
+                    if let Some(reply) = handle_hello(&bytes, &shared).await {
+                        writer.send(Message::Binary(reply.into())).await?;
+                        // Accepted - register for broadcasts
+                        queue = Some(shared.register());
+                        break;
+                    }
+                    // Rejected - close without registering
+                    return Ok(());
+                }
+                // Non-Hello frames before handshake - ignore
+            }
+            Ok(Some(Ok(Message::Close(_)))) => return Ok(()),
+            Ok(Some(Err(error))) => return Err(error),
+            _ => {}
+        }
+    }
+    // Handshake complete - run the broadcast fan-out loop
+    let mut queue = match queue {
+        Some(q) => q,
+        None => return Ok(()),
+    };
     while !shared.is_shutdown() {
         tokio::select! {
             incoming = reader.next() => match incoming {
@@ -74,16 +96,13 @@ async fn run_session(
                     for frame in handle_host_frame(&bytes, &shared).await {
                         writer.send(Message::Binary(frame.into())).await?;
                     }
-                    if is_hello(&bytes) {
-                        handshook = true;
-                    }
                 }
                 Some(Ok(Message::Close(_))) | None => return Ok(()),
                 Some(Ok(_)) => {}
                 Some(Err(WsError::ConnectionClosed | WsError::AlreadyClosed)) => return Ok(()),
                 Some(Err(error)) => return Err(error),
             },
-            queued = queue.recv(), if handshook => match queued {
+            queued = queue.recv() => match queued {
                 Some(frame) => writer.send(Message::Binary(frame.into())).await?,
                 None => return Ok(()),
             },
