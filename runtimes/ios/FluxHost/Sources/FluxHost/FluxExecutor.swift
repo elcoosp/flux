@@ -265,6 +265,21 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
                 MainActor.assumeIsolated { self?.table ?? MaterializationStringTable() }
             }
         )
+        // Audit C10: the registry's Http/Persist entries MUST share the same
+        // HttpRequestStore the async resolver polls, otherwise a request
+        // written by the capability is never observed by the resolver.
+        // Replace the httpPersistEntries with ones sharing our store.
+        var devEntries = CapabilityRegistry.makeDev(
+            backend: InMemoryStorageBackend(),
+            nativeHost: CapabilityRegistry.realNativeHost ?? DevNativeCapabilityHost()
+        ).table
+        // Remove any existing http/persist entries (caps 14/15) and add shared ones
+        devEntries.removeAll { $0.capId == 14 || $0.capId == 15 }
+        devEntries.append(contentsOf: HttpCapabilities.httpPersistEntries(
+            store: httpRequests,
+            transport: httpTransport
+        ))
+        self.capRegistry = CapabilityRegistry(entries: devEntries, store: InMemoryStorageBackend())
         // When DevTools connects, replay the current shadow tree so its component
         // tree populates immediately (FLUX-039: snapshot-on-connect).
         fluxDevtoolsOnConnect = { [weak self] in

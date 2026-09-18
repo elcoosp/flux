@@ -35,6 +35,10 @@ public enum PermissionKind: Equatable {
     /// Wrapping an arbitrary native SDK through the `.native` escape hatch
     /// (FLUX-046); gated by an explicit LANE-I allow-list.
     case nativeModule
+    /// Network access (Http.get/post/...) — audit C10: missing case hard-denied all Http.
+    case network
+    /// Persistent storage (Persist.get/set) — audit C10: missing case hard-denied all Persist.
+    case storage
 }
 
 /// Answers whether a `PermissionKind` has been granted on the host. The production
@@ -77,6 +81,8 @@ public func requiredPermission(capID: UInt32, methodID: UInt16) -> PermissionKin
     case 11: .sensors // Sensors.read
     case 12: PermissionKind.none // WebView.load — sandbox-contained, no OS prompt (FLUX-048)
     case 13: .nativeModule // NativeModule.invoke — explicit .native grant (FLUX-046)
+    case 14: .network      // Http.get/post/... — audit C10: missing case hard-denied all Http
+    case 15: .storage      // Persist.get/set — audit C10: missing case hard-denied all Persist
     default: nil
     }
 }
