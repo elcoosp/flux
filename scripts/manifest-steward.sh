@@ -24,6 +24,8 @@ readonly REQUEST_FILE="MANIFEST_REQUESTS.md"
 readonly TABLE_HEADER='| crate | dependency | version | reason |'
 
 DRY_RUN=0
+STEWARD_TMP_ERR="$(mktemp)"
+trap 'rm -f "$STEWARD_TMP_ERR"' EXIT
 
 usage() {
   printf 'usage: %s [--dry-run]\n' "${0##*/}" >&2
@@ -190,6 +192,23 @@ main() {
   if [ -z "$applied" ]; then
     printf 'manifest-steward: nothing applied.\n'
     return 0
+  fi
+
+  # Validate the workspace still parses as TOML before committing (audit C14).
+  # A bad insertion must fail the steward PR, not break main.
+  if command -v cargo >/dev/null 2>&1; then
+    if ! cargo metadata --no-deps --format-version 1 >/dev/null 2> "$STEWARD_TMP_ERR"; then
+      echo "::error::manifest edit produced an invalid workspace TOML; aborting" >&2
+      cat "$STEWARD_TMP_ERR" >&2
+      exit 1
+    fi
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 - <<'PYTOML' || { echo "::error::manifest edit produced invalid TOML" >&2; exit 1; }
+import tomllib, sys
+for p in ("Cargo.toml", "crates/flux-devtools-ui/Cargo.toml"):
+    with open(p, "rb") as fh:
+        tomllib.load(fh)
+PYTOML
   fi
 
   # shellcheck disable=SC2086
