@@ -237,12 +237,12 @@ check_forbidden() {
             [ -z "$m" ] && continue
             warn "$rel" "${m%%:*}" "forbidden in non-test code (§2.2/§2.3): ${m#*:}"
             violations=$((violations+1))
-          done < <(grep -nE '(try!|[A-Za-z0-9_)\]]\s*!(=|\?|;|,|\)|\s|$))' "$f" \
-                     | grep -vE '//.*(!|\?)' | grep -E '(!|\?)')
+          done < <(grep -nE '(try!|[]A-Za-z0-9_)]!([^=]|$))' "$f" \
+                               | grep -vE '//.*(!|\\?)' | grep -E '(!|\\?)')
         else
           added="$(git -C "$REPO_ROOT" diff -U0 "$MERGE_BASE" "$HEAD_REF" -- "$f" \
             | grep -E '^\+[^+]' | sed 's/^\+//' \
-            | grep -cE '(try!|[A-Za-z0-9_)\]]\s*!(=|\?|;|,|\)|\s|$))')"
+            | grep -cE '(try!|[]A-Za-z0-9_)]!([^=]|$))')"
           if [ "$added" -gt 0 ]; then
             warn "$rel" "new" "forbidden in non-test code (§2.2/§2.3): $added added line(s) with try!/force-unwrap"
             violations=$((violations+added))
