@@ -148,7 +148,15 @@ struct ShadowTreeReconciler {
                 blobs[Data(handler.closure.hash)] = bytecode
             }
         }
-        thunkBlobs = blobs
+        // Audit H12: replacing thunkBlobs on every frame dropped every OTHER
+        // thunk's bytecode after a hot reload; merge like thunkHandlerToNode.
+        for (hash, blob) in blobs {
+            thunkBlobs[hash] = blob
+        }
+        // Blobs for handlers no longer present in the new frame are removed so
+        // stale thunks cannot resurrect:
+        let liveHandlerHashes = Set(blobs.keys)
+        thunkBlobs = thunkBlobs.filter { liveHandlerHashes.contains($0.key) }
         // Join the frame's handler ids (stable across edits) to each node's
         // prop-thunk (identified by its content hash) so a state-preserving
         // `Handler` patch can find the node to re-materialise. The delta frame
@@ -238,7 +246,11 @@ struct ShadowTreeReconciler {
             // the new authoritative table. This is a full rebuild rather than a
             // surgical patch, which is acceptable for the cold hot-reload case
             // where every id changed.
-            built.removeAll()
+            // Audit H3: only wipe when the root was actually replaced. Wiping on
+            // every delta frame destroyed all native view identity (scroll/focus/
+            // text loss) and skipped adapter.destroy/onCleanup.
+            let rootReplaced = newRootId != rootId
+            if rootReplaced { built.removeAll() }
             nodeTable = patchNodes
             currentRootId = newRootId
             reconcile(nodeId: newRootId, parentId: 0, nodes: patchNodes, report: &report)
