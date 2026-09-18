@@ -696,6 +696,13 @@ impl<'a> Emitter<'a> {
         self.code.extend_from_slice(&idx.to_le_bytes());
         self.code.push(src);
     }
+
+    /// Emits `LOAD_INT_CONST dst, imm` — loads an i64 immediate into a register.
+    fn emit_load_int_const(&mut self, dst: u8, imm: i64) {
+        self.code.push(raw::LOAD_INT_CONST);
+        self.code.push(dst);
+        self.code.extend_from_slice(&imm.to_le_bytes());
+    }
     fn signal_of(&mut self, name: &str, span: Span) -> Result<SignalId, HandlerCompileError> {
         match self.scope.iter().find(|(n, _)| n == name) {
             Some((_, id)) => {
@@ -1620,12 +1627,31 @@ impl<'a> Emitter<'a> {
                     // handler (e.g. `tasks.append(Task(label: x, done: y))`)
                     // would store fields at sequential indices and the reader
                     // would miss them (FLUX-072 #4).
+                    //
+                    // Field 0 carries the variant tag (audit C5): the VM's
+                    // MATCH_TAG reads the tag from record field 0. +1 for the
+                    // tag slot; reject a payload field whose PropIdx collides
+                    // with 0.
                     let dst = self.alloc_reg()?;
-                    self.emit_alloc_record(dst, arg_regs.len() as u16);
+                    self.emit_alloc_record(dst, arg_regs.len() as u16 + 1);
+                    let tag_reg = self.alloc_reg()?;
+                    self.emit_load_int_const(tag_reg, variant_tag(&ident.name) as i64);
+                    self.emit_set_field(dst, 0, tag_reg);
                     let mut positional: u16 = 0;
                     for (arg, reg) in args.iter().zip(arg_regs.iter()) {
                         let idx: u16 = match arg {
-                            flux_parser::Arg::Named { name, .. } => prop_index_for_name(&name.name),
+                            flux_parser::Arg::Named { name, .. } => {
+                                let idx = prop_index_for_name(&name.name);
+                                if idx == 0 {
+                                    return Err(HandlerCompileError::new(
+                                        "record field hashes to the reserved tag slot 0 — \
+                                         rename the field (audit C5)"
+                                            .to_owned(),
+                                        expr.span,
+                                    ));
+                                }
+                                idx
+                            }
                             _ => {
                                 // Positional args keep their sequential slot.
                                 let p = positional;

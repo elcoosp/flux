@@ -61,7 +61,7 @@ use crate::arena::IRArena;
 use crate::builder::{ArenaBuilder, Node};
 use crate::closure::ClosureIR;
 use crate::instance::InstanceRegistry;
-use crate::lower::bytecode::{collect_read_signals, compile_prop_thunk};
+use crate::lower::bytecode::{collect_read_signals, compile_prop_thunk, variant_tag};
 use ids::{ExprNodeKind, decl_node_id, expr_node_id};
 
 /// The fully lowered program.
@@ -880,13 +880,17 @@ impl<'a> Lowerer<'a> {
                 }
                 Ok(Value::List(lowered))
             }
-            flux_parser::ExprKind::Record { name: _, fields } => {
+            flux_parser::ExprKind::Record { name, fields } => {
                 // A record literal (`Task(label: "x", done: false)`) lowers to a
                 // `Value::Record` keyed by stable field `PropIdx`s (Appendix C).
-                // The record type name is unused on the wire — fields are
-                // position-independent, matched by index — so it is dropped here.
+                // Field 0 carries the variant tag so `match` over a seeded
+                // record agrees with handler construction (audit C5).
                 let mut lowered: Vec<(flux_syntax::PropIdx, Value)> =
-                    Vec::with_capacity(fields.len());
+                    Vec::with_capacity(fields.len() + 1);
+                lowered.push((
+                    flux_syntax::PropIdx::from(0u16),
+                    Value::Int(i64::from(variant_tag(name.name.as_str()))),
+                ));
                 for (fname, fexpr) in fields {
                     let idx = prop_index_for_name(&fname.name);
                     lowered.push((idx, self.lower_value(fexpr, owner, handlers)?));

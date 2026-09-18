@@ -237,9 +237,19 @@ compo C
                     // side use — NOT sequential 0/1. A runtime-constructed
                     // record must agree with the static one or readers miss the
                     // field (FLUX-072 #4).
-                    assert_eq!(fields.len(), 2, "record has two fields");
+                    //
+                    // Field 0 carries the variant tag (audit C5): the VM's
+                    // MATCH_TAG reads the tag from record field 0. So a
+                    // constructed record has 3 fields: tag + label + done.
+                    assert_eq!(fields.len(), 3, "record has tag + two payload fields");
                     let label_idx = flux_ir::lower::prop_index_for_name("label");
                     let done_idx = flux_ir::lower::prop_index_for_name("done");
+                    // Field 0 = variant tag (stored at raw PropIdx 0)
+                    let tag_field = fields.iter().find(|(i, _)| *i == flux_syntax::PropIdx::from(0u16));
+                    assert!(
+                        tag_field.is_some(),
+                        "field 0 must carry the variant tag"
+                    );
                     assert_eq!(
                         fields.iter().find(|(i, _)| *i == label_idx).map(|(_, v)| v),
                         Some(&Value::Str(flux_syntax::StringId::from(1u32))),
