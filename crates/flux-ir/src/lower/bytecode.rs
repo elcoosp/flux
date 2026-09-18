@@ -20,7 +20,7 @@ use flux_parser::{
     BinOp, Block, BlockItem, Expr, ExprKind, MatchArm, MatchPattern, MatchPatternKind,
 };
 use flux_syntax::opcode::raw;
-use flux_syntax::{ExprTag, PropIdx, SignalId, Span, StringId, Value, compute_node_id};
+use flux_syntax::{PropIdx, SignalId, Span, StringId, Value};
 use flux_types::CapabilityIdl;
 use std::collections::HashSet;
 
@@ -420,6 +420,14 @@ struct Emitter<'a> {
     code: Vec<u8>,
     captured: Vec<SignalId>,
     reg: u8,
+    /// Statement-scope watermark: registers at or above the watermark are
+    /// scratch for the current statement and are reclaimed when it ends.
+    /// Signal cells / records / props persist outside registers, so nothing
+    /// live crosses a statement boundary (audit C1 step 2).
+    watermark: u8,
+    /// Span of the expression currently being compiled, for register-exhaustion
+    /// diagnostics. Updated at the top of `compile_value`/`compile_call`.
+    current_span: Span,
     /// Interns a string literal, returning its content-addressed [`StringId`].
     /// The type is a `dyn FnMut` so the emitter stays decoupled from the arena
     /// owner; callers supply `|s| self.intern_str(s).as_str_id()` (the
@@ -443,6 +451,8 @@ impl<'a> Emitter<'a> {
             captured: Vec::new(),
             // r0 = payload, r15 = gas; start allocating at r1.
             reg: 1,
+            watermark: 0,
+            current_span: Span::new(0, 0, 0),
             str_interner,
         }
     }
@@ -474,6 +484,8 @@ impl<'a> Emitter<'a> {
             code: Vec::new(),
             captured: Vec::new(),
             reg: 2,
+            watermark: 0,
+            current_span: Span::new(0, 0, 0),
             str_interner,
         }
     }
@@ -484,10 +496,33 @@ impl<'a> Emitter<'a> {
         Ok((code, self.captured))
     }
 
-    fn alloc_reg(&mut self) -> u8 {
+    /// Allocates the next scratch register. Handlers have 15 registers (r0..r14);
+    /// exhausting them is a compile error, never a silent alias of a live
+    /// register (audit C1 — a saturating allocator made `count = count + 1`
+    /// miscompile whenever a handler needed too many temporaries).
+    fn alloc_reg(&mut self) -> Result<u8, HandlerCompileError> {
+        if self.reg > 14 {
+            return Err(HandlerCompileError::new(
+                "handler uses more than 15 registers — simplify the expression \
+                 (register pressure limit, audit C1)"
+                    .to_owned(),
+                self.current_span,
+            ));
+        }
         let r = self.reg;
-        self.reg = self.reg.saturating_add(1).min(14);
-        r
+        self.reg += 1;
+        Ok(r)
+    }
+
+    /// Statement-scope watermark: registers at or above the watermark are
+    /// scratch for the current statement and are reclaimed when it ends.
+    /// Signal cells / records / props persist outside registers, so nothing
+    /// live crosses a statement boundary (audit C1 step 2).
+    fn push_watermark(&mut self) {
+        self.watermark = self.reg;
+    }
+    fn pop_watermark(&mut self) {
+        self.reg = self.watermark;
     }
 
     /// Emits `ALLOC_RECORD dst, count` — allocates a record with `count` fields
@@ -539,7 +574,7 @@ impl<'a> Emitter<'a> {
     ) -> Result<u8, HandlerCompileError> {
         let sig_id = self.signal_of(signal, span)?;
         // Read the current list value into a register we can mutate.
-        let list_reg = self.alloc_reg();
+        let list_reg = self.alloc_reg()?;
         self.code.push(raw::READ_SIGNAL);
         self.code.push(list_reg);
         self.code.extend_from_slice(&sig_id.to_le_bytes());
@@ -589,21 +624,21 @@ impl<'a> Emitter<'a> {
                 Ok(list_reg)
             }
             ListMethod::IsEmpty => {
-                let len = self.alloc_reg();
+                let len = self.alloc_reg()?;
                 self.emit_list_len(len, list_reg);
-                let out = self.alloc_reg();
+                let out = self.alloc_reg()?;
                 // `isEmpty` == (length == 0).
                 self.code.push(raw::EQ_I64);
                 self.code.push(out);
                 self.code.push(len);
-                let zero = self.alloc_reg();
+                let zero = self.alloc_reg()?;
                 self.code.push(raw::LOAD_INT_CONST);
                 self.code.push(zero);
                 self.code.extend_from_slice(&0i64.to_le_bytes());
                 Ok(out)
             }
             ListMethod::Length => {
-                let len = self.alloc_reg();
+                let len = self.alloc_reg()?;
                 self.emit_list_len(len, list_reg);
                 Ok(len)
             }
@@ -695,7 +730,7 @@ impl<'a> Emitter<'a> {
         match &base.kind {
             ExprKind::Ident(name) => {
                 if let Ok(sig_id) = self.signal_of(&name.name, span) {
-                    let rec_reg = self.alloc_reg();
+                    let rec_reg = self.alloc_reg()?;
                     self.code.push(raw::READ_SIGNAL);
                     self.code.push(rec_reg);
                     self.code.extend_from_slice(&sig_id.to_le_bytes());
@@ -996,6 +1031,7 @@ impl<'a> Emitter<'a> {
     /// Emits every item of `block` as a statement.
     fn compile_block(&mut self, block: &Block) -> Result<(), HandlerCompileError> {
         for item in &block.items {
+            self.push_watermark();
             match item {
                 BlockItem::State(decl) => {
                     self.compile_assignment(&decl.name.name, &decl.init)?;
@@ -1010,6 +1046,7 @@ impl<'a> Emitter<'a> {
                     ));
                 }
             }
+            self.pop_watermark();
         }
         Ok(())
     }
@@ -1076,9 +1113,10 @@ impl<'a> Emitter<'a> {
     /// value. Emits READ_SIGNAL for signal references and the appropriate
     /// arithmetic opcode for binary expressions.
     fn compile_value(&mut self, expr: &Expr) -> Result<u8, HandlerCompileError> {
+        self.current_span = expr.span;
         match &expr.kind {
             ExprKind::Int(i) => {
-                let r = self.alloc_reg();
+                let r = self.alloc_reg()?;
                 // LOAD_INT_CONST dst(u8), imm(i64)
                 self.code.push(raw::LOAD_INT_CONST);
                 self.code.push(r);
@@ -1086,14 +1124,14 @@ impl<'a> Emitter<'a> {
                 Ok(r)
             }
             ExprKind::Bool(b) => {
-                let r = self.alloc_reg();
+                let r = self.alloc_reg()?;
                 self.code.push(raw::LOAD_BOOL_CONST);
                 self.code.push(r);
                 self.code.push(u8::from(*b));
                 Ok(r)
             }
             ExprKind::Float(f) => {
-                let r = self.alloc_reg();
+                let r = self.alloc_reg()?;
                 // LOAD_FLOAT_CONST dst(u8), imm(f64)
                 self.code.push(raw::LOAD_FLOAT_CONST);
                 self.code.push(r);
@@ -1114,7 +1152,7 @@ impl<'a> Emitter<'a> {
                     return Ok(reg);
                 }
                 let id = self.signal_of(raw, ident.span)?;
-                let r = self.alloc_reg();
+                let r = self.alloc_reg()?;
                 // READ_SIGNAL dst(u8), signal_id(u32)
                 self.code.push(raw::READ_SIGNAL);
                 self.code.push(r);
@@ -1127,7 +1165,7 @@ impl<'a> Emitter<'a> {
             // through `compile_call` (the `Field` is the callee there).
             ExprKind::Field { base, field } => {
                 let base_reg = self.compile_value(base)?;
-                let r = self.alloc_reg();
+                let r = self.alloc_reg()?;
                 // GET_FIELD dst(u8), idx(u16), src(u8). The field index is the
                 // canonical `PropIdx` derived from the field name
                 // (`prop_index_for_name`), which is exactly what the SET_FIELD
@@ -1143,7 +1181,7 @@ impl<'a> Emitter<'a> {
             }
             // A list literal `[a, b, c]` → ALLOC_LIST + LIST_PUSH per element.
             ExprKind::List(items) => {
-                let dst = self.alloc_reg();
+                let dst = self.alloc_reg()?;
                 let cap = items.len().max(1) as u16;
                 self.emit_alloc_list(dst, cap);
                 for item in items {
@@ -1158,7 +1196,7 @@ impl<'a> Emitter<'a> {
             // canonical `PropIdx` (`prop_index_for_name`) so they agree with the
             // static seed path and the GET_FIELD read side (FLUX-072 #4).
             ExprKind::Record { fields, .. } => {
-                let dst = self.alloc_reg();
+                let dst = self.alloc_reg()?;
                 let count = fields.len() as u16;
                 self.emit_alloc_record(dst, count);
                 for (name, value) in fields.iter() {
@@ -1171,7 +1209,7 @@ impl<'a> Emitter<'a> {
             ExprKind::Binary { op, lhs, rhs } => {
                 let a = self.compile_value(lhs)?;
                 let b = self.compile_value(rhs)?;
-                let dst = self.alloc_reg();
+                let dst = self.alloc_reg()?;
                 // `==` / `!=` over `Bool` operands compile to `BOOL_EQ` (the VM's
                 // `EQ_I64` only accepts integers; booleans would type-mismatch).
                 // `!=` negates the `BOOL_EQ` result via `NOT_BOOL`.
@@ -1223,7 +1261,7 @@ impl<'a> Emitter<'a> {
                 self.code.push(b);
                 if *op == BinOp::Ne {
                     // Flip EQ result into a NEQ.
-                    let negated = self.alloc_reg();
+                    let negated = self.alloc_reg()?;
                     self.code.push(raw::NOT_BOOL);
                     self.code.push(negated);
                     self.code.push(dst);
@@ -1254,10 +1292,10 @@ impl<'a> Emitter<'a> {
             // the runtime models as `Option[...]` (ADR-0051).
             ExprKind::OptField { base, field } => {
                 let base_reg = self.compile_value(base)?;
-                let out = self.alloc_reg();
+                let out = self.alloc_reg()?;
                 // `is_null = base == Null` (the null-distinguishing test the
                 // `truthy`-based `if` cannot express — `Int(0)` is also falsey).
-                let is_null = self.alloc_reg();
+                let is_null = self.alloc_reg()?;
                 self.code.push(raw::IS_NULL);
                 self.code.push(is_null);
                 self.code.push(base_reg);
@@ -1300,10 +1338,10 @@ impl<'a> Emitter<'a> {
         let mut result: Option<u8> = None;
         for part in parts {
             let piece = match part {
-                flux_parser::StrPart::Text(text) => self.emit_str_const(text),
+                flux_parser::StrPart::Text(text) => self.emit_str_const(text)?,
                 flux_parser::StrPart::Interp(inner) => {
                     let value = self.compile_value(inner)?;
-                    let rendered = self.alloc_reg();
+                    let rendered = self.alloc_reg()?;
                     // TO_STRING dst(u8), src(u8)
                     self.code.push(raw::TO_STRING);
                     self.code.push(rendered);
@@ -1323,7 +1361,7 @@ impl<'a> Emitter<'a> {
             result = Some(match result {
                 None => piece,
                 Some(left) => {
-                    let dst = self.alloc_reg();
+                    let dst = self.alloc_reg()?;
                     // STR_CONCAT dst(u8), a(u8), b(u8)
                     self.code.push(raw::STR_CONCAT);
                     self.code.push(dst);
@@ -1335,18 +1373,18 @@ impl<'a> Emitter<'a> {
         }
         // An empty literal (`""`) has no parts at all; it still needs a value.
         let _ = span;
-        Ok(result.unwrap_or_else(|| self.emit_str_const("")))
+        Ok(result.unwrap_or(self.emit_str_const("")?))
     }
 
     /// Emits `LOAD_STR_CONST` for `text`, interning it, and returns its register.
-    fn emit_str_const(&mut self, text: &str) -> u8 {
+    fn emit_str_const(&mut self, text: &str) -> Result<u8, HandlerCompileError> {
         let id = (self.str_interner)(text);
-        let r = self.alloc_reg();
+        let r = self.alloc_reg()?;
         // LOAD_STR_CONST dst(u8), str_id(u32)
         self.code.push(raw::LOAD_STR_CONST);
         self.code.push(r);
         self.code.extend_from_slice(&id.to_le_bytes());
-        r
+        Ok(r)
     }
 
     /// Compiles a call expression, returning the register holding its result.
@@ -1387,7 +1425,7 @@ impl<'a> Emitter<'a> {
                     // not yet pattern-match. Lower it to a Null placeholder
                     // register rather than ICE — consistent with the handler
                     // literal path's `Value::Null` fallback (FLUX-014).
-                    let r = self.alloc_reg();
+                    let r = self.alloc_reg()?;
                     self.code.push(raw::LOAD_NULL);
                     self.code.push(r);
                     arg_regs.push(r)
@@ -1432,7 +1470,7 @@ impl<'a> Emitter<'a> {
                     // handler (e.g. `tasks.append(Task(label: x, done: y))`)
                     // would store fields at sequential indices and the reader
                     // would miss them (FLUX-072 #4).
-                    let dst = self.alloc_reg();
+                    let dst = self.alloc_reg()?;
                     self.emit_alloc_record(dst, arg_regs.len() as u16);
                     let mut positional: u16 = 0;
                     for (arg, reg) in args.iter().zip(arg_regs.iter()) {
@@ -1467,12 +1505,12 @@ impl<'a> Emitter<'a> {
         method: &str,
         arg_regs: &[u8],
     ) -> Result<u8, HandlerCompileError> {
-        let args_reg = self.alloc_reg();
+        let args_reg = self.alloc_reg()?;
         self.emit_alloc_record(args_reg, arg_regs.len() as u16);
         for (idx, reg) in arg_regs.iter().enumerate() {
             self.emit_set_field(args_reg, idx as u16, *reg);
         }
-        let result = self.alloc_reg();
+        let result = self.alloc_reg()?;
         // CALL_CAP result_reg(u8), cap_id(u32), method_id(u16), args_reg(u8)
         self.code.push(raw::CALL_CAP);
         self.code.push(result);
@@ -1531,10 +1569,78 @@ pub(crate) fn variant_tag(name: &str) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flux_parser::{BinOp, Block, BlockItem, Expr, ExprKind, Ident};
+    use flux_parser::{BinOp, Block, BlockItem, Expr, ExprKind, Ident, StateDecl};
     use flux_syntax::opcode::raw;
     use flux_syntax::{SignalId, Span, StringTable, Value};
     use flux_vm_ref::{InMemorySignals, SignalStore, run};
+
+    /// Compiles a handler from a `.flux`-style source string (for tests only).
+    fn compile_handler_for_test(src: &str) -> Result<Vec<u8>, HandlerCompileError> {
+        let block = flux_parser::parse_block(src).expect("parse");
+        let (code, _) = compile_handler(
+            &block,
+            &SignalScope::new(),
+            &HashSet::new(),
+            &HashMap::new(),
+            span(),
+            &mut |_s| StringTable::new().intern(_s),
+        )?;
+        Ok(code)
+    }
+
+    /// Builds a handler body with `n` sequential `sN = sN + 1` assignments
+    /// against distinct signals, to exercise the register allocator.
+    fn build_handler_with_n_sequential_increments(n: usize) -> Vec<BlockItem> {
+        (0..n).map(|i| {
+            let name = format!("s{i}");
+            BlockItem::State(StateDecl {
+                name: Ident { name, span: span() },
+                ty: None,
+                init: Expr {
+                    kind: ExprKind::Binary {
+                        op: BinOp::Add,
+                        lhs: Box::new(Expr {
+                            kind: ExprKind::Ident(Ident { name: format!("s{i}"), span: span() }),
+                            span: span(),
+                        }),
+                        rhs: Box::new(int(1)),
+                    },
+                    span: span(),
+                },
+                span: span(),
+            })
+        }).collect()
+    }
+
+    /// Scans bytecode for clobbered const loads: for each `LOAD_*_CONST rX`,
+    /// no later `ADD rD, rX, rX` may appear where rX was also the prior
+    /// READ_SIGNAL dst between them (which would clobber the summand).
+    fn assert_no_clobbered_const_loads(code: &[u8]) {
+        // Simpler invariant: every ADD/SUB/MUL/DIV must have its two source
+        // registers equal to the dst (oracle semantics for `s = s + 1`), and
+        // the register loaded with the constant must be distinct from the
+        // READ_SIGNAL dst. We check: for any arithmetic opcode at position i,
+        // the three register operands (i+1, i+2, i+3) must not all equal the
+        // same register (which would indicate clobbering).
+        use flux_syntax::opcode::raw;
+        let arith = [raw::ADD_I64, raw::ADD_F64, raw::SUB_I64, raw::SUB_F64,
+                     raw::MUL_I64, raw::MUL_F64, raw::DIV_I64, raw::DIV_F64,
+                     raw::MOD_I64];
+        for i in 0..code.len().saturating_sub(4) {
+            if arith.contains(&code[i]) {
+                let dst = code[i+1];
+                let s1 = code[i+2];
+                let s2 = code[i+3];
+                // The constant must load into a DIFFERENT register than the
+                // READ_SIGNAL dst; otherwise the ADD sums a clobbered value.
+                assert!(
+                    !(s1 == dst && s2 == dst && s1 == s2),
+                    "clobbered arithmetic at byte {i}: opcode={:#x} dst={dst} s1={s1} s2={s2}",
+                    code[i]
+                );
+            }
+        }
+    }
 
     fn span() -> Span {
         Span::new(0, 0, 0)
@@ -1963,5 +2069,32 @@ mod tests {
             bytecode.contains(&raw::GET_FIELD),
             "OptField must emit GET_FIELD for the present-base path: {bytecode:?}"
         );
+    }
+
+    /// Regression test for audit C1: a handler that performs many sequential
+    /// signal updates must compile and produce bytecode where the constant
+    /// load does NOT clobber the signal-read register before the ADD consumes
+    /// it. Before C1, the saturating allocator silently aliased r14.
+    #[test]
+    fn twenty_sequential_statements_do_not_clobber_registers() {
+        let n = 20;
+        let items = build_handler_with_n_sequential_increments(n);
+        let body = Block { params: vec![], items, span: span() };
+        let scope: SignalScope = (0..n)
+            .map(|i| (format!("s{i}"), SignalId::from(i as u32 + 1)))
+            .collect();
+        let result = compile_handler_with_params(
+            &body,
+            &[],
+            &scope,
+            &HashSet::new(),
+            &HashMap::new(),
+            span(),
+            &mut |_s| StringTable::new().intern(_s),
+        );
+        match result {
+            Ok((code, _)) => assert_no_clobbered_const_loads(&code),
+            Err(e) => panic!("handler must compile under watermark reuse; got: {e:?}"),
+        }
     }
 }
