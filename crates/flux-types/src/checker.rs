@@ -64,7 +64,7 @@ pub struct GenericInstantiation {
 #[derive(Default)]
 pub struct Checker {
     pub(crate) env: Env,
-    supply: Supply,
+    pub(crate) supply: Supply,
     subst: HashMap<u32, TcType>,
     /// Per-expression/declaration inferred types, keyed by derived [`NodeId`].
     pub types: HashMap<NodeId, TcType>,

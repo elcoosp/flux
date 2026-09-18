@@ -145,7 +145,7 @@ pub fn type_check_with_loader(
         Some(loader) => Checker::with_loader(loader),
         None => Checker::new(),
     };
-    collect_adts(&mut checker.env, ast);
+    collect_adts(&mut checker.env, ast, &mut checker.supply);
 
     let mut types = HashMap::new();
     for decl in &ast.decls {

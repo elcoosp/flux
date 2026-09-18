@@ -98,6 +98,9 @@ impl Checker {
                         // Unify each call argument against its declared prop
                         // type (with generic vars substituted), pinning the
                         // generic parameters to concrete call-site types.
+                        // Track positional index for positional arg checking
+                        // (audit H20: positional args were never checked).
+                        let mut positional_idx = 0usize;
                         for arg in args {
                             let arg_ty = self.infer(arg.value())?;
                             let decl_ty = match arg {
@@ -105,13 +108,17 @@ impl Checker {
                                     .iter()
                                     .find(|(n, _)| n == &name.name)
                                     .map(|(_, t)| t.clone()),
-                                flux_parser::Arg::Positional { .. } => None,
+                                flux_parser::Arg::Positional { .. } => {
+                                    let t = props.get(positional_idx).map(|(_, t)| t.clone());
+                                    positional_idx += 1;
+                                    t
+                                }
                                 #[allow(unreachable_patterns)]
                                 _ => None,
                             };
                             if let Some(decl_ty) = decl_ty {
                                 let resolved = decl_ty.apply(&subst);
-                                let _ = self.expect(&resolved, &arg_ty, arg.value().span);
+                                self.expect(&resolved, &arg_ty, arg.value().span)?;
                             }
                         }
                         if generic && !tvars.is_empty() {
@@ -157,7 +164,7 @@ impl Checker {
                                 ));
                             };
                             let arg_ty = self.infer(arg.value())?;
-                            let _ = self.expect(&decl_ty, &arg_ty, arg.value().span);
+                            self.expect(&decl_ty, &arg_ty, arg.value().span)?;
                         }
                         Ok(TcType::Named(name.clone(), Vec::new()))
                     }

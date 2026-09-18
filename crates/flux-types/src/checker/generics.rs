@@ -79,7 +79,7 @@ pub(crate) fn rewrite_generics(ty: &mut TcType, index: &HashMap<String, usize>) 
 
 /// Collects ADT definitions from `type` declarations so they are visible before
 /// their uses (mutual references are not required by the B.3 examples).
-pub fn collect_adts(env: &mut Env, ast: &Ast) {
+pub fn collect_adts(env: &mut Env, ast: &Ast, supply: &mut Supply) {
     for decl in &ast.decls {
         match decl {
             Decl::Type(type_decl) => {
@@ -152,7 +152,8 @@ pub fn collect_adts(env: &mut Env, ast: &Ast) {
                 // call it (mutual recursion among top-level fns is allowed).
                 // Generic params become fresh variables; the body is checked
                 // later in `check_decl`, which re-binds them in a fresh scope.
-                let mut supply = Supply::default();
+                // Uses the checker-wide supply (audit H19) so forward-declared
+                // fns do not collide on var ids starting from 0.
                 let gen_vars: HashMap<String, TcType> = fn_decl
                     .generics
                     .iter()

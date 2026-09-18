@@ -54,7 +54,7 @@ impl Checker {
         let mut sub = Checker::with_loader(Arc::clone(loader));
         sub.modules_loading = Arc::clone(&self.modules_loading);
         // Collect ADTs first (mirrors `type_check`), then check every declaration.
-        collect_adts(&mut sub.env, &ast);
+        collect_adts(&mut sub.env, &ast, &mut sub.supply);
         for decl in &ast.decls {
             check_decl(&mut sub, decl)?;
         }

@@ -78,7 +78,7 @@ mod appendix_b3 {
     #[test]
     fn b3_7_pure_component() {
         check_ok(
-            "@pure\ncompo Avatar(url: String, size: Float)\n  Image(url) {\n    width: size,\n    height: size,\n    cornerRadius: size / 2\n  }\n\n\ncompo Profile\n  state avatarUrl: String = \"https://example.com/me.png\"\n\n  Column {\n    Avatar(url: avatarUrl, size: 80)\n    Text(\"Profile\")\n  }\n\n",
+            "@pure\ncompo Avatar(url: String, size: Float)\n  Image(url) {\n    width: size,\n    height: size,\n    cornerRadius: size / 2.0\n  }\n\n\ncompo Profile\n  state avatarUrl: String = \"https://example.com/me.png\"\n\n  Column {\n    Avatar(url: avatarUrl, size: 80.0)\n    Text(\"Profile\")\n  }\n\n",
         );
     }
 
@@ -297,4 +297,37 @@ mod instantiations {
             err.message
         );
     }
+}
+
+#[test]
+fn button_with_int_text_is_rejected() {
+    // Component prop type errors must propagate (H20).
+    let src = "compo Card
+  prop text: String
+compo App
+  state t: Int = 42
+  Card(text: t)
+";
+    let ast = ast_of(src);
+    let result = crate::type_check(&ast);
+    assert!(
+        result.is_err(),
+        "component prop type errors must propagate (H20)"
+    );
+}
+
+#[test]
+fn record_ctor_wrong_field_type_is_rejected() {
+    // Record constructor arg type errors must propagate (H20).
+    let src =
+        "record Task { label: String, done: Bool }
+compo App
+  let t = Task(label: 42, done: true)
+";
+    let ast = ast_of(src);
+    let result = crate::type_check(&ast);
+    assert!(
+        result.is_err(),
+        "record ctor type errors must propagate (H20)"
+    );
 }
