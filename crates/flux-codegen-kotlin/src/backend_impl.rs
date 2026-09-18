@@ -95,11 +95,13 @@ impl Backend for Kotlin {
     }
 
     fn for_each_open(collection: &str, key: &str, element: &str) -> String {
-        format!("items({collection}, key = {key}) {{ {element} ->")
+        // ForEach bodies must be inside a LazyListScope — wrap in LazyColumn
+        // (audit H22: items() was emitted directly, only valid in LazyListScope).
+        format!("LazyColumn {{\n                items({collection}, key = {key}) {{ {element} ->")
     }
 
     fn for_each_close() -> String {
-        "}".to_owned()
+        "}\n            }".to_owned()
     }
 
     fn button_open(name: &str, handler: &str) -> String {
@@ -191,7 +193,7 @@ impl Backend for Kotlin {
     }
 
     fn prelude() -> &'static str {
-        "package dev.flux.app\n\nimport androidx.compose.foundation.layout.*\nimport androidx.compose.foundation.text.KeyboardActions\nimport androidx.compose.foundation.text.KeyboardOptions\nimport androidx.compose.material3.*\nimport androidx.compose.runtime.*\nimport androidx.compose.ui.Alignment\nimport androidx.compose.ui.Modifier\nimport androidx.compose.ui.text.input.KeyboardType\nimport androidx.compose.ui.unit.dp\nimport androidx.navigation.NavHostController\nimport androidx.navigation.compose.NavHost\nimport androidx.navigation.compose.composable\nimport androidx.navigation.compose.rememberNavController\nimport kotlinx.coroutines.launch\n\n"
+        "package dev.flux.app\n\nimport androidx.compose.foundation.Image\nimport androidx.compose.foundation.layout.*\nimport androidx.compose.foundation.text.KeyboardActions\nimport androidx.compose.foundation.text.KeyboardOptions\nimport androidx.compose.material3.*\nimport androidx.compose.runtime.*\nimport androidx.compose.ui.Alignment\nimport androidx.compose.ui.Modifier\nimport androidx.compose.ui.res.painterResource\nimport androidx.compose.ui.text.input.KeyboardType\nimport androidx.compose.ui.unit.dp\nimport androidx.navigation.NavHostController\nimport androidx.navigation.compose.NavHost\nimport androidx.navigation.compose.composable\nimport androidx.navigation.compose.rememberNavController\nimport kotlinx.coroutines.launch\n\n"
     }
 
     fn escape_text(s: &str) -> String {
