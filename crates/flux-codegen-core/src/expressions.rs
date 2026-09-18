@@ -69,7 +69,7 @@ pub(crate) fn render_string<B: Backend>(parts: &[StrPart]) -> String {
     let mut body = String::new();
     for part in parts {
         match part {
-            StrPart::Text(text) => body.push_str(text),
+            StrPart::Text(text) => body.push_str(&B::escape_text(text)),
             StrPart::Interp(expr) => {
                 body.push_str(B::interp_open());
                 body.push_str(&render_expr::<B>(expr));

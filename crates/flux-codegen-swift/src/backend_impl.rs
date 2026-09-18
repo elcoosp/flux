@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use flux_codegen_core::backend::Backend;
 use flux_codegen_core::emitter::Emitter;
-use flux_codegen_core::model::{ComponentMeta, native_type};
+use flux_codegen_core::model::{native_type, ComponentMeta};
 use flux_codegen_core::primitives::PrimitiveSpec;
 use flux_parser::{Expr, ExprKind, TypeDecl};
 
@@ -193,6 +193,22 @@ impl Backend for Swift {
 
     fn prelude() -> &'static str {
         "import SwiftUI\n"
+    }
+
+    fn escape_text(s: &str) -> String {
+        // Swift metacharacters: backslash and double quote.
+        let mut out = String::with_capacity(s.len() + 8);
+        for c in s.chars() {
+            match c {
+                '\\' => out.push_str("\\\\"),
+                '"' => out.push_str("\\\""),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                other => out.push(other),
+            }
+        }
+        out
     }
 
     fn animation_spec(curve: &str) -> String {

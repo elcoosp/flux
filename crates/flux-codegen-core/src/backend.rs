@@ -282,4 +282,11 @@ pub trait Backend {
     fn prelude() -> &'static str {
         ""
     }
+
+    /// Escapes user text for embedding inside a generated string literal.
+    /// Each backend has different metacharacters: Swift needs `\` and `"`
+    /// escaped; Kotlin needs those PLUS `$` (string templates). A silent
+    /// non-escaping implementation produces non-compiling output (audit H21).
+    #[must_use]
+    fn escape_text(s: &str) -> String;
 }

@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use flux_codegen_core::backend::Backend;
 use flux_codegen_core::emitter::Emitter;
-use flux_codegen_core::model::{ComponentMeta, native_type};
+use flux_codegen_core::model::{native_type, ComponentMeta};
 use flux_codegen_core::primitives::PrimitiveSpec;
 use flux_parser::{Expr, ExprKind, TypeDecl};
 
@@ -192,6 +192,23 @@ impl Backend for Kotlin {
 
     fn prelude() -> &'static str {
         "package dev.flux.app\n\nimport androidx.compose.foundation.layout.*\nimport androidx.compose.foundation.text.KeyboardActions\nimport androidx.compose.foundation.text.KeyboardOptions\nimport androidx.compose.material3.*\nimport androidx.compose.runtime.*\nimport androidx.compose.ui.Alignment\nimport androidx.compose.ui.Modifier\nimport androidx.compose.ui.text.input.KeyboardType\nimport androidx.compose.ui.unit.dp\nimport androidx.navigation.NavHostController\nimport androidx.navigation.compose.NavHost\nimport androidx.navigation.compose.composable\nimport androidx.navigation.compose.rememberNavController\nimport kotlinx.coroutines.launch\n\n"
+    }
+
+    fn escape_text(s: &str) -> String {
+        // Kotlin metacharacters: backslash, double quote, and $ (string templates).
+        let mut out = String::with_capacity(s.len() + 8);
+        for c in s.chars() {
+            match c {
+                '\\' => out.push_str("\\\\"),
+                '"' => out.push_str("\\\""),
+                '$' => out.push_str("\\$"),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                other => out.push(other),
+            }
+        }
+        out
     }
 
     fn animation_spec(curve: &str) -> String {
