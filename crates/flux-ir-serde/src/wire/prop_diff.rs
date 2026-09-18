@@ -7,12 +7,12 @@ use super::cursor::Reader;
 use super::value::{decode_value, encode_value};
 
 pub(crate) fn encode_prop_diff(w: &mut super::cursor::Writer, diff: &PropDiff) {
-    w.u16(diff.changes.len() as u16);
+    w.u16_len(diff.changes.len(), "prop_diff.changes");
     for (index, value) in &diff.changes {
         w.u16(*index);
         encode_value(w, value);
     }
-    w.u16(diff.removals.len() as u16);
+    w.u16_len(diff.removals.len(), "prop_diff.removals");
     for index in &diff.removals {
         w.u16(*index);
     }

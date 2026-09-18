@@ -228,7 +228,7 @@ impl TelemetryEvent {
                 w.u32(*signal_id);
                 encode_value(w, old_value);
                 encode_value(w, new_value);
-                w.u16(triggered_effect_ids.len() as u16);
+                w.u16_len(triggered_effect_ids.len(), "telemetry.triggered_effect_ids");
                 for id in triggered_effect_ids {
                     w.u32(*id);
                 }
@@ -607,11 +607,11 @@ impl HostAnnounceFrame {
         w.u8(FRAME_HOST_ANNOUNCE);
         encode_str(&mut w, &self.platform);
         encode_str(&mut w, &self.device);
-        w.u16(self.capabilities.len() as u16);
+        w.u16_len(self.capabilities.len(), "telemetry.capabilities");
         for (name, ver, feats) in &self.capabilities {
             encode_str(&mut w, name);
             w.u32(*ver);
-            w.u16(feats.len() as u16);
+            w.u16_len(feats.len(), "telemetry.capability.features");
             for f in feats {
                 encode_str(&mut w, f);
             }
@@ -773,7 +773,7 @@ impl DebugCommandFrame {
         w.u8(PROTOCOL_VERSION);
         w.u8(FRAME_DEBUG_COMMAND);
         w.u32(self.command_id);
-        w.u16(payload.len() as u16);
+        w.u16_len(payload.len(), "telemetry.payload");
         w.bytes(&payload);
         w.into_vec()
     }
@@ -1315,7 +1315,7 @@ fn decode_optional_span(r: &mut Reader<'_>) -> Result<Option<Span>, WireError> {
 
 /// Length-prefixed UTF-8 string encoder (little-endian `u16` length).
 fn encode_str(w: &mut Writer, s: &str) {
-    w.u16(s.len() as u16);
+    w.u16_len(s.len(), "telemetry.string_len");
     w.bytes(s.as_bytes());
 }
 

@@ -7,7 +7,7 @@ use super::value::encode_value;
 use super::{WireError, decode_value};
 
 pub(crate) fn encode_props(w: &mut super::cursor::Writer, props: &Props) {
-    w.u16(props.fields().len() as u16);
+    w.u16_len(props.fields().len(), "props.fields");
     for (index, value) in props.fields() {
         w.u16(*index);
         encode_value(w, value);

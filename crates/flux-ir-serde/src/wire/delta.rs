@@ -19,7 +19,7 @@ pub(crate) struct StateDelta {
 impl StateDelta {
     #[allow(dead_code)]
     pub(crate) fn encode(w: &mut super::cursor::Writer, delta: &StateDelta) {
-        w.u16(delta.cells.len() as u16);
+        w.u16_len(delta.cells.len(), "delta.cells");
         for (signal, value) in &delta.cells {
             w.u32(*signal);
             encode_value(w, value);
@@ -51,10 +51,10 @@ pub(crate) struct SourceMapDelta {
 impl SourceMapDelta {
     #[allow(dead_code)]
     pub(crate) fn encode(w: &mut super::cursor::Writer, delta: &SourceMapDelta) {
-        w.u16(delta.files.len() as u16);
+        w.u16_len(delta.files.len(), "delta.files");
         for (file_id, path) in &delta.files {
             w.u32(*file_id);
-            w.u16(path.len() as u16);
+            w.u16_len(path.len(), "delta.file.path");
             w.bytes(path.as_bytes());
         }
     }

@@ -40,7 +40,7 @@ pub struct NodeSignalMeta {
 /// | thunk(ClosureRef)? | layout_count(u16) | layout(u16)*`.
 pub(crate) fn encode_signal_meta(w: &mut super::cursor::Writer, meta: &NodeSignalMeta) {
     w.u32(meta.node_id);
-    w.u16(meta.deps.len() as u16);
+    w.u16_len(meta.deps.len(), "signal_meta.deps");
     for &signal in &meta.deps {
         w.u32(signal);
     }
@@ -51,7 +51,7 @@ pub(crate) fn encode_signal_meta(w: &mut super::cursor::Writer, meta: &NodeSigna
         }
         None => w.u8(0),
     }
-    w.u16(meta.layout.len() as u16);
+    w.u16_len(meta.layout.len(), "signal_meta.layout");
     for &idx in &meta.layout {
         w.u16(idx);
     }
@@ -115,7 +115,7 @@ pub(crate) fn decode_signal_meta(r: &mut Reader<'_>) -> Result<NodeSignalMeta, W
 
 /// Encodes a `Vec<NodeSignalMeta>` section: a `u16` count followed by entries.
 pub(crate) fn encode_signal_meta_section(w: &mut super::cursor::Writer, metas: &[NodeSignalMeta]) {
-    w.u16(metas.len() as u16);
+    w.u16_len(metas.len(), "signal_meta.metas");
     for meta in metas {
         encode_signal_meta(w, meta);
     }

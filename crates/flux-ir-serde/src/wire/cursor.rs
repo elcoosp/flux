@@ -31,6 +31,15 @@ impl Writer {
         self.buf.extend_from_slice(&value.to_le_bytes());
     }
 
+    /// Checked length-prefix write. A silent `as u16` truncation desyncs
+    /// every host decoder (audit H14): panic the encode instead.
+    pub(crate) fn u16_len(&mut self, n: usize, what: &'static str) {
+        let len = u16::try_from(n).unwrap_or_else(|_| {
+            panic!("wire encode: {what} length {n} exceeds u16 prefix width (audit H14)");
+        });
+        self.u16(len);
+    }
+
     pub(crate) fn u32(&mut self, value: u32) {
         self.buf.extend_from_slice(&value.to_le_bytes());
     }

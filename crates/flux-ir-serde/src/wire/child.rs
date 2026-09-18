@@ -13,7 +13,7 @@ pub(crate) fn encode_child(w: &mut Writer, child: &Child) {
         }
         Child::Splice { items } => {
             w.u8(0x02);
-            w.u16(items.len() as u16);
+            w.u16_len(items.len(), "child.splice.items");
             for (key, id) in items {
                 w.u64(*key);
                 w.u32(*id);

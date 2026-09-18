@@ -10,7 +10,7 @@ pub(crate) fn encode_closure_ref(w: &mut super::cursor::Writer, closure: &Closur
     w.u64(closure.hash);
     w.u32(closure.bytecode_offset);
     w.u16(closure.bytecode_len);
-    w.u16(closure.captured_signals.len() as u16);
+    w.u16_len(closure.captured_signals.len(), "closure_ref.captured_signals");
     for signal in &closure.captured_signals {
         w.u32(*signal);
     }

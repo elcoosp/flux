@@ -174,10 +174,10 @@ fn write_closures(w: &mut Writer, closures: &[ClosureIR]) {
     for closure in closures {
         let offset = blob.len() as u32;
         blob.extend_from_slice(&closure.bytecode);
-        offsets.push((closure.id, offset, closure.bytecode.len() as u16));
+        offsets.push((closure.id, offset, u16::try_from(closure.bytecode.len()).expect("bytecode len exceeds u16 (audit H14)")));
     }
     encode_bytecode_blob(w, &blob);
-    w.u16(closures.len() as u16);
+    w.u16_len(closures.len(), "frame.closures");
     for closure in closures {
         let (_, offset, len) = offsets
             .iter()
@@ -259,7 +259,7 @@ fn r_ensure_capacity(payload: &[u8], pos: usize, count: usize, _ctx: &'static st
 }
 
 fn encode_str(w: &mut Writer, s: &str) {
-    w.u16(s.len() as u16);
+    w.u16_len(s.len(), "frame.string_len");
     w.bytes(s.as_bytes());
 }
 
@@ -426,11 +426,11 @@ impl HelloFrame {
         w.u8(self.kind.type_byte());
         encode_str(&mut w, &self.platform);
         encode_str(&mut w, &self.device);
-        w.u16(self.capabilities.len() as u16);
+        w.u16_len(self.capabilities.len(), "frame.capabilities");
         for (name, ver, feats) in &self.capabilities {
             encode_str(&mut w, name);
             w.u32(*ver);
-            w.u16(feats.len() as u16);
+            w.u16_len(feats.len(), "frame.capability.features");
             for f in feats {
                 encode_str(&mut w, f);
             }
@@ -697,12 +697,12 @@ impl InitFrame {
         for node in &self.extra_nodes {
             encode_node(&mut w, node);
         }
-        w.u16(self.state_seed.len() as u16);
+        w.u16_len(self.state_seed.len(), "frame.state_seed");
         for (sig, val) in &self.state_seed {
             w.u32(*sig);
             encode_value(&mut w, val);
         }
-        w.u16(self.source_map.len() as u16);
+        w.u16_len(self.source_map.len(), "frame.source_map");
         for (fid, path) in &self.source_map {
             w.u32(*fid);
             encode_str(&mut w, path);
@@ -724,7 +724,7 @@ impl InitFrame {
         // Appendix D §D.9: component-name interning, separate `u16` count then
         // `(u32 ComponentId, utf8 name)` pairs. The host resolves each node's
         // adapter from `byComponent[component_id]`.
-        w.u16(self.component_names.len() as u16);
+        w.u16_len(self.component_names.len(), "frame.component_names");
         for (cid, name) in &self.component_names {
             w.u32(*cid);
             encode_str(&mut w, name);
@@ -869,9 +869,9 @@ impl DeltaFrame {
         w.u8(self.kind.type_byte());
         w.u32(self.seq);
         w.u8(self.flags);
-        w.u16(self.patches.len() as u16);
-        w.u16(self.closures.len() as u16); // D.1 handler_count (now meaningful)
-        w.u16(self.strings.len() as u16);
+        w.u16_len(self.patches.len(), "frame.patches");
+        w.u16_len(self.closures.len(), "frame.closures"); // D.1 handler_count (now meaningful)
+        w.u16_len(self.strings.len(), "frame.strings");
         for patch in &self.patches {
             encode_patch(&mut w, patch);
         }
@@ -1102,7 +1102,7 @@ impl Frame {
         InternStringFrame {
             version: PROTOCOL_VERSION,
             kind: FrameKind::InternString,
-            len: bytes.len() as u16,
+            len: u16::try_from(bytes.len()).expect("InternString payload exceeds u16 len (audit H14)"),
             bytes: bytes.to_vec(),
         }
     }
@@ -1122,7 +1122,7 @@ impl Frame {
         Some(InternStringFrame {
             version,
             kind,
-            len: len as u16,
+            len: u16::try_from(len).expect("InternString payload exceeds u16 len (audit H14)"),
             bytes: raw.to_vec(),
         })
     }

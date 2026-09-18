@@ -20,13 +20,13 @@ pub(crate) fn encode_value(w: &mut Writer, value: &Value) {
         Value::Bool(b) => w.u8(u8::from(*b)),
         Value::Str(id) | Value::HandlerRef(id) => w.u32(*id),
         Value::List(items) => {
-            w.u16(items.len() as u16);
+            w.u16_len(items.len(), "value.list");
             for item in items {
                 encode_value(w, item);
             }
         }
         Value::Record(fields) => {
-            w.u16(fields.len() as u16);
+            w.u16_len(fields.len(), "value.record.fields");
             for (index, val) in fields {
                 w.u16(*index);
                 encode_value(w, val);

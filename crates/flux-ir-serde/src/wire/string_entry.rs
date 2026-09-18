@@ -7,7 +7,7 @@ use super::cursor::{Reader, Writer};
 
 pub(crate) fn encode_string_entry(w: &mut Writer, id: StringId, text: &str) {
     w.u32(id);
-    w.u16(text.len() as u16);
+    w.u16_len(text.len(), "string_entry.text");
     w.bytes(text.as_bytes());
 }
 

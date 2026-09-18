@@ -21,7 +21,7 @@ pub fn decode_span(r: &mut Reader<'_>) -> Result<Span, WireError> {
 /// Writes a length-prefixed UTF-8 string (u16 byte length + bytes), matching the
 /// layout `frame::encode_str` uses for `Error`/`Hello` payloads.
 pub(crate) fn encode_str(w: &mut Writer, s: &str) {
-    w.u16(s.len() as u16);
+    w.u16_len(s.len(), "span.len");
     w.bytes(s.as_bytes());
 }
 

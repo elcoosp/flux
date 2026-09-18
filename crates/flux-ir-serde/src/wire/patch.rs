@@ -33,7 +33,7 @@ pub(crate) fn encode_patch(w: &mut super::cursor::Writer, patch: &Patch) {
         }
         Patch::Reorder { parent, keys } => {
             w.u32(*parent);
-            w.u16(keys.len() as u16);
+            w.u16_len(keys.len(), "patch.removals.keys");
             for key in keys {
                 w.u32(*key);
             }
