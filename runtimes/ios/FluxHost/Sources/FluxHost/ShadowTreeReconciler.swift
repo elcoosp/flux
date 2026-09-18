@@ -266,6 +266,25 @@ struct ShadowTreeReconciler {
             emitSnapshot()
         }
         #endif
+        // Audit H4: destroy unreachable subtrees and prune stale ForEach row state.
+        // Anything still in `built` that is not reachable from the current tree is stale.
+        if let rootId = currentRootId {
+            var reachable = Set<UInt32>()
+            func mark(_ id: UInt32) {
+                guard !reachable.contains(id) else { return }
+                reachable.insert(id)
+                if let node = nodeTable[id] {
+                    for child in node.children {
+                        if case let .node(cid) = child { mark(cid) }
+                    }
+                }
+            }
+            mark(rootId)
+            for (id, builtNode) in built where !reachable.contains(id) {
+                builtNode.adapter.destroy(builtNode.view)
+                built.removeValue(forKey: id)
+            }
+        }
         return report
     }
 
