@@ -647,9 +647,12 @@ fn exec_tail(
                 regs[usize::from(instr.u8(0))] = Value::List(items);
             }
             Opcode::ListInsert => {
-                let idx = usize::from(instr.u8(2));
-                let val = reg!(instr.u8(3));
-                let list = instr.u8(1);
+                // LIST_INSERT list(u8), idx(u8), val(u8) — audit C11: the
+                // oracle read positions 2/3/1, one past the 3-byte operand
+                // window, panicking on any compiled insert.
+                let idx = usize::from(instr.u8(1));
+                let val = reg!(instr.u8(2));
+                let list = instr.u8(0);
                 match &mut regs[usize::from(list)] {
                     Value::List(items) => {
                         if idx > items.len() {
@@ -661,8 +664,9 @@ fn exec_tail(
                 }
             }
             Opcode::ListRemove => {
-                let idx = usize::from(instr.u8(2));
-                let list = instr.u8(1);
+                // LIST_REMOVE list(u8), idx(u8) — audit C11 (same off-by-one).
+                let idx = usize::from(instr.u8(1));
+                let list = instr.u8(0);
                 match &mut regs[usize::from(list)] {
                     Value::List(items) => {
                         if idx >= items.len() {

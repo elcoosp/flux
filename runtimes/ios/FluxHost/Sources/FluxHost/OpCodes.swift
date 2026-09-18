@@ -184,8 +184,8 @@ enum Opcode: UInt8, CaseIterable, Equatable {
              .loadStrConst: 5
         case .allocRecord, .allocList: 3
         case .loadBoolConst, .listPush: 2
-        case .listInsert: 4
-        case .listRemove: 3
+        case .listInsert: 3 // LIST_INSERT list(u8), idx(u8), val(u8) — audit C11/D3
+        case .listRemove: 2 // LIST_REMOVE list(u8), idx(u8) — audit C11/D3
         case .listClear: 1
         case .listRemoveItem: 2
         case .loadIntConst, .loadFloatConst: 9
