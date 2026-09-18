@@ -145,7 +145,7 @@ compo Profile
   state avatarUrl: String = "https://example.com/me.png"
 
   Column {
-    Avatar(url: avatarUrl, size: 80)
+    Avatar(url: avatarUrl, size: 80.0)
     Text("Profile")
 }"#;
 

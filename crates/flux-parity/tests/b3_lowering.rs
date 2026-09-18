@@ -37,7 +37,7 @@ const B3_EXAMPLES: &[(&str, &str)] = &[
     ),
     (
         "b37_pure",
-        "@pure\ncompo Avatar(url: String, size: Float)\n  Image(source: url) {\n    width: size,\n    height: size,\n    cornerRadius: size / 2\n}\n\ncompo Profile\n  state avatarUrl: String = \"https://example.com/me.png\"\n\n  Column {\n    Avatar(url: avatarUrl, size: 80)\n    Text(\"Profile\")\n}\n",
+        "@pure\ncompo Avatar(url: String, size: Float)\n  Image(source: url) {\n    width: size,\n    height: size,\n    cornerRadius: size / 2\n}\n\ncompo Profile\n  state avatarUrl: String = \"https://example.com/me.png\"\n\n  Column {\n    Avatar(url: avatarUrl, size: 80.0)\n    Text(\"Profile\")\n}\n",
     ),
     (
         "b38_platform",
