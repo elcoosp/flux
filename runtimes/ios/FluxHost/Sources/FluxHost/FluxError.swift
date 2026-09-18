@@ -59,6 +59,8 @@ public enum FluxErrorKind: String, Equatable, Sendable {
     case capability = "CapabilityError"
     case compile = "CompileError"
     case server = "ServerError"
+    case invalidFrame = "InvalidFrame"
+    case invalidDispatch = "InvalidDispatch"
 }
 
 /// A Flux fault with a human-readable message, a category, an optional

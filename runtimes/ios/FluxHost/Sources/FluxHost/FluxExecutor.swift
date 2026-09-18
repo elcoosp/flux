@@ -240,6 +240,9 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
     /// without polling. Set by the mount controller; `nil` when no host is
     /// attached (e.g. headless tests).
     public var onTreeChanged: (@MainActor () -> Void)?
+    /// Audit H10: the error overlay cannot observe a plain property. Fires
+    /// whenever a new error is recorded so SwiftUI can re-render.
+    public var onError: ((FluxError) -> Void)?
 
     /// Creates an executor backed by `graph` and an `AdapterRegistry` built from
     /// `table`.
@@ -338,9 +341,14 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
         do {
             _ = try applyFrame(data)
         } catch {
-            #if DEBUG
-            NSLog("[frame] applyFrame threw: \(error)")
-            #endif
+            // Audit H5: silent catch hid malformed frames in Release.
+            lastError = VmError(kind: .invalidDispatch, offset: 0)
+            let fluxErr = FluxError(
+                message: "malformed frame: \(error.localizedDescription)",
+                kind: .invalidFrame,
+                span: nil
+            )
+            onError?(fluxErr)
         }
     }
 
@@ -562,7 +570,17 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
         closure: ClosureRef,
         payload: FluxValue
     ) -> DispatchResult {
-        let instructions = (try? Instruction.decode(bytecode)) ?? []
+        // Audit H5: a corrupt handler must surface, not execute as an empty program.
+        guard let instructions = try? Instruction.decode(bytecode) else {
+            lastError = VmError(kind: .invalidDispatch, offset: 0)
+            let fluxErr = FluxError(
+                message: "handler has undecodable bytecode",
+                kind: .invalidDispatch,
+                span: nil
+            )
+            onError?(fluxErr)
+            return DispatchResult(builtOrUpdated: [], signals: [], error: VmError(kind: .invalidDispatch, offset: 0))
+        }
         return dispatch(instructions: instructions, payload: payload)
     }
 

@@ -170,6 +170,7 @@ struct FluxErrorOverlay: View {
         case .vm: return .red
         case .runtime, .capability: return .orange
         case .wire: return .orange
+        case .invalidFrame, .invalidDispatch: return .red
         }
     }
 
@@ -180,6 +181,8 @@ struct FluxErrorOverlay: View {
         case .runtime: return "Flux runtime error"
         case .capability: return "Flux capability error"
         case .wire: return "Flux wire error"
+        case .invalidFrame: return "Flux frame error"
+        case .invalidDispatch: return "Flux dispatch error"
         }
     }
 
