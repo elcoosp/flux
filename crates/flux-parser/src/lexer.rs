@@ -288,6 +288,11 @@ struct Lexer<'s> {
     file_id: u32,
     /// Emitted tokens.
     out: Vec<Token>,
+    /// Whether the previously emitted significant token can end a value
+    /// (ident, number, string, bool, rparen, rbracket, rbrace). When false,
+    /// a `-` begins a negative literal; when true, it is binary minus.
+    /// Audit H18: without this, `x = x-1` lexes as `x = x` plus dead `-1`.
+    prev_can_end_value: bool,
 }
 
 impl<'s> Lexer<'s> {
@@ -305,6 +310,7 @@ impl<'s> Lexer<'s> {
             started: false,
             file_id,
             out: Vec::with_capacity(src.len() / 4 + 8),
+            prev_can_end_value: false,
         }
     }
 
@@ -411,7 +417,7 @@ impl<'s> Lexer<'s> {
             '>' if self.peek_at(1) == Some('=') => self.take(TokenKind::GtEq, 2),
             '>' => self.take(TokenKind::Gt, 1),
             '-' if self.peek_at(1) == Some('>') => self.take(TokenKind::Arrow, 2),
-            '-' if self.is_number(1) => self.lex_number(start),
+            '-' if !self.prev_can_end_value && self.is_number(1) => self.lex_number(start),
             '-' => self.take(TokenKind::Minus, 1),
             '@' => self.take(TokenKind::At, 1),
             '(' => self.bracket_tok(TokenKind::LParen),
@@ -460,6 +466,7 @@ impl<'s> Lexer<'s> {
             start,
             end: self.cur_byte(),
         });
+        self.prev_can_end_value = true;
     }
 
     fn lex_string(&mut self, start: usize) -> Result<(), LexError> {
@@ -502,6 +509,7 @@ impl<'s> Lexer<'s> {
             start,
             end: self.cur_byte(),
         });
+        self.prev_can_end_value = true;
         Ok(())
     }
 
@@ -539,6 +547,7 @@ impl<'s> Lexer<'s> {
                 end: self.cur_byte(),
             });
         }
+        self.prev_can_end_value = true;
     }
 
     fn lex_ident(&mut self, start: usize) {
@@ -556,6 +565,10 @@ impl<'s> Lexer<'s> {
             start,
             end: self.cur_byte(),
         });
+        // Whether this token can end a value: Ident (including bare
+        // names like `x`) and Bool (true/false) can; keywords like
+        // Let/If/Fn cannot.
+        self.prev_can_end_value = matches!(kind, TokenKind::Ident | TokenKind::Bool);
     }
 
     /// Whether the char `ahead` positions from `pos` begins a number.
@@ -571,6 +584,11 @@ impl<'s> Lexer<'s> {
             start,
             end: self.cur_byte(),
         });
+        self.prev_can_end_value = matches!(
+            kind,
+            TokenKind::Int | TokenKind::Float | TokenKind::Str | TokenKind::Bool
+                | TokenKind::Ident | TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace
+        );
     }
 
     fn bracket_tok(&mut self, kind: TokenKind) {
@@ -638,5 +656,38 @@ mod tests {
             kinds.contains(&"?."),
             "expected a QuestionDot token in {kinds:?}"
         );
+    }
+
+    #[test]
+    fn binary_minus_without_spaces_parses() {
+        let toks = lex("x-1", 1).expect("lex");
+        let kinds: Vec<&str> = toks
+            .iter()
+            .map(|t| match t.kind {
+                TokenKind::Ident => "ident",
+                TokenKind::Int => "int",
+                TokenKind::Float => "float",
+                TokenKind::Minus => "minus",
+                TokenKind::Eof => "eof",
+                _ => "other",
+            })
+            .collect();
+        assert_eq!(kinds, vec!["ident", "minus", "int", "eof"]);
+    }
+
+    #[test]
+    fn unary_minus_still_folds() {
+        let toks = lex("-1", 1).expect("lex");
+        let kinds: Vec<&str> = toks
+            .iter()
+            .map(|t| match t.kind {
+                TokenKind::Int => "int",
+                TokenKind::Float => "float",
+                TokenKind::Minus => "minus",
+                TokenKind::Eof => "eof",
+                _ => "other",
+            })
+            .collect();
+        assert_eq!(kinds, vec!["int", "eof"]);
     }
 }
