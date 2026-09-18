@@ -23,7 +23,7 @@ use std::collections::HashMap;
 use crate::backend::Backend;
 use crate::bridge::Bridge;
 use crate::expressions::{render_expr, render_handler_body};
-use crate::model::{ComponentMeta, native_type};
+use crate::model::{native_type, ComponentMeta};
 use crate::primitives::{PrimitiveKind, PrimitiveSpec};
 use flux_ir::lower::Monomorphization;
 
@@ -469,15 +469,13 @@ impl<'a, B: Backend> Emitter<'a, B> {
                         .unwrap_or_else(|| "\"\"".to_owned());
                     self.line(indent, &B::image_expr(&value));
                 } else if spec.flux_name == "Toggle" {
-                    // SwiftUI Toggle needs `Toggle(isOn: $binding, label: …)`.
-                    // For release-mode rendering with an immutable value, use
-                    // `.constant()` since `task.done` is not a mutable binding.
+                    // Audit T-403.1: toggle is backend-specific (Swift Toggle vs Kotlin Switch).
                     let value = primary
                         .map(render_inline)
                         .unwrap_or_else(|| "\"\"".to_owned());
-                    self.line(indent, &format!("Toggle(isOn: .constant({value})) {{"));
+                    self.line(indent, &B::toggle_open(&value));
                     self.emit_trailing_or_children(trailing.as_deref(), id, indent + B::CHILD_STEP);
-                    self.line(indent, "}");
+                    self.line(indent, &B::toggle_close());
                 } else if spec.flux_name == "Spacer" {
                     self.line(indent, &B::spacer());
                 } else {

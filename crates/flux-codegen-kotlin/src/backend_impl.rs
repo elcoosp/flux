@@ -147,6 +147,15 @@ impl Backend for Kotlin {
         }
     }
 
+    fn toggle_open(value: &str) -> String {
+        // Kotlin uses Switch with checked + onCheckedChange
+        format!("Switch(checked = {value}, onCheckedChange = {{ {value} = it }}) {{")
+    }
+
+    fn toggle_close() -> String {
+        "}".to_string()
+    }
+
     fn key_extractor(key: &Expr) -> String {
         if let ExprKind::Lambda { params, body } = &key.kind {
             if let Some(param) = params.first() {

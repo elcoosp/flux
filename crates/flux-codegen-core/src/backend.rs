@@ -153,6 +153,18 @@ pub trait Backend {
     #[must_use]
     fn text_field(value: &str, on_change: &str, placeholder: &str) -> String;
 
+    /// Renders a `Toggle` open line given the bound value (e.g. `Toggle(isOn: $v)`).
+    #[must_use]
+    fn toggle_open(value: &str) -> String {
+        format!("Toggle(isOn: .constant({value})) {{")
+    }
+
+    /// Renders a `Toggle` close line (`}`).
+    #[must_use]
+    fn toggle_close() -> String {
+        "}".to_string()
+    }
+
     /// The `key`-extractor fragment for a `ForEach` collection (`{ it.id }` /
     /// `\\.id`).
     #[must_use]
