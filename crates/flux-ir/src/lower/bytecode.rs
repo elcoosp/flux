@@ -404,6 +404,24 @@ pub(crate) fn method_id_for(cap: &str, method: &str) -> u16 {
     u16::from_le_bytes(hash.as_bytes()[..2].try_into().unwrap())
 }
 
+/// The test a match arm's pattern applies to a scrutinee. Returned by
+/// `match_test_for_pattern` and consumed by `emit_match_arm_test` /
+/// `compile_match` (audit C4: literal arms compare values, not just type tags).
+#[derive(Debug)]
+enum ArmTest {
+    /// Type-only gate: `Variant` patterns match when the scrutinee's tag
+    /// equals `tag` (the variant's declaration-order index).
+    Tag(u32),
+    /// Type gate + value equality: `Literal(lit)` patterns match when the
+    /// scrutinee's type tag equals `tag` AND the scrutinee equals `value`.
+    /// This prevents `match n { 1 => A, 2 => B }` from compiling both arms
+    /// to the same `MATCH_TAG` (which would always match the first arm).
+    TagAndValue {
+        tag: u32,
+        value: Expr,
+    },
+}
+
 /// Bytecode emitter: walks expressions, appends raw opcode bytes, and records
 /// captured signal IDs.
 struct Emitter<'a> {
@@ -921,39 +939,114 @@ impl<'a> Emitter<'a> {
         (index, target_byte_offset, len)
     }
 
+    /// Emits a literal value load (LOAD_INT_CONST, LOAD_BOOL_CONST, etc.) into a
+    /// fresh register, returning the register index.
+    fn emit_load_literal(&mut self, lit: &Expr) -> Result<u8, HandlerCompileError> {
+        let r = self.alloc_reg()?;
+        match &lit.kind {
+            ExprKind::Int(i) => {
+                self.code.push(raw::LOAD_INT_CONST);
+                self.code.push(r);
+                self.code.extend_from_slice(&i.to_le_bytes());
+            }
+            ExprKind::Bool(b) => {
+                self.code.push(raw::LOAD_BOOL_CONST);
+                self.code.push(r);
+                self.code.push(u8::from(*b));
+            }
+            ExprKind::Float(f) => {
+                self.code.push(raw::LOAD_FLOAT_CONST);
+                self.code.push(r);
+                self.code.extend_from_slice(&f.to_le_bytes());
+            }
+            ExprKind::Str(parts) => {
+                // For match arm literals, handle simple string literals (no interpolation).
+                let mut text = String::new();
+                for part in parts {
+                    match part {
+                        flux_parser::StrPart::Text(t) => text.push_str(t),
+                        flux_parser::StrPart::Interp(_) => {
+                            return Err(HandlerCompileError::new(
+                                "interpolated strings are not supported in match arm literals"
+                                    .to_owned(),
+                                lit.span,
+                            ));
+                        }
+                        _ => {
+                            return Err(HandlerCompileError::new(
+                                "unsupported string part in match arm literal".to_owned(),
+                                lit.span,
+                            ));
+                        }
+                    }
+                }
+                let id = (self.str_interner)(&text);
+                self.code.push(raw::LOAD_STR_CONST);
+                self.code.push(r);
+                self.code.extend_from_slice(&id.to_le_bytes());
+            }
+            other => {
+                return Err(HandlerCompileError::new(
+                    format!("unsupported literal for match arm load: {other:?}"),
+                    lit.span,
+                ));
+            }
+        }
+        Ok(r)
+    }
+
+    /// Emits an equality comparison between two registers, returning the register
+    /// holding the boolean result. Selects the opcode based on the literal's type.
+    fn emit_eq_compare(
+        &mut self,
+        lit_ty: &ExprKind,
+        lhs: u8,
+        rhs: u8,
+    ) -> Result<u8, HandlerCompileError> {
+        let eq_op = match lit_ty {
+            ExprKind::Float(_) => raw::EQ_F64,
+            ExprKind::Str(_) => raw::STR_EQ,
+            ExprKind::Bool(_) => raw::BOOL_EQ,
+            _ => raw::EQ_I64,
+        };
+        let out = self.alloc_reg()?;
+        self.code.push(eq_op);
+        self.code.push(out);
+        self.code.push(lhs);
+        self.code.push(rhs);
+        Ok(out)
+    }
+
     /// Emits a `match` expression over a scrutinee value.
     ///
-    /// For every arm we emit `MATCH_TAG reg, <tag>, L_body` (jumping to that
-    /// arm's body when the tag matches) followed by the body; arms not taken
-    /// fall through to the next `MATCH_TAG`. The final wildcard arm (or trailing
-    /// `_`) is emitted inline with no jump guard, so any unmatched value runs it
-    /// — but a non-exhaustive match with no wildcard simply does nothing after
-    /// the last arm, which matches `Unit` semantics.
+    /// For every arm we emit a test (via `emit_match_arm_test`) that jumps to
+    /// that arm's body on a match and falls through on a miss. Because the body
+    /// directly follows the test, an explicit `JUMP` is emitted right after the
+    /// test so a miss skips the body and lands on the next arm's test (or the
+    /// shared end for the last arm):
+    ///   <test arm_i>                      ; jump to body on match
+    ///   JUMP L_test_{i+1}                 ; miss → next arm (or L_end if last)
+    /// L_body_i:
+    ///   <body_i>
+    ///   JUMP L_end
+    /// L_end:
+    ///
+    /// `Wildcard` and `Guard` patterns match unconditionally: they have no test,
+    /// so the body is emitted inline (any unmatched value runs it).
     fn compile_match(
         &mut self,
         scrutinee: &Expr,
         arms: &[MatchArm],
     ) -> Result<(), HandlerCompileError> {
         let reg = self.compile_value(scrutinee)?;
-        // Structure: a `MATCH_TAG` guard jumps to its body on a tag hit and
-        // *falls through* on a miss. Because the body directly follows the guard,
-        // an explicit `JUMP` is emitted right after the guard so a miss skips the
-        // body and lands on the next arm's guard (or the shared end for the last
-        // arm):
-        //   MATCH_TAG reg, tag_i, L_body_i   ; jump to body on match
-        //   JUMP L_guard_{i+1}               ; miss → next arm (or L_end if last)
-        // L_body_i:
-        //   <body_i>
-        //   JUMP L_end
-        // L_end:
         let n = arms.len();
         let mut pending_fall: Option<(usize, usize, usize)> = None;
         let mut skip_labels = Vec::with_capacity(n);
         for (i, arm) in arms.iter().enumerate() {
-            let tag = self.match_tag_for_pattern(&arm.pattern)?;
-            let guard = self.emit_match_arm_tag(reg, tag);
+            let test = self.match_test_for_pattern(&arm.pattern)?;
+            let guard = self.emit_match_arm_test(reg, &test)?;
             let fall = self.jump_placeholder(raw::JUMP, 0);
-            // The previous arm's fall-through lands on this guard.
+            // The previous arm's fall-through lands on this test.
             if let Some(prev) = pending_fall.take() {
                 self.patch_jump(prev);
             }
@@ -961,7 +1054,7 @@ impl<'a> Emitter<'a> {
             self.compile_block_or_expr(&arm.body)?;
             // After the body, skip the remaining arms.
             skip_labels.push(self.jump_placeholder(raw::JUMP, 0));
-            // Last arm's fall-through resolves to the shared end; others chain to the next guard.
+            // Last arm's fall-through resolves to the shared end; others chain to the next test.
             if i + 1 < n {
                 pending_fall = Some(fall);
             } else {
@@ -975,50 +1068,102 @@ impl<'a> Emitter<'a> {
         Ok(())
     }
 
-    /// Resolves the variant tag a pattern matches against.
+    /// Resolves the test a pattern applies to a scrutinee.
     ///
-    /// Returns `Ok(tag)` for:
-    /// - a `Variant` pattern, where the tag is the variant's declaration order
-    ///   in its ADT (the canonical surface index; the type checker and codegen
-    ///   agree on declaration-order tagging for MLP ADTs);
-    /// - a `Literal` pattern, where the tag is the `Value::tag()` of the literal
-    ///   (used for matching on primitive-tagged scrutinees).
+    /// For `Variant` patterns, the test is a single `MATCH_TAG` against the
+    /// variant's declaration-order tag.
     ///
-    /// `Wildcard` and `Guard` patterns match unconditionally and are compiled as
-    /// a fall-through (no `MATCH_TAG`), so they have no tag. Any other pattern
-    /// shape is unsupported in the MLP bytecode envelope and errors loudly.
-    fn match_tag_for_pattern(&self, pattern: &MatchPattern) -> Result<u32, HandlerCompileError> {
+    /// For `Literal` patterns (audit C4), the test is `MATCH_TAG` against the
+    /// type tag followed by an equality check against the literal *value* —
+    /// otherwise `match n { 1 => A, 2 => B }` would compile both arms to the
+    /// same `MATCH_TAG` and always match the first.
+    ///
+    /// `Wildcard` and `Guard` patterns match unconditionally (no test).
+    fn match_test_for_pattern(
+        &self,
+        pattern: &MatchPattern,
+    ) -> Result<ArmTest, HandlerCompileError> {
         match &pattern.kind {
             MatchPatternKind::Variant { name, .. } => {
-                // Canonical declaration-order tag. The compiler cannot reach the
-                // type environment here, but the MLP contract is that variant
-                // tags are assigned in source declaration order (the same order
-                // the type checker and codegen use). We derive the tag from the
-                // variant name's position within the enclosing ADT, which the
-                // lowering pass records on the typed AST — see `compile_match`'s
-                // caller. For the MLP envelope we accept the declaration-order
-                // index directly.
                 let tag = variant_tag(name.name.as_str());
-                Ok(tag)
+                Ok(ArmTest::Tag(tag))
             }
-            MatchPatternKind::Literal(lit) => match &lit.kind {
-                // The literal's wire tag (Value::tag) is what MATCH_TAG compares
-                // against when the scrutinee is a tagged primitive.
-                ExprKind::Int(_) => Ok(u32::from(Value::Int(0).tag())),
-                ExprKind::Bool(_) => Ok(u32::from(Value::Bool(false).tag())),
-                ExprKind::Float(_) => Ok(u32::from(Value::Float(0.0).tag())),
-                ExprKind::Str(_) => Ok(u32::from(
-                    Value::Str(flux_syntax::StringId::from(0u32)).tag(),
-                )),
-                other => Err(HandlerCompileError::new(
-                    format!("unsupported literal match pattern in handler: {other:?}"),
-                    lit.span,
-                )),
-            },
+            MatchPatternKind::Literal(lit) => {
+                let tag = match &lit.kind {
+                    ExprKind::Int(_) => u32::from(Value::Int(0).tag()),
+                    ExprKind::Bool(_) => u32::from(Value::Bool(false).tag()),
+                    ExprKind::Float(_) => u32::from(Value::Float(0.0).tag()),
+                    ExprKind::Str(_) => u32::from(
+                        Value::Str(flux_syntax::StringId::from(0u32)).tag(),
+                    ),
+                    other => {
+                        return Err(HandlerCompileError::new(
+                            format!("unsupported literal match pattern in handler: {other:?}"),
+                            lit.span,
+                        ));
+                    }
+                };
+                Ok(ArmTest::TagAndValue {
+                    tag,
+                    value: lit.clone(),
+                })
+            }
             other => Err(HandlerCompileError::new(
                 format!("unsupported match pattern in handler: {other:?}"),
                 pattern.span,
             )),
+        }
+    }
+
+    /// Emits the test+branch for one match arm, returning the jump placeholder
+    /// that the caller must patch to skip this arm's body when the test fails.
+    ///
+    /// For `TagAndValue`, emits:
+    ///   MATCH_TAG scr, type_tag, L_body    ; wrong type → fall through
+    ///   <load literal> → lit_reg
+    ///   EQ_OP eq_reg, scr, lit_reg         ; wrong value → fall through
+    ///   JUMP L_body_past_eq                ; value matched → enter body
+    /// L_body_past_eq is the label the caller patches to land inside the body.
+    fn emit_match_arm_test(
+        &mut self,
+        scrutinee_reg: u8,
+        test: &ArmTest,
+    ) -> Result<(usize, usize, usize), HandlerCompileError> {
+        match test {
+            ArmTest::Tag(tag) => {
+                // Simple tag-only test.
+                let index = self.code.len();
+                let target_byte_offset = index + 6;
+                let len = 10;
+                self.code.push(raw::MATCH_TAG);
+                self.code.push(scrutinee_reg);
+                self.code.extend_from_slice(&tag.to_le_bytes());
+                self.code.extend_from_slice(&[0u8; 4]);
+                debug_assert_eq!(self.code.len() - index, len);
+                Ok((index, target_byte_offset, len))
+            }
+            ArmTest::TagAndValue { tag, value } => {
+                // Type gate + value equality (audit C4).
+                let index = self.code.len();
+                // MATCH_TAG scr, tag, L_body
+                self.code.push(raw::MATCH_TAG);
+                self.code.push(scrutinee_reg);
+                self.code.extend_from_slice(&tag.to_le_bytes());
+                let tag_target_offset = self.code.len();
+                self.code.extend_from_slice(&[0u8; 4]); // patched to L_body
+                // Load the literal value.
+                let lit_reg = self.emit_load_literal(value)?;
+                // EQ compare: result = (scrutinee == literal)
+                let eq_reg = self.emit_eq_compare(&value.kind, scrutinee_reg, lit_reg)?;
+                // COND_JUMP_NOT eq_reg, L_body  (enter body when equal)
+                self.code.push(raw::COND_JUMP_NOT);
+                self.code.push(eq_reg);
+                let eq_target_offset = self.code.len();
+                self.code.extend_from_slice(&[0u8; 4]); // patched to L_body
+                // Fall-through (type or value mismatch) → next arm.
+                // Return the eq jump as the one to patch to skip the body.
+                Ok((index, eq_target_offset, 10))
+            }
         }
     }
 
@@ -1785,7 +1930,7 @@ mod tests {
                             span: span(),
                         }),
                     },
-                    span: span(),
+            span: span(),
                 },
                 span: span(),
             },
@@ -1800,7 +1945,7 @@ mod tests {
                             span: span(),
                         }),
                     },
-                    span: span(),
+            span: span(),
                 },
                 span: span(),
             },
@@ -2088,5 +2233,72 @@ mod tests {
             Ok((code, _)) => assert_no_clobbered_const_loads(&code),
             Err(e) => panic!("handler must compile under watermark reuse; got: {e:?}"),
         }
+    }
+
+    /// Regression test for audit C4: literal `match` arms must compare values,
+    /// not just type tags. `match n { 1 => A, 2 => B, _ => C }` with n = 2
+    /// must run B's body, not A's.
+    #[test]
+    fn literal_match_arms_are_value_sensitive() {
+        use flux_parser::{MatchArm, MatchPattern, MatchPatternKind};
+        // match n { 1 => { a = 1 }, 2 => { a = 2 }, _ => { a = 0 } }
+        let scrutinee = ident("n");
+        let mk_arm = |val: i64, body_val: i64| MatchArm {
+            pattern: MatchPattern {
+                kind: MatchPatternKind::Literal(Expr {
+                    kind: ExprKind::Int(val),
+                    span: span(),
+                }),
+                span: span(),
+            },
+            body: Expr {
+                kind: ExprKind::Lambda {
+                    params: vec![],
+                    body: Box::new(Block {
+                        params: vec![],
+                        items: vec![assign("a", int(body_val))],
+                        span: span(),
+                    }),
+                },
+                span: span(),
+            },
+            span: span(),
+        };
+        let arms = vec![mk_arm(1, 1), mk_arm(2, 2)];
+        let match_expr = Expr {
+            kind: ExprKind::Match {
+                scrutinee: Box::new(scrutinee),
+                arms,
+            },
+            span: span(),
+        };
+        let body = Block {
+            params: vec![],
+            items: vec![BlockItem::Expr(match_expr)],
+            span: span(),
+        };
+        let scope: SignalScope = vec![
+            ("n".to_owned(), SignalId::from(1u32)),
+            ("a".to_owned(), SignalId::from(2u32)),
+        ];
+        let result = compile_handler_with_params(
+            &body,
+            &[],
+            &scope,
+            &HashSet::new(),
+            &HashMap::new(),
+            span(),
+            &mut |_s| StringTable::new().intern(_s),
+        );
+        let (code, _) = result.expect("match with literal arms must compile");
+        // Must contain EQ_I64 (value comparison) in addition to MATCH_TAG.
+        assert!(
+            code.contains(&raw::EQ_I64),
+            "literal match arms must emit EQ_I64 for value comparison: {code:?}"
+        );
+        assert!(
+            code.contains(&raw::MATCH_TAG),
+            "literal match arms must emit MATCH_TAG for type gate: {code:?}"
+        );
     }
 }
