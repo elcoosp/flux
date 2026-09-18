@@ -301,7 +301,7 @@ enum FluxBytecodeVM {
             case .f64ToI64:
                 let dst = instr.u8(0)
                 let v = try requireFloat(reg(instr.u8(1)), at: instr.offset)
-                regs[Int(dst)] = .int(Int64(v))
+                regs[Int(dst)] = .int(Self.f64ToI64(v))
 
             case .andBool:
                 let dst = instr.u8(0)
@@ -869,7 +869,7 @@ enum FluxBytecodeVM {
             case .f64ToI64:
                 let dst = instr.u8(0)
                 let v = try requireFloat(reg(instr.u8(1)), at: instr.offset)
-                regs[Int(dst)] = .int(Int64(v))
+                regs[Int(dst)] = .int(Self.f64ToI64(v))
 
             case .andBool:
                 let dst = instr.u8(0)
@@ -1259,7 +1259,7 @@ enum FluxBytecodeVM {
             case opcodeIndex[.f64ToI64]!:
                 let dst = instr.u8(0)
                 let v = try requireFloat(reg(instr.u8(1)), at: instr.offset)
-                regs[Int(dst)] = .int(Int64(v))
+                regs[Int(dst)] = .int(Self.f64ToI64(v))
             case opcodeIndex[.andBool]!:
                 let dst = instr.u8(0)
                 let x = try requireBool(reg(instr.u8(1)), at: instr.offset)
@@ -1448,6 +1448,15 @@ enum FluxBytecodeVM {
     private static func requireBool(_ v: FluxValue, at offset: Int) throws -> Bool {
         guard case let .bool(b) = v else { throw VmError.typeMismatch(offset: offset) }
         return b
+    }
+
+    /// f64 → i64 with oracle-parity saturation (audit H1): NaN → 0, values
+    /// outside Int64 range clamp to min/max. `Int64(v)` would trap.
+    static func f64ToI64(_ v: Double) -> Int64 {
+        if v.isNaN { return 0 }
+        if v >= 9.223372036854776e18 { return Int64.max }
+        if v <= -9.223372036854776e18 { return Int64.min }
+        return Int64(v)
     }
 
     private static func requireStr(_ v: FluxValue, at offset: Int) throws -> UInt32 {
