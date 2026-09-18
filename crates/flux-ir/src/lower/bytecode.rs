@@ -123,6 +123,7 @@ pub fn compile_handler_with_params(
         emitter.bind_payload(ident.name.clone());
     }
     for item in &body.items {
+        emitter.push_watermark();
         match item {
             BlockItem::State(decl) => {
                 // `state x = e` is an initialiser, not a mutation; treat as a
@@ -147,6 +148,7 @@ pub fn compile_handler_with_params(
                 ));
             }
         }
+        emitter.pop_watermark();
     }
     emitter.finish()
 }
@@ -1311,8 +1313,11 @@ impl<'a> Emitter<'a> {
                 self.patch_jump(else_label);
                 self.code.push(raw::GET_FIELD);
                 self.code.push(out);
-                let tag = method_id_for("", &field.name);
-                self.code.extend_from_slice(&tag.to_le_bytes());
+                // Same index space as every other field access (audit C3):
+                // `?.` previously hashed the field name with blake3 via
+                // method_id_for, reading a slot nothing ever wrote.
+                let idx = prop_index_for_name(&field.name);
+                self.code.extend_from_slice(&idx.to_le_bytes());
                 self.code.push(base_reg);
                 self.patch_jump(join_label);
                 Ok(out)
@@ -1573,22 +1578,9 @@ mod tests {
     use flux_syntax::opcode::raw;
     use flux_syntax::{SignalId, Span, StringTable, Value};
     use flux_vm_ref::{InMemorySignals, SignalStore, run};
+    use std::collections::HashMap;
 
-    /// Compiles a handler from a `.flux`-style source string (for tests only).
-    fn compile_handler_for_test(src: &str) -> Result<Vec<u8>, HandlerCompileError> {
-        let block = flux_parser::parse_block(src).expect("parse");
-        let (code, _) = compile_handler(
-            &block,
-            &SignalScope::new(),
-            &HashSet::new(),
-            &HashMap::new(),
-            span(),
-            &mut |_s| StringTable::new().intern(_s),
-        )?;
-        Ok(code)
-    }
-
-    /// Builds a handler body with `n` sequential `sN = sN + 1` assignments
+    /// Builds a handler body with `n` sequential `sN = sN + 1` state declarations
     /// against distinct signals, to exercise the register allocator.
     fn build_handler_with_n_sequential_increments(n: usize) -> Vec<BlockItem> {
         (0..n).map(|i| {
