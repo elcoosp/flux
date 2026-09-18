@@ -12,6 +12,13 @@ on:
       - 'docs/spec/mlp-appendices.md'
       - 'docs/scripts/check-adr-numbering.sh'
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   check-adr-numbering:
     runs-on: ubuntu-latest

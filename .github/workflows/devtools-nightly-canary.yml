@@ -34,6 +34,10 @@ permissions:
   contents: read
   issues: write
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
@@ -52,17 +56,20 @@ jobs:
         # Force the FLOATING `nightly` (the "next" nightly) explicitly, so this
         # does NOT read the pinned `rust-toolchain.toml`. The canary commands
         # below also carry `+nightly` to make the override unambiguous.
+        # TODO(sha-pin): resolve the commit SHA for this third-party action before v1.0
         uses: dtolnay/rust-toolchain@nightly
         with:
           toolchain: nightly
           components: rustfmt, clippy
 
       - name: Cache cargo
+        # TODO(sha-pin): resolve the commit SHA for this third-party action before v1.0
         uses: Swatinem/rust-cache@v2
 
       - name: Install cargo-nextest
         # Prebuilt binary on PATH (toolchain-agnostic), so `cargo +nightly
         # nextest` resolves regardless of which toolchain is active.
+        # TODO(sha-pin): resolve the commit SHA for this third-party action before v1.0
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest
@@ -75,6 +82,7 @@ jobs:
 
       - name: Open/update canary issue on failure
         if: failure()
+        # TODO(sha-pin): resolve the commit SHA for this third-party action before v1.0
         uses: actions/github-script@v7
         with:
           script: |

@@ -41,6 +41,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   ios-matrix:
     name: iOS (Xcode ${{ matrix.xcode }})
@@ -111,6 +115,7 @@ jobs:
           cache: gradle
 
       - name: Set up Android SDK
+        # TODO(sha-pin): resolve the commit SHA for this third-party action before v1.0
         uses: android-actions/setup-android@v3
 
       - name: Pin AGP + Kotlin in gradle/libs.versions.toml
@@ -139,6 +144,7 @@ jobs:
           echo "exported ANDROID_COMPOSE_CLASSPATH and ANDROID_COMPOSE_COMPILER"
 
       - name: Set up Rust toolchain
+        # TODO(sha-pin): resolve the commit SHA for this third-party action before v1.0
         uses: dtolnay/rust-toolchain@stable
 
       - name: kotlinc compile-check of generated Compose (HARD)

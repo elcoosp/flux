@@ -40,6 +40,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   android:
     name: gradlew tests + kotlinc codegen check
@@ -64,6 +68,7 @@ jobs:
           cache: gradle
 
       - name: Set up Android SDK
+        # TODO(sha-pin): resolve the commit SHA for this third-party action before v1.0
         uses: android-actions/setup-android@v3
 
       - name: Install Android platform (ubuntu-24.04 preinstalls android-37; fail if absent)
@@ -147,6 +152,7 @@ jobs:
           echo "exported ANDROID_COMPOSE_CLASSPATH ($classpath) and ANDROID_COMPOSE_COMPILER"
 
       - name: Set up Rust toolchain
+        # TODO(sha-pin): resolve the commit SHA for this third-party action before v1.0
         uses: dtolnay/rust-toolchain@stable
 
       - name: kotlinc compile-check of generated Compose (HARD)

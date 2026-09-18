@@ -6,6 +6,13 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
@@ -15,8 +22,8 @@ jobs:
     name: Criterion suite + baseline compare
     runs-on: macos-14
     # Benchmarks are expensive; only run on demand / main to keep PR minutes sane.
-    # Remove the `if` to gate on every PR.
-    if: github.event_name != 'pull_request'
+    # release-gate consumes this job's result; skipping would fake a green gate
+    if: true
     steps:
       - uses: actions/checkout@v5
         with:
@@ -125,6 +132,7 @@ jobs:
           rustup default nightly
 
       - name: Cache cargo
+        # TODO(sha-pin): resolve the commit SHA for this third-party action before v1.0
         uses: Swatinem/rust-cache@v2
 
       - name: Run save→photon loopback bench

@@ -32,6 +32,13 @@ on:
       - "scripts/run-perf-harness.sh"
       - ".github/workflows/perf-harness.yml"
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   perf-harness-rust-android:
     name: flux-perf-harness (rust core + android host)
@@ -39,8 +46,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust toolchain
+        # TODO(sha-pin): resolve the commit SHA for this third-party action before v1.0
         uses: dtolnay/rust-toolchain@stable
       - name: Cache cargo
+        # TODO(sha-pin): resolve the commit SHA for this third-party action before v1.0
         uses: Swatinem/rust-cache@v2
       - name: Set up JDK
         uses: actions/setup-java@v4
@@ -62,6 +71,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust toolchain
+        # TODO(sha-pin): resolve the commit SHA for this third-party action before v1.0
         uses: dtolnay/rust-toolchain@stable
       - name: Boot iOS simulator
         run: |

@@ -30,6 +30,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
@@ -43,6 +47,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install Rust nightly toolchain (cargo-fuzz needs nightly)
+        # TODO(sha-pin): resolve the commit SHA for this third-party action before v1.0
         uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt, clippy
@@ -53,6 +58,7 @@ jobs:
         run: cargo +nightly install cargo-fuzz --locked
 
       - name: Cache cargo
+        # TODO(sha-pin): resolve the commit SHA for this third-party action before v1.0
         uses: Swatinem/rust-cache@v2
 
       - name: Build the fuzz target (sanitized, release)
