@@ -942,10 +942,11 @@ enum FluxBytecodeVM {
                 let count = Int(instr.u16(1))
                 allocated &+= UInt64(count) &* 16
                 if allocated > allocationBudget { return .failure(.memoryExhausted(offset: instr.offset)) }
-                var fields: [(UInt16, FluxValue)] = []
-                fields.reserveCapacity(count)
-                for i in 0..<count { fields.append((UInt16(i), .null)) }
-                regs[Int(dst)] = .record(fields)
+                // Audit H2: the resumable path pre-populated records with
+                // positional nulls, diverging from `run` and the oracle;
+                // after any AWAIT every record carried phantom null fields.
+                // Allocation now starts empty on all three interpreters.
+                regs[Int(dst)] = .record([])
 
             case .getField:
                 let dst = instr.u8(0)
@@ -1317,10 +1318,8 @@ enum FluxBytecodeVM {
                 let count = Int(instr.u16(1))
                 allocated &+= UInt64(count) &* 16
                 if allocated > allocationBudget { throw VmError.memoryExhausted(offset: instr.offset) }
-                var fields: [(UInt16, FluxValue)] = []
-                fields.reserveCapacity(count)
-                for i in 0..<count { fields.append((UInt16(i), .null)) }
-                regs[Int(dst)] = .record(fields)
+                // Audit H2: no pre-population — records start empty on all paths.
+                regs[Int(dst)] = .record([])
             case opcodeIndex[.getField]!:
                 let dst = instr.u8(0)
                 let idx = Int(instr.u16(1))
