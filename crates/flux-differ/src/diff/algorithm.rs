@@ -109,10 +109,10 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
     // Nodes removed from the new tree.
     // Structural edits (a re-spanned or retagged subtree) surface as a
     // removed id plus an inserted id that still denote the SAME component at
-    // the SAME parent/index. Pair those up into a state-preserving
+    // the same parent/index. Pair those up into a state-preserving
     // `Patch::Reattach` before falling back to remove+insert (roadmap Phase 3).
     let removed: Vec<NodeId> = old_ids.difference(&new_ids).copied().collect();
-    let inserted: Vec<NodeId> = new_ids.difference(&old_ids).copied().collect();
+    let mut inserted: Vec<NodeId> = new_ids.difference(&old_ids).copied().collect();
     let pairs = reattach_pairs(old, new, &old_index, &new_index, &removed, &inserted);
 
     for id in &removed {
@@ -121,6 +121,12 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
         }
         patches.push(Patch::Remove { id: *id });
     }
+
+    // Audit C8: Insert carries an absolute index into the new tree; emitting
+    // inserts in hash-set order corrupts the host's child order when more
+    // than one row is added per frame. Sort by (parent, index) — stable and
+    // deterministic — before any Reattach filtering below.
+    inserted.sort_by_key(|id| new_index.get(id).copied());
 
     for id in &inserted {
         if pairs.iter().any(|(_, new_id)| new_id == id) {
@@ -131,6 +137,17 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
             patches.push(Patch::Insert {
                 parent,
                 index,
+                node: to_ref(&n),
+            });
+        } else if is_root_of_new(new, id) {
+            // Audit C9: arena roots have no entry in `new_index` (no parent),
+            // so new top-level components were silently dropped on hot reload.
+            // Emit the insert against the stable synthetic wrapper id the
+            // devserver's tree.rs uses for the multi-root Init (§D.12.2).
+            let n = new.get(*id).expect("present in new");
+            patches.push(Patch::Insert {
+                parent: synthetic_root_id(),
+                index: root_position(new, id),
                 node: to_ref(&n),
             });
         }
@@ -186,4 +203,103 @@ pub(crate) fn reattach_pairs(
         }
     }
     pairs
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flux_ir::{ArenaBuilder, Node};
+    use flux_syntax::{ComponentId, NodeKind, NodeId, Props, Span, Child};
+
+    fn build_tree(root_id: u32, root_kind: NodeKind, children: &[(u32, NodeKind)]) -> flux_ir::IRArena {
+        let mut b = ArenaBuilder::new();
+        let root = Node {
+            id: NodeId::from(root_id),
+            kind: root_kind,
+            component_id: ComponentId::from(0u32),
+            props: Props::from_fields(vec![]),
+            children: children.iter().map(|(cid, _)| Child::Node(NodeId::from(*cid))).collect(),
+            handlers: vec![],
+            span: Span::new(0, 0, 10),
+        };
+        b.pack(root);
+        for (cid, kind) in children {
+            let child = Node {
+                id: NodeId::from(*cid),
+                kind: *kind,
+                component_id: ComponentId::from(*cid),
+                props: Props::from_fields(vec![]),
+                children: vec![],
+                handlers: vec![],
+                span: Span::new(0, 10, 20),
+            };
+            b.pack(child);
+        }
+        b.finish()
+    }
+
+    #[test]
+    fn multi_insert_emits_ascending_indices_per_parent() {
+        let old = build_tree(1, NodeKind::Component, &[(2, NodeKind::Primitive)]);
+        let new = build_tree(1, NodeKind::Component, &[
+            (3, NodeKind::Primitive),
+            (4, NodeKind::Primitive),
+            (2, NodeKind::Primitive),
+        ]);
+        let patches = diff(&old, &new);
+        let inserts: Vec<(u32, u32)> = patches.iter().filter_map(|p| match p {
+            Patch::Insert { parent, index, .. } => Some((u32::from(*parent), u32::from(*index))),
+            _ => None,
+        }).collect();
+        let mut sorted = inserts.clone();
+        sorted.sort();
+        assert_eq!(inserts, sorted, "inserts must be emitted in (parent, index) order (audit C8)");
+    }
+
+    #[test]
+    fn new_root_component_is_inserted_on_hot_reload() {
+        let old = build_tree(1, NodeKind::Component, &[]);
+        let mut b = ArenaBuilder::new();
+        b.pack(Node {
+            id: NodeId::from(1),
+            kind: NodeKind::Component,
+            component_id: ComponentId::from(1),
+            props: Props::from_fields(vec![]),
+            children: vec![],
+            handlers: vec![],
+            span: Span::new(0, 0, 10),
+        });
+        b.pack(Node {
+            id: NodeId::from(2),
+            kind: NodeKind::Component,
+            component_id: ComponentId::from(2),
+            props: Props::from_fields(vec![]),
+            children: vec![],
+            handlers: vec![],
+            span: Span::new(0, 10, 20),
+        });
+        let new = b.finish();
+        let patches = diff(&old, &new);
+        assert!(
+            patches.iter().any(|p| matches!(p, Patch::Insert { .. })),
+            "a newly added top-level component must produce an Insert patch (audit C9)"
+        );
+    }
+}
+
+/// Audit C9: true when `id` is a root of `new` (no parent in the arena).
+fn is_root_of_new(new: &flux_ir::IRArena, id: &NodeId) -> bool {
+    !new.iter().any(|n| n.children().any(|c| c == id))
+}
+
+/// Audit C9: the stable synthetic wrapper id for multi-root Init frames.
+fn synthetic_root_id() -> NodeId {
+    flux_syntax::compute_node_id(0, NodeKind::Component, Span::new(0, 0, 0), None)
+}
+
+/// Audit C9: the index of `id` among the new tree's roots.
+fn root_position(new: &flux_ir::IRArena, id: &NodeId) -> u16 {
+    let roots: Vec<_> = new.iter().filter(|n| !new.iter().any(|p| p.children().any(|c| c == n.id()))).collect();
+    roots.iter().position(|n| n.id() == *id).unwrap_or(0) as u16
 }
