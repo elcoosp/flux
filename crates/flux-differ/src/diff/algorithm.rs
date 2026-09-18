@@ -210,7 +210,7 @@ pub(crate) fn reattach_pairs(
 mod tests {
     use super::*;
     use flux_ir::{ArenaBuilder, Node};
-    use flux_syntax::{ComponentId, NodeKind, NodeId, Props, Span, Child};
+    use flux_syntax::{Child, ComponentId, NodeId, NodeKind, Props, Span};
 
     fn build_tree(root_id: u32, root_kind: NodeKind, children: &[(u32, NodeKind)]) -> flux_ir::IRArena {
         let mut b = ArenaBuilder::new();
@@ -290,7 +290,11 @@ mod tests {
 
 /// Audit C9: true when `id` is a root of `new` (no parent in the arena).
 fn is_root_of_new(new: &flux_ir::IRArena, id: &NodeId) -> bool {
-    !new.iter().any(|n| n.children().any(|c| c == id))
+    !new.all_ids().any(|nid| {
+        new.get(nid).map_or(false, |n| {
+            n.children().iter().any(|c| matches!(c, Child::Node(n) if *n == *id))
+        })
+    })
 }
 
 /// Audit C9: the stable synthetic wrapper id for multi-root Init frames.
@@ -300,6 +304,15 @@ fn synthetic_root_id() -> NodeId {
 
 /// Audit C9: the index of `id` among the new tree's roots.
 fn root_position(new: &flux_ir::IRArena, id: &NodeId) -> u16 {
-    let roots: Vec<_> = new.iter().filter(|n| !new.iter().any(|p| p.children().any(|c| c == n.id()))).collect();
-    roots.iter().position(|n| n.id() == *id).unwrap_or(0) as u16
+    let roots: Vec<_> = new
+        .all_ids()
+        .filter(|nid| {
+            !new.all_ids().any(|pid| {
+                new.get(pid).map_or(false, |p| {
+                    p.children().iter().any(|c| matches!(c, Child::Node(n) if *n == *nid))
+                })
+            })
+        })
+        .collect();
+    roots.iter().position(|nid| *nid == *id).unwrap_or(0) as u16
 }
