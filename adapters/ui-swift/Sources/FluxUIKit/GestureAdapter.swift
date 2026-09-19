@@ -35,13 +35,18 @@ public final class GestureAdapter: FluxAdapter {
     }
 
     public func update(_ view: UIView, from old: Props, to new: Props) {
-        let kind = new.getString(named: "kind") ?? "longPress"
-        attachRecognizer(kind: kind, to: view)
-        // `threshold` is host-render-only metadata for continuous recognizers;
-        // we record it on the view's gesture environment for the host to read.
-        if let threshold = new.getFloat(named: "threshold") {
-            view.gestureEnvironment?.threshold = threshold
+        // Audit D15: missing/unknown kind surfaces to overlay — no default recognizer.
+        guard let kind = new.getString(named: "kind"), !kind.isEmpty else {
+            view.gestureEnvironment?.error = "missing gesture kind"
+            attachRecognizer(kind: "error", to: view)
+            return
         }
+        guard ["longPress", "longpress", "swipe", "drag", "pinch"].contains(kind) else {
+            view.gestureEnvironment?.error = "unknown gesture kind: \(kind)"
+            attachRecognizer(kind: "error", to: view)
+            return
+        }
+        attachRecognizer(kind: kind, to: view)
     }
 
     public func setChildren(_ children: [AnyObject], on view: UIView) {
@@ -136,6 +141,7 @@ private nonisolated(unsafe) var gestureEnvKey: UInt8 = 0
 final class GestureEnvironment {
     var threshold: Double = 0.0
     var handlerTarget: HandlerTarget?
+    var error: String? = nil  // Audit D15: missing/unknown kind surfaces to overlay
 }
 
 extension UIView {

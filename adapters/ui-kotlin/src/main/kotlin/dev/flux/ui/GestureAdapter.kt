@@ -30,8 +30,16 @@ public class GestureAdapter private constructor() : FluxAdapter<FluxNativeView> 
         view: FluxNativeView,
         props: Props,
     ) {
-        val kind = props.getString(PropsIndex.GESTURE_KIND).orEmpty()
-        if (view.getProperty(PROP_KIND) != kind) view.setProperty(PROP_KIND, kind)
+        // Audit D15: missing/unknown kind surfaces to overlay — no default recognizer.
+        val kind = props.getString(PropsIndex.GESTURE_KIND)
+        when (kind) {
+            null, "" -> view.setProperty(PROP_ERROR, "missing gesture kind")
+            "longPress", "longpress", "swipe", "drag", "pinch" -> {
+                if (view.getProperty(PROP_KIND) != kind) view.setProperty(PROP_KIND, kind)
+                view.setProperty(PROP_ERROR, null)
+            }
+            else -> view.setProperty(PROP_ERROR, "unknown gesture kind: $kind")
+        }
 
         props.getFloat(PropsIndex.GESTURE_THRESHOLD)?.let { threshold ->
             if (view.getProperty(PROP_THRESHOLD) != threshold) view.setProperty(PROP_THRESHOLD, threshold)
@@ -76,5 +84,6 @@ public class GestureAdapter private constructor() : FluxAdapter<FluxNativeView> 
         const val PROP_THRESHOLD = "threshold"
         const val PROP_HANDLER = "onGestureHandler"
         const val PROP_EXECUTOR = "executor"
+        const val PROP_ERROR = "gestureError"
     }
 }
