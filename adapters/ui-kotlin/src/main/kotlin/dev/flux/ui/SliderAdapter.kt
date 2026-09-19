@@ -25,17 +25,18 @@ public class SliderAdapter private constructor() : FluxAdapter<FluxNativeView> {
         view: FluxNativeView,
         props: Props,
     ) {
-        val value = props.getFloat(PropsIndex.SLIDER_VALUE) ?: 0.0
-        if (view.getProperty(PROP_VALUE) != value) view.setProperty(PROP_VALUE, value)
-
-        val min = props.getFloat(PropsIndex.SLIDER_MIN) ?: 0.0
-        if (view.getProperty(PROP_MIN) != min) view.setProperty(PROP_MIN, min)
-
-        val max = props.getFloat(PropsIndex.SLIDER_MAX) ?: 1.0
-        if (view.getProperty(PROP_MAX) != max) view.setProperty(PROP_MAX, max)
-
-        val step = props.getFloat(PropsIndex.SLIDER_STEP) ?: 0.0
-        if (view.getProperty(PROP_STEP) != step) view.setProperty(PROP_STEP, step)
+        props.getFloat(PropsIndex.SLIDER_VALUE)?.let { value ->
+            if (view.getProperty(PROP_VALUE) != value) view.setProperty(PROP_VALUE, value)
+        }
+        props.getFloat(PropsIndex.SLIDER_MIN)?.let { min ->
+            if (view.getProperty(PROP_MIN) != min) view.setProperty(PROP_MIN, min)
+        }
+        props.getFloat(PropsIndex.SLIDER_MAX)?.let { max ->
+            if (view.getProperty(PROP_MAX) != max) view.setProperty(PROP_MAX, max)
+        }
+        props.getFloat(PropsIndex.SLIDER_STEP)?.let { step ->
+            if (view.getProperty(PROP_STEP) != step) view.setProperty(PROP_STEP, step)
+        }
 
         val enabled = props.getBool(PropsIndex.SLIDER_ENABLED, true)
         if (view.getProperty(PROP_ENABLED) != enabled) view.setProperty(PROP_ENABLED, enabled)

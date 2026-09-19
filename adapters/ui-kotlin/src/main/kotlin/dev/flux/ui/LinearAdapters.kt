@@ -56,8 +56,9 @@ public open class FluxLinearAdapter(
         view: FluxNativeView,
         props: Props,
     ) {
-        val gap = props.getFloat(PropsIndex.STACK_GAP) ?: 0.0
-        if (view.getProperty(PROP_GAP) != gap) view.setProperty(PROP_GAP, gap)
+        props.getFloat(PropsIndex.STACK_GAP)?.let { gap ->
+            if (view.getProperty(PROP_GAP) != gap) view.setProperty(PROP_GAP, gap)
+        }
         if (view.getProperty(PROP_ORIENTATION) != orientation) view.setProperty(PROP_ORIENTATION, orientation)
     }
 

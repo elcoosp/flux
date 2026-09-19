@@ -21,8 +21,9 @@ public class StackAdapter private constructor() : FluxAdapter<FluxNativeView> {
         view: FluxNativeView,
         props: Props,
     ) {
-        val gap = props.getFloat(PropsIndex.STACK_GAP) ?: 0.0
-        if (view.getProperty(PROP_GAP) != gap) view.setProperty(PROP_GAP, gap)
+        props.getFloat(PropsIndex.STACK_GAP)?.let { gap ->
+            if (view.getProperty(PROP_GAP) != gap) view.setProperty(PROP_GAP, gap)
+        }
         // Stack paints children back-to-front; the host renderer uses `zOrder`.
         if (view.getProperty(PROP_Z_ORDER) != true) view.setProperty(PROP_Z_ORDER, true)
     }
@@ -70,10 +71,12 @@ public class GridAdapter private constructor() : FluxAdapter<FluxNativeView> {
         view: FluxNativeView,
         props: Props,
     ) {
-        val columns = props.getInt(PropsIndex.GRID_COLUMNS) ?: 2L
-        if (view.getProperty(PROP_COLUMNS) != columns) view.setProperty(PROP_COLUMNS, columns)
-        val gap = props.getFloat(PropsIndex.STACK_GAP) ?: 0.0
-        if (view.getProperty(PROP_GAP) != gap) view.setProperty(PROP_GAP, gap)
+        props.getInt(PropsIndex.GRID_COLUMNS)?.let { columns ->
+            if (view.getProperty(PROP_COLUMNS) != columns) view.setProperty(PROP_COLUMNS, columns)
+        }
+        props.getFloat(PropsIndex.STACK_GAP)?.let { gap ->
+            if (view.getProperty(PROP_GAP) != gap) view.setProperty(PROP_GAP, gap)
+        }
     }
 
     override fun setChildren(

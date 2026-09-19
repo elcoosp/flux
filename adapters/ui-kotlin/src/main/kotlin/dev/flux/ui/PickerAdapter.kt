@@ -24,8 +24,9 @@ public class PickerAdapter private constructor() : FluxAdapter<FluxNativeView> {
         view: FluxNativeView,
         props: Props,
     ) {
-        val value = props.getInt(PropsIndex.PICKER_VALUE) ?: 0L
-        if (view.getProperty(PROP_VALUE) != value) view.setProperty(PROP_VALUE, value)
+        props.getInt(PropsIndex.PICKER_VALUE)?.let { value ->
+            if (view.getProperty(PROP_VALUE) != value) view.setProperty(PROP_VALUE, value)
+        }
 
         props.get(PropsIndex.PICKER_ITEMS)?.let { items ->
             if (view.getProperty(PROP_ITEMS) != items) view.setProperty(PROP_ITEMS, items)

@@ -25,14 +25,15 @@ public class DatePickerAdapter private constructor() : FluxAdapter<FluxNativeVie
         view: FluxNativeView,
         props: Props,
     ) {
-        val value = props.getInt(PropsIndex.DATE_PICKER_VALUE) ?: 0L
-        if (view.getProperty(PROP_VALUE) != value) view.setProperty(PROP_VALUE, value)
-
-        val min = props.getInt(PropsIndex.DATE_PICKER_MIN) ?: 0L
-        if (view.getProperty(PROP_MIN) != min) view.setProperty(PROP_MIN, min)
-
-        val max = props.getInt(PropsIndex.DATE_PICKER_MAX) ?: 0L
-        if (view.getProperty(PROP_MAX) != max) view.setProperty(PROP_MAX, max)
+        props.getInt(PropsIndex.DATE_PICKER_VALUE)?.let { value ->
+            if (view.getProperty(PROP_VALUE) != value) view.setProperty(PROP_VALUE, value)
+        }
+        props.getInt(PropsIndex.DATE_PICKER_MIN)?.let { min ->
+            if (view.getProperty(PROP_MIN) != min) view.setProperty(PROP_MIN, min)
+        }
+        props.getInt(PropsIndex.DATE_PICKER_MAX)?.let { max ->
+            if (view.getProperty(PROP_MAX) != max) view.setProperty(PROP_MAX, max)
+        }
 
         val enabled = props.getBool(PropsIndex.DATE_PICKER_ENABLED, true)
         if (view.getProperty(PROP_ENABLED) != enabled) view.setProperty(PROP_ENABLED, enabled)
