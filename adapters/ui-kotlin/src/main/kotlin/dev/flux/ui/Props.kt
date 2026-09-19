@@ -54,24 +54,36 @@ public data class Props(
      */
     public fun getHandler(index: UShort): UInt = (get(index) as? FluxValue.HandlerRef)?.handlerId ?: 0u
 
+    // Audit D5: the server lowers Color/Font records POSITIONALLY (fields
+    // 0..3 / 0..2). The previous FNV-name lookups never matched, so colors
+    // and fonts were silently dropped on Android. Field order mirrors
+    // adapters/ui-swift Color.swift + TextAdapter.swift.
+
+    /** Float value at the record's positional [slot], or `null`. */
+    private fun FluxValue.Record.floatAt(slot: Int): kotlin.Double? =
+        (fields.getOrNull(slot)?.value as? FluxValue.Float)?.value
+
+    private fun FluxValue.Record.stringAt(slot: Int): String? =
+        (fields.getOrNull(slot)?.value as? FluxValue.Str)?.value
+
     /** Decodes the `Color` record at [index] into a [FluxColor], or `null`. */
     public fun getColor(index: UShort): FluxColor? {
         val record = getRecord(index) ?: return null
-        val red = record.getFloat(PropsIndex.COLOR_RED) ?: return null
-        val green = record.getFloat(PropsIndex.COLOR_GREEN) ?: return null
-        val blue = record.getFloat(PropsIndex.COLOR_BLUE) ?: return null
-        val alpha = record.getFloat(PropsIndex.COLOR_ALPHA) ?: 1.0
+        val red = record.floatAt(0) ?: return null
+        val green = record.floatAt(1) ?: return null
+        val blue = record.floatAt(2) ?: return null
+        val alpha = record.floatAt(3) ?: 1.0
         return FluxColor(red, green, blue, alpha)
     }
 
     /** Decodes the `Font` record at [index] into a [FluxFont], or `null`. */
     public fun getFont(index: UShort): FluxFont? {
         val record = getRecord(index) ?: return null
-        val size = record.getFloat(PropsIndex.FONT_SIZE) ?: return null
+        val size = record.floatAt(0) ?: return null
         return FluxFont(
             size = size,
-            weight = record.getString(PropsIndex.FONT_WEIGHT),
-            family = record.getString(PropsIndex.FONT_FAMILY),
+            weight = record.stringAt(1),
+            family = record.stringAt(2),
         )
     }
 
