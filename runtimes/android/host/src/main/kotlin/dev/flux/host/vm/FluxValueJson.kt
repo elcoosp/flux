@@ -70,7 +70,8 @@ public object FluxValueJson {
                 var index: UShort = 0u
                 while (keys.hasNext()) {
                     val key = keys.next()
-                    fields.add(Field(index, StrVal(intern(key))))
+                    // Audit P2.27: field VALUE comes from parsing the member value, not the key.
+                    fields.add(Field(index, parseValue(any.get(key), intern)))
                     index = (index + 1u).toUShort()
                 }
                 RecordVal(fields)

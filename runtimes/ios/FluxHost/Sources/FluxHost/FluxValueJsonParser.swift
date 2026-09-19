@@ -47,8 +47,9 @@ enum FluxValueJsonParser {
         case let dict as [String: Any]:
             var fields: [(UInt16, FluxValue)] = []
             fields.reserveCapacity(dict.count)
-            for (i, (key, value)) in dict.enumerated() {
-                fields.append((UInt16(i), .str(intern(key))))
+            // Audit P2.27: field VALUE comes from parsing the member value, not the key.
+            for (i, (_, value)) in dict.enumerated() {
+                fields.append((UInt16(i), box(value)))
             }
             return .record(fields)
         case let arr as [Any]:
