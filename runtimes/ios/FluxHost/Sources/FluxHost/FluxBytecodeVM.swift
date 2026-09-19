@@ -1153,7 +1153,8 @@ enum FluxBytecodeVM {
     /// dispatch styles can be compared under a micro-benchmark. Retained only if
     /// measurement shows it is faster than the native enum `switch`; otherwise
     /// `run` stays canonical.
-    static func runViaDispatchTable(
+    /// Audit T-316.2: runViaDispatchTable is test-only (benchmark); mark internal.
+    internal static func runViaDispatchTable(
         _ bytecode: [UInt8],
         signals: inout SignalStore,
         payload: FluxValue,
