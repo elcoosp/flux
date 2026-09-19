@@ -94,7 +94,9 @@ enum FrameDeserializer {
         // Payload begins after the 6-byte header (magic + version + kind).
         let seq = try r.u32()
         dbg("seq", r.offset)
-        let root = try decodeNode(&r)
+        guard let root = try decodeNode(&r) else {
+            throw WireError.unknownTag(offset: r.offset, tag: 0)
+        }
         dbg("root", r.offset)
         // Appendix D §D.12.2: `root` is followed by a `u32` count then every
         // descendant node, flat. Register each in the node table.
@@ -102,8 +104,10 @@ enum FrameDeserializer {
         dbg("extraCount=\(extraCount)", r.offset)
         var nodes: [UInt32: ShadowNode] = [root.id: root]
         for _ in 0..<extraCount {
-            let node = try decodeNode(&r)
-            nodes[node.id] = node
+            // Audit D9: skip nodes with unknown kind gracefully.
+            if let node = try decodeNode(&r) {
+                nodes[node.id] = node
+            }
         }
         dbg("extras", r.offset)
         // signal `state_seed`: u16 count of (u32 signalId, value).
@@ -311,17 +315,29 @@ enum FrameDeserializer {
     // MARK: - Node
 
     /// Decodes a `Node` (Appendix D §D.3).
-    static func decodeNode(_ r: inout ByteReader) throws -> ShadowNode {
+    /// Audit D9: diagnostic counter for nodes skipped due to unknown kind.
+    nonisolated(unsafe) private static var nodesSkipped: Int = 0
+
+    /// Audit D9: returns the count of nodes skipped since last reset.
+    nonisolated(unsafe) static func skippedNodeCount() -> Int { nodesSkipped }
+
+    /// Audit D9: resets the skipped-node counter (tests).
+    nonisolated(unsafe) static func resetSkippedNodeCount() { nodesSkipped = 0 }
+
+    static func decodeNode(_ r: inout ByteReader) throws -> ShadowNode? {
         let id = try r.u32()
         let rawKind = try r.u8()
         // The kind byte packs the `NodeKind` in the low 5 bits (0x1F) and the
         // `@pure` flag in bit 0x20 (Appendix D §D.3). Mask them apart so a pure
-        // node resolves to a valid kind instead of throwing `unknownTag` — mirrors
-        // the Android port.
+        // node resolves to a valid kind instead of throwing `unknownTag`.
         let kindByte = rawKind & 0x1F
         let isPure = (rawKind & 0x20) != 0
         guard let kind = NodeKind(rawValue: kindByte) else {
-            throw WireError.unknownTag(offset: r.offset - 1, tag: rawKind)
+            // Audit D9: unknown kind — skip this node gracefully and count it.
+            // Consume the rest of the node's fields (mirrors Android's fallback).
+            _ = try? skipNodeBody(&r)
+            nodesSkipped += 1
+            return nil
         }
         let componentId = try r.u32()
         let propCount = try r.u16()
@@ -359,6 +375,23 @@ enum FrameDeserializer {
         )
     }
 
+    /// Audit D9: best-effort skip of a node body when the kind is unknown.
+    private static func skipNodeBody(_ r: inout ByteReader) throws {
+        _ = try r.u32() // componentId
+        let propCount = try r.u16()
+        for _ in 0..<propCount {
+            _ = try r.u16() // idx
+            _ = try decodeValue(&r)
+        }
+        let childCount = try r.u16()
+        for _ in 0..<childCount {
+            _ = try decodeChild(&r)
+        }
+        let handlerCount = try r.u16()
+        for _ in 0..<handlerCount { _ = try r.u32() }
+        _ = try decodeSpan(&r)
+    }
+
     /// Decodes a `Child` (Appendix D §D.4).
     static func decodeChild(_ r: inout ByteReader) throws -> Child {
         let tag = try r.u8()
@@ -388,7 +421,9 @@ enum FrameDeserializer {
         switch tag {
         case 0x01:
             let id = try r.u32()
-            let node = try decodeNode(&r)
+            guard let node = try decodeNode(&r) else {
+                throw WireError.unknownTag(offset: r.offset, tag: 0)
+            }
             return .replace(id: id, node: node)
         case 0x02:
             let id = try r.u32()
@@ -410,7 +445,9 @@ enum FrameDeserializer {
         case 0x03:
             let parentId = try r.u32()
             let index = try r.u16()
-            let node = try decodeNode(&r)
+            guard let node = try decodeNode(&r) else {
+                throw WireError.unknownTag(offset: r.offset, tag: 0)
+            }
             return .insert(parentId: parentId, index: index, node: node)
         case 0x04:
             return .remove(id: try r.u32())
@@ -430,7 +467,9 @@ enum FrameDeserializer {
             // then the new node shape to apply to the preserved instance.
             let oldId = try r.u32()
             let newId = try r.u32()
-            let node = try decodeNode(&r)
+            guard let node = try decodeNode(&r) else {
+                throw WireError.unknownTag(offset: r.offset, tag: 0)
+            }
             return .reattach(old: oldId, new: newId, node: node)
         case let t:
             throw WireError.unknownTag(offset: r.offset - 1, tag: t)
