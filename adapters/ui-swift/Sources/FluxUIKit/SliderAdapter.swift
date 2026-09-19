@@ -25,15 +25,14 @@ public final class SliderAdapter: FluxAdapter {
     public func create() -> UISlider { UISlider() }
 
     public func update(_ view: UISlider, from old: Props, to new: Props) {
-        let min = Float(new.getFloat(named: "min") ?? 0.0)
-        let max = Float(new.getFloat(named: "max") ?? 1.0)
-        if view.minimumValue != min { view.minimumValue = min }
-        if view.maximumValue != max { view.maximumValue = max }
-        let step = new.getFloat(named: "step") ?? 0.0
-        // UIKit has no native step; we keep the value continuous and record the
-        // requested step so a future quantized binding can snap. `value` is the
-        // controlled position and is only pushed when it differs to avoid loops.
-        _ = step
+        // Audit D14: absent props retain previous values (no reset).
+        if let min = new.getFloat(named: "min"), view.minimumValue != Float(min) {
+            view.minimumValue = Float(min)
+        }
+        if let max = new.getFloat(named: "max"), view.maximumValue != Float(max) {
+            view.maximumValue = Float(max)
+        }
+        // UIKit has no native step; record the requested step but keep value continuous.
         if let value = new.getFloat(named: "value"), view.value != Float(value) {
             view.value = Float(value)
         }

@@ -39,8 +39,8 @@ public final class PickerAdapter: FluxAdapter {
 
     public func update(_ view: UIPickerView, from old: Props, to new: Props) {
         source?.items = new.getList(named: "items")?.compactMap { if case .str(let s) = $0 { s } else { nil } } ?? []
-        let selected = new.getInt(named: "value") ?? 0
-        if view.selectedRow(inComponent: 0) != Int(selected) {
+        // Audit D14: absent prop retains previous value (no reset).
+        if let selected = new.getInt(named: "value"), view.selectedRow(inComponent: 0) != Int(selected) {
             view.selectRow(Int(selected), inComponent: 0, animated: false)
         }
         view.isUserInteractionEnabled = new.getBool(named: "enabled") ?? true

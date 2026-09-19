@@ -31,8 +31,10 @@ public final class CheckboxAdapter: FluxAdapter {
     }
 
     public func update(_ view: UIButton, from old: Props, to new: Props) {
-        let value = new.getBool(named: "value") ?? false
-        if view.isSelected != value { view.isSelected = value }
+        // Audit D14: absent prop retains previous value (no reset).
+        if let value = new.getBool(named: "value"), view.isSelected != value {
+            view.isSelected = value
+        }
         applyGlyph(view)
         if let label = new.getString(named: "label") { view.setTitle(label, for: .normal) }
         view.isEnabled = new.getBool(named: "enabled") ?? true

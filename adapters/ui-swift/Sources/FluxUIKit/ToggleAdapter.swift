@@ -36,8 +36,10 @@ public final class ToggleAdapter: FluxAdapter {
     public func create() -> UISwitch { UISwitch() }
 
     public func update(_ view: UISwitch, from old: Props, to new: Props) {
-        let value = new.getBool(named: "value") ?? false
-        if view.isOn != value { view.isOn = value }
+        // Audit D14: absent prop retains previous value (no reset).
+        if let value = new.getBool(named: "value"), view.isOn != value {
+            view.isOn = value
+        }
         view.isEnabled = new.getBool(named: "enabled") ?? true
     }
 
