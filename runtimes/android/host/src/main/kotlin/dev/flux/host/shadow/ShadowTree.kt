@@ -863,18 +863,19 @@ public class ShadowTree(
             host.materializationSignals.read(listSignal) as? FluxValue.ListVal ?: return
         val templateMeta = signalMeta[template.id] ?: signalMetaOverride[template.id]
         // Desired row ids, one per current list element, in order.
-        val desired =
-            list.items.mapIndexed { i, elem ->
-                val rowId = deriveForEachRowId(foreachId, i.toUInt())
-                val childIds = linkedSetOf<UInt>()
-                expandedIndex[rowId] = cloneWireNode(template, rowId, childIds, wireIndex)
-                if (templateMeta != null) signalMetaOverride[rowId] = templateMeta
-                elem?.let { element ->
-                    childIds.forEach { forEachRowContext[it] = itemSlot to element }
-                    forEachRowContext[rowId] = itemSlot to element
-                }
-                rowId
-            }.toSet()
+        val desired = linkedSetOf<UInt>()
+        list.items.forEachIndexed { i, elem ->
+            val rowId = deriveForEachRowId(foreachId, i.toUInt())
+            val rootId = deriveForEachChildId(rowId, template.id)
+            val childIds = linkedSetOf<UInt>()
+            expandedIndex[rootId] = cloneWireNode(template, rowId, childIds, wireIndex)
+            if (templateMeta != null) signalMetaOverride[rootId] = templateMeta
+            elem?.let { element ->
+                childIds.forEach { forEachRowContext[it] = itemSlot to element }
+                forEachRowContext[rootId] = itemSlot to element
+            }
+            desired.add(rootId)
+        }
         // Tear down rows that no longer exist in the list.
         for (child in node.children.toList()) {
             if (child.id !in desired) {
@@ -888,17 +889,18 @@ public class ShadowTree(
         val newChildren =
             list.items.mapIndexed { i, elem ->
                 val rowId = deriveForEachRowId(foreachId, i.toUInt())
+                val rootId = deriveForEachChildId(rowId, template.id)
                 val child =
-                    nodes[rowId] ?: run {
+                    nodes[rootId] ?: run {
                         val childIds = linkedSetOf<UInt>()
-                        val wire = expandedIndex[rowId]
+                        val wire = expandedIndex[rootId]
                             ?: cloneWireNode(template, rowId, childIds, wireIndex)
                         elem?.let { element ->
                             childIds.forEach { forEachRowContext[it] = itemSlot to element }
                         }
                         val built = build(wire, wireIndex, host, 1u)
-                        nodes[rowId] = built
-                        parents[rowId] = foreachId
+                        nodes[rootId] = built
+                        parents[rootId] = foreachId
                         built
                     }
                 // Seed the shared itemSlot with this row's element before
