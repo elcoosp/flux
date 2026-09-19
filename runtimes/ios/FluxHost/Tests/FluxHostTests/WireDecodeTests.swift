@@ -73,9 +73,11 @@ final class WireDecodeTests: XCTestCase {
             state,             // flags has_state_delta (bit 3)
         ])
 
+        // Audit T-316.4: frame layout is magic + version + kind + seq + flags + body.
         let frame = cat([
             u32(FrameDeserializer.magic), // magic
             [FrameDeserializer.protocolVersion], // version
+            [FrameKind.initByte],         // kind = Init (0x02)
             u32(0),                       // seq
             [0x09],                       // flags: full_tree (bit0) | has_state_delta (bit3)
             body,
@@ -129,9 +131,13 @@ final class WireDecodeTests: XCTestCase {
             update,
         ])
 
+        // Audit T-316.4: frame layout is magic + version + kind + seq + flags + body.
         let frame = cat([
             u32(FrameDeserializer.magic),
-            [FrameDeserializer.protocolVersion], u32(7), [0x00], // version, seq, flags=delta
+            [FrameDeserializer.protocolVersion],
+            [FrameKind.deltaByte],    // kind = Delta (0x04)
+            u32(7),                   // seq
+            [0x00],                   // flags=delta
             body,
         ])
 
@@ -162,9 +168,13 @@ final class WireDecodeTests: XCTestCase {
             u32(0), u32(0), u32(0),       // span
         ])
         let body = cat([u16(0), u16(0), u16(0), node])
+        // Audit T-316.4: frame layout is magic + version + kind + seq + flags + body.
         let frame = cat([
             u32(FrameDeserializer.magic),
-            [FrameDeserializer.protocolVersion], u32(0), [0x01],       // version, seq, full_tree
+            [FrameDeserializer.protocolVersion],
+            [FrameKind.initByte],         // kind = Init (0x02)
+            u32(0),                       // seq
+            [0x01],                       // flags=full_tree
             body,
         ])
         let decoded = try FrameDeserializer.decode(frame)
