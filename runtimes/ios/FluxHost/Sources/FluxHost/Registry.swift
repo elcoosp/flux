@@ -255,7 +255,11 @@ public final class CapabilityRegistry: @unchecked Sendable {
     /// high signal id derived from the interned path id. The 900_000 offset keeps
     /// these ids below the cell allocator's 1_000_000 ceiling (see `InMemorySignals`)
     /// so they never collide with result cells.
-    private static func fileSignalID(_ pathID: UInt32) -> UInt32 { 900_000 &+ pathID }
+    /// Audit H7: masked into a reserved range below the allocator's 1_000_000
+    /// ceiling; `&+` prevents the trapping overflow on unmasked FNV hashes.
+    private static func fileSignalID(_ pathID: UInt32) -> UInt32 {
+        900_000 &+ (pathID % 90_000)
+    }
 
     /// The injectable real-OS capability host. The Foundation-only `FluxHost` core
     /// defaults to `DevNativeCapabilityHost` (deterministic echoes); the app shell

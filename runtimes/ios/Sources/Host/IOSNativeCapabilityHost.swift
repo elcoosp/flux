@@ -204,7 +204,23 @@ public final class IOSNativeCapabilityHost: NativeCapabilityHost {
               let path = resolve(pathId) else {
             throw VmError.typeMismatch(offset: 0)
         }
-        let data = dataField.value.description
+        // Audit H6: `value.description` is a DEBUG representation ("str(12)");
+        // persist the real payload instead.
+        let data: String
+        switch dataField.value {
+        case .str(let sid):
+            data = resolve(sid) ?? ""
+        case .int(let i):
+            data = String(i)
+        case .float(let f):
+            data = String(f)
+        case .bool(let b):
+            data = b ? "true" : "false"
+        case .null:
+            data = ""
+        default:
+            throw VmError.typeMismatch(offset: 0)
+        }
         let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent(path)
         do {
@@ -306,8 +322,9 @@ public final class IOSNativeCapabilityHost: NativeCapabilityHost {
         return UInt16(hash & 0xFFFF)
     }
 
-    /// File-system signal id = 900_000 + path intern id (matches the Android host).
+    /// Audit H7: masked into a reserved range below the allocator's 1_000_000
+    /// ceiling; `&+` prevents the trapping overflow on unmasked FNV hashes.
     private func fileSignalID(_ pathId: UInt32) -> UInt32 {
-        900_000 + pathId
+        900_000 &+ (pathId % 90_000)
     }
 }

@@ -167,5 +167,9 @@ struct DevNativeCapabilityHost: NativeCapabilityHost {
     }
 
     /// FileSystem contents persisted under a deterministic high signal id.
-    private static func fileSignalID(_ pathID: UInt32) -> UInt32 { 900_000 &+ pathID }
+    /// Audit H7: masked into a reserved range below the allocator's 1_000_000
+    /// ceiling; `&+` prevents the trapping overflow on unmasked FNV hashes.
+    private static func fileSignalID(_ pathID: UInt32) -> UInt32 {
+        900_000 &+ (pathID % 90_000)
+    }
 }
