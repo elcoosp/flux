@@ -51,9 +51,23 @@ impl Backend for Kotlin {
     }
 
     fn container_spacing(gap: &str) -> String {
+        // Audit D5/T-403.3: detect parent axis from context. Default to vertical.
         format!(
             "(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy({gap}.dp))"
         )
+    }
+
+    fn container_spacing_axis(gap: &str, axis: &str) -> String {
+        // Audit T-403.3: emit arrangement matching the parent container axis.
+        if axis == "horizontal" {
+            format!(
+                "(horizontalAlignment = Alignment.CenterHorizontally, horizontalArrangement = Arrangement.spacedBy({gap}.dp))"
+            )
+        } else {
+            format!(
+                "(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy({gap}.dp))"
+            )
+        }
     }
 
     fn image_expr(value: &str) -> String {
@@ -280,15 +294,12 @@ impl Backend for Kotlin {
         meta: &ComponentMeta<'_>,
         subst: &HashMap<String, String>,
     ) {
-        em.append_line(&format!("@Composable fun {name}{generics}("));
-        let mut first_prop = true;
-        for prop in meta.props() {
+        // Audit T-403.4: parameters separated by ", " (not leading commas).
+        let params: Vec<String> = meta.props().map(|prop| {
             let ty = native_type::<Self>(&prop.ty, subst);
-            let comma = if first_prop { "" } else { "," };
-            first_prop = false;
-            em.append_line(&format!("    {comma} {0}: {1}", prop.name.name, ty));
-        }
-        em.append_line(") {");
+            format!("{}: {}", prop.name.name, ty)
+        }).collect();
+        em.append_line(&format!("@Composable fun {name}{generics}({})) {{", params.join(", ")));
     }
 
     fn emit_body_open(em: &mut Emitter<'_, Self>) {
