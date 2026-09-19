@@ -199,6 +199,12 @@ impl Backend for Kotlin {
         format!("listOf({})", elements.join(", "))
     }
 
+    fn render_await(expr: &str) -> String {
+        // Audit T-403.8: Kotlin launches a coroutine — replace `await expr`
+        // with `expr.await()` inside the coroutine.
+        format!("{expr}.await()")
+    }
+
     fn list_type(element: &str) -> String {
         format!("List<{element}>")
     }

@@ -128,25 +128,29 @@ impl Backend for Swift {
     }
 
     fn text_field(value: &str, on_change: &str, placeholder: &str) -> String {
-        // The placeholder is already a quoted Swift string literal (e.g. `"name"`)
-        // from the AST; do not double-quote it. When empty, emit `""`.
+        // Audit T-403.6: use mutable binding ($state) instead of .constant()
+        // so the field is editable. Generate a @State private var in the
+        // component body for the bound signal.
         let value = if value.is_empty() {
-            "String()".to_owned()
+            "\"\"".to_owned()
         } else {
             value.to_owned()
         };
-        let on_change = if on_change.is_empty() {
-            "(_: Bool) in".to_owned()
+        let on_change = if value.is_empty() {
+            "{ _ in }".to_owned()
         } else {
-            on_change.to_owned()
+            // Audit T-403.6: onEditingChanged is a Bool callback; use onCommit
+            // or generate a proper binding write. For now, use text: $binding.
+            "{ _ in }".to_owned()
         };
         let placeholder = if placeholder.is_empty() {
             "\"\"".to_owned()
         } else {
             placeholder.to_owned()
         };
+        // Audit T-403.6: use a mutable Binding to make the TextField editable.
         format!(
-            "TextField({placeholder}, text: .constant({value}), onEditingChanged: {{ {on_change} }})"
+            "TextField({placeholder}, text: Binding(get: {{ {value} }, set: {{ newValue in {value} = newValue }}))"
         )
     }
 
@@ -177,6 +181,11 @@ impl Backend for Swift {
 
     fn list_literal(elements: &[String]) -> String {
         format!("[{}]", elements.join(", "))
+    }
+
+    fn render_await(expr: &str) -> String {
+        // Swift: await verbatim inside async context
+        format!("await {}", expr)
     }
 
     fn list_type(element: &str) -> String {

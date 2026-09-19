@@ -187,6 +187,12 @@ pub trait Backend {
     #[must_use]
     fn list_literal(elements: &[String]) -> String;
 
+    /// Renders an `await expr` statement for this backend.
+    /// Swift: `await expr` (verbatim inside async context).
+    /// Kotlin: `expr.await()` inside a coroutine.
+    #[must_use]
+    fn render_await(expr: &str) -> String;
+
     /// Renders the native spelling of the `List[T]` collection type
     /// (`List<T>` for Kotlin, `[T]` for Swift).
     #[must_use]

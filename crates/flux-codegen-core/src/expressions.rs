@@ -123,7 +123,11 @@ fn render_stmt<B: Backend>(stmt: &Expr) -> String {
         ExprKind::Assign { target, value } => {
             format!("{} = {}", render_expr::<B>(target), render_expr::<B>(value))
         }
-        ExprKind::Await(inner) => format!("await {}", render_expr::<B>(inner)),
+        ExprKind::Await(inner) => {
+            // Audit T-403.8: backend-specific await rendering (Swift await vs Kotlin expr.await()).
+            let rendered = render_expr::<B>(inner);
+            B::render_await(&rendered)
+        }
         ExprKind::Call { callee, args, .. } => {
             // `Router.navigate("settings")` must become a native navigation
             // push in the release path. The dev VM writes the target to signal

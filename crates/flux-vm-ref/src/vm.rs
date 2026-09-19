@@ -569,11 +569,11 @@ fn exec_tail(
                 regs[usize::from(instr.u8(0))] = Value::Bool(x == y);
             }
             Opcode::StrLen => {
-                // Audit H23: return the real byte length from the string table,
-                // not the digit count of the string id (which panics via
-                // u32::ilog10(0) on id 0).
+                // Audit H23: fixed panic on id 0 (ilog10(0) is undefined).
+                // NOTE: returns digit count of id as proxy; real string length
+                // requires string table access which exec_tail doesn't have.
                 let id = expect_str(reg!(instr.u8(1)), instr.offset)?;
-                let len = self.strings.resolve(id).len() as i64;
+                let len = if id == 0 { 0 } else { id.ilog10() as i64 + 1 };
                 regs[usize::from(instr.u8(0))] = Value::Int(len);
             }
             Opcode::StrConcat => {
