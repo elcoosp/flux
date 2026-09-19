@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FLUX-048 / T-335.5 — network security config.
+  Cleartext is allowed ONLY to the dev loopback addresses (127.0.0.1, 10.0.2.2).
+  Production traffic must use HTTPS.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">127.0.0.1</domain>
+        <domain includeSubdomains="true">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>

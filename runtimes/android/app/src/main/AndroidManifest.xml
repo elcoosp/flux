@@ -9,7 +9,7 @@
         android:label="Flux"
         android:supportsRtl="true"
         android:theme="@style/Theme.Flux"
-        android:usesCleartextTraffic="true">
+        android:networkSecurityConfig="@xml/network_security_config">
         <activity
             android:name=".FluxHostActivity"
             android:exported="true">
