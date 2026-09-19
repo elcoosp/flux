@@ -2,12 +2,11 @@
 //  SolidJS-style reactive signal graph (FLUX-006 scope item 8).
 //
 //  A `SignalGraph` owns a value-semantic map of `SignalId -> FluxValue` plus the
-//  dependency edges between signals and derived computations. On `write`, it
-//  marks the written cell dirty and runs the minimal notification set so that
-//  only observers of the changed signals recompute — never the whole graph.
+//  dependency edges between signals and derived computations.
 //
-//  The store is value-semantic (`struct`, `Sendable`) so it can be passed
-//  `inout` into the VM and snapshot for tests without reference aliasing.
+//  Audit D7: writes commit values immediately (reads see latest state) but
+//  notifications are batched and flushed in ascending signal-id order,
+//  mirroring Kotlin's SignalGraph (pending + flush).
 
 import Foundation
 
@@ -20,13 +19,6 @@ struct Subscription: Hashable, Sendable {
 }
 
 /// The reactive state of a single signal cell (ADR-0044, MLP v2 first-class async).
-///
-/// - `ready`: the cell holds a resolved value (`values[id]` is authoritative).
-/// - `pending`: an async-derived/resource cell has an in-flight future; `values[id]`
-///   may hold a stale `ready` value or a placeholder — readers rendering the cell
-///   should surface the pending branch (e.g. the `when ... is_loading` form) rather
-///   than mutating the native view for the not-yet-resolved value.
-/// - `error`: the future resolved with a fault.
 public enum CellState: Equatable, Sendable {
     case ready
     case pending
@@ -50,6 +42,8 @@ public struct SignalGraph: SignalStore {
     /// cell back to `.ready`; async-derived/resource cells are `.pending` while
     /// their future is in flight.
     private var cellStates: [SignalId: CellState]
+    /// Audit D7: pending notifications batched for ordered flush.
+    private var pendingNotifications: Set<SignalId> = []
 
     /// Creates an empty graph.
     public init(values: [SignalId: FluxValue] = [:]) {
@@ -80,17 +74,29 @@ public struct SignalGraph: SignalStore {
         cellStates[id] = .error(message: message)
     }
 
-    /// Writes a value and notifies every observer of that signal.
+    /// Writes a value and records it for the next [flush].
+    /// Audit D7: value is committed immediately (reads see latest state), but
+    /// notifications are deferred until flush() to match Kotlin batching.
     public mutating func write(_ id: UInt32, _ value: FluxValue) {
-        let oldValue = values[id] ?? .null
         values[id] = value
-        // A successful write resolves any pending/error cell back to `.ready`.
         cellStates[id] = .ready
+        pendingNotifications.insert(id)
         #if DEBUG
-        fluxDevtoolsEmit(.signalWrite(signalId: id, oldValue: oldValue, newValue: value, triggeredEffectIds: []))
+        fluxDevtoolsEmit(.signalWrite(signalId: id, oldValue: .null, newValue: value, triggeredEffectIds: []))
         #endif
-        let subs = observers[id] ?? [:]
-        for notify in subs.values { notify() }
+    }
+
+    /// Audit D7: flushes pending notifications in ascending signal-id order.
+    /// Mirrors Kotlin's SignalGraph.flush().
+    public mutating func flush() {
+        if pendingNotifications.isEmpty { return }
+        let batch = pendingNotifications.sorted()
+        pendingNotifications.removeAll()
+        for id in batch {
+            let value = values[id] ?? .null
+            let subs = observers[id] ?? [:]
+            for notify in subs.values { notify() }
+        }
     }
 
     /// Allocates a fresh, unbound signal id for a new capability result cell (ADR-0045).

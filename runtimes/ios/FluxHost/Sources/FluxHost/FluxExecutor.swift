@@ -688,6 +688,9 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
         }
         let written = outcome.signals
         for (id, value) in written { graph.write(id, value) }
+        // Audit D7: flush batched writes in id order before reconcile so
+        // subscribers (and the reconciler) see the final state.
+        graph.flush()
         let dirty = Set(written.map { $0.0 })
         if !dirty.isEmpty, let rootId = currentRootId {
             lastReconcile = reconciler.reconcileDirty(rootId: rootId, signalIds: dirty)
