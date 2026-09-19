@@ -72,7 +72,7 @@ jobs:
           path: "${{ runner.temp }}/FluxHost.xcframework"
 
   android-aar:
-    name: flux-host AAR (linux)
+    name: flux-host APK (linux)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
