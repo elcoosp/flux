@@ -77,6 +77,11 @@ final class UserDefaultsStorageBackend: @unchecked Sendable, StorageBackend {
             defaults.removeObject(forKey: k)
             return
         }
+        // Audit D12: reject NaN on write (matches Kotlin).
+        if case let .float(f) = value, f.isNaN {
+            FluxCrashReporter.shared.record(StorageError.encodeFailed(key: key, underlying: NSError(domain: "FluxStorage", code: 1, userInfo: [NSLocalizedDescriptionKey: "NaN not allowed"])))
+            return
+        }
         do {
             let encoded = try FluxValueJSON.encode(value)
             defaults.set(encoded, forKey: k)
@@ -90,6 +95,8 @@ final class UserDefaultsStorageBackend: @unchecked Sendable, StorageBackend {
         do {
             return try FluxValueJSON.decode(data)
         } catch {
+            // Audit D12: corrupt entry quarantined (deleted) on read.
+            defaults.removeObject(forKey: self.key(key))
             FluxCrashReporter.shared.record(StorageError.decodeFailed(key: key, underlying: error))
             return nil
         }
