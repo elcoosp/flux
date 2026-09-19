@@ -948,7 +948,7 @@ impl EnrichedTelemetryEvent {
                 w.u32(*signal_id);
                 encode_value(w, old_value);
                 encode_value(w, new_value);
-                w.u16(triggered_effect_ids.len() as u16);
+                w.u16_len(triggered_effect_ids.len(), "telemetry.triggered_effect_ids");
                 for id in triggered_effect_ids {
                     w.u32(*id);
                 }

@@ -2,22 +2,22 @@
 
 use flux_syntax::{NodeKind, NodeRef};
 
-use super::WireError;
 use super::child::{decode_child, encode_child};
 use super::cursor::Reader;
 use super::props::{decode_props, encode_props};
 use super::span::{decode_span, encode_span};
+use super::WireError;
 
 pub(crate) fn encode_node(w: &mut super::cursor::Writer, node: &NodeRef) {
     w.u32(node.id);
     w.u8(node.kind.tag());
     w.u32(node.component_id);
     encode_props(w, &node.props);
-    w.u16(node.children.len() as u16);
+    w.u16_len(node.children.len(), "node.children");
     for child in &node.children {
         encode_child(w, child);
     }
-    w.u16(node.handlers.len() as u16);
+    w.u16_len(node.handlers.len(), "node.handlers");
     for handler in &node.handlers {
         w.u32(*handler);
     }
