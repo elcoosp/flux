@@ -287,6 +287,16 @@ pub fn run_resumable(
     signals: &mut impl SignalStore,
     payload: Value,
 ) -> Result<RunResult, VmError> {
+    run_resumable_with_registry(bytecode, signals, payload, &CapabilityRegistry::with_parity_stubs())
+}
+
+/// Audit T-335.2: run_resumable with an explicit capability registry.
+pub(crate) fn run_resumable_with_registry(
+    bytecode: &[u8],
+    signals: &mut impl SignalStore,
+    payload: Value,
+    registry: &CapabilityRegistry,
+) -> Result<RunResult, VmError> {
     let program = decode_program(bytecode)?;
     let offsets: Vec<u32> = program.iter().map(|i| i.offset).collect();
     let mut regs = std::array::from_fn(|_| Value::Null);
@@ -294,7 +304,7 @@ pub fn run_resumable(
     regs[15] = Value::Int(i64::from(ENTRY_GAS));
     let mut gas: u32 = ENTRY_GAS;
 
-    match exec_tail(&program, &offsets, 0, &mut regs, &mut gas, signals)? {
+    match exec_tail(&program, &offsets, 0, &mut regs, &mut gas, signals, registry)? {
         ControlFlow::Halt => Ok(finish(regs, gas, signals)),
         ControlFlow::Suspend {
             resume_ip,
@@ -328,6 +338,16 @@ pub fn resume(
     signals: &mut impl SignalStore,
     value: Value,
 ) -> Result<RunResult, VmError> {
+    resume_with_registry(state, signals, value, &CapabilityRegistry::with_parity_stubs())
+}
+
+/// Audit T-335.2: resume with an explicit capability registry.
+pub(crate) fn resume_with_registry(
+    state: SuspendState,
+    signals: &mut impl SignalStore,
+    value: Value,
+    registry: &CapabilityRegistry,
+) -> Result<RunResult, VmError> {
     // Replay the signal writes captured at suspend so reads during the resumed tail
     // see the pre-suspend state.
     for (id, v) in &state.signals {
@@ -346,6 +366,7 @@ pub fn resume(
         &mut regs,
         &mut gas,
         signals,
+        registry,
     )? {
         ControlFlow::Halt => Ok(finish(regs, gas, signals)),
         ControlFlow::Suspend {
@@ -393,6 +414,7 @@ fn exec_tail(
     regs: &mut [Value; 16],
     gas: &mut u32,
     signals: &mut impl SignalStore,
+    registry: &CapabilityRegistry,
 ) -> Result<ControlFlow, VmError> {
     let start_index = offsets
         .iter()
@@ -711,7 +733,6 @@ fn exec_tail(
                 // An unregistered `(capId, methodId)` is a type error (the VM cannot
                 // invent a capability), matching the host contract.
                 let args = regs[usize::from(args_reg)].clone();
-                let registry = CapabilityRegistry::with_parity_stubs();
                 match registry.lookup(cap_id, method_id) {
                     Some(impl_) => {
                         let id = impl_(cap_id, method_id, &args, signals);
@@ -809,6 +830,16 @@ pub fn run(
     signals: &mut impl SignalStore,
     payload: Value,
 ) -> Result<VmOutcome, VmError> {
+    run_with_registry(bytecode, signals, payload, &CapabilityRegistry::with_parity_stubs())
+}
+
+/// Audit T-335.2: run with an explicit capability registry (for conformance tests).
+pub(crate) fn run_with_registry(
+    bytecode: &[u8],
+    signals: &mut impl SignalStore,
+    payload: Value,
+    registry: &CapabilityRegistry,
+) -> Result<VmOutcome, VmError> {
     let program = decode_program(bytecode)?;
     // v1 bytecode never emits `AWAIT` (an MLP v2 opcode, ADR-0044). If one is present the
     // program is malformed for the v1 entry point: reject it rather than silently running the
@@ -826,7 +857,7 @@ pub fn run(
     regs[15] = Value::Int(i64::from(ENTRY_GAS));
     let mut gas: u32 = ENTRY_GAS;
 
-    match exec_tail(&program, &offsets, 0, &mut regs, &mut gas, signals)? {
+    match exec_tail(&program, &offsets, 0, &mut regs, &mut gas, signals, registry)? {
         ControlFlow::Halt => {
             let out_signals = signals.snapshot();
             Ok(VmOutcome {
