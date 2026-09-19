@@ -80,6 +80,8 @@ final class Flux047HttpPersistTests: XCTestCase {
     /// A `HttpTransport` that returns a canned response (no network).
     private struct MockHttpTransport: HttpTransport {
         let response: String
-        func request(method: String, url: String, body: String?) -> String { response }
+        func request(method: String, url: String, body: String?) async throws -> HttpResponse {
+            HttpResponse(statusCode: 200, body: response)
+        }
     }
 }

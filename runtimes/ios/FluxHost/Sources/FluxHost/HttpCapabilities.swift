@@ -64,30 +64,34 @@ final class HttpRequestStore: @unchecked Sendable {
 /// deterministic without a live server.
 protocol HttpTransport: Sendable {
     /// Performs `method` against `url` with optional `body`; returns the response body.
-    func request(method: String, url: String, body: String?) -> String
+    /// Audit H8: async to avoid blocking the main actor on a semaphore.
+    func request(method: String, url: String, body: String?) async throws -> HttpResponse
+}
+
+/// HTTP response with status code and body.
+struct HttpResponse {
+    let statusCode: Int
+    let body: String
 }
 
 /// Production `Http` transport for the iOS host: performs requests over
-/// `URLSession` (Foundation). Runs synchronously on the caller's context (the
-/// executor's async resolver is already suspended on the reactive loop).
+/// `URLSession` (Foundation). Audit H8: uses async URLSession instead of
+/// blocking semaphore; 15s timeout; real status code propagation.
 struct URLSessionHttpTransport: HttpTransport {
-    func request(method: String, url: String, body: String?) -> String {
-        guard let u = URL(string: url) else { return "" }
+    func request(method: String, url: String, body: String?) async throws -> HttpResponse {
+        guard let u = URL(string: url) else { return HttpResponse(statusCode: 0, body: "") }
         var req = URLRequest(url: u)
         req.httpMethod = method
         req.setValue("application/json", forHTTPHeaderField: "Accept")
+        // Audit H8/D13: 15s timeout (matches Kotlin).
+        req.timeoutInterval = 15
         if let body {
             req.httpBody = body.data(using: .utf8)
             req.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
         }
-        let sem = DispatchSemaphore(value: 0)
-        var result = ""
-        let task = URLSession.shared.dataTask(with: req) { data, _, _ in
-            if let data, let s = String(data: data, encoding: .utf8) { result = s }
-            sem.signal()
-        }
-        task.resume()
-        sem.wait()
-        return result
+        let (data, response) = try await URLSession.shared.data(for: req)
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+        let bodyStr = String(data: data, encoding: .utf8) ?? ""
+        return HttpResponse(statusCode: statusCode, body: bodyStr)
     }
 }

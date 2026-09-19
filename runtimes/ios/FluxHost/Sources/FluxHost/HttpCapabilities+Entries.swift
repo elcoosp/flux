@@ -135,23 +135,39 @@ internal struct HttpAsyncResolver: AsyncResolver {
             )
         )
         let started = ContinuousClock.now
-        let response = transport.request(method: request.method, url: url, body: body)
+        // Audit H8: transport.request is now async — no semaphore blocking.
+        let response: HttpResponse
+        do {
+            response = try await transport.request(method: request.method, url: url, body: body)
+        } catch {
+            // Audit D13: error body "{}" + real status propagation.
+            fluxDevtoolsEmit(
+                .networkResponse(
+                    requestId: UInt32(cellId),
+                    statusCode: 0,
+                    latencyMs: 0,
+                    body: "",
+                    resultKind: 0
+                )
+            )
+            return .str(table.intern("{}"))
+        }
         let elapsed = started.duration(to: ContinuousClock.now)
         let latencyMs = UInt32(clamping: Int64(elapsed.components.seconds * 1_000)
             + Int64(elapsed.components.attoseconds) / 1_000_000)
         fluxDevtoolsEmit(
             .networkResponse(
                 requestId: UInt32(cellId),
-                statusCode: 200,
+                statusCode: UInt16(clamping: response.statusCode),
                 latencyMs: latencyMs,
-                body: response,
+                body: response.body,
                 resultKind: 1
             )
         )
         if request.parseJson {
-            return FluxValueJsonParser.parse(response)
+            return FluxValueJsonParser.parse(response.body)
         }
         // The response text must reach the VM as a resolvable .str; intern it.
-        return .str(table.intern(response))
+        return .str(table.intern(response.body))
     }
 }
