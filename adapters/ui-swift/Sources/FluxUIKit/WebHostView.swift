@@ -41,8 +41,8 @@ public final class WebHostView: FluxAdapter {
 
     public func update(_ view: WKWebView, from old: Props, to new: Props) {
         guard let src = new.getString(named: "src"), let url = URL(string: src), url.scheme == "https" || url.scheme == "http" else {
-            // Missing/empty/unsafe `src` (non-http(s)) degrades to no-op rather
-            // than attempting a malformed navigation.
+            // Audit D18: absent/non-http(s) `src` clears the view (loads blank).
+            view.loadHTMLString("", baseURL: nil)
             return
         }
         // Avoid reloading the same URL on every no-op patch.

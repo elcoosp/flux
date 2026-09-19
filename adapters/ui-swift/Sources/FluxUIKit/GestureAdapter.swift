@@ -109,7 +109,7 @@ public final class GestureAdapter: FluxAdapter {
 /// here), so this performs the minimal insert/remove and reorders in place —
 /// never recreating a view that already exists, which would drop its state.
 @MainActor
-private func reconcileSubviews(_ target: [UIView], on container: UIView) {
+func reconcileSubviews(_ target: [UIView], on container: UIView) {
     let current = container.subviews
     let targetSet = Set(target)
     for stale in current where !targetSet.contains(stale) {

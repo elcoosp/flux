@@ -424,7 +424,7 @@ final class RenderMountTests: XCTestCase {
 
         let registry = AdapterRegistry(table: table)
         let expectations: [(String, AnyClass)] = [
-            ("Stack", UIStackView.self), ("Grid", UIStackView.self),
+            ("Stack", UIView.self), ("Grid", UIStackView.self),
             ("Spacer", UIStackView.self), ("SafeArea", UIView.self),
             ("Modal", UIView.self), ("Sheet", UIView.self),
             ("Dialog", UIView.self), ("Animate", UIView.self),

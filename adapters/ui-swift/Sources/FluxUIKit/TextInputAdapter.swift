@@ -47,7 +47,10 @@ public final class TextInputAdapter: FluxAdapter {
 
     public func update(_ view: UITextField, from old: Props, to new: Props) {
         if let text = new.getString(named: "text"), view.text != text { view.text = text }
-        view.placeholder = new.getString(named: "placeholder")
+        // Audit D14: absent placeholder retains previous value.
+        if let placeholder = new.getString(named: "placeholder") {
+            view.placeholder = placeholder
+        }
         view.isEnabled = new.getBool(named: "enabled") ?? true
         view.isSecureTextEntry = new.getBool(named: "secureTextEntry") ?? false
     }
@@ -77,14 +80,8 @@ public final class TextInputAdapter: FluxAdapter {
             self.nodeId = nodeId
         }
 
-        func textFieldDidChangeSelection(_ textField: UITextField) {
-            guard let handlerId, let nodeId, let text = textField.text else { return }
-            #if DEBUG
-            NSLog("[fluxdbg:textinput] delegate fired handlerId=\(handlerId) nodeId=\(nodeId) text='\(text)' executorNil=\(adapter?.executor == nil)")
-            #endif
-            MainActor.assumeIsolated {
-                adapter?.executor?.dispatch(FluxEvent(handlerId: handlerId, nodeId: nodeId, payload: .str(text)))
-            }
-        }
+        // Audit D19: textFieldDidChangeSelection removed — caret moves must
+        // NOT fire onChangeText. Only text changes should dispatch. The
+        // default UITextField behavior (editingChanged) handles text changes.
     }
 }

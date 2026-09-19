@@ -61,40 +61,37 @@ extension UIView {
 }
 
 /// `Stack` — z-order overlay of children (SwiftUI `ZStack`). Mapped to a
-/// `UIStackView` laid out vertically; later children paint above earlier ones
-/// via z-ordering. The `gap` prop spaces siblings.
+/// plain `UIView` whose children are laid back-to-front so later children
+/// paint above earlier ones (Audit D16: z-overlay, not linear).
 public final class StackAdapter: FluxAdapter {
-    public typealias View = UIStackView
+    public typealias View = UIView
     weak var executor: (any FluxExecutor)?
 
     public init(executor: (any FluxExecutor)? = nil) { self.executor = executor }
 
-    public func create() -> UIStackView {
-        let stack = UIStackView()
-        stack.axis = .vertical
-        stack.distribution = .fill
-        stack.alignment = .fill
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        return stack
+    public func create() -> UIView {
+        let view = UIView()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        return view
     }
 
-    public func update(_ view: UIStackView, from old: Props, to new: Props) {
-        let gap = new.getFloat(named: "gap") ?? 0
-        if Double(view.spacing) != gap { view.spacing = CGFloat(gap) }
-        // Recorded for parity with Android `StackAdapter.PROP_GAP` so the host
-        // presentation layer (ADR-0048) reads the same data the Compose host does.
-        view.fluxRecord(FluxRecordedProp.gap, gap)
+    public func update(_ view: UIView, from old: Props, to new: Props) {
+        // Audit D14: absent gap retains previous value.
+        if let gap = new.getFloat(named: "gap") {
+            view.fluxRecord(FluxRecordedProp.gap, gap)
+        }
     }
 
-    public func setChildren(_ children: [AnyObject], on view: UIStackView) {
+    public func setChildren(_ children: [AnyObject], on view: UIView) {
         let views = children.compactMap { $0 as? UIView }
-        reconcileChildren(views, on: view)
+        // Audit D16: z-overlay — reconcile by identity; children paint back-to-front.
+        reconcileSubviews(views, on: view)
     }
 
-    public func bindHandler(_ handlerId: FluxHandlerId, to view: UIStackView, nodeId: FluxNodeId) {}
+    public func bindHandler(_ handlerId: FluxHandlerId, to view: UIView, nodeId: FluxNodeId) {}
 
-    public func destroy(_ view: UIStackView) {
-        view.arrangedSubviews.forEach { $0.removeFromSuperview() }
+    public func destroy(_ view: UIView) {
+        view.subviews.forEach { $0.removeFromSuperview() }
     }
 }
 
