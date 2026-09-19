@@ -345,8 +345,12 @@ public func fluxDevtoolsSetSink(_ sink: (any VMTelemetrySink)?) {
 }
 
 /// Emits a telemetry event if a DevTools sink is attached.
+/// Audit H11: no-op stub in Release so the call sites compile but the
+/// per-instruction + signal telemetry is compiled out.
 public func fluxDevtoolsEmit(_ event: TelemetryEvent) {
+    #if DEBUG
     fluxDevtoolsSink?.emit(event)
+    #endif
 }
 
 /// Encodes a UTF-8 string as a little-endian `u16` length prefix + bytes (matches Rust `encode_str`).
