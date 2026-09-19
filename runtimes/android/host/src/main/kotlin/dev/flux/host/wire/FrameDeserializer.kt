@@ -40,7 +40,8 @@ public object FrameDeserializer {
      * protocol version 2, but the `FrameBuilder` test helper and committed
      * fixtures exercise both v1 and v2, so both are accepted; any other version
      * is rejected fail-closed (FLUX-050 / ADR-0056). */
-    private val SUPPORTED_VERSIONS: Set<UByte> = setOf(0x01u, 0x02u)
+    // Audit D8: v1 removed — keep v2 only (protocol version 0x02)
+    private val SUPPORTED_VERSIONS: Set<UByte> = setOf(0x02u)
 
     /** FluxFrame kind constants mirroring crates/flux-ir-serde/src/frame.rs. */
     private const val FRAME_INIT: UByte = 0x02u

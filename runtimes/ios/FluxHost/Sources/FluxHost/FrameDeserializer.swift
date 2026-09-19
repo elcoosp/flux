@@ -465,7 +465,7 @@ enum FrameDeserializer {
             deps.reserveCapacity(Int(depCount))
             for _ in 0..<depCount { deps.append(try r.u32()) }
             let thunkPresent = try r.u8()
-            let thunk: ClosureRef? = (thunkPresent == 1) ? try decodeClosureRef(&r) : nil
+            let thunk: ClosureRef? = (thunkPresent != 0) ? try decodeClosureRef(&r) : nil  // Audit D11: presence is != 0
             let layoutCount = try r.u16()
             var layout: [UInt16] = []
             layout.reserveCapacity(Int(layoutCount))
@@ -473,7 +473,7 @@ enum FrameDeserializer {
             // FLUX-072 / ADR-0050: trailing `itemSlot` after layout (matches the Rust
             // `flux-ir-serde` encoder). `u8` present flag, then `u32` id when present.
             let itemSlotPresent = try r.u8()
-            let itemSlot: UInt32? = (itemSlotPresent == 1) ? try r.u32() : nil
+            let itemSlot: UInt32? = (itemSlotPresent != 0) ? try r.u32() : nil  // Audit D11: presence is != 0
             out[nodeId] = NodeSignalMeta(deps: deps, thunk: thunk, layout: layout, itemSlot: itemSlot)
         }
         return out
