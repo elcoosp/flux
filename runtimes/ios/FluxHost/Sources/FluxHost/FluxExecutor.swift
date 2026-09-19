@@ -177,6 +177,11 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
     private var currentNodes: [UInt32: ShadowNode]
     /// The most recent full root id.
     private var currentRootId: UInt32?
+    /// Audit H9: serializes dispatches so two interleaved taps don't lose
+    /// signal writes. Each dispatch works on `var store = graph` and commits
+    /// at HALT; concurrent dispatches would race on `graph`.
+    private var isDispatching = false
+    private var pendingEvents: [FluxEvent] = []
     /// Monotonic counter for FLUX_FRAME_DUMP filenames.
     private var frameSequenceNumber: Int = 0
     /// The most recent VM error, surfaced to the UI overlay.
@@ -500,7 +505,7 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
                 signals: &store,
                 payload: payload,
                 stringTable: table,
-                capRegistry: .dev,
+                capRegistry: self.capRegistry,
                 permissions: permissionChecker,
                 programBytes: bytecode
             )
@@ -510,7 +515,7 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
                 signals: &store,
                 payload: payload,
                 stringTable: table,
-                capRegistry: .dev,
+                capRegistry: self.capRegistry,
                 permissions: permissionChecker
             )
         }
@@ -547,7 +552,7 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
                     signals: &store,
                     value: resolved,
                     stringTable: table,
-                    capRegistry: .dev,
+                    capRegistry: self.capRegistry,
                     permissions: permissionChecker
                 )
             case let .failure(err):
@@ -639,77 +644,58 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
         // Seeding happens inside the Task before runHandlerAsync.
         let rowContext = reconciler.itemContext(for: event.nodeId)
         currentHandlerId = event.handlerId
-        // Hand the raw `entry.bytecode` AND the registration-time decoded cache
-        // to `runHandlerAsync`, which uses the cache (R3) so the handler is not
-        // re-decoded on every tap; it falls back to re-decoding the raw bytes
-        // only when the cache is absent.
+        // Audit H9: serialize dispatches — queue event if one is already running.
+        if isDispatching {
+            pendingEvents.append(event)
+            return
+        }
+        isDispatching = true
         Task { @MainActor in
-            if let ctx = rowContext {
-                #if DEBUG
-                NSLog("[FluxRT] dispatch: seeding ForEach itemSlot \(ctx.slot) with element for node \(event.nodeId)")
-                #endif
-                self.graph.write(ctx.slot, ctx.element)
+            await self.processDispatch(event)
+            // Process any queued events
+            while let next = self.pendingEvents.first {
+                self.pendingEvents.removeFirst()
+                await self.processDispatch(next)
             }
-            // Convert the native event payload to the runtime's id-based value,
-            // interning any resolved string locally into the shared table — no
-            // round-trip to the dev server (brittleness 4c).
-            let payload: FluxValue = if let kitPayload = event.payload {
-                toRuntime(kitPayload, table: &table)
-            } else {
-                .null
-            }
-            #if DEBUG
-            NSLog("[fluxdbg:dispatch] payload->runtime value=\(payload)")
-            #endif
-            // Run the handler with resumable semantics (ADR-0044): every `AWAIT`
-            // is settled by `asyncResolver` and the handler is resumed until `HALT`.
-            // Pass the cached decoded instructions (R3) so the handler is not
-            // re-decoded on every tap.
-            let (outcome, error) = await runHandlerAsync(
-                bytecode: entry.bytecode,
-                decoded: entry.decoded,
-                payload: payload
-            )
-            guard let outcome else {
-                #if DEBUG
-                NSLog("[executor] async dispatch FAILED: \(String(describing: error))")
-                #endif
-                lastError = error
-                lastReconcile = ReconcileReport()
-                onTreeChanged?()
-                return
-            }
-            // Fold VM-written signals back into the live graph (runHandlerAsync has
-            // already committed its working copy, but folding keeps `graph` and the
-            // reconcile in lockstep for any observer that read mid-flight).
-            let written = outcome.signals
-            for (id, value) in written { graph.write(id, value) }
-            #if DEBUG
-            let writtenDesc = written.map { "S\($0.0)=\(FluxExecutor.describe($0.1, table: table))" }.joined(separator: ", ")
-            NSLog("[FluxRT] dispatch wrote signals: [ \(writtenDesc) ] currentRootId=\(currentRootId.map { String($0) } ?? "nil")")
-            #endif
-            // R1: re-reconcile only the nodes whose signal dependencies were just
-            // written, instead of re-walking the whole tree on every tap.
-            let dirty = Set(written.map { $0.0 })
-            if !dirty.isEmpty, let rootId = currentRootId {
-                let report = reconciler.reconcileDirty(rootId: rootId, signalIds: dirty)
-                #if DEBUG
-                NSLog("[FluxRT] dispatch reconcileDirty: dirty=\(dirty) built=\(report.built.count) updated=\(report.updated.count) detached=\(report.detached.count)")
-                #endif
-                lastReconcile = report
-            } else {
-                #if DEBUG
-                UserDefaults.standard.set("[dispatch] rootId=\(currentRootId.map { String($0) } ?? "nil") dirty=[] (no signals written) built=[] updated=[] detached=[]\n", forKey: "flux_dispatch")
-                #endif
-                lastReconcile = ReconcileReport()
-            }
-            // A signal-dependent reconcile may have re-parented native views; the
-            // host should re-present the (unchanged-identity) root view.
-            onTreeChanged?()
+            self.isDispatching = false
         }
     }
 
-        // MARK: - Debug instrumentation (Phase 0)
+    private func processDispatch(_ event: FluxEvent) async {
+        guard let entry = handlerClosures[event.handlerId] else {
+            lastError = VmError(kind: .invalidDispatch, offset: 0)
+            lastReconcile = ReconcileReport()
+            return
+        }
+        if let ctx = reconciler.itemContext(for: event.nodeId) {
+            graph.write(ctx.slot, ctx.element)
+        }
+        let payload: FluxValue = if let kitPayload = event.payload {
+            toRuntime(kitPayload, table: &table)
+        } else {
+            .null
+        }
+        let (outcome, error) = await runHandlerAsync(
+            bytecode: entry.bytecode,
+            decoded: entry.decoded,
+            payload: payload
+        )
+        guard let outcome else {
+            lastError = error
+            lastReconcile = ReconcileReport()
+            onTreeChanged?()
+            return
+        }
+        let written = outcome.signals
+        for (id, value) in written { graph.write(id, value) }
+        let dirty = Set(written.map { $0.0 })
+        if !dirty.isEmpty, let rootId = currentRootId {
+            lastReconcile = reconciler.reconcileDirty(rootId: rootId, signalIds: dirty)
+        } else {
+            lastReconcile = ReconcileReport()
+        }
+        onTreeChanged?()
+    }
 
     /// Human-readable description of a `FluxValue`, resolving interned string
     /// ids through the shared string `table` so signal writes can be inspected
