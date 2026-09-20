@@ -452,10 +452,15 @@ impl<'a, B: Backend> Emitter<'a, B> {
         match spec.kind {
             PrimitiveKind::Container => {
                 let gap = props.get("gap").map(String::as_str).unwrap_or("");
+                let axis = if spec.flux_name == "Row" || spec.flux_name == "GridRow" {
+                    "horizontal"
+                } else {
+                    "vertical"
+                };
                 let spacing = if gap.is_empty() {
                     String::new()
                 } else {
-                    B::container_spacing(gap)
+                    B::container_spacing_axis(gap, axis)
                 };
                 self.line(indent, &format!("{native}{spacing} {{"));
                 self.emit_trailing_or_children(trailing.as_deref(), id, indent + B::CHILD_STEP);

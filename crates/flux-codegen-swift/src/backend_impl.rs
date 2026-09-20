@@ -52,6 +52,10 @@ impl Backend for Swift {
     }
 
     fn container_spacing(gap: &str) -> String {
+        Self::container_spacing_axis(gap, "vertical")
+    }
+
+    fn container_spacing_axis(gap: &str, _axis: &str) -> String {
         format!("(spacing: {gap})")
     }
 
@@ -136,7 +140,7 @@ impl Backend for Swift {
         } else {
             value.to_owned()
         };
-        let on_change = if value.is_empty() {
+        let _on_change = if value.is_empty() {
             "{ _ in }".to_owned()
         } else {
             // Audit T-403.6: onEditingChanged is a Bool callback; use onCommit
@@ -149,8 +153,9 @@ impl Backend for Swift {
             placeholder.to_owned()
         };
         // Audit T-403.6: use a mutable Binding to make the TextField editable.
-        let binding = format!("Binding(get: {{ {value} }}, set: {{ newValue in {value} = newValue }})");
-        format!("TextField({placeholder}, text: {binding})")
+        let getter = format!("get: {{ {} }}", value);
+        let setter = format!("set: {{ newValue in {} = newValue }}", value);
+        format!("TextField({placeholder}, text: Binding({}, {}))", getter, setter)
     }
 
     fn key_extractor(key: &Expr) -> String {

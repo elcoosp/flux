@@ -59,6 +59,12 @@ pub trait Backend {
     #[must_use]
     fn container_spacing(gap: &str) -> String;
 
+    /// Renders axis-aware spacing for a layout container.
+    /// `axis` is `"horizontal"` for Row, `"vertical"` for Column.
+    /// Swift: `(spacing: gap)`. Kotlin: `(horizontalArrangement|verticalArrangement = Arrangement.spacedBy(gap.dp))`.
+    #[must_use]
+    fn container_spacing_axis(gap: &str, axis: &str) -> String;
+
     /// Renders the body of an `Image(primary)` call: the resource binding.
     /// Kotlin: `painter = painterResource(value), contentDescription = null`.
     /// Swift: `uiImage: UIImage(named: value) ?? UIImage()`.

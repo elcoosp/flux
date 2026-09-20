@@ -51,11 +51,9 @@ impl Backend for Kotlin {
     }
 
     fn container_spacing(gap: &str) -> String {
-        // Audit D5/T-403.3: detect parent axis from context. Default to vertical.
-        format!(
-            "(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy({gap}.dp))"
-        )
-    }
+        // Audit D5/T-403.3: delegate to axis-aware implementation (default vertical).
+        Self::container_spacing_axis(gap, "vertical")
+    }}
 
     fn container_spacing_axis(gap: &str, axis: &str) -> String {
         // Audit T-403.3: emit arrangement matching the parent container axis.
