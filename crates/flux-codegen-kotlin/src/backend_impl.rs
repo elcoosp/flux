@@ -72,11 +72,13 @@ impl Backend for Kotlin {
         format!("Image(painter = painterResource({value}), contentDescription = null)")
     }
 
-    fn router_open() -> String {
+    fn router_open(start_destination: &str) -> String {
         // Declare a navController variable so that `Router.navigate(target)`
         // (rendered by router_navigate_expr) can call navController.navigate.
-        "val navController = rememberNavController()\n    NavHost(\n        navController = navController,\n        startDestination = \"home\"\n    ) {"
-            .to_owned()
+        format!(
+            "val navController = rememberNavController()\n    NavHost(\n        navController = navController,\n        startDestination = {}\n    ) {{",
+            start_destination
+        )
     }
 
     fn router_close() -> String {

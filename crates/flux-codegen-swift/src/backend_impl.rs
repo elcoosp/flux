@@ -63,9 +63,10 @@ impl Backend for Swift {
         format!("Image(uiImage: UIImage(named: {value}) ?? UIImage())")
     }
 
-    fn router_open() -> String {
+    fn router_open(_start_destination: &str) -> String {
         // SwiftUI NavigationStack bound to the route path for programmatic
         // navigation. The destination modifier is chained by router_close.
+        // Audit T-403.7: start_destination handled by NavigationStack path binding.
         "NavigationStack(path: $route) {".to_owned()
     }
 

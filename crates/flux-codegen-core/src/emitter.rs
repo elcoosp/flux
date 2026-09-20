@@ -643,7 +643,19 @@ impl<'a, B: Backend> Emitter<'a, B> {
     /// For Swift (children after close): `router_open()` → `router_close()` → children → `router_destination_close()`.
     fn emit_router(&mut self, id: NodeId, indent: usize) {
         let _node = self.lowered.arena.get(id);
-        self.line(indent, &B::router_open());
+        // Audit T-403.7: derive startDestination from initialRouteName prop.
+        let node = self.lowered.arena.get(id);
+        let start_destination = match node {
+            Some(n) => {
+                let route_idx = flux_ir::lower::prop_index_for_name("initialRouteName");
+                let route = n.props().get(route_idx)
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "home".to_string());
+                format!("\"{}\"", route)
+            }
+            None => "\"home\"".to_string(),
+        };
+        self.line(indent, &B::router_open(&start_destination));
         if !B::ROUTER_CHILDREN_AFTER_CLOSE {
             self.emit_children_under_router(id, indent + B::CHILD_STEP);
             self.line(indent, &B::router_close());

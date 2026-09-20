@@ -75,7 +75,7 @@ pub trait Backend {
     /// Swift emits `NavigationStack { EmptyView() };` with a root content;
     /// Kotlin emits `NavHost(navController = ..., startDestination = ...) {`.
     #[must_use]
-    fn router_open() -> String;
+    fn router_open(start_destination: &str) -> String;
 
     /// Closes the body of a `Router` navigation container and optionally opens
     /// the destination binding.
