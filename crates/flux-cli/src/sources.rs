@@ -41,11 +41,13 @@ fn collect_into(dir: &Path, out: &mut Vec<(PathBuf, String)>) -> std::io::Result
         } else if path.extension().and_then(|e| e.to_str()) == Some("flux") {
             match fs::read_to_string(&path) {
                 Ok(source) => out.push((path, source)),
-                Err(error) => tracing::warn!(
-                    path = %path.display(),
-                    %error,
-                    "cannot read source file; skipping"
-                ),
+                Err(error) => {
+                    return Err(anyhow::anyhow!(
+                        "cannot read source file {}: {}",
+                        path.display(),
+                        error
+                    ));
+                }
             }
         }
     }

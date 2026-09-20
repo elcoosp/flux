@@ -92,17 +92,16 @@ pub(crate) fn run_with(
             .unwrap_or_else(|| "generated".to_owned());
         let stem_owned = stem.clone();
 
-        // Walk the bridge to find the root component's source name. The root
-        // component is the last user-defined component in declaration order
-        // (a Flux program's top-level component is declared last, after its
-        // children). Sorting by source span gives deterministic declaration
-        // order; HashMap iteration alone does not.
+        // Audit T-404: entry point = component named "App" if present,
+        // else the FIRST declared component (not last).
         let root_comp_name: String = {
             let bridge = flux_codegen_core::Bridge::build(ast);
             let mut comps: Vec<_> = bridge.components().collect();
             comps.sort_by_key(|(_, comp)| comp.span.start);
             comps
-                .last()
+                .iter()
+                .find(|(_, comp)| comp.name.name == "App")
+                .or_else(|| comps.first())
                 .map(|(_, comp)| comp.name.name.clone())
                 .unwrap_or_else(|| stem_owned.clone())
         };
@@ -139,7 +138,7 @@ pub(crate) fn run_with(
         };
         let file_name = match platform {
             Platform::Ios => format!("{root_comp_name}App.{}", platform.source_extension()),
-            Platform::Android => "MainActivity.kt".to_owned(),
+            Platform::Android => format!("{stem}.kt", stem = stem_owned),
         };
         let out = out_dir.join(&file_name);
         std::fs::write(&out, app_code)
