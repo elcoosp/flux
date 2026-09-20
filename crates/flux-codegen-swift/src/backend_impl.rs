@@ -382,6 +382,11 @@ impl Backend for Swift {
                     em.line(indent + step, &format!("case {}:", em.render(lit)));
                     em.emit_expr_body(&arm.body, indent + 2 * step);
                 }
+                // Audit T-403.5: Guard pattern emits exact-type test (not default).
+                flux_parser::MatchPatternKind::Guard { name, .. } => {
+                    em.line(indent + step, &format!("case let .{}(_):", name.name));
+                    em.emit_expr_body(&arm.body, indent + 2 * step);
+                }
                 _ => {
                     em.line(indent + step, "default:");
                     em.emit_expr_body(&arm.body, indent + 2 * step);
