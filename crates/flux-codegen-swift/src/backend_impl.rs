@@ -149,9 +149,8 @@ impl Backend for Swift {
             placeholder.to_owned()
         };
         // Audit T-403.6: use a mutable Binding to make the TextField editable.
-        format!(
-            "TextField({placeholder}, text: Binding(get: {{ {value} }, set: {{ newValue in {value} = newValue }}))"
-        )
+        let binding = format!("Binding(get: {{ {value} }}, set: {{ newValue in {value} = newValue }})");
+        format!("TextField({placeholder}, text: {binding})")
     }
 
     fn key_extractor(key: &Expr) -> String {
