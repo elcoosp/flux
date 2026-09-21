@@ -123,13 +123,13 @@ async fn handle_host_frame(bytes: &[u8], shared: &Arc<Shared>) -> Vec<Vec<u8>> {
     // time after connecting.
     match bytes.get(5).copied() {
         Some(FRAME_DISPATCH_REPORT) => {
-            handle_dispatch_report(bytes, shared);
+            handle_dispatch_report(bytes, shared).await;
             Vec::new()
         }
         // Brittleness 4a: the host asks for a canonical `StringId` instead of
         // synthesising one locally.
         Some(flux_ir_serde::FRAME_INTERN_STRING) => {
-            handle_intern_string(bytes, shared).into_iter().collect()
+            handle_intern_string(bytes, shared).await.into_iter().collect()
         }
         Some(flux_ir_serde::FRAME_HELLO) => handle_hello(bytes, shared).await.into_iter().collect(),
         // Host telemetry (spec §4.1): the iOS/Android host ships `Telemetry`
@@ -367,7 +367,7 @@ where
 /// [`flux_ir_serde::STRING_ID_CANONICAL_CEILING`]. A non-UTF-8 or over-long
 /// payload is a protocol violation: it is logged and dropped rather than
 /// answered with a bogus id.
-fn handle_intern_string(bytes: &[u8], shared: &Arc<Shared>) -> Option<Vec<u8>> {
+async fn handle_intern_string(bytes: &[u8], shared: &Arc<Shared>) -> Option<Vec<u8>> {
     use flux_ir_serde::{Frame, StringInternedFrame};
     let request = Frame::from_intern_string_bytes(bytes)?;
     let Some(text) = request.as_str() else {
@@ -377,7 +377,12 @@ fn handle_intern_string(bytes: &[u8], shared: &Arc<Shared>) -> Option<Vec<u8>> {
         );
         return None;
     };
-    let id = shared.pipeline.lock().intern_string(text);
+    // Audit P2.1: intern_string is cheap and does not block; still route it
+    // through spawn_blocking to avoid holding the reactor on the std Mutex.
+    let text_owned = text.to_owned();
+    let shared_req = Arc::clone(shared);
+    let id = blocking(move || shared_req.pipeline.lock().intern_string(&text_owned))
+        .await?;
     tracing::debug!(id, text, "interned host string");
     Some(StringInternedFrame::new(id).to_bytes())
 }
@@ -388,7 +393,7 @@ fn handle_intern_string(bytes: &[u8], shared: &Arc<Shared>) -> Option<Vec<u8>> {
 /// the pipeline returns `None` (index inactive → degrade to coarse frame, or the
 /// written signal has no dependents → `noop_dispatch`), nothing is shipped.
 /// Otherwise the `Delta` is fanned out to every connected host.
-fn handle_dispatch_report(bytes: &[u8], shared: &Arc<Shared>) {
+async fn handle_dispatch_report(bytes: &[u8], shared: &Arc<Shared>) {
     let report = match crate::dispatch::DispatchReport::from_bytes(bytes) {
         Some(report) => report,
         None => {
@@ -396,8 +401,11 @@ fn handle_dispatch_report(bytes: &[u8], shared: &Arc<Shared>) {
             return;
         }
     };
-    let frame = shared.pipeline.lock().handle_dispatch_report(report);
-    if let Some(frame) = frame {
+    // Audit P2.1: handle_dispatch_report acquires the pipeline std Mutex and
+    // may re-diff/reconcile — route through spawn_blocking to keep the I/O
+    // reactor free.
+    let shared_req = Arc::clone(shared);
+    if let Some(frame) = blocking(move || shared_req.pipeline.lock().handle_dispatch_report(report)).await.flatten() {
         shared.broadcast(frame);
         tracing::debug!(handler = ?report.handler_id, "shipped minimal dispatch delta");
     }
