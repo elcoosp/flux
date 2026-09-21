@@ -11,28 +11,29 @@ pub(crate) fn emit_replace(patches: &mut Vec<Patch>, n: &NodeView<'_>) {
     });
 }
 
-/// Emits `Handler` patches for the differing handler bodies (state-preserving).
+/// Emits `Handler` patches for handlers in `new_handlers` (added or body
+/// changed). Handlers present only in `old_handlers` (removed) are not
+/// emitted — the host reconciles by removing any handler not mentioned in
+/// the patch set (audit P2.5).
 pub(crate) fn emit_handler(
     patches: &mut Vec<Patch>,
     new: &IRArena,
     new_handlers: Vec<HandlerId>,
     old_handlers: Vec<HandlerId>,
 ) {
-    for hid in new_handlers
-        .iter()
-        .chain(old_handlers.iter())
-        .collect::<AHashSet<_>>()
-    {
-        if !new_handlers.contains(hid) || !old_handlers.contains(hid) {
-            continue;
-        }
-        if let Some(cl) = new.closure(*hid) {
+    for hid in new_handlers {
+        if let Some(cl) = new.closure(hid) {
+            // Emit for all handlers in new (added or body changed).
+            // Host handles removal of handlers not in this set.
             patches.push(Patch::Handler {
-                id: *hid,
+                id: hid,
                 closure: closure_ref(&cl.bytecode, cl.captured_signals.clone(), cl.span),
             });
         }
     }
+    // Handlers only in old_handlers are implicitly removed — host reconciles
+    // by comparing the patch's handler set with the node's current handlers.
+    let _ = old_handlers;
 }
 
 /// Builds a `ClosureRef` from a closure's bytecode. The digest is a content
