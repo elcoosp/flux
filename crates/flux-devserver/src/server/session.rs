@@ -104,6 +104,9 @@ pub(crate) async fn serve_client(stream: TcpStream, shared: Arc<Shared>) -> Resu
             },
         }
     }
+    // Audit H17: clear stale `early` capability completions on session end so
+    // they cannot leak into a future session that reuses the cell-id space.
+    shared.async_bridge.lock().clear_early();
     Ok(())
 }
 

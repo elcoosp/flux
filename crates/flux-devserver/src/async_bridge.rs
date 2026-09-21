@@ -91,15 +91,40 @@ impl AsyncBridge {
     ///
     /// Returns the `Resume` frame bytes when a handler is parked on the cell;
     /// otherwise the value is retained until its suspension is reported.
+    ///
+    /// # Panics
+    ///
+    /// This method is `#[cfg(test)]` only — it is the test seam for injecting
+    /// pre-arrival completions. In production, cells are settled by the async
+    /// capability completion path (`AsyncResolver` → `resume`), not by direct
+    /// calls to this method.
+    #[cfg(test)]
     #[must_use]
     pub fn settle(&mut self, cell: SignalId, value: Value) -> Option<Vec<u8>> {
         self.settle_inner(cell, value, false)
     }
 
-    /// Settles `cell` with a capability error payload.
+    /// Settles `cell` with a capability error payload (test seam only).
+    #[cfg(test)]
     #[must_use]
     pub fn settle_error(&mut self, cell: SignalId, value: Value) -> Option<Vec<u8>> {
         self.settle_inner(cell, value, true)
+    }
+
+    /// Production resume path: a capability completed externally (from the
+    /// host's `CALL_CAP` result or a dev-server-side HTTP stub) settles `cell`.
+    /// If a handler is parked on it, the `Resume` frame bytes are returned to
+    /// send to the host; otherwise the value is retained as `early` for the
+    /// next `AwaitSuspend` for that cell.
+    #[must_use]
+    pub fn resume(&mut self, cell: SignalId, value: Value) -> Option<Vec<u8>> {
+        self.settle_inner(cell, value, false)
+    }
+
+    /// Discards any `early` values left over from this session so they cannot
+    /// leak into a future session that reuses the cell id space.
+    pub fn clear_early(&mut self) {
+        self.early.clear();
     }
 
     fn settle_inner(&mut self, cell: SignalId, value: Value, is_error: bool) -> Option<Vec<u8>> {
@@ -222,5 +247,19 @@ mod tests {
         let mut bridge = AsyncBridge::new();
         assert!(bridge.on_await_suspend(&[0, 1, 2]).is_err());
         assert_eq!(bridge.parked_len(), 0);
+    }
+
+    #[test]
+    fn clear_early_drops_stale_completions() {
+        let mut bridge = AsyncBridge::new();
+        // A completion arrives before any suspension is reported.
+        assert!(bridge.settle(5, Value::Int(42)).is_none());
+        assert_eq!(bridge.parked_len(), 0);
+        // The stale `early` value is discarded on session end.
+        bridge.clear_early();
+        // A new session reporting the suspension must NOT resume from the
+        // stale value.
+        assert!(bridge.park(AwaitSuspendFrame::new(9, 5, 0)).is_none());
+        assert_eq!(bridge.parked_len(), 1);
     }
 }
