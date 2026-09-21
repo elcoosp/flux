@@ -5,9 +5,9 @@
 //! 16 ms window before they go out on the wire.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use notify::{Event, EventKind, RecursiveMode, Watcher as _};
@@ -133,43 +133,47 @@ fn reload(pending: &mut Vec<PathBuf>, shared: &Arc<Shared>) {
 ///
 /// On a compile failure an `Error` frame is shipped and the previous good tree
 /// is retained — no `Delta` is produced (spec §D.12.3).
+///
+/// Audit H16: the frame is broadcast while the pipeline lock is still held so
+/// that a Hello arriving between compile and broadcast cannot observe a stale
+/// sequence (Init(new) then Delta(old→new)). The broadcast sender is
+/// non-blocking (`broadcast::Sender::send` is synchronous and cheap), so it is
+/// safe to call while holding the `parking_lot::Mutex`.
 pub(crate) fn compile_and_broadcast(shared: &Arc<Shared>) -> bool {
-    let (outcome, perf_json) = {
-        let mut pipeline = shared.pipeline.lock();
-        let outcome = match pipeline.compile() {
-            Ok(compiled) => Ok(compiled),
-            Err(diagnostic) => {
-                tracing::warn!(%diagnostic, "compile failed; retaining previous tree");
-                Err(pipeline.error_frame(&diagnostic))
-            }
-        };
-        // Capture the render-perf records from the compile that just ran so they can
-        // be broadcast to DevTools as `PerfRecord` telemetry (FLUX-059), independent
-        // of whether the frame itself shipped.
-        let perf_json: Vec<String> = pipeline
-            .perf_records()
-            .into_iter()
-            .filter_map(|r| r.to_json().ok())
-            .collect();
-        (outcome, perf_json)
+    let mut pipeline = shared.pipeline.lock();
+    let outcome = match pipeline.compile() {
+        Ok(compiled) => Ok(compiled),
+        Err(diagnostic) => {
+            tracing::warn!(%diagnostic, "compile failed; retaining previous tree");
+            Err(pipeline.error_frame(&diagnostic))
+        }
     };
-    let sent = match outcome {
+    let perf_json: Vec<String> = pipeline
+        .perf_records()
+        .into_iter()
+        .filter_map(|r| r.to_json().ok())
+        .collect();
+    // Audit H16: broadcast the frame while the pipeline lock is still held
+    // so a concurrent Hello cannot observe Init(new) then Delta(old→new).
+    let sent = match &outcome {
         Ok(Compiled::Init(frame)) => {
-            shared.broadcast(frame);
+            shared.broadcast(frame.clone());
             true
         }
         Ok(Compiled::Delta(frame)) => {
-            shared.broadcast(frame);
+            shared.broadcast(frame.clone());
             true
         }
         Err(frame) => {
-            shared.broadcast(frame);
+            shared.broadcast(frame.clone());
             true
         }
         Ok(Compiled::Unchanged) => false,
     };
-    // Broadcast the render-perf records to every subscribed DevTools client. These
-    // are best-effort: a disconnected client is pruned by `route_telemetry`.
+    drop(pipeline);
+    // Broadcast the render-perf records to every subscribed DevTools client.
+    // These are best-effort: a disconnected client is pruned by
+    // `route_telemetry`.
     for json in &perf_json {
         shared
             .devtools_router
