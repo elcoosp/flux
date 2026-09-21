@@ -74,12 +74,17 @@ struct ContentTag {
 }
 
 impl ContentTag {
-    /// Folds `kind` and `component_id` into a single `u8`-wide tag byte so the
-    /// hash input stays fixed-width and cheap to build.
-    fn as_byte(self) -> u8 {
-        // `kind` is a 3-bit wire discriminant; `component_id` is folded in via a
-        // small rotation so common low ids still perturb the tag meaningfully.
-        (self.kind ^ (self.component_id.wrapping_mul(0x9E) as u8)) & 0x7F
+    /// Folds `kind` and `component_id` into a 5-byte tag so the hash input
+    /// stays fixed-width. The full `component_id` (all 4 LE bytes) is mixed
+    /// in — audit P2.7: the previous single-byte fold (`component_id *
+    /// 0x9E as u8`) collided for component ids differing by multiples of
+    /// 0x100, so structurally identical nodes of different components could
+    /// share content ids.
+    fn as_bytes(self) -> [u8; 5] {
+        let mut out = [0_u8; 5];
+        out[0] = self.kind;
+        out[1..5].copy_from_slice(&self.component_id.to_le_bytes());
+        out
     }
 }
 
@@ -130,14 +135,35 @@ pub fn content_addressed_id(
     children_hash: u64,
     key: Option<Key>,
 ) -> NodeId {
-    let mut buf = [0_u8; 29];
+    let mut buf = [0_u8; 33];
     buf[0..4].copy_from_slice(&parent.to_le_bytes());
-    buf[4] = ContentTag { kind, component_id }.as_byte();
-    buf[5..13].copy_from_slice(&props_hash.to_le_bytes());
-    buf[13..21].copy_from_slice(&children_hash.to_le_bytes());
+    buf[4..9].copy_from_slice(&ContentTag { kind, component_id }.as_bytes());
+    buf[9..17].copy_from_slice(&props_hash.to_le_bytes());
+    buf[17..25].copy_from_slice(&children_hash.to_le_bytes());
     match key {
-        Some(k) => buf[21..29].copy_from_slice(&k.to_le_bytes()),
-        None => buf[21..29].copy_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]),
+        Some(k) => buf[25..33].copy_from_slice(&k.to_le_bytes()),
+        None => buf[25..33].copy_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]),
     };
     fnv1a32(&buf)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Two component ids differing by exactly 0x100 must produce different
+    /// content-addressed ids for otherwise-identical nodes (audit P2.7).
+    #[test]
+    fn component_id_collision_at_0x100_is_resolved() {
+        let id_a = content_addressed_id(
+            0, 1, 0x0000_0100, 0x1111_2222_3333_4444, 0x5555_6666_7777_8888, None,
+        );
+        let id_b = content_addressed_id(
+            0, 1, 0x0000_0200, 0x1111_2222_3333_4444, 0x5555_6666_7777_8888, None,
+        );
+        assert_ne!(
+            id_a, id_b,
+            "component ids 0x100 apart must produce different content ids (audit P2.7)"
+        );
+    }
 }
