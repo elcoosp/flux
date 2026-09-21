@@ -123,7 +123,14 @@ fn reload(pending: &mut Vec<PathBuf>, shared: &Arc<Shared>) {
         match std::fs::read_to_string(&path) {
             Ok(source) => shared.pipeline.lock().set_source(&path, source),
             Err(error) => {
-                tracing::warn!(path = %path.display(), %error, "cannot read saved file");
+                if error.kind() == std::io::ErrorKind::NotFound {
+                    if let Some(file_id) = shared.pipeline.lock().file_id_for_path(&path) {
+                        shared.pipeline.lock().remove_file(file_id);
+                    }
+                    tracing::info!(path = %path.display(), "deleted .flux file removed from pipeline");
+                } else {
+                    tracing::warn!(path = %path.display(), %error, "cannot read saved file");
+                }
             }
         }
     }

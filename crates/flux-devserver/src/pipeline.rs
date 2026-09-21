@@ -482,7 +482,7 @@ impl Pipeline {
     }
 
     /// Assigns (or reuses) the dense [`FileId`] for `path`.
-    fn file_id_for(&mut self, path: &Path) -> FileId {
+    pub(crate) fn file_id_for(&mut self, path: &Path) -> FileId {
         if let Some(id) = self.file_ids.get(path) {
             return *id;
         }
@@ -491,10 +491,35 @@ impl Pipeline {
         id
     }
 
+    /// Reverse-looks up the [`FileId`] for `path`, if the path is currently
+    /// registered in the source map.
+    pub(crate) fn file_id_for_path(&self, path: &Path) -> Option<FileId> {
+        self.file_ids.get(path).copied()
+    }
+
     /// Records a source snapshot for `path`, replacing any previous snapshot.
     pub fn set_source(&mut self, path: &Path, source: String) {
         let id = self.file_id_for(path);
         self.sources.insert(id, (path.to_path_buf(), source));
+    }
+
+    /// Removes the source for `file_id` (audit P2.2): when a `.flux` file is
+    /// deleted, its components must not linger in the next compile. Drops the
+    /// file's entry from the source snapshot, the path→id map, and the
+    /// incremental-lower cache so a subsequent `compile` ships only the
+    /// surviving files' components.
+    ///
+    /// The retained last-good tree is left intact — it is rebuilt naturally on
+    /// the next successful `compile`.
+    pub fn remove_file(&mut self, file_id: FileId) {
+        // Remove from the source snapshot, keyed by FileId.
+        if let Some((path, _)) = self.sources.remove(&file_id) {
+            // Remove the path→id reverse mapping.
+            self.file_ids.remove(&path);
+        }
+        // Drop the per-file incremental-lower cache so the deleted file is not
+        // reused on a recompile.
+        self.file_cache.remove(&file_id);
     }
 
     /// The `(FileId, path)` source map shipped in the `Init` frame.
@@ -1276,6 +1301,33 @@ mod tests {
             typed.is_ok(),
             "use theme should resolve theme.flux from the package root: {:?}",
             typed.err()
+        );
+    }
+
+    #[test]
+    fn removed_file_drops_its_components_on_recompile() {
+        // Audit P2.2: deleting a .flux file must remove its components so they
+        // do not linger in the next compiled tree.
+        let path_a = Path::new("/tmp/project/a.flux");
+        let path_b = Path::new("/tmp/project/b.flux");
+        let mut pipeline = Pipeline::new("/tmp/project", false);
+        pipeline.set_source(path_a, "compo A\n  Text(\"a\")\n".to_owned());
+        pipeline.set_source(path_b, "compo B\n  Text(\"b\")\n".to_owned());
+        pipeline.compile().expect("initial compile succeeds");
+        assert_eq!(pipeline.compiled_sources().len(), 2);
+
+        // Remove file B from the pipeline (simulating deletion).
+        let file_id_b = *pipeline.file_ids.get(path_b).expect("file B registered");
+        pipeline.remove_file(file_id_b);
+
+        // Recompile: only A's components should reach the codegen store.
+        pipeline.compile().expect("recompile after deletion succeeds");
+        let sources = pipeline.compiled_sources();
+        assert_eq!(sources.len(), 1, "only surviving file reaches codegen store");
+        assert_eq!(
+            sources[0].0,
+            Path::new("/tmp/project/a.flux"),
+            "surviving source is file A"
         );
     }
 
