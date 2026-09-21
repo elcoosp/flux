@@ -107,7 +107,8 @@ async fn serve_asset(
     }
 }
 
-/// Joins `path` onto `root`, rejecting `..` traversal and absolute components.
+/// Result of resolving an asset path: either resolved to a path within root,
+/// or rejected (path escapes root or contains `..`/absolute components).
 fn resolve(root: &Path, path: &str) -> Option<PathBuf> {
     let candidate = Path::new(path);
     if candidate
@@ -116,7 +117,20 @@ fn resolve(root: &Path, path: &str) -> Option<PathBuf> {
     {
         return None;
     }
-    Some(root.join(candidate))
+    let joined = root.join(candidate);
+
+    // Audit P2.4: canonicalize and re-verify the prefix AFTER resolution so
+    // symlinks inside the project root cannot escape it. If canonicalization
+    // fails (file doesn't exist), fall back to the joined path — the server
+    // will return 404 when it tries to read a non-existent file.
+    if let Ok(canonical_path) = joined.canonicalize() {
+        let canonical_root = root.canonicalize().ok()?;
+        if !canonical_path.starts_with(&canonical_root) {
+            return None;
+        }
+        return Some(canonical_path);
+    }
+    Some(joined)
 }
 
 /// Derives a strong `ETag` from the file's length and modification time.
@@ -196,10 +210,37 @@ mod tests {
 
     #[test]
     fn nested_asset_resolves_under_root() {
-        assert_eq!(
-            resolve(Path::new("/tmp/project"), "img/logo.png"),
-            Some(PathBuf::from("/tmp/project/img/logo.png"))
+        // `resolve` now canonicalizes, so the root must exist on disk.
+        let dir = temp_asset_dir();
+        std::fs::create_dir_all(dir.join("img")).expect("create img subdir");
+        std::fs::write(dir.join("img/logo.png"), b"").expect("create logo.png");
+        // Canonicalize the expected path too — on macOS `/var` → `/private/var`.
+        let expected = dir.join("img/logo.png").canonicalize().expect("canonicalize");
+        assert_eq!(resolve(&dir, "img/logo.png"), Some(expected));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn symlink_escape_is_rejected() {
+        // Audit P2.4: a symlink inside the project root that points outside
+        // it must be rejected after canonicalization.
+        let dir = temp_asset_dir();
+        let target = std::env::temp_dir().join(format!(
+            "flux-symlink-target-{}",
+            std::process::id()
+        ));
+        std::fs::write(&target, b"secret").expect("write target");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target, dir.join("escape"))
+            .expect("symlink creation");
+        #[cfg(not(unix))]
+        panic!("symlink test requires unix");
+        assert!(
+            resolve(&dir, "escape").is_none(),
+            "symlink pointing outside root must be rejected"
         );
+        let _ = std::fs::remove_file(&target);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
