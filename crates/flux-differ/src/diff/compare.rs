@@ -104,7 +104,13 @@ pub(crate) fn handlers_equal(
     o_set
         .iter()
         .all(|hid| match (old.closure(*hid), new.closure(*hid)) {
-            (Some(a), Some(b)) => a.bytecode == b.bytecode,
+            (Some(a), Some(b)) => {
+                // Audit P2.6: captured_signals are behavior-changing (signal
+                // wiring drives re-execution). Same bytecode with a different
+                // captured set must NOT compare equal, or the host keeps stale
+                // signal wiring after hot reload.
+                a.bytecode == b.bytecode && a.captured_signals == b.captured_signals
+            }
             _ => false,
         })
 }

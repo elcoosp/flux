@@ -60,4 +60,32 @@ mod emit_tests {
         );
         assert_eq!(r.captured_signals.len(), 2);
     }
+
+    /// Verifies that `handlers_equal` returns `false` when the captured
+    /// signal set differs even though the bytecode is identical (audit P2.6).
+    #[test]
+    fn handlers_equal_differs_on_captured_signals() {
+        let hid = HandlerId::from(1u32);
+
+        let mut old = flux_ir::IRArena::new();
+        old.add_closure(flux_ir::ClosureIR::new(
+            hid,
+            vec![0x01, 0x02],
+            vec![SignalId::from(10u32)],
+            Span::new(0, 0, 0),
+        ));
+
+        let mut new = flux_ir::IRArena::new();
+        new.add_closure(flux_ir::ClosureIR::new(
+            hid,
+            vec![0x01, 0x02], // same bytecode
+            vec![SignalId::from(20u32)], // different captured signals
+            Span::new(0, 0, 0),
+        ));
+
+        assert!(
+            !crate::diff::compare::handlers_equal(&old, &new, &[hid], &[hid]),
+            "same bytecode but different captured_signals must not be equal"
+        );
+    }
 }
