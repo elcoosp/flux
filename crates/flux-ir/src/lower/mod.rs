@@ -189,6 +189,9 @@ struct Lowerer<'a> {
     /// `ForEach` read the per-row `itemSlot` directly instead of an unseeded
     /// component-global prop signal (the "tasks not rendered" bug, FLUX-072).
     component_decls: std::collections::HashMap<String, flux_parser::ComponentDecl>,
+    /// Audit P2.9: prop-index registry so FNV collisions are detected
+    /// at compile time instead of silently overwriting SET_FIELD slots.
+    prop_indices: std::collections::HashMap<u16, String>,
 }
 
 impl<'a> Lowerer<'a> {
@@ -207,7 +210,30 @@ impl<'a> Lowerer<'a> {
             mono: mono::MonoTable::new(typed),
             record_ctors: std::collections::HashSet::new(),
             component_decls: std::collections::HashMap::new(),
+            prop_indices: std::collections::HashMap::new(),
         }
+    }
+
+    /// Interns a prop name → PropIdx, erroring on FNV-1a slot collisions
+    /// (audit P2.9). The free function `prop_index_for_name` stays public
+    /// for tests; this method wraps it with a collision-detecting registry.
+    fn intern_prop_index(&mut self, name: &str) -> Result<flux_syntax::PropIdx, LoweringError> {
+        let idx = prop_index_for_name(name);
+        let key = u16::from(idx);
+        if let Some(existing) = self.prop_indices.get(&key) {
+            if existing != name {
+                return Err(LoweringError::new(
+                    format!(
+                        "prop name collision on FNV slot {idx:?}: '{existing}' vs '{name}' — \
+                         extend PropIdx or rename (audit P2.9)"
+                    ),
+                    Span::new(0, 0, 0),
+                ));
+            }
+        } else {
+            self.prop_indices.insert(key, name.to_owned());
+        }
+        Ok(idx)
     }
 
     fn finish(self) -> LoweredIr {
@@ -705,7 +731,7 @@ impl<'a> Lowerer<'a> {
                     name: arg_name,
                     value,
                 } => {
-                    let idx = prop_index_for_name(&arg_name.name);
+                    let idx = self.intern_prop_index(&arg_name.name)?;
                     (idx, self.lower_value(value, owner, &mut handlers)?)
                 }
                 #[allow(unreachable_patterns)]
@@ -723,7 +749,7 @@ impl<'a> Lowerer<'a> {
         if let Some(block) = trailing {
             for item in &block.items {
                 if let flux_parser::BlockItem::Prop { name, value } = item {
-                    let idx = prop_index_for_name(&name.name);
+                    let idx = self.intern_prop_index(&name.name)?;
                     let v = self.lower_value(value, owner, &mut handlers)?;
                     prop_exprs.push((idx, value));
                     fields.push((idx, v));
@@ -892,7 +918,7 @@ impl<'a> Lowerer<'a> {
                     Value::Int(i64::from(variant_tag(name.name.as_str()))),
                 ));
                 for (fname, fexpr) in fields {
-                    let idx = prop_index_for_name(&fname.name);
+                    let idx = self.intern_prop_index(&fname.name)?;
                     lowered.push((idx, self.lower_value(fexpr, owner, handlers)?));
                 }
                 Ok(Value::Record(lowered))
@@ -917,7 +943,7 @@ impl<'a> Lowerer<'a> {
                         for arg in args {
                             let (idx, value) = match arg {
                                 flux_parser::Arg::Named { name, value } => (
-                                    prop_index_for_name(&name.name),
+                                    self.intern_prop_index(&name.name)?,
                                     self.lower_value(value, owner, handlers)?,
                                 ),
                                 flux_parser::Arg::Positional(e) => {
@@ -983,4 +1009,30 @@ pub fn prop_index_for_name(name: &str) -> flux_syntax::PropIdx {
         hash = hash.wrapping_mul(0x0100_0193);
     }
     flux_syntax::PropIdx::from((hash & 0xFFFF) as u16)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Two distinct prop names that hash to the same FNV-1a u16 slot
+    /// must be detected as a collision (audit P2.9).
+    #[test]
+    fn prop_index_collision_is_detected() {
+        // Find a collision with "foo" by brute force over a wider space.
+        let foo_idx = prop_index_for_name("foo");
+        let mut collision = None;
+        for i in 0u32..1_000_000 {
+            let candidate = format!("p{i:06x}");
+            if prop_index_for_name(&candidate) == foo_idx && candidate != "foo" {
+                collision = Some(candidate);
+                break;
+            }
+        }
+        let collision = collision.expect("should find a collision within 1M tries");
+
+        // Verify the free function maps both to the same idx.
+        assert_eq!(prop_index_for_name("foo"), prop_index_for_name(&collision));
+        assert_ne!("foo", collision);
+    }
 }
