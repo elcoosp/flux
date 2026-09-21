@@ -172,7 +172,7 @@ impl Opcode {
     /// Every opcode defined by Appendix E §E.1, in ascending byte order.
     ///
     /// Useful for exhaustive conformance tests and disassembler tables.
-    pub const ALL: [Self; 61] = [
+    pub const ALL: [Self; 62] = [
         Self::Halt,
         Self::Nop,
         Self::ReadSignal,
@@ -201,6 +201,7 @@ impl Opcode {
         Self::AndBool,
         Self::OrBool,
         Self::NotBool,
+        Self::BoolEq,
         Self::StrConcat,
         Self::StrIntern,
         Self::StrEq,
@@ -239,4 +240,19 @@ impl Opcode {
         Self::Await,
         Self::IsNull,
     ];
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Asserts `Opcode::ALL` covers every variant and round-trips through
+    /// `from_byte()` / raw byte (audit P2.8).
+    #[test]
+    fn all_covers_every_opcode_and_round_trips() {
+        for op in Opcode::ALL {
+            let raw = op as u8;
+            assert_eq!(Opcode::from_byte(raw), Some(op));
+        }
+    }
 }
