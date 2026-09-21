@@ -41,6 +41,10 @@ pub struct ServerConfig {
     /// matching token before the server replies with `Init` (protects a
     /// `--ws-host 0.0.0.0` LAN exposure from unauthenticated bytecode pushes).
     auth_token: Option<String>,
+    /// DevTools WebSocket bind address (spec §4.1). Defaults to
+    /// `127.0.0.1:7333` — NOT `0.0.0.0`, so a LAN-exposed dev server
+    /// still keeps the DevTools port localhost-only unless explicitly overridden.
+    devtools_addr: SocketAddr,
 }
 
 impl ServerConfig {
@@ -69,6 +73,10 @@ impl ServerConfig {
             coalesce: DEFAULT_COALESCE,
             profile: false,
             auth_token: None,
+            devtools_addr: SocketAddr::from((
+                [127, 0, 0, 1],
+                crate::debug_bridge::DEFAULT_DEVTOOLS_PORT,
+            )),
         }
     }
 
@@ -193,5 +201,35 @@ impl ServerConfig {
     #[must_use]
     pub fn profile(&self) -> bool {
         self.profile
+    }
+
+    /// The DevTools WebSocket bind address (default `127.0.0.1:7333`).
+    #[must_use]
+    pub fn devtools_addr(&self) -> SocketAddr {
+        self.devtools_addr
+    }
+
+    /// Overrides the DevTools bind host, keeping the current port.
+    #[must_use]
+    pub fn with_devtools_host(mut self, host: &str) -> Self {
+        match host.parse::<std::net::IpAddr>() {
+            Ok(ip) => {
+                let port = self.devtools_addr.port();
+                self.devtools_addr = SocketAddr::new(ip, port);
+            }
+            Err(_) => tracing::warn!(
+                host = host,
+                "ignoring unparseable devtools_host; keeping current bind address"
+            ),
+        }
+        self
+    }
+
+    /// Overrides the DevTools bind port, keeping the current host.
+    #[must_use]
+    pub fn with_devtools_port(mut self, port: u16) -> Self {
+        let ip = self.devtools_addr.ip();
+        self.devtools_addr = SocketAddr::new(ip, port);
+        self
     }
 }

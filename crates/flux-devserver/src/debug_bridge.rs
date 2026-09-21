@@ -218,109 +218,145 @@ pub const DEFAULT_DEVTOOLS_PORT: u16 = 7333;
 /// Each accepted `Telemetry` frame is enriched via `source_map` and broadcast;
 /// each `DebugCommand` frame is sent to `host_sink`. The returned task runs
 /// until the listener errors. This is the only I/O path in the bridge.
+///
+/// `token` gates the WebSocket upgrade: when `Some`, the client must present a
+/// matching `?token=<value>` query parameter, otherwise the connection is
+/// rejected with HTTP 401 (audit P2.3).
 pub async fn serve_devtools(
     addr: std::net::SocketAddr,
     router: std::sync::Arc<parking_lot::Mutex<DevToolsRouter>>,
+    token: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    // One router shared by every connection so host telemetry is broadcast to
-    // all subscribed DevTools clients (not just the sender's own connection).
-    // The router is owned by the server and shared with the host patch-channel
-    // accept loop, which routes telemetry the host sends over `:7331`.
     loop {
-        let (stream, _) = listener.accept().await?;
-        let upgraded =
-            tokio_tungstenite::accept_async_with_config(stream, Some(WebSocketConfig::default()))
-                .await;
-        let Ok(ws) = upgraded else {
-            continue; // malformed handshake; skip this connection
-        };
-        let (mut writer, mut reader) = ws.split();
-        // Subscribe this connection; the returned receiver drives its outbound
-        // stream. Dropped connections are pruned by `route_telemetry`.
-        let mut sub_rx = router.lock().subscribe_devtools();
-        let mut host_rx = router.lock().subscribe_host_announce();
-        // Replay the most recent telemetry batch so a freshly-connected DevTools
-        // shows the current tree immediately (snapshot-on-connect, FLUX-039),
-        // and the cached host identity so it learns which device is streaming
-        // even when it subscribed after the host announced (the normal case).
-        let mut replay: Vec<Vec<u8>> = Vec::new();
-        if let Some(announce) = router.lock().last_announce.clone() {
-            replay.push(announce.to_bytes());
-        }
-        for event in router.lock().replay_last() {
-            let frame = EnrichedTelemetryFrame {
-                version: flux_ir_serde::PROTOCOL_VERSION,
-                event_count: 1,
-                events: vec![event],
+        let (stream, peer) = listener.accept().await?;
+
+        // Audit P2.3: the WS upgrade is spawned per-connection so a silent
+        // client cannot block the accept loop or any other session.
+        let router = router.clone();
+        let token = token.clone();
+        tokio::spawn(async move {
+            let upgraded = tokio_tungstenite::accept_hdr_async_with_config(
+                stream,
+                |req: &tokio_tungstenite::tungstenite::handshake::server::Request, response| {
+                    // Audit P2.3: validate `?token=` query param at upgrade
+                    // time. A mismatch rejects the connection with HTTP 401
+                    // before the WebSocket is established, so the client never
+                    // subscribes to telemetry.
+                    if let Some(expected) = &token {
+                        let query = req.uri().query().unwrap_or("");
+                        if !query.contains(&format!("token={expected}")) {
+                            // Build a 401 rejection response. Use `None` body
+                            // to keep the error variant small (clippy).
+                            let err = tokio_tungstenite::tungstenite::handshake::server::Response::builder()
+                                .status(401)
+                                .header("Content-Length", "0")
+                                .header("Connection", "close")
+                                .body(None)
+                                .unwrap();
+                            return Err(err);
+                        }
+                    }
+                    Ok(response)
+                },
+                Some(WebSocketConfig::default()),
+            )
+            .await;
+            let Ok(ws) = upgraded else {
+                tracing::warn!(%peer, "devtools: handshake failed");
+                return;
             };
-            replay.push(frame.to_bytes());
-        }
-        // Outbound: enriched telemetry events AND host-identity frames share a
-        // single sink (a `SplitSink` is not `Clone`, so we `select!` over both
-        // receivers in one task that owns `writer`).
-        tokio::spawn(async move {
-            for bytes in replay {
-                if writer
-                    .send(tokio_tungstenite::tungstenite::Message::Binary(
-                        bytes.into(),
-                    ))
-                    .await
-                    .is_err()
-                {
-                    return;
-                }
+            let (mut writer, mut reader) = ws.split();
+            // Subscribe this connection; the returned receiver drives its
+            // outbound stream. Dropped connections are pruned by route_telemetry.
+            let mut sub_rx = router.lock().subscribe_devtools();
+            let mut host_rx = router.lock().subscribe_host_announce();
+            // Replay the most recent telemetry batch so a freshly-connected
+            // DevTools shows the current tree immediately (snapshot-on-connect,
+            // FLUX-039), and the cached host identity so it learns which device
+            // is streaming even when it subscribed after the host announced.
+            let mut replay: Vec<Vec<u8>> = Vec::new();
+            if let Some(announce) = router.lock().last_announce.clone() {
+                replay.push(announce.to_bytes());
             }
-            loop {
-                tokio::select! {
-                    event = sub_rx.recv() => {
-                        let Some(event) = event else { break };
-                        let frame = EnrichedTelemetryFrame {
-                            version: flux_ir_serde::PROTOCOL_VERSION,
-                            event_count: 1,
-                            events: vec![event],
-                        };
-                        if writer
-                            .send(tokio_tungstenite::tungstenite::Message::Binary(
-                                frame.to_bytes().into(),
-                            ))
-                            .await
-                            .is_err()
-                        {
-                            break;
-                        }
-                    }
-                    announce = host_rx.recv() => {
-                        let Some(announce) = announce else { break };
-                        if writer
-                            .send(tokio_tungstenite::tungstenite::Message::Binary(
-                                announce.to_bytes().into(),
-                            ))
-                            .await
-                            .is_err()
-                        {
-                            break;
-                        }
-                    }
-                }
-            }
-        });
-        // Inbound: telemetry → enrich+broadcast; commands → host.
-        let router_in = router.clone();
-        tokio::spawn(async move {
-            while let Some(msg) = reader.next().await {
-                let Ok(msg) = msg else { continue };
-                let Some(frame) = TelemetryFrame::from_bytes(match &msg {
-                    tokio_tungstenite::tungstenite::Message::Binary(b) => b,
-                    _ => continue,
-                }) else {
-                    tracing::debug!("serve_devtools: inbound frame failed to decode");
-                    continue;
+            for event in router.lock().replay_last() {
+                let frame = EnrichedTelemetryFrame {
+                    version: flux_ir_serde::PROTOCOL_VERSION,
+                    event_count: 1,
+                    events: vec![event],
                 };
-                for event in frame.events {
-                    router_in.lock().route_telemetry(&event);
-                }
+                replay.push(frame.to_bytes());
             }
+            // Outbound: enriched telemetry events AND host-identity frames share
+            // a single sink (a SplitSink is not Clone, so we select! over both
+            // receivers in one task that owns writer).
+            tokio::spawn(async move {
+                for bytes in replay {
+                    if writer
+                        .send(tokio_tungstenite::tungstenite::Message::Binary(
+                            bytes.into(),
+                        ))
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+                loop {
+                    tokio::select! {
+                        event = sub_rx.recv() => {
+                            let Some(event) = event else { break };
+                            let frame = EnrichedTelemetryFrame {
+                                version: flux_ir_serde::PROTOCOL_VERSION,
+                                event_count: 1,
+                                events: vec![event],
+                            };
+                            if writer
+                                .send(tokio_tungstenite::tungstenite::Message::Binary(
+                                    frame.to_bytes().into(),
+                                ))
+                                .await
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
+                        announce = host_rx.recv() => {
+                            let Some(announce) = announce else { break };
+                            if writer
+                                .send(tokio_tungstenite::tungstenite::Message::Binary(
+                                    announce.to_bytes().into(),
+                                ))
+                                .await
+                                .is_err()
+                            {
+                                break;
+                            }
+                        }
+                    }
+                }
+            });
+            // Inbound: telemetry → enrich+broadcast; commands → host.
+            // No request URL or body snippets are captured in telemetry (spec
+            // §4.2 carries only IDs and spans); this path forwards raw events
+            // to the router for enrichment, never persisting client request
+            // metadata.
+            let router_in = router.clone();
+            tokio::spawn(async move {
+                while let Some(msg) = reader.next().await {
+                    let Ok(msg) = msg else { continue };
+                    let Some(frame) = TelemetryFrame::from_bytes(match &msg {
+                        tokio_tungstenite::tungstenite::Message::Binary(b) => b,
+                        _ => continue,
+                    }) else {
+                        tracing::debug!("serve_devtools: inbound frame failed to decode");
+                        continue;
+                    };
+                    for event in frame.events {
+                        router_in.lock().route_telemetry(&event);
+                    }
+                }
+            });
         });
     }
 }
@@ -425,7 +461,7 @@ mod tests {
         let test_router = std::sync::Arc::new(parking_lot::Mutex::new(DevToolsRouter::new(
             source_map, host_tx,
         )));
-        tokio::spawn(async move { serve_devtools(addr, test_router).await });
+        tokio::spawn(async move { serve_devtools(addr, test_router, None).await });
         // Give the accept loop a moment to bind.
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
@@ -483,7 +519,7 @@ mod tests {
         )));
         tokio::spawn({
             let r = test_router.clone();
-            async move { serve_devtools(addr, r).await }
+            async move { serve_devtools(addr, r, None).await }
         });
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 

@@ -146,11 +146,11 @@ impl DevServer {
         let accept_task = spawn_accept_loop(ws_listener, Arc::clone(&shared));
         let http_task = crate::assets::spawn(http_listener, config.root().to_path_buf());
 
-        // DevTools WebSocket endpoint (`:7333`, spec §4.1): enriches host
-        // telemetry with source spans and relays `DebugCommand`s. Shares the
-        // router created above with the host accept loop.
-        let devtools_addr =
-            std::net::SocketAddr::from(([0, 0, 0, 0], crate::debug_bridge::DEFAULT_DEVTOOLS_PORT));
+        // DevTools WebSocket endpoint (spec §4.1): enriches host telemetry with
+        // source spans and relays `DebugCommand`s. Binds to the config-driven
+        // address (default 127.0.0.1:7333, NOT 0.0.0.0) so a `--ws-host 0.0.0.0`
+        // LAN exposure does not also expose DevTools without an explicit opt-in.
+        let devtools_addr = config.devtools_addr();
         let devtools_drain = tokio::spawn(async move {
             while host_command_rx.recv().await.is_some() {
                 // DevTools commands are currently observed but not forwarded to
@@ -160,8 +160,9 @@ impl DevServer {
         });
         let devtools_task = tokio::spawn({
             let router = std::sync::Arc::clone(&shared.devtools_router);
+            let token = config.auth_token().map(str::to_owned);
             async move {
-                if let Err(e) = crate::debug_bridge::serve_devtools(devtools_addr, router).await {
+                if let Err(e) = crate::debug_bridge::serve_devtools(devtools_addr, router, token).await {
                     tracing::warn!(error = %e, "devtools endpoint stopped");
                 }
             }
