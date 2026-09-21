@@ -108,11 +108,11 @@ use tokio::sync::mpsc;
 pub struct DevToolsRouter {
     source_map: SourceMap,
     /// One sender per connected DevTools client (telemetry stream).
-    devtools: Vec<mpsc::UnboundedSender<EnrichedTelemetryEvent>>,
+    devtools: Vec<mpsc::Sender<EnrichedTelemetryEvent>>,
     /// One sender per connected DevTools client (host-identity stream).
-    host_announce: Vec<mpsc::UnboundedSender<HostAnnounceFrame>>,
+    host_announce: Vec<mpsc::Sender<HostAnnounceFrame>>,
     /// Where host-bound `DebugCommand`s are forwarded.
-    host_command: mpsc::UnboundedSender<DebugCommand>,
+    host_command: mpsc::Sender<DebugCommand>,
     /// The most recent enriched telemetry batch, replayed to DevTools clients
     /// that subscribe after it was emitted (snapshot-on-connect, FLUX-039).
     last_enriched: Vec<EnrichedTelemetryEvent>,
@@ -126,7 +126,7 @@ pub struct DevToolsRouter {
 impl DevToolsRouter {
     /// Creates a router; `host_command` receives every forwarded `DebugCommand`.
     #[must_use]
-    pub fn new(source_map: SourceMap, host_command: mpsc::UnboundedSender<DebugCommand>) -> Self {
+    pub fn new(source_map: SourceMap, host_command: mpsc::Sender<DebugCommand>) -> Self {
         Self {
             source_map,
             devtools: Vec::new(),
@@ -145,16 +145,16 @@ impl DevToolsRouter {
     }
 
     /// Registers a new DevTools client and returns its event receiver.
-    pub fn subscribe_devtools(&mut self) -> mpsc::UnboundedReceiver<EnrichedTelemetryEvent> {
-        let (tx, rx) = mpsc::unbounded_channel();
+    pub fn subscribe_devtools(&mut self) -> mpsc::Receiver<EnrichedTelemetryEvent> {
+        let (tx, rx) = mpsc::channel(1024);
         self.devtools.push(tx);
         rx
     }
 
     /// Registers a new DevTools client for the host-identity stream and returns
     /// its receiver.
-    pub fn subscribe_host_announce(&mut self) -> mpsc::UnboundedReceiver<HostAnnounceFrame> {
-        let (tx, rx) = mpsc::unbounded_channel();
+    pub fn subscribe_host_announce(&mut self) -> mpsc::Receiver<HostAnnounceFrame> {
+        let (tx, rx) = mpsc::channel(1024);
         self.host_announce.push(tx);
         rx
     }
@@ -167,11 +167,12 @@ impl DevToolsRouter {
         self.last_announce = Some(announce.clone());
         let mut reached = 0;
         self.host_announce
-            .retain(|tx| match tx.send(announce.clone()) {
+            .retain(|tx| match tx.try_send(announce.clone()) {
                 Ok(()) => {
                     reached += 1;
                     true
                 }
+                // Disconnected or lagged (Full): evict the slow client.
                 Err(_) => false,
             });
         tracing::debug!(reached, "announce_host: broadcast complete");
@@ -189,12 +190,13 @@ impl DevToolsRouter {
             self.last_enriched.drain(0..self.last_enriched.len() - 1024);
         }
         let mut reached = 0;
-        self.devtools.retain(|tx| match tx.send(enriched.clone()) {
+        self.devtools.retain(|tx| match tx.try_send(enriched.clone()) {
             Ok(()) => {
                 reached += 1;
                 true
             }
-            Err(_) => false, // drop disconnected clients
+            // Disconnected or lagged (buffer full): evict the slow client.
+            Err(_) => false,
         });
         tracing::debug!(reached, "route_telemetry: broadcast complete");
         reached
@@ -203,7 +205,7 @@ impl DevToolsRouter {
     /// Forwards a `DebugCommand` to the host. Returns `false` if the host is gone.
     #[must_use]
     pub fn route_command(&self, command: DebugCommand) -> bool {
-        self.host_command.send(command).is_ok()
+        self.host_command.try_send(command).is_ok()
     }
 }
 
@@ -349,7 +351,7 @@ mod tests {
 
     #[test]
     fn router_broadcasts_to_subscribers() {
-        let (host_tx, _host_rx) = mpsc::unbounded_channel();
+        let (host_tx, _host_rx) = mpsc::channel(1024);
         let mut router = DevToolsRouter::new(SourceMap::default(), host_tx);
         let mut rx = router.subscribe_devtools();
         assert_eq!(router.route_telemetry(&sample_event()), 1);
@@ -365,7 +367,7 @@ mod tests {
 
     #[test]
     fn router_drops_disconnected_clients() {
-        let (host_tx, _host_rx) = mpsc::unbounded_channel();
+        let (host_tx, _host_rx) = mpsc::channel(1024);
         let mut router = DevToolsRouter::new(SourceMap::default(), host_tx);
         let _rx = router.subscribe_devtools();
         drop(_rx); // simulate disconnect
@@ -377,7 +379,7 @@ mod tests {
         // A `PerfRecord` telemetry event (FLUX-059) must route to subscribers just
         // like any other telemetry event, so DevTools can render it as a flamegraph
         // lane. The record JSON is carried verbatim.
-        let (host_tx, _host_rx) = mpsc::unbounded_channel();
+        let (host_tx, _host_rx) = mpsc::channel(1024);
         let mut router = DevToolsRouter::new(SourceMap::default(), host_tx);
         let mut rx = router.subscribe_devtools();
         let json = "{\"scenario\":\"loopback-e2e\",\"kind\":\"save-to-photon\",\"tree_size\":50,\"samples\":[{\"latency\":42.0}]}";
@@ -418,7 +420,7 @@ mod tests {
         // the clients, so we use a stable port and let the server own the bind.
         let addr: std::net::SocketAddr = "127.0.0.1:17399".parse().unwrap();
 
-        let (host_tx, _host_rx) = mpsc::unbounded_channel();
+        let (host_tx, _host_rx) = mpsc::channel(1024);
         let source_map = SourceMap::default();
         let test_router = std::sync::Arc::new(parking_lot::Mutex::new(DevToolsRouter::new(
             source_map, host_tx,
@@ -474,7 +476,7 @@ mod tests {
         use tokio_tungstenite::{connect_async, tungstenite::Message};
 
         let addr: std::net::SocketAddr = "127.0.0.1:17400".parse().unwrap();
-        let (host_tx, _host_rx) = mpsc::unbounded_channel();
+        let (host_tx, _host_rx) = mpsc::channel(1024);
         let test_router = std::sync::Arc::new(parking_lot::Mutex::new(DevToolsRouter::new(
             SourceMap::default(),
             host_tx,

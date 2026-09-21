@@ -26,12 +26,16 @@ fn register_only_after_successful_hello() {
         "run_session should be removed: handshake is now inline in serve_client"
     );
     assert!(
-        src.contains("let mut queue = None;"),
-        "queue should be Option, set to None initially"
+        src.contains("let mut queue: BroadcastReceiver<Vec<u8>> = loop {"),
+        "queue should be initialized via loop expression"
     );
     assert!(
-        src.contains("queue = Some(shared.register());"),
+        src.contains("break shared.register();"),
         "register() should only be called after successful Hello"
+    );
+    assert!(
+        !src.contains("queue = Some(shared.register());"),
+        "old Some-assignment pattern should be replaced by loop break"
     );
     assert!(
         src.contains("// Rejected - close without registering"),

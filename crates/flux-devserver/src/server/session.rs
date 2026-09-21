@@ -14,16 +14,13 @@ use std::sync::Arc;
 
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpStream;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::broadcast::Receiver as BroadcastReceiver;
+use tokio_tungstenite::accept_async_with_config;
 use tokio_tungstenite::tungstenite::{Error as WsError, Message, protocol::WebSocketConfig};
-use tokio_tungstenite::{WebSocketStream, accept_async_with_config};
 
 use crate::dispatch::FRAME_DISPATCH_REPORT;
 use crate::error::Diagnostic;
 use crate::server::Shared;
-
-/// The upgraded WebSocket stream a session is driven over.
-type HostSocket = WebSocketStream<TcpStream>;
 
 /// WebSocket configuration for accepted host connections.
 ///
@@ -60,8 +57,7 @@ pub(crate) async fn serve_client(stream: TcpStream, shared: Arc<Shared>) -> Resu
     // leave the client subscribed to Init/Delta traffic.
     let (mut writer, mut reader) = socket.split();
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
-    let mut queue = None;
-    loop {
+    let mut queue: BroadcastReceiver<Vec<u8>> = loop {
         let next = tokio::time::timeout_at(deadline, reader.next()).await;
         match next {
             Err(_) => return Ok(()), // handshake timeout: drop silent clients
@@ -71,8 +67,7 @@ pub(crate) async fn serve_client(stream: TcpStream, shared: Arc<Shared>) -> Resu
                     if let Some(reply) = handle_hello(&bytes, &shared).await {
                         writer.send(Message::Binary(reply.into())).await?;
                         // Accepted - register for broadcasts
-                        queue = Some(shared.register());
-                        break;
+                        break shared.register();
                     }
                     // Rejected - close without registering
                     return Ok(());
@@ -83,12 +78,8 @@ pub(crate) async fn serve_client(stream: TcpStream, shared: Arc<Shared>) -> Resu
             Ok(Some(Err(error))) => return Err(error),
             _ => {}
         }
-    }
-    // Handshake complete - run the broadcast fan-out loop
-    let mut queue = match queue {
-        Some(q) => q,
-        None => return Ok(()),
     };
+    // Handshake complete - run the broadcast fan-out loop
     while !shared.is_shutdown() {
         tokio::select! {
             incoming = reader.next() => match incoming {
@@ -103,8 +94,13 @@ pub(crate) async fn serve_client(stream: TcpStream, shared: Arc<Shared>) -> Resu
                 Some(Err(error)) => return Err(error),
             },
             queued = queue.recv() => match queued {
-                Some(frame) => writer.send(Message::Binary(frame.into())).await?,
-                None => return Ok(()),
+                // Audit H15: a lagging client (buffer full / channel closed)
+                // is evicted, not allowed to silently consume unbounded memory.
+                Ok(frame) => writer.send(Message::Binary(frame.into())).await?,
+                Err(_) => {
+                    tracing::warn!("client fell behind or channel closed; closing session");
+                    return Ok(());
+                }
             },
         }
     }

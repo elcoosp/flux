@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use parking_lot::Mutex;
 use tokio::net::TcpListener;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+use tokio::sync::broadcast::{self, Receiver as BroadcastReceiver, Sender as BroadcastSender};
 use tokio::task::JoinHandle;
 
 use crate::config::ServerConfig;
@@ -40,7 +40,7 @@ pub(crate) struct Shared {
     /// clients. Shared between the host accept loop and `serve_devtools` so a
     /// single router fans events out to every connected DevTools app.
     pub(crate) devtools_router: std::sync::Arc<parking_lot::Mutex<DevToolsRouter>>,
-    clients: Mutex<Vec<UnboundedSender<Vec<u8>>>>,
+    clients: Mutex<BroadcastSender<Vec<u8>>>,
     shutdown: AtomicBool,
     /// Optional pairing token every host handshake must present (Appendix D
     /// §D.12.1, `flux dev --token`). `None` = accept any host (default open
@@ -54,26 +54,34 @@ impl Shared {
         devtools_router: std::sync::Arc<parking_lot::Mutex<DevToolsRouter>>,
         auth_token: Option<String>,
     ) -> Self {
+        let (tx, _rx) = broadcast::channel(1024);
         Self {
             pipeline: Mutex::new(pipeline),
             async_bridge: Mutex::new(crate::AsyncBridge::new()),
             devtools_router,
-            clients: Mutex::new(Vec::new()),
+            clients: Mutex::new(tx),
             shutdown: AtomicBool::new(false),
             auth_token,
         }
     }
 
-    fn register(&self) -> UnboundedReceiver<Vec<u8>> {
-        let (tx, rx) = unbounded_channel();
-        self.clients.lock().push(tx);
-        rx
+    /// Subscribes a new host to broadcast frames. Only called after a
+    /// successful handshake (audit C7).
+    fn register(&self) -> BroadcastReceiver<Vec<u8>> {
+        self.clients.lock().subscribe()
     }
 
-    /// Fans `frame` out to every connected client, dropping closed queues.
+    /// Fans `frame` out to every connected client. A lagging client (buffer
+    /// full) is silently dropped — its session task will observe the
+    /// `RecvError::Lagged` and close the connection (audit H15).
     pub(crate) fn broadcast(&self, frame: Vec<u8>) {
-        let mut clients = self.clients.lock();
-        clients.retain(|tx| tx.send(frame.clone()).is_ok());
+        // Audit H15: bounded broadcast channel; lagging clients (buffer full on
+        // 1024 items) are evicted by their session task which observes
+        // RecvError::Lagged and closes the socket. A send fails only when no
+        // subscribers remain, which is a normal idle state, not an error.
+        if self.clients.lock().send(frame).is_err() {
+            tracing::trace!("broadcast: no active subscribers");
+        }
     }
 
     pub(crate) fn is_shutdown(&self) -> bool {
@@ -121,7 +129,7 @@ impl DevServer {
         // WebSocket (the only port the Simulator forwards) instead of opening a
         // separate device→:7333 socket that the Simulator cannot reach.
         let (host_command_tx, mut host_command_rx) =
-            tokio::sync::mpsc::unbounded_channel::<DebugCommand>();
+            tokio::sync::mpsc::channel::<DebugCommand>(1024);
         let source_map = pipeline.devtools_source_map();
         let devtools_router = std::sync::Arc::new(parking_lot::Mutex::new(DevToolsRouter::new(
             source_map,
