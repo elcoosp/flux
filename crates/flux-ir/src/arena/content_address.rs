@@ -69,8 +69,19 @@ impl IRArena {
             .copied()
             .filter(|id| parent_of.get(id).copied().flatten().is_none())
             .collect();
-        for root in roots {
-            assign_final_id(0, 0, root, &local_ids, &mut final_ids, self);
+        for (root_slot, root) in roots.iter().enumerate() {
+            // Audit P2.20: roots all get parent=0, so identical roots
+            // would collapse to one id. Mix the root's index among the
+            // arena's root list into the hash (as position) to keep
+            // distinct roots distinct.
+            assign_final_id(
+                0,
+                root_slot as u64,
+                *root,
+                &local_ids,
+                &mut final_ids,
+                self,
+            );
         }
 
         // 4. Rebuild a fresh arena with remapped ids and remapped child references.
