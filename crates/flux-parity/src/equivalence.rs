@@ -48,10 +48,26 @@ pub(crate) fn structurally_equal(a: &[ViewNode], b: &[ViewNode]) -> bool {
 ///
 /// Recurses so wrappers at any depth are normalized consistently.
 fn elide_wrappers(nodes: &[ViewNode]) -> Vec<ViewNode> {
+    // T-502.2: only elide a wrapper container when its sole child is a
+    // container of a *different* layout kind — i.e. the codegen wrapped a
+    // `VStack`/`HStack`/`ZStack` in an extra layout layer. Two adjacent
+    // containers of the *same* kind (e.g. `Column { Column { ... } }`) are
+    // kept as-is so a real `Column { Text }` is never equated with
+    // `Row { Text }`.
     if nodes.len() == 1 {
-        if let ViewNode::Primitive { name, children, .. } = &nodes[0] {
-            if is_container(name) {
-                return elide_wrappers(children);
+        if let ViewNode::Primitive {
+            name, children, ..
+        } = &nodes[0]
+        {
+            if children.len() == 1 {
+                if let ViewNode::Primitive {
+                    name: inner_name, ..
+                } = &children[0]
+                {
+                    if is_container(name) && is_container(inner_name) && name != inner_name {
+                        return elide_wrappers(children);
+                    }
+                }
             }
         }
     }
@@ -69,9 +85,9 @@ fn map_children(node: &ViewNode, f: impl Fn(&[ViewNode]) -> Vec<ViewNode> + Copy
             name: name.clone(),
             children: f(children),
         },
-        ViewNode::Primitive { name, children, .. } => ViewNode::Primitive {
+        ViewNode::Primitive { name, props, children, .. } => ViewNode::Primitive {
             name: name.clone(),
-            props: vec![],
+            props: props.clone(),
             children: f(children),
         },
         ViewNode::If {
@@ -108,24 +124,45 @@ fn map_children(node: &ViewNode, f: impl Fn(&[ViewNode]) -> Vec<ViewNode> + Copy
 /// path's `(/* unsupported expr */ 0 == "ios")` and the codegen path's
 /// `( /* unsupported expr */ 0 == "ios" )` compare equal.
 fn norm_cond(s: &str) -> String {
-    let without_comments: String = s
-        .chars()
-        .scan(false, |in_comment, c| {
-            if *in_comment {
-                if c == '/' {
-                    *in_comment = false;
+    // T-502.3: properly lex — `//` starts a comment (not a single `/`),
+    // and comments only start outside string literals.
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = Vec::new();
+    let mut idx = 0;
+    while idx < chars.len() {
+        match chars[idx] {
+            '"' => {
+                // String literal: copy everything until the closing quote.
+                out.push(chars[idx]);
+                idx += 1;
+                while idx < chars.len() && chars[idx] != '"' {
+                    out.push(chars[idx]);
+                    idx += 1;
                 }
-                Some(None)
-            } else if c == '/' {
-                *in_comment = true;
-                Some(None)
-            } else {
-                Some(Some(c))
+                if idx < chars.len() {
+                    out.push(chars[idx]);
+                    idx += 1;
+                }
             }
-        })
-        .flatten()
-        .collect();
-    without_comments.split_whitespace().collect::<String>()
+            '/' if idx + 1 < chars.len() && chars[idx + 1] == '/' => {
+                // Line comment: skip until newline.
+                while idx < chars.len() && chars[idx] != '\n' {
+                    idx += 1;
+                }
+            }
+            '/' => {
+                // A lone `/` outside a string/comment is division — keep it.
+                out.push(chars[idx]);
+                idx += 1;
+            }
+            c => {
+                out.push(c);
+                idx += 1;
+            }
+        }
+    }
+    let filtered: String = out.into_iter().collect();
+    filtered.split_whitespace().collect::<String>()
 }
 
 /// Normalizes a ForEach key path so the three paths compare equal. The dev
@@ -175,15 +212,15 @@ fn node_equal(a: &ViewNode, b: &ViewNode) -> bool {
         (
             ViewNode::Primitive {
                 name: n1,
+                props: p1,
                 children: c1,
-                ..
             },
             ViewNode::Primitive {
                 name: n2,
+                props: p2,
                 children: c2,
-                ..
             },
-        ) => n1 == n2 && structurally_equal(c1, c2),
+        ) => n1 == n2 && p1 == p2 && structurally_equal(c1, c2),
         (
             ViewNode::If {
                 cond: c1,
@@ -247,14 +284,130 @@ fn branch_bag_equal(t1: &[ViewNode], e1: &[ViewNode], t2: &[ViewNode], e2: &[Vie
     if left.len() != right.len() {
         return false;
     }
-    left.iter().zip(&right).all(|(x, y)| node_equal(x, y))
+    // T-502.1: compare as an unordered multiset — branch ordering within an
+    // if/else is not significant across backends.
+    let mut matched = vec![false; right.len()];
+    for l in &left {
+        let found = (0..right.len()).find(|&i| !matched[i] && node_equal(l, &right[i]));
+        match found {
+            Some(i) => matched[i] = true,
+            None => return false,
+        }
+    }
+    true
 }
 
 fn arms_equal(a: &[(String, Vec<ViewNode>)], b: &[(String, Vec<ViewNode>)]) -> bool {
     if a.len() != b.len() {
         return false;
     }
-    a.iter()
-        .zip(b)
-        .all(|((la, ca), (lb, cb))| la == lb && structurally_equal(ca, cb))
+    // T-502.1: Match arms compare as an unordered multiset — branch ordering
+    // within an if/else is not significant across backends.
+    let mut matched = vec![false; b.len()];
+    for (la, ca) in a {
+        let found = (0..b.len()).find(|&i| !matched[i] && la == &b[i].0 && structurally_equal(ca, &b[i].1));
+        match found {
+            Some(i) => matched[i] = true,
+            None => return false,
+        }
+    }
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// T-502.3: a lone `/` outside a string is division and must survive;
+    /// only `//` starts a comment.
+    #[test]
+    fn norm_cond_preserves_division() {
+        assert_eq!(norm_cond("a / b"), "a/b");
+    }
+
+    /// T-502.3: `/` inside a string literal must not be treated as a comment.
+    #[test]
+    fn norm_cond_preserves_slash_in_string() {
+        assert_eq!(norm_cond("\"http://x\""), "\"http://x\"");
+    }
+
+    /// T-502.3: `//` starts a comment that runs to end of line.
+    #[test]
+    fn norm_cond_strips_line_comment() {
+        assert_eq!(norm_cond("a == b // comment"), "a==b");
+    }
+
+    /// T-502.3: `//` inside a string literal is preserved.
+    #[test]
+    fn norm_cond_preserves_double_slash_in_string() {
+        assert_eq!(norm_cond("\"url = http://x\""), "\"url=http://x\"");
+    }
+
+    /// T-502.1: If/else branch ordering is not significant — the same two
+    /// branches in swapped then/else position must compare equal.
+    #[test]
+    fn if_branch_ordering_is_unordered() {
+        let mk = |name: &str| ViewNode::Primitive {
+            name: name.to_string(),
+            props: vec![],
+            children: vec![],
+        };
+        let left = ViewNode::If {
+            cond: "x > 0".to_string(),
+            then_branch: vec![mk("A")],
+            else_branch: vec![mk("B")],
+        };
+        let right = ViewNode::If {
+            cond: "x > 0".to_string(),
+            then_branch: vec![mk("B")],
+            else_branch: vec![mk("A")],
+        };
+        assert!(structurally_equal(&[left], &[right]));
+    }
+
+    /// T-502.2: A `Column { Row { Text } }` must NOT be elided into `Row
+    /// { Text }` — only synthetic wrappers of a *different* layout kind
+    /// are removed. `Column { Column { Text } }` should also NOT collapse
+    /// because same-kind nesting is structural, not a wrapper artifact.
+    #[test]
+    fn elide_wrappers_preserves_same_kind_nesting() {
+        let mk = |name: &str| ViewNode::Primitive {
+            name: name.to_string(),
+            props: vec![],
+            children: vec![],
+        };
+        let same_kind = vec![ViewNode::Primitive {
+            name: "Column".to_string(),
+            props: vec![],
+            children: vec![ViewNode::Primitive {
+                name: "Column".to_string(),
+                props: vec![],
+                children: vec![mk("Text")],
+            }],
+        }];
+        // Single child, same container kind — must NOT be elided.
+        assert_eq!(elide_wrappers(&same_kind).len(), 1);
+    }
+
+    /// T-502.1: Match arms compare as an unordered multiset.
+    #[test]
+    fn match_arms_are_unordered() {
+        let arm = |pat: &str| (
+            pat.to_string(),
+            vec![ViewNode::Primitive {
+                name: "Text".to_string(),
+                props: vec![],
+                children: vec![],
+            }],
+        );
+        let left = ViewNode::Match {
+            scrutinee: "x".to_string(),
+            arms: vec![arm("A"), arm("B")],
+        };
+        let right = ViewNode::Match {
+            scrutinee: "x".to_string(),
+            arms: vec![arm("B"), arm("A")],
+        };
+        assert!(structurally_equal(&[left], &[right]));
+    }
 }
