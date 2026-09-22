@@ -38,6 +38,16 @@ struct FluxRootView: View {
     @StateObject private var connection: HostConnectionState
     /// The live WebSocket transport feeding frames into the executor.
     @State private var transport: FluxTransport
+    /// Audit H10: publishes the latest executor fault so SwiftUI re-renders
+    /// the error overlay. `FluxExecutor.lastFluxError` alone does not trigger
+    /// a view update because `FluxExecutor` is not `ObservableObject`.
+    @StateObject private var errorModel = ErrorModel()
+
+    /// Bridges executor faults into an `ObservableObject` for SwiftUI.
+    @MainActor
+    final class ErrorModel: ObservableObject {
+        @Published var fluxError: FluxError?
+    }
 
     init() {
         // Seed the standard-library component names so the registry can resolve
@@ -77,6 +87,11 @@ struct FluxRootView: View {
         _executor = State(initialValue: runtime)
         _connection = StateObject(wrappedValue: connection)
         _transport = State(initialValue: transport)
+        // Audit H10: wire executor faults into the error model so the overlay
+        // re-renders when a fault occurs.
+        runtime.onError = { [weak errorModel] err in
+            DispatchQueue.main.async { errorModel?.fluxError = err }
+        }
     }
 
     var body: some View {
@@ -84,7 +99,7 @@ struct FluxRootView: View {
             FluxHostRepresentable(executor: executor)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityLabel("Flux root")
-            if let error = executor.lastFluxError {
+            if let error = errorModel.fluxError {
                 FluxErrorOverlay(error: error)
             }
             if connection.isReconnecting {
