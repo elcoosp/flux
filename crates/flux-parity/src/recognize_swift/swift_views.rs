@@ -219,9 +219,12 @@ pub(crate) fn parse_view(
     let mut i = start + 1;
     // Skip an optional `( ... )` argument list (present for normal adapters;
     // absent for no-arg overlay containers like `FullScreenCover {`).
+    let mut props: Vec<(String, String)> = Vec::new();
     if tokens.get(i).map(|t| t.text.as_str()) == Some("(") {
         let end = match_paren(tokens, i)
             .ok_or_else(|| SwiftRecognitionError(format!("unbalanced args in {normalized}")))?;
+        // T-501: extract recognised props from the argument list.
+        props = extract_swift_props(&normalized, &tokens[i..=end]);
         i = end + 1;
     }
     if tokens.get(i).map(|t| t.text.as_str()) == Some("{") {
@@ -235,7 +238,7 @@ pub(crate) fn parse_view(
             return Ok((
                 ViewNode::Primitive {
                     name: normalized,
-                    props: vec![],
+                    props: props.clone(),
                     children,
                 },
                 after,
@@ -249,9 +252,91 @@ pub(crate) fn parse_view(
     Ok((
         ViewNode::Primitive {
             name: normalized,
-            props: vec![],
+            props,
             children: vec![],
         },
         i,
     ))
+}
+
+/// Extracts recognised props from a Swift/Kotlin argument-list token slice.
+///
+/// Codegen emits named args as `name : value` (Swift) or `name = value` (Kotlin).
+/// We surface only the canonical subset (`label`, `color`, `alignment`)
+/// that survives as a named argument in both backends — matching the dev-side
+/// `props_from_args`. `text` is excluded because the codegen renders it either
+/// positionally (Text/Image) or as a child `Text(...)` node (Button).
+pub(crate) fn extract_swift_props(_name: &str, args: &[Token]) -> Vec<(String, String)> {
+    const RECOGNISED: &[&str] = &["label", "color", "alignment"];
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut i = 0;
+    // The first token is `(`, the last is `)`. Scan interior tokens.
+    let interior: Vec<&str> = args
+        .iter()
+        .skip(1)
+        .take(args.len().saturating_sub(2))
+        .map(|t| t.text.as_str())
+        .collect();
+    while i < interior.len() {
+        let tok = interior[i];
+        // Named argument: `name : value` (Swift) or `name = value` (Kotlin).
+        if RECOGNISED.contains(&tok)
+            && i + 1 < interior.len()
+            && (interior[i + 1] == ":" || interior[i + 1] == "=")
+        {
+            if let Some(val) = collect_value(&interior[i + 2..]) {
+                out.push((tok.to_owned(), canonicalize_expr(&val.0)));
+                i += 2 + val.1;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    out
+}
+
+/// Collects a single argument value from a token slice starting at `tokens`.
+/// Returns `(rendered_value, token_count_consumed)` or `None` if the first
+/// token is a comma (argument boundary).
+fn collect_value(tokens: &[&str]) -> Option<(String, usize)> {
+    if tokens.is_empty() || tokens[0] == "," {
+        return None;
+    }
+    let first = tokens[0];
+    if first.starts_with('"') {
+        // String literal — count until closing quote token.
+        let mut result = first.to_owned();
+        let mut j = 1;
+        while j < tokens.len()
+            && !tokens[j].ends_with('"')
+            && tokens[j] != ","
+        {
+            result.push_str(tokens[j]);
+            j += 1;
+        }
+        if j < tokens.len() && tokens[j] != "," && tokens[j].ends_with('"') {
+            result.push_str(tokens[j]);
+            j += 1;
+        }
+        Some((result, j))
+    } else if first == "(" {
+        // Parenthesised group — find matching close.
+        let mut depth = 1;
+        let mut j = 1;
+        while j < tokens.len() && depth > 0 {
+            match tokens[j] {
+                "(" => depth += 1,
+                ")" => depth -= 1,
+                _ => {}
+            }
+            if depth > 0 {
+                j += 1;
+            }
+        }
+        let collected: String = tokens[..=j].join(" ");
+        Some((collected, j + 1))
+    } else {
+        // Single identifier or number token.
+        Some((first.to_owned(), 1))
+    }
 }

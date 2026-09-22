@@ -203,11 +203,12 @@ pub(crate) fn parse_view(
     let name = tokens[start].text.clone();
     let normalized = normalize_view_name(&name);
     let mut i = start + 1;
-    // Skip an optional `( ... )` argument list (present for normal adapters;
-    // absent for no-arg overlay containers like `Dialog {`).
+    // Extract recognised props from the argument list, if any.
+    let mut props: Vec<(String, String)> = Vec::new();
     if tokens.get(i).map(|t| t.text.as_str()) == Some("(") {
         let end = match_paren(tokens, i)
             .ok_or_else(|| KotlinRecognitionError(format!("unbalanced args in {normalized}")))?;
+        props = crate::recognize_swift::swift_views::extract_swift_props(&normalized, &tokens[i..=end]);
         i = end + 1;
     }
     if tokens.get(i).map(|t| t.text.as_str()) == Some("{") {
@@ -220,7 +221,7 @@ pub(crate) fn parse_view(
             return Ok((
                 ViewNode::Primitive {
                     name: normalized,
-                    props: vec![],
+                    props: props.clone(),
                     children,
                 },
                 after,
@@ -234,7 +235,7 @@ pub(crate) fn parse_view(
     Ok((
         ViewNode::Primitive {
             name: normalized,
-            props: vec![],
+            props,
             children: vec![],
         },
         i,

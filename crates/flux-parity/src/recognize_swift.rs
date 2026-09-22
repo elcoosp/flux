@@ -22,7 +22,7 @@
 use crate::model::{ViewNode, is_container, normalize_view_name};
 use crate::tokenize::{Token, match_brace, tokenize};
 
-mod swift_views;
+pub(crate) mod swift_views;
 use swift_views::{
     parse_for_each, parse_if, parse_navigation_stack, parse_screen_comment, parse_view,
 };

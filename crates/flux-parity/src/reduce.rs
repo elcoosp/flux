@@ -83,6 +83,7 @@ fn node_from_ast(expr: &Expr, out: &mut Vec<ViewNode>) {
                         .filter(|_| is_container(&normalized))
                         .map(|b| block_children(b))
                         .unwrap_or_default();
+                    let props = props_from_args(args);
                     out.push(ViewNode::Primitive {
                         // Normalize the source name through `normalize_view_name`
                         // so the dev tree matches the release recognizers (`VStack`
@@ -102,7 +103,7 @@ fn node_from_ast(expr: &Expr, out: &mut Vec<ViewNode>) {
                         } else {
                             normalized
                         },
-                        props: vec![],
+                        props,
                         children,
                     });
                 }
@@ -206,6 +207,31 @@ fn screen_route_from_args(args: &[flux_parser::Arg]) -> String {
         }
     }
     String::new()
+}
+
+/// Extracts the canonical prop subset from a call's arguments for parity
+/// comparison. Returns `(name, rendered_value)` pairs in declaration/source
+/// order, filtered to the props that both backends must agree on:
+/// `label`, `color`, `alignment`.
+///
+/// Unnamed/positional args are skipped — only named props participate.
+/// Values are rendered through `render_expr` + `canonicalize_expr` so the
+/// format matches what the release recognizers produce.
+fn props_from_args(args: &[flux_parser::Arg]) -> Vec<(String, String)> {
+    // Recognised prop subset that survives as a named argument in both backends'
+    // generated source. `text` is excluded because the codegen renders it either
+    // positionally (Text/Image) or as a child `Text(...)` node (Button) — it never
+    // appears as a `text:` named arg in generated code, so comparing it would
+    // produce dev-vs-release drift rather than parity.
+    const RECOGNISED: &[&str] = &["label", "color", "alignment"];
+    args.iter()
+        .filter_map(|arg| match arg {
+            flux_parser::Arg::Named { name, value } if RECOGNISED.contains(&name.name.as_str()) => {
+                Some((name.name.clone(), canonicalize_expr(&render_expr(value))))
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 /// Reduces an `else` branch expression (if present) into structural children. A
