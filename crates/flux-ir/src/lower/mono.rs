@@ -146,4 +146,42 @@ mod tests {
     fn no_arguments_keeps_source_name() {
         assert_eq!(mangle_specialised("Counter", &[]), "Counter");
     }
+
+    /// Audit P2.10: verify that instantiations are consumed in the same
+    /// order as the checker records them (source order). Two call sites
+    /// of the same generic must get distinct specializations.
+    #[test]
+    fn two_call_sites_get_distinct_specializations() {
+        use flux_types::{GenericInstantiation, TcType};
+
+        let typed = flux_types::TypedAST {
+            ast: flux_parser::Ast {
+                decls: vec![],
+                span: flux_syntax::Span::new(0, 0, 0),
+            },
+            types: std::collections::HashMap::new(),
+            instantiations: vec![
+                GenericInstantiation {
+                    name: "Counter".to_owned(),
+                    generic_args: vec![TcType::Int],
+                },
+                GenericInstantiation {
+                    name: "Counter".to_owned(),
+                    generic_args: vec![TcType::Float],
+                },
+            ],
+            constructors: std::collections::HashSet::new(),
+            field_indices: std::collections::HashMap::new(),
+        };
+
+        let mut mono = MonoTable::new(&typed);
+        let first = mono.next_specialised("Counter").expect("first");
+        let second = mono.next_specialised("Counter").expect("second");
+        assert_eq!(first, "Counter_Int");
+        assert_eq!(second, "Counter_Float");
+        assert_ne!(
+            first, second,
+            "two call sites must get distinct specializations"
+        );
+    }
 }
