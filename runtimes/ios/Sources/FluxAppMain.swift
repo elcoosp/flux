@@ -80,8 +80,17 @@ struct FluxRootView: View {
         let wsUrlString = ProcessInfo.processInfo.environment["FLUX_WS_URL"]
             ?? (Bundle.main.object(forInfoDictionaryKey: "FLUX_WS_URL") as? String)
             ?? "ws://127.0.0.1:7331"
-        guard let wsUrl = URL(string: wsUrlString) else {
-            fatalError("FLUX_WS_URL is not a valid WebSocket URL: \(wsUrlString)")
+        // Audit P2.34: never fatal on bad URL; fall back to loopback default.
+        let wsUrl: URL
+        if let parsed = URL(string: wsUrlString) {
+            wsUrl = parsed
+        } else {
+            errorModel.fluxError = FluxError(
+                message: "Invalid FLUX_WS_URL: \(wsUrlString) — falling back to loopback",
+                kind: .invalidFrame,
+                span: nil
+            )
+            wsUrl = URL(string: "ws://127.0.0.1:7331")!
         }
         let transport = FluxWebSocketTransport(url: wsUrl)
         _executor = State(initialValue: runtime)

@@ -99,9 +99,12 @@ public final class FluxWebSocketTransport: FluxTransport {
         }
     }
 
+    private var userInitiatedClose = false
+
     public func close() {
         retryTask?.cancel()
         retryTask = nil
+        userInitiatedClose = true
         socket?.cancel(with: .goingAway, reason: nil)
         socket = nil
         transition(to: .connecting)
@@ -142,6 +145,8 @@ public final class FluxWebSocketTransport: FluxTransport {
     private func handleDrop() {
         socket?.cancel(with: .goingAway, reason: nil)
         socket = nil
+        // Audit P2.29: don't reconnect when the user explicitly closed.
+        if userInitiatedClose { return }
         transition(to: .reconnecting)
         scheduleReconnect()
     }
