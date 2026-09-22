@@ -48,6 +48,7 @@ public enum class Opcode(
     AND_BOOL(0x40, 3),
     OR_BOOL(0x41, 3),
     NOT_BOOL(0x42, 2),
+    BOOL_EQ(0x43, 3),
 
     STR_CONCAT(0x50, 3),
     STR_INTERN(0x51, 5),

@@ -44,6 +44,7 @@ enum Opcode: UInt8, CaseIterable, Equatable {
     case andBool = 0x40
     case orBool = 0x41
     case notBool = 0x42
+    case boolEq = 0x43
 
     case strConcat = 0x50
     case strIntern = 0x51
@@ -131,6 +132,7 @@ enum Opcode: UInt8, CaseIterable, Equatable {
         case .andBool: "AND_BOOL"
         case .orBool: "OR_BOOL"
         case .notBool: "NOT_BOOL"
+        case .boolEq: "BOOL_EQ"
         case .strConcat: "STR_CONCAT"
         case .strIntern: "STR_INTERN"
         case .strEq: "STR_EQ"
@@ -174,7 +176,7 @@ enum Opcode: UInt8, CaseIterable, Equatable {
         switch self {
         case .halt, .nop: 0
         case .loadNull: 1
-        case .negI64, .negF64, .i64ToF64, .f64ToI64, .notBool, .strLen,
+        case .negI64, .negF64, .i64ToF64, .f64ToI64, .notBool, .boolEq, .strLen,
              .mov, .listLen, .toString: 2
         case .addI64, .subI64, .mulI64, .divI64, .modI64, .eqI64, .ltI64, .gtI64,
              .lteI64, .gteI64, .addF64, .subF64, .mulF64, .divF64, .eqF64, .ltF64,

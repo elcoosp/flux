@@ -168,6 +168,12 @@ internal fun executeInstruction(
             regs[instr.u8(0)] = FluxValue.BoolVal(!requireBool(regs[instr.u8(1)], instr.offset))
             StepResult.Proceed
         }
+        Opcode.BOOL_EQ -> {
+            val x = requireBool(regs[instr.u8(1)], instr.offset)
+            val y = requireBool(regs[instr.u8(2)], instr.offset)
+            regs[instr.u8(0)] = FluxValue.BoolVal(x == y)
+            StepResult.Proceed
+        }
         Opcode.STR_INTERN -> {
             regs[instr.u8(0)] = FluxValue.StrVal(instr.u32(1).toUInt())
             StepResult.Proceed

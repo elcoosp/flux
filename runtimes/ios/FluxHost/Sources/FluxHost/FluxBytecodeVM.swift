@@ -320,6 +320,12 @@ enum FluxBytecodeVM {
                 let v = try requireBool(reg(instr.u8(1)), at: instr.offset)
                 regs[Int(dst)] = .bool(!v)
 
+            case .boolEq:
+                let dst = instr.u8(0)
+                let x = try requireBool(reg(instr.u8(1)), at: instr.offset)
+                let y = try requireBool(reg(instr.u8(2)), at: instr.offset)
+                regs[Int(dst)] = .bool(x == y)
+
             case .strIntern:
                 regs[Int(instr.u8(0))] = .str(instr.u32(1))
 
@@ -891,6 +897,12 @@ enum FluxBytecodeVM {
                 let v = try requireBool(reg(instr.u8(1)), at: instr.offset)
                 regs[Int(dst)] = .bool(!v)
 
+            case .boolEq:
+                let dst = instr.u8(0)
+                let x = try requireBool(reg(instr.u8(1)), at: instr.offset)
+                let y = try requireBool(reg(instr.u8(2)), at: instr.offset)
+                regs[Int(dst)] = .bool(x == y)
+
             case .strIntern:
                 regs[Int(instr.u8(0))] = .str(instr.u32(1))
 
@@ -1279,6 +1291,11 @@ enum FluxBytecodeVM {
                 let dst = instr.u8(0)
                 let v = try requireBool(reg(instr.u8(1)), at: instr.offset)
                 regs[Int(dst)] = .bool(!v)
+            case opcodeIndex[.boolEq]!:
+                let dst = instr.u8(0)
+                let x = try requireBool(reg(instr.u8(1)), at: instr.offset)
+                let y = try requireBool(reg(instr.u8(2)), at: instr.offset)
+                regs[Int(dst)] = .bool(x == y)
             case opcodeIndex[.strIntern]!:
                 regs[Int(instr.u8(0))] = .str(instr.u32(1))
             case opcodeIndex[.strEq]!:
