@@ -7,8 +7,9 @@ name: artifact-publish
 # closed via ADR-0050 runtime versioning):
 #   * iOS:   `FluxHost.xcframework` via `xcodebuild -create-xcframework` (needs a
 #            macOS runner with Xcode).
-#   * Android: `:runtimes:android:host` AAR via `./gradlew :runtimes:android:host:
-#            bundleReleaseAar` (linux runner is fine — no Xcode needed).
+# * Android: `:runtimes:android:app` debug APK via `./gradlew :runtimes:android:app:assembleDebug`
+#            (linux runner is fine — no Xcode needed). The `:host` module is pure-JVM
+#            with no Android AAR target; the APK is the consumable artifact.
 #
 # This is the CI/publish step the issue calls out; the host-side fail-closed
 # PROTOCOL_VERSION handshake and the `docs/embed-flux.md` guide are owned by the
