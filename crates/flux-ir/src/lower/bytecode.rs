@@ -1427,15 +1427,20 @@ impl<'a> Emitter<'a> {
             ExprKind::Await(inner) => {
                 // Compile the future expression into a register, then suspend the
                 // handler with `AWAIT`. The VM captures the continuation and, on
-                // resume, deposits the resolved value into `r0` (see flux-vm-ref);
-                // we therefore return register 0 so the surrounding expression reads
-                // the awaited result after suspension.
+                // resume, deposits the resolved value into `r0` (see flux-vm-ref).
+                // Audit P2.14: MOV the result out of r0 into a fresh register so
+                // a second `await` in the same expression (e.g. `await f() + await
+                // g()`) does not clobber the first result before the ADD reads it.
                 let fut = self.compile_value(inner)?;
                 // AWAIT result_reg(u8)=0, future_reg(u8)
                 self.code.push(raw::AWAIT);
                 self.code.push(0u8);
                 self.code.push(fut);
-                Ok(0u8)
+                let out = self.alloc_reg()?;
+                self.code.push(raw::MOV);
+                self.code.push(out);
+                self.code.push(0u8);
+                Ok(out)
             }
             // Null-safe field access `base?.field` (FLUX-053 / ADR-0051).
             //
