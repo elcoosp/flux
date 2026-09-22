@@ -53,7 +53,7 @@ impl Backend for Kotlin {
     fn container_spacing(gap: &str) -> String {
         // Audit D5/T-403.3: delegate to axis-aware implementation (default vertical).
         Self::container_spacing_axis(gap, "vertical")
-    }}
+    }
 
     fn container_spacing_axis(gap: &str, axis: &str) -> String {
         // Audit T-403.3: emit arrangement matching the parent container axis.
@@ -301,11 +301,23 @@ impl Backend for Kotlin {
         subst: &HashMap<String, String>,
     ) {
         // Audit T-403.4: parameters separated by ", " (not leading commas).
-        let params: Vec<String> = meta.props().map(|prop| {
-            let ty = native_type::<Self>(&prop.ty, subst);
-            format!("{}: {}", prop.name.name, ty)
-        }).collect();
-        em.append_line(&format!("@Composable fun {name}{generics}({})) {{", params.join(", ")));
+        let params: Vec<String> = meta
+            .props()
+            .iter()
+            .map(|prop| {
+                let ty = native_type::<Self>(&prop.ty, subst);
+                format!("{}: {}", prop.name.name, ty)
+            })
+            .collect();
+        let header = if params.is_empty() {
+            format!("@Composable fun {name}{generics}(\n) {{")
+        } else {
+            format!(
+                "@Composable fun {name}{generics}(\n     {}\n) {{",
+                params.join("\n     ")
+            )
+        };
+        em.append_line(&header);
     }
 
     fn emit_body_open(em: &mut Emitter<'_, Self>) {
@@ -339,7 +351,7 @@ impl Backend for Kotlin {
         for variant in &sum.variants {
             let vname = &variant.name.name;
             if variant.fields.is_empty() {
-                em.append_line(&format!("    data class {vname} : {name}"));
+                em.append_line(&format!("    data object {vname} : {name}"));
             } else {
                 let params: Vec<String> = variant
                     .fields
