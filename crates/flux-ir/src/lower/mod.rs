@@ -595,9 +595,13 @@ impl<'a> Lowerer<'a> {
                 // `deps` carries the items-signal (list) so the host knows which
                 // signal to watch; `layout` carries `itemSlot` so the host knows
                 // which signal each row thunk reads for `item`.
+                // Audit P2.13: include the key expression's signal reads so
+                // a key like `|t| t.id` marks the node dirty when `id` changes.
+                let mut deps = collect_read_signals(&[items_expr], &self.signal_scope);
+                deps.extend(collect_read_signals(&[key_expr], &self.signal_scope));
                 self.builder.signal_metadata(
                     id,
-                    collect_read_signals(&[items_expr], &self.signal_scope),
+                    deps,
                     None,
                     Vec::new(),
                     Some(item_slot),
