@@ -50,7 +50,10 @@ public final class ScrollViewAdapter: FluxAdapter {
     public func setChildren(_ children: [AnyObject], on view: UIScrollView) {
         guard let content = view.subviews.first else { return }
         let views = children.compactMap { $0 as? UIView }
-        view.subviews.forEach { $0.removeFromSuperview() }
+        // Audit D20/T-316.10: remove only the old arranged subviews, not the
+        // content host itself. Removing all subviews (including content) then
+        // adding children to the removed content host blanked the scroll view.
+        content.subviews.forEach { $0.removeFromSuperview() }
         for v in views {
             v.translatesAutoresizingMaskIntoConstraints = false
             content.addSubview(v)
