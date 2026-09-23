@@ -1,0 +1,19 @@
+{
+  "bytecode_hex": "b3000000000053010000",
+  "description": "STR_LEN returns the interned string's byte length, not the id's digit count. String id 0 = 'hello world' (11 bytes); the old digit-count formula would return 0 for id 0 or 5 for id 12345.",
+  "expected_error": null,
+  "expected_gas_used": 2,
+  "expected_registers": {
+    "r1": {
+      "type": "Int",
+      "value": 11
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "str_len_byte_count_not_digit_count",
+  "payload": null,
+  "strings": [
+    {"id": 0, "text": "hello world"}
+  ]
+}

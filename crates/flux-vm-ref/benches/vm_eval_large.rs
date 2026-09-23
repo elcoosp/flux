@@ -8,7 +8,7 @@
 //! micro-benchmarks.
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use flux_syntax::Value;
+use flux_syntax::{StringTable, Value};
 use flux_vm_ref::{InMemorySignals, run};
 use std::hint::black_box;
 use std::time::Instant;
@@ -78,7 +78,13 @@ fn bench_vm_eval_large(c: &mut Criterion) {
     // against a 10k-signal graph.
     assert_within_budget_us("vm_eval_50instr", 2_000, || {
         let mut s = signals.clone();
-        run(black_box(&program), &mut s, Value::Int(0)).expect("handler runs")
+        run(
+            black_box(&program),
+            &mut s,
+            &StringTable::new(),
+            Value::Int(0),
+        )
+        .expect("handler runs")
     });
     group.bench_with_input(
         BenchmarkId::new("50instr", SIGNAL_GRAPH_SIZE),
@@ -86,7 +92,13 @@ fn bench_vm_eval_large(c: &mut Criterion) {
         |b, _| {
             b.iter(|| {
                 let mut s = signals.clone();
-                let out = run(black_box(&program), &mut s, Value::Int(0)).expect("handler runs");
+                let out = run(
+                    black_box(&program),
+                    &mut s,
+                    &StringTable::new(),
+                    Value::Int(0),
+                )
+                .expect("handler runs");
                 // The store must carry at least the written signals so the
                 // bench is not optimised away and the writes are observable.
                 assert!(!out.signals.is_empty(), "handler must emit signal writes");

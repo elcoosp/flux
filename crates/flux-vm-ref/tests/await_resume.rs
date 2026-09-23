@@ -28,7 +28,7 @@
 //! The v1 `run` entry point must NOT silently suspend: an `AWAIT` in v1 bytecode
 //! is an invalid dispatch, preserving v1 parity.
 
-use flux_syntax::Value;
+use flux_syntax::{StringTable, Value};
 use flux_vm_ref::{InMemorySignals, RunResult, SignalStore, resume, run, run_resumable};
 
 // CALL_CAP (0x90): opcode, result_reg(u8), cap_id(u32), method_id(u16), args_reg(u8).
@@ -65,7 +65,7 @@ fn await_suspends_then_resume_completes() {
 
     // v1 `run` must treat an AWAIT as an invalid dispatch: v1 has no suspend concept.
     assert!(
-        run(&prog, &mut signals, Value::Null).is_err(),
+        run(&prog, &mut signals, &StringTable::new(), Value::Null).is_err(),
         "v1 run() must not silently suspend on AWAIT"
     );
 
@@ -73,7 +73,8 @@ fn await_suspends_then_resume_completes() {
     // returns 99, so AWAIT sees a Ready cell and continues without suspending.
     // First run reaches HALT directly with signal 2 = 42.
     let payload = Value::Record(vec![(0u16, Value::Int(42))]);
-    let first = run_resumable(&prog, &mut signals, payload).expect("run_resumable ok");
+    let first =
+        run_resumable(&prog, &mut signals, &StringTable::new(), payload).expect("run_resumable ok");
     let outcome_a = match first {
         RunResult::Halt(o) => o,
         RunResult::Suspended(_) => panic!("sync capability should not suspend on a Ready cell"),
@@ -103,7 +104,8 @@ fn await_suspends_then_resume_completes() {
 
     let mut signals = InMemorySignals::default();
     let payload = Value::Record(vec![(0u16, Value::Int(42))]);
-    let first = run_resumable(&prog_b, &mut signals, payload).expect("run_resumable ok (async)");
+    let first = run_resumable(&prog_b, &mut signals, &StringTable::new(), payload)
+        .expect("run_resumable ok (async)");
     let state = match first {
         RunResult::Suspended(s) => s,
         RunResult::Halt(_) => panic!("expected Suspended when the cell is Pending"),
@@ -119,7 +121,8 @@ fn await_suspends_then_resume_completes() {
     );
     // Host resolves the pending cell, then resumes.
     signals.resolve_cell(cell_id, Value::Int(7));
-    let resumed = resume(state, &mut signals, Value::Int(7)).expect("resume ok");
+    let resumed =
+        resume(state, &mut signals, &StringTable::new(), Value::Int(7)).expect("resume ok");
     let outcome_b = match resumed {
         RunResult::Halt(o) => o,
         RunResult::Suspended(_) => panic!("expected Halt after resume"),

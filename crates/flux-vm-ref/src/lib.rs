@@ -18,7 +18,7 @@
 //! let prog = [0xB0, 0, 7, 0, 0, 0, 0, 0, 0, 0,   // LOAD_INT_CONST r0, 7
 //!              0x00];                              // HALT
 //! let mut signals = InMemorySignals::default();
-//! let out = run(&prog, &mut signals, Value::Null).unwrap();
+//! let out = run(&prog, &mut signals, &StringTable::new(), Value::Null).unwrap();
 //! assert_eq!(out.gas_used, 1);
 //! assert_eq!(out.registers[0], Value::Int(7));
 //! ```
@@ -39,18 +39,30 @@ pub use vm::{
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flux_syntax::Value;
+    use flux_syntax::{StringTable, Value};
 
     #[test]
     fn gas_counts_non_halt_only() {
         let prog = [0x01, 0xB0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0x00]; // NOP + LOAD + HALT
-        let out = run(&prog, &mut InMemorySignals::default(), Value::Null).unwrap();
+        let out = run(
+            &prog,
+            &mut InMemorySignals::default(),
+            &StringTable::new(),
+            Value::Null,
+        )
+        .unwrap();
         assert_eq!(out.gas_used, 2);
     }
 
     #[test]
     fn invalid_dispatch_errors() {
-        let err = run(&[0xFF], &mut InMemorySignals::default(), Value::Null).unwrap_err();
+        let err = run(
+            &[0xFF],
+            &mut InMemorySignals::default(),
+            &StringTable::new(),
+            Value::Null,
+        )
+        .unwrap_err();
         assert_eq!(err.kind, VmErrorKind::InvalidDispatch);
         assert_eq!(err.offset, 0);
     }
@@ -61,6 +73,7 @@ mod tests {
         let err = run(
             &[0xB0, 0, 1, 2],
             &mut InMemorySignals::default(),
+            &StringTable::new(),
             Value::Null,
         )
         .unwrap_err();
@@ -75,7 +88,13 @@ mod tests {
             0x23, 2, 0, 1, // DIV_I64 r2, r0, r1
             0x00,
         ];
-        let err = run(&prog, &mut InMemorySignals::default(), Value::Null).unwrap_err();
+        let err = run(
+            &prog,
+            &mut InMemorySignals::default(),
+            &StringTable::new(),
+            Value::Null,
+        )
+        .unwrap_err();
         assert_eq!(err.kind, VmErrorKind::DivByZero);
     }
 
@@ -87,7 +106,13 @@ mod tests {
             0x33, 2, 0, 1, // DIV_F64 r2, r0, r1
             0x00,
         ];
-        let out = run(&prog, &mut InMemorySignals::default(), Value::Null).unwrap();
+        let out = run(
+            &prog,
+            &mut InMemorySignals::default(),
+            &StringTable::new(),
+            Value::Null,
+        )
+        .unwrap();
         assert_eq!(out.registers[2], Value::Float(f64::INFINITY));
     }
 
@@ -98,7 +123,13 @@ mod tests {
             0x71, 1, 0, 0, 0, // GET_FIELD r1, r0, 0
             0x00,
         ];
-        let err = run(&prog, &mut InMemorySignals::default(), Value::Null).unwrap_err();
+        let err = run(
+            &prog,
+            &mut InMemorySignals::default(),
+            &StringTable::new(),
+            Value::Null,
+        )
+        .unwrap_err();
         assert_eq!(err.kind, VmErrorKind::NullDereference);
     }
 }

@@ -8,7 +8,7 @@
 
 use flux_ir::lower::lower;
 use flux_parser::parse;
-use flux_syntax::{NodeId, NodeKind, Value};
+use flux_syntax::{NodeId, NodeKind, StringTable, Value};
 use flux_types::type_check;
 use flux_vm_ref::{InMemorySignals, run};
 
@@ -58,7 +58,13 @@ fn text_node_prop_thunk_interpolates_count_not_increments() {
     // Running it must leave an ALLOC_RECORD (not an Int) in r1.
     let mut signals =
         InMemorySignals::from_signals([(flux_syntax::SignalId::from(1u32), Value::Int(0))]);
-    let out = run(&thunk.bytecode, &mut signals, Value::Null).expect("thunk runs");
+    let out = run(
+        &thunk.bytecode,
+        &mut signals,
+        &StringTable::new(),
+        Value::Null,
+    )
+    .expect("thunk runs");
     match &out.registers[1] {
         Value::Record(fields) => {
             println!("TEXT prop_thunk r1 record fields = {:?}", fields);

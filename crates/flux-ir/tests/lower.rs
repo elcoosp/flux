@@ -8,7 +8,7 @@
 use flux_ir::InstanceRegistry;
 use flux_ir::lower::{LoweringError, lower};
 use flux_parser::parse;
-use flux_syntax::{Child, HandlerId, NodeId, NodeKind, PropIdx, SignalId, Value};
+use flux_syntax::{Child, HandlerId, NodeId, NodeKind, PropIdx, SignalId, StringTable, Value};
 use flux_types::type_check;
 use flux_vm_ref::{InMemorySignals, SignalStore, run};
 
@@ -131,7 +131,13 @@ fn handler_bytecode_increments_signal_under_vm() {
 
     // Signal ids start at 1 per component; `count` is signal 1.
     let mut signals = InMemorySignals::from_signals([(SignalId::from(1u32), Value::Int(0))]);
-    let out = run(&closure.bytecode, &mut signals, Value::Null).expect("vm run");
+    let out = run(
+        &closure.bytecode,
+        &mut signals,
+        &StringTable::new(),
+        Value::Null,
+    )
+    .expect("vm run");
     let new_value = signals.read(SignalId::from(1u32)).expect("signal updated");
     assert_eq!(new_value, Value::Int(1), "count incremented to 1");
     // gas_used counts the non-HALT instructions executed (ADR-0021).
@@ -241,7 +247,13 @@ fn prop_thunk_runs_to_alloc_record_of_literals() {
     );
 
     let mut signals = InMemorySignals::default();
-    let out = run(&thunk.bytecode, &mut signals, Value::Null).expect("thunk runs");
+    let out = run(
+        &thunk.bytecode,
+        &mut signals,
+        &StringTable::new(),
+        Value::Null,
+    )
+    .expect("thunk runs");
     match &out.registers[1] {
         Value::Record(fields) => {
             // Field 0 = `text`, field 1 = `width` (positional fill order).

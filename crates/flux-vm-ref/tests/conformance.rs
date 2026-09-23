@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use flux_syntax::{PropIdx, StringId, Value};
+use flux_syntax::{PropIdx, StringId, StringTable, Value};
 use flux_vm_ref::{InMemorySignals, SignalStore, VmErrorKind, run};
 use serde::Deserialize;
 
@@ -51,17 +51,32 @@ struct Vector {
     description: String,
     bytecode_hex: String,
     initial_signals: Vec<SignalSeed>,
+    #[serde(default)]
     payload: Option<VecValue>,
     expected_signals: Vec<SignalSeed>,
     expected_registers: BTreeMap<String, VecValue>,
+    #[serde(default)]
     expected_error: Option<ExpectedError>,
     expected_gas_used: u32,
+    #[serde(default)]
+    strings: Vec<StringSeed>,
+    #[serde(default)]
+    expected_output: Option<VecValue>,
 }
 
 #[derive(Debug, Deserialize)]
 struct SignalSeed {
     id: u32,
     value: VecValue,
+}
+
+/// A string interning entry: `id` is the `StringId` operand the bytecode
+/// references, `text` is the resolved string content for `StrLen` / `StrEq`
+/// / `StrConcat` evaluation.
+#[derive(Debug, Clone, Deserialize)]
+struct StringSeed {
+    id: u32,
+    text: String,
 }
 
 fn to_value(v: &VecValue) -> Value {
@@ -187,9 +202,24 @@ fn all_isa_vectors_pass() {
         );
         let payload = v.payload.as_ref().map(to_value).unwrap_or(Value::Null);
 
+        // Build the string interning table the VM uses to resolve StrLen (Appendix E §E.5).
+        // Seeds are sorted by id so `intern` — which assigns dense ids from 0 in
+        // insertion order — reproduces the vector's intended StringId mapping.
+        let mut sorted_strings = v.strings.clone();
+        sorted_strings.sort_by_key(|s| s.id);
+        let mut strings = StringTable::new();
+        for seed in &sorted_strings {
+            let actual = strings.intern(&seed.text);
+            assert_eq!(
+                actual, seed.id,
+                "{}: string seed id {} != intern-assigned {} for text {:?}",
+                v.name, seed.id, actual, seed.text
+            );
+        }
+
         match &v.expected_error {
             Some(err) => {
-                let got = run(&bytecode, &mut signals, payload);
+                let got = run(&bytecode, &mut signals, &strings, payload);
                 match got {
                     Err(e) if e.kind == err.kind() => {}
                     Err(e) => failed.push(format!(
@@ -203,7 +233,7 @@ fn all_isa_vectors_pass() {
                 }
             }
             None => {
-                let out = match run(&bytecode, &mut signals, payload) {
+                let out = match run(&bytecode, &mut signals, &strings, payload) {
                     Ok(o) => o,
                     Err(e) => {
                         failed.push(format!("{}: unexpected error {:?}", v.name, e.kind));
@@ -231,6 +261,16 @@ fn all_isa_vectors_pass() {
                     let got = &out.registers[idx];
                     if !value_matches(got, exp) {
                         failed.push(format!("{}: register {name} mismatch: {got:?}", v.name));
+                    }
+                }
+                if let Some(exp) = &v.expected_output {
+                    if !value_matches(&out.registers[0], exp) {
+                        failed.push(format!(
+                            "{}: r0 mismatch: {:?} != {:?}",
+                            v.name,
+                            out.registers[0],
+                            to_value(exp)
+                        ));
                     }
                 }
             }

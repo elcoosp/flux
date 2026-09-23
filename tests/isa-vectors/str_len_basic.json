@@ -1,6 +1,6 @@
 {
-  "bytecode_hex": "b3003930000053010000",
-  "description": "STR_LEN returns id length.",
+  "bytecode_hex": "b3000000000053010000",
+  "description": "STR_LEN r1, r0 resolves the interned string via the string table and writes its byte length (Appendix E §E.5). String id 0 = 'hello' (5 bytes).",
   "expected_error": null,
   "expected_gas_used": 2,
   "expected_registers": {
@@ -12,5 +12,8 @@
   "expected_signals": [],
   "initial_signals": [],
   "name": "str_len_basic",
-  "payload": null
+  "payload": null,
+  "strings": [
+    {"id": 0, "text": "hello"}
+  ]
 }

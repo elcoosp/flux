@@ -8,7 +8,7 @@
 use flux_ir::lower::lower;
 use flux_parser::parse;
 use flux_syntax::opcode::raw;
-use flux_syntax::{Child, NodeId, NodeKind, Value};
+use flux_syntax::{Child, NodeId, NodeKind, StringTable, Value};
 use flux_types::type_check;
 use flux_vm_ref::{InMemorySignals, SignalStore, run};
 
@@ -59,7 +59,7 @@ fn list_literal_lowers_and_runs() {
     assert!(bc.contains(&0x80), "ALLOC_LIST missing: {:02x?}", bc);
     assert!(bc.contains(&0x81), "LIST_PUSH missing: {:02x?}", bc);
     let mut signals = InMemorySignals::from_signals(std::iter::empty());
-    let out = run(&bc, &mut signals, Value::Null).expect("thunk runs");
+    let out = run(&bc, &mut signals, &StringTable::new(), Value::Null).expect("thunk runs");
     match &out.registers[1] {
         Value::Record(fields) => {
             // The single `text` field holds the list.
@@ -93,7 +93,7 @@ fn record_literal_and_field_access_lowers_and_runs() {
             (done_idx, Value::Bool(false)),
         ]),
     )]);
-    let out = run(&bc, &mut signals, Value::Null).expect("thunk runs");
+    let out = run(&bc, &mut signals, &StringTable::new(), Value::Null).expect("thunk runs");
     match &out.registers[1] {
         Value::Record(fields) => {
             let text = fields.first().expect("one field");
@@ -118,7 +118,7 @@ fn boolean_negation_lowers_and_runs() {
     assert!(bc.contains(&0x42), "NOT_BOOL missing: {:02x?}", bc);
     let mut signals =
         InMemorySignals::from_signals([(flux_syntax::SignalId::from(1u32), Value::Bool(false))]);
-    let out = run(&bc, &mut signals, Value::Null).expect("thunk runs");
+    let out = run(&bc, &mut signals, &StringTable::new(), Value::Null).expect("thunk runs");
     match &out.registers[1] {
         Value::Record(fields) => {
             let text = fields.first().expect("one field");
@@ -141,7 +141,7 @@ fn run_first_handler(
     let (_, captured) = lowered.closures.iter().next().expect("a handler closure");
     let _ = captured;
     let bc = closure.bytecode.clone();
-    flux_vm_ref::run(&bc, signals, Value::Null).expect("handler runs");
+    flux_vm_ref::run(&bc, signals, &StringTable::new(), Value::Null).expect("handler runs");
 }
 
 #[test]
@@ -245,11 +245,10 @@ compo C
                     let label_idx = flux_ir::lower::prop_index_for_name("label");
                     let done_idx = flux_ir::lower::prop_index_for_name("done");
                     // Field 0 = variant tag (stored at raw PropIdx 0)
-                    let tag_field = fields.iter().find(|(i, _)| *i == flux_syntax::PropIdx::from(0u16));
-                    assert!(
-                        tag_field.is_some(),
-                        "field 0 must carry the variant tag"
-                    );
+                    let tag_field = fields
+                        .iter()
+                        .find(|(i, _)| *i == flux_syntax::PropIdx::from(0u16));
+                    assert!(tag_field.is_some(), "field 0 must carry the variant tag");
                     assert_eq!(
                         fields.iter().find(|(i, _)| *i == label_idx).map(|(_, v)| v),
                         Some(&Value::Str(flux_syntax::StringId::from(1u32))),

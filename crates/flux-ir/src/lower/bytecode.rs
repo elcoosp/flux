@@ -1997,7 +1997,8 @@ mod tests {
 
         // The decoder must accept the backpatched offsets (proves they are valid).
         let mut signals = InMemorySignals::from_signals([(SignalId::from(1u32), Value::Int(20))]);
-        let out = run(&bytecode, &mut signals, Value::Null).expect("vm runs if/else");
+        let out = run(&bytecode, &mut signals, &StringTable::new(), Value::Null)
+            .expect("vm runs if/else");
         // count (20) > 10 -> then branch -> count = 0.
         assert_eq!(
             signals.read(SignalId::from(1u32)),
@@ -2093,7 +2094,8 @@ mod tests {
             (SignalId::from(1u32), Value::Int(5)),
             (SignalId::from(2u32), status_val),
         ]);
-        let _ = run(&bytecode, &mut signals, Value::Null).expect("vm runs match");
+        let _ =
+            run(&bytecode, &mut signals, &StringTable::new(), Value::Null).expect("vm runs match");
         assert_eq!(
             signals.read(SignalId::from(1u32)),
             Some(Value::Int(0)),
@@ -2110,7 +2112,8 @@ mod tests {
             (SignalId::from(1u32), Value::Int(5)),
             (SignalId::from(2u32), status_val),
         ]);
-        let _ = run(&bytecode, &mut signals, Value::Null).expect("vm runs match");
+        let _ =
+            run(&bytecode, &mut signals, &StringTable::new(), Value::Null).expect("vm runs match");
         assert_eq!(
             signals.read(SignalId::from(1u32)),
             Some(Value::Int(1)),
@@ -2166,7 +2169,8 @@ mod tests {
 
         // The thunk must actually run and leave a record in r1.
         let mut signals = InMemorySignals::from_signals([(SignalId::from(1u32), Value::Int(3))]);
-        let out = run(&bytecode, &mut signals, Value::Null).expect("thunk runs");
+        let out =
+            run(&bytecode, &mut signals, &StringTable::new(), Value::Null).expect("thunk runs");
         match &out.registers[1] {
             Value::Record(fields) => {
                 assert_eq!(fields.len(), 1, "one prop field");

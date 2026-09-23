@@ -9,7 +9,7 @@
 //! `Null` raises `NullDereference`, other non-records raise `TypeMismatch`).
 
 use flux_syntax::opcode::Opcode;
-use flux_syntax::{PropIdx, SignalId, Value};
+use flux_syntax::{PropIdx, SignalId, StringTable, Value};
 
 use crate::decode::{Instruction, decode_program};
 use crate::error::{VmError, VmErrorKind};
@@ -285,15 +285,23 @@ fn next_offset(instr: &Instruction) -> u32 {
 pub fn run_resumable(
     bytecode: &[u8],
     signals: &mut impl SignalStore,
+    strings: &StringTable,
     payload: Value,
 ) -> Result<RunResult, VmError> {
-    run_resumable_with_registry(bytecode, signals, payload, &CapabilityRegistry::with_parity_stubs())
+    run_resumable_with_registry(
+        bytecode,
+        signals,
+        strings,
+        payload,
+        &CapabilityRegistry::with_parity_stubs(),
+    )
 }
 
-/// Audit T-335.2: run_resumable with an explicit capability registry.
+/// Audit T-335.2: run_resumable with an explicit capability registry (for conformance tests).
 pub(crate) fn run_resumable_with_registry(
     bytecode: &[u8],
     signals: &mut impl SignalStore,
+    strings: &StringTable,
     payload: Value,
     registry: &CapabilityRegistry,
 ) -> Result<RunResult, VmError> {
@@ -304,7 +312,9 @@ pub(crate) fn run_resumable_with_registry(
     regs[15] = Value::Int(i64::from(ENTRY_GAS));
     let mut gas: u32 = ENTRY_GAS;
 
-    match exec_tail(&program, &offsets, 0, &mut regs, &mut gas, signals, registry)? {
+    match exec_tail(
+        &program, &offsets, 0, &mut regs, &mut gas, signals, strings, registry,
+    )? {
         ControlFlow::Halt => Ok(finish(regs, gas, signals)),
         ControlFlow::Suspend {
             resume_ip,
@@ -336,20 +346,26 @@ pub(crate) fn run_resumable_with_registry(
 pub fn resume(
     state: SuspendState,
     signals: &mut impl SignalStore,
+    strings: &StringTable,
     value: Value,
 ) -> Result<RunResult, VmError> {
-    resume_with_registry(state, signals, value, &CapabilityRegistry::with_parity_stubs())
+    resume_with_registry(
+        state,
+        signals,
+        strings,
+        value,
+        &CapabilityRegistry::with_parity_stubs(),
+    )
 }
 
-/// Audit T-335.2: resume with an explicit capability registry.
+/// Audit T-335.2: resume with an explicit capability registry (for conformance tests).
 pub(crate) fn resume_with_registry(
     state: SuspendState,
     signals: &mut impl SignalStore,
+    strings: &StringTable,
     value: Value,
     registry: &CapabilityRegistry,
 ) -> Result<RunResult, VmError> {
-    // Replay the signal writes captured at suspend so reads during the resumed tail
-    // see the pre-suspend state.
     for (id, v) in &state.signals {
         signals.write(*id, v.clone());
     }
@@ -366,6 +382,7 @@ pub(crate) fn resume_with_registry(
         &mut regs,
         &mut gas,
         signals,
+        strings,
         registry,
     )? {
         ControlFlow::Halt => Ok(finish(regs, gas, signals)),
@@ -405,8 +422,9 @@ fn snapshot_sorted(signals: &mut impl SignalStore) -> Vec<(SignalId, Value)> {
 /// Executes instructions starting at `start_offset` until `HALT` or `AWAIT`.
 ///
 /// Shared by [`run_resumable`] (entry from offset 0) and [`resume`] (entry from the
-/// captured `resume_ip`). Every opcode except `AWAIT` is evaluated here; `AWAIT`
+/// the captured `resume_ip`). Every opcode except `AWAIT` is evaluated here; `AWAIT`
 /// returns [`ControlFlow::Suspend`] with the offset of the following instruction.
+#[allow(clippy::too_many_arguments)]
 fn exec_tail(
     program: &[Instruction],
     offsets: &[u32],
@@ -414,6 +432,7 @@ fn exec_tail(
     regs: &mut [Value; 16],
     gas: &mut u32,
     signals: &mut impl SignalStore,
+    strings: &StringTable,
     registry: &CapabilityRegistry,
 ) -> Result<ControlFlow, VmError> {
     let start_index = offsets
@@ -591,11 +610,11 @@ fn exec_tail(
                 regs[usize::from(instr.u8(0))] = Value::Bool(x == y);
             }
             Opcode::StrLen => {
-                // Audit H23: fixed panic on id 0 (ilog10(0) is undefined).
-                // NOTE: returns digit count of id as proxy; real string length
-                // requires string table access which exec_tail doesn't have.
+                // Audit H23: returns the real byte length of the interned string
+                // (Appendix E §E.5). Strings missing from the table degrade to
+                // length 0, matching the host contract's missing-string policy.
                 let id = expect_str(reg!(instr.u8(1)), instr.offset)?;
-                let len = if id == 0 { 0 } else { id.ilog10() as i64 + 1 };
+                let len = strings.resolve(id).map(|s| s.len() as i64).unwrap_or(0);
                 regs[usize::from(instr.u8(0))] = Value::Int(len);
             }
             Opcode::StrConcat => {
@@ -821,6 +840,9 @@ fn finish(regs: [Value; 16], gas: u32, signals: &mut impl SignalStore) -> RunRes
 /// resumable [`run_resumable`] / [`resume`] path, so the two execution models stay
 /// in lockstep and cannot drift.
 ///
+/// `strings` is the interning table that resolves `StringId` operands for
+/// `StrLen` (Appendix E §E.5).
+///
 /// # Errors
 ///
 /// Returns a [`VmError`] when the handler faults (gas exhaustion, bad dispatch,
@@ -828,15 +850,23 @@ fn finish(regs: [Value; 16], gas: u32, signals: &mut impl SignalStore) -> RunRes
 pub fn run(
     bytecode: &[u8],
     signals: &mut impl SignalStore,
+    strings: &StringTable,
     payload: Value,
 ) -> Result<VmOutcome, VmError> {
-    run_with_registry(bytecode, signals, payload, &CapabilityRegistry::with_parity_stubs())
+    run_with_registry(
+        bytecode,
+        signals,
+        strings,
+        payload,
+        &CapabilityRegistry::with_parity_stubs(),
+    )
 }
 
 /// Audit T-335.2: run with an explicit capability registry (for conformance tests).
 pub(crate) fn run_with_registry(
     bytecode: &[u8],
     signals: &mut impl SignalStore,
+    strings: &StringTable,
     payload: Value,
     registry: &CapabilityRegistry,
 ) -> Result<VmOutcome, VmError> {
@@ -857,7 +887,9 @@ pub(crate) fn run_with_registry(
     regs[15] = Value::Int(i64::from(ENTRY_GAS));
     let mut gas: u32 = ENTRY_GAS;
 
-    match exec_tail(&program, &offsets, 0, &mut regs, &mut gas, signals, registry)? {
+    match exec_tail(
+        &program, &offsets, 0, &mut regs, &mut gas, signals, strings, registry,
+    )? {
         ControlFlow::Halt => {
             let out_signals = signals.snapshot();
             Ok(VmOutcome {
