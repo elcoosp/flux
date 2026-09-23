@@ -17,7 +17,7 @@ use flux_ir::LoweredIr;
 use flux_parser::{Arg, BinOp, BlockItem, Expr, ExprKind, MatchPattern, MatchPatternKind, StrPart};
 use flux_syntax::{NodeId, NodeKind};
 
-use crate::bridge::{Bridge, expr_id};
+use crate::bridge::{expr_id, Bridge};
 
 /// A single node in the language-neutral structural view tree.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
@@ -169,6 +169,28 @@ fn node_from_lowered(lowered: &LoweredIr, bridge: &Bridge, id: NodeId, out: &mut
                     name: normalize_view_name(&comp.name.name),
                     props: vec![],
                     children: children_of(lowered, bridge, node),
+                });
+            } else {
+                // Component *call* site: the ID is expression-tagged (ExprTag)
+                // and the bridge has no declaration entry for it. Recover the
+                // callee name from the arena's component_names table (keyed by
+                // ComponentId) so the release tree matches the dev tree, which
+                // treats all view calls as Primitives.
+                let name = lowered
+                    .component_names
+                    .iter()
+                    .find(|(cid, _)| *cid == node.component_id())
+                    .map(|(_, n)| n.clone())
+                    .unwrap_or_else(|| "<anon>".to_owned());
+                let children = if is_container(&normalize_view_name(&name)) {
+                    children_of(lowered, bridge, node)
+                } else {
+                    Vec::new()
+                };
+                out.push(ViewNode::Primitive {
+                    name: normalize_view_name(&name),
+                    props: vec![],
+                    children,
                 });
             }
         }
