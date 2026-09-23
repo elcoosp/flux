@@ -7,6 +7,13 @@
 use flux_syntax::{Child, HandlerId, Props, Value};
 // ── blob (de)serialisation ────────────────────────────────────────────────
 
+/// Checked length-prefix conversion. A silent `as u16` truncation desyncs
+/// the arena's blob reader (audit H14/P2.11): fail loudly instead.
+fn u16_len(n: usize, what: &'static str) -> u16 {
+    u16::try_from(n)
+        .unwrap_or_else(|_| panic!("{what} length {n} exceeds u16 prefix width (audit H14/P2.11)"))
+}
+
 pub(crate) struct Cursor<'b> {
     bytes: &'b [u8],
     pos: usize,
@@ -45,7 +52,7 @@ impl<'b> Cursor<'b> {
 }
 
 pub(crate) fn pack_props(blob: &mut Vec<u8>, props: &Props) {
-    blob.extend_from_slice(&(props.fields().len() as u16).to_le_bytes());
+    blob.extend_from_slice(&u16_len(props.fields().len(), "props.fields").to_le_bytes());
     for (idx, value) in props.fields() {
         blob.extend_from_slice(&idx.to_le_bytes());
         pack_value(blob, value);
@@ -73,13 +80,13 @@ pub(crate) fn pack_value(blob: &mut Vec<u8>, value: &Value) {
         Value::Bool(b) => blob.push(u8::from(*b)),
         Value::Str(id) | Value::HandlerRef(id) => blob.extend_from_slice(&id.to_le_bytes()),
         Value::List(items) => {
-            blob.extend_from_slice(&(items.len() as u16).to_le_bytes());
+            blob.extend_from_slice(&u16_len(items.len(), "list.items").to_le_bytes());
             for item in items {
                 pack_value(blob, item);
             }
         }
         Value::Record(fields) => {
-            blob.extend_from_slice(&(fields.len() as u16).to_le_bytes());
+            blob.extend_from_slice(&u16_len(fields.len(), "record.fields").to_le_bytes());
             for (idx, val) in fields {
                 blob.extend_from_slice(&idx.to_le_bytes());
                 pack_value(blob, val);
@@ -134,7 +141,7 @@ pub(crate) fn unpack_value(cur: &mut Cursor<'_>) -> Value {
 }
 
 pub(crate) fn pack_children(blob: &mut Vec<u8>, children: &[Child]) {
-    blob.extend_from_slice(&(children.len() as u16).to_le_bytes());
+    blob.extend_from_slice(&u16_len(children.len(), "children").to_le_bytes());
     for child in children {
         match child {
             Child::Node(id) => {
@@ -143,7 +150,7 @@ pub(crate) fn pack_children(blob: &mut Vec<u8>, children: &[Child]) {
             }
             Child::Splice { items } => {
                 blob.push(1);
-                blob.extend_from_slice(&(items.len() as u16).to_le_bytes());
+                blob.extend_from_slice(&u16_len(items.len(), "splice.items").to_le_bytes());
                 for (key, id) in items {
                     blob.extend_from_slice(&key.to_le_bytes());
                     blob.extend_from_slice(&id.to_le_bytes());
@@ -180,7 +187,7 @@ pub(crate) fn unpack_children(bytes: &[u8]) -> Vec<Child> {
 }
 
 pub(crate) fn pack_handlers(blob: &mut Vec<u8>, handlers: &[HandlerId]) {
-    blob.extend_from_slice(&(handlers.len() as u16).to_le_bytes());
+    blob.extend_from_slice(&u16_len(handlers.len(), "handlers").to_le_bytes());
     for id in handlers {
         blob.extend_from_slice(&id.to_le_bytes());
     }
