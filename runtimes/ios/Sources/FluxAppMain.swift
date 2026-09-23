@@ -80,12 +80,13 @@ struct FluxRootView: View {
         let wsUrlString = ProcessInfo.processInfo.environment["FLUX_WS_URL"]
             ?? (Bundle.main.object(forInfoDictionaryKey: "FLUX_WS_URL") as? String)
             ?? "ws://127.0.0.1:7331"
+        let model = ErrorModel()
         // Audit P2.34: never fatal on bad URL; fall back to loopback default.
         let wsUrl: URL
         if let parsed = URL(string: wsUrlString) {
             wsUrl = parsed
         } else {
-            errorModel.fluxError = FluxError(
+            model.fluxError = FluxError(
                 message: "Invalid FLUX_WS_URL: \(wsUrlString) — falling back to loopback",
                 kind: .invalidFrame,
                 span: nil
@@ -96,10 +97,11 @@ struct FluxRootView: View {
         _executor = State(initialValue: runtime)
         _connection = StateObject(wrappedValue: connection)
         _transport = State(initialValue: transport)
+        _errorModel = StateObject(wrappedValue: model)
         // Audit H10: wire executor faults into the error model so the overlay
         // re-renders when a fault occurs.
-        runtime.onError = { [weak errorModel] err in
-            DispatchQueue.main.async { errorModel?.fluxError = err }
+        runtime.onError = { [weak model] err in
+            DispatchQueue.main.async { model?.fluxError = err }
         }
     }
 
