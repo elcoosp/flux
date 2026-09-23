@@ -20,11 +20,12 @@ use flux_parser::{
     BinOp, Block, BlockItem, Expr, ExprKind, MatchArm, MatchPattern, MatchPatternKind,
 };
 use flux_syntax::opcode::raw;
-use flux_syntax::{PropIdx, SignalId, Span, StringId, Value};
+use flux_syntax::{PropIdx, SignalId, Span, StringId, TypeKind, Value};
 use flux_types::CapabilityIdl;
 use std::collections::HashSet;
 
 use crate::lower::error::LoweringError;
+use crate::lower::ids::{ExprNodeKind, expr_node_id};
 use crate::lower::prop_index_for_name;
 
 /// A string interner callback: maps a literal's concatenated text to its
@@ -34,6 +35,21 @@ type StringInterner<'a> = &'a mut dyn FnMut(&str) -> StringId;
 
 /// A signal name paired with its assigned [`SignalId`].
 type SignalScope = Vec<(String, SignalId)>;
+
+/// Bundles the two node-keyed lookup tables the emitter needs from the typed AST
+/// (T-103): resolved field positions (FLUX-072) and inferred expression types.
+/// Grouping them avoids exceeding CLI's parameter-count ceiling and keeps the
+/// lowering→emitter hand-off in one opaque bundle.
+#[derive(Clone, Copy, Debug)]
+pub struct IrMetadata<'a> {
+    /// Resolved field positions for `base.field` expressions, keyed by the
+    /// expression's [`NodeId`].
+    pub field_indices: &'a std::collections::HashMap<flux_syntax::NodeId, u16>,
+    /// Inferred types from the type checker (T-103), keyed by `NodeId` as
+    /// derived by [`expr_node_id`]. Drives typed opcode selection in
+    /// [`Emitter::compile_binary`].
+    pub expr_types: &'a std::collections::HashMap<flux_syntax::NodeId, TypeKind>,
+}
 
 /// Content-addressed hash of a thunk/handler closure body, used for
 /// `ClosureRef` interning. This must stay byte-identical to
@@ -85,7 +101,7 @@ pub fn compile_handler(
     body: &Block,
     scope: &SignalScope,
     constructors: &HashSet<String>,
-    field_indices: &std::collections::HashMap<flux_syntax::NodeId, u16>,
+    metadata: &IrMetadata<'_>,
     span: Span,
     str_interner: StringInterner<'_>,
 ) -> Result<(Vec<u8>, Vec<SignalId>), HandlerCompileError> {
@@ -94,7 +110,7 @@ pub fn compile_handler(
         &body.params,
         scope,
         constructors,
-        field_indices,
+        metadata,
         span,
         str_interner,
     )
@@ -109,11 +125,11 @@ pub fn compile_handler_with_params(
     params: &[flux_parser::Pattern],
     scope: &SignalScope,
     constructors: &HashSet<String>,
-    field_indices: &std::collections::HashMap<flux_syntax::NodeId, u16>,
+    metadata: &IrMetadata<'_>,
     span: Span,
     str_interner: StringInterner<'_>,
 ) -> Result<(Vec<u8>, Vec<SignalId>), HandlerCompileError> {
-    let mut emitter = Emitter::new(scope, constructors, field_indices, str_interner);
+    let mut emitter = Emitter::new(scope, constructors, metadata, str_interner);
     // A handler's first declared parameter is the event payload, delivered by
     // the host as `r0` (Appendix E: r0 is the entry payload; both native
     // `TextInput`/`Button` adapters dispatch `FluxEvent(payload)` into r0). Bind
@@ -187,11 +203,11 @@ pub(crate) type PropThunk = Result<(Vec<u8>, Vec<SignalId>, Vec<u16>), HandlerCo
 /// ```
 pub(crate) fn compile_prop_thunk(
     props: &[(PropIdx, &Expr)],
-    field_indices: &std::collections::HashMap<flux_syntax::NodeId, u16>,
+    metadata: &IrMetadata<'_>,
     scope: &SignalScope,
     str_interner: StringInterner<'_>,
 ) -> PropThunk {
-    let mut emitter = Emitter::for_thunk(scope, field_indices, str_interner);
+    let mut emitter = Emitter::for_thunk(scope, metadata, str_interner);
     let count = props.len() as u16;
     emitter.emit_alloc_record(1, count);
     let mut layout = Vec::with_capacity(props.len());
@@ -416,10 +432,7 @@ enum ArmTest {
     /// scrutinee's type tag equals `tag` AND the scrutinee equals `value`.
     /// This prevents `match n { 1 => A, 2 => B }` from compiling both arms
     /// to the same `MATCH_TAG` (which would always match the first arm).
-    TagAndValue {
-        tag: u32,
-        value: Expr,
-    },
+    TagAndValue { tag: u32, value: Expr },
 }
 
 /// Bytecode emitter: walks expressions, appends raw opcode bytes, and records
@@ -429,11 +442,8 @@ struct Emitter<'a> {
     /// Names of every in-scope ADT value constructor. Used to decide whether a
     /// `Name(args)` call lowers to a value record or a capability invocation.
     constructors: &'a HashSet<String>,
-    /// Resolved field positions for `base.field` expressions, keyed by the
-    /// expression's `NodeId`. Used to emit `GET_FIELD` with the positional index
-    /// the VM expects (records are stored as a positional `Vec<(PropIdx, Value)>`;
-    /// FLUX-072).
-    field_indices: &'a std::collections::HashMap<flux_syntax::NodeId, u16>,
+    /// IrMetadata: bundles field_indices (FLUX-072) and expr_types (T-103).
+    metadata: &'a IrMetadata<'a>,
     /// Locally-bound `let` names → register. Checked before the signal scope so
     /// `let x = …; … x …` reads the binding rather than a (non-existent) signal.
     locals: std::collections::HashMap<String, u8>,
@@ -459,13 +469,13 @@ impl<'a> Emitter<'a> {
     fn new(
         scope: &'a SignalScope,
         constructors: &'a HashSet<String>,
-        field_indices: &'a std::collections::HashMap<flux_syntax::NodeId, u16>,
+        metadata: &'a IrMetadata<'a>,
         str_interner: StringInterner<'a>,
     ) -> Self {
         Self {
             scope,
             constructors,
-            field_indices,
+            metadata,
             locals: std::collections::HashMap::new(),
             code: Vec::new(),
             captured: Vec::new(),
@@ -493,13 +503,13 @@ impl<'a> Emitter<'a> {
     /// receive an empty constructor set and no locals.
     fn for_thunk(
         scope: &'a SignalScope,
-        field_indices: &'a std::collections::HashMap<flux_syntax::NodeId, u16>,
+        metadata: &'a IrMetadata<'a>,
         str_interner: StringInterner<'a>,
     ) -> Self {
         Self {
             scope,
             constructors: empty_constructors(),
-            field_indices,
+            metadata,
             locals: std::collections::HashMap::new(),
             code: Vec::new(),
             captured: Vec::new(),
@@ -1100,9 +1110,9 @@ impl<'a> Emitter<'a> {
                     ExprKind::Int(_) => u32::from(Value::Int(0).tag()),
                     ExprKind::Bool(_) => u32::from(Value::Bool(false).tag()),
                     ExprKind::Float(_) => u32::from(Value::Float(0.0).tag()),
-                    ExprKind::Str(_) => u32::from(
-                        Value::Str(flux_syntax::StringId::from(0u32)).tag(),
-                    ),
+                    ExprKind::Str(_) => {
+                        u32::from(Value::Str(flux_syntax::StringId::from(0u32)).tag())
+                    }
                     other => {
                         return Err(HandlerCompileError::new(
                             format!("unsupported literal match pattern in handler: {other:?}"),
@@ -1363,43 +1373,89 @@ impl<'a> Emitter<'a> {
             ExprKind::Binary { op, lhs, rhs } => {
                 let a = self.compile_value(lhs)?;
                 let b = self.compile_value(rhs)?;
+                // T-103: select the opcode family from the type checker's
+                // inferred type of `lhs` (the operand), not from a syntactic
+                // heuristic.  When the type is absent (un-typed call site,
+                // e.g. `state = state + 1` where `state` was initialised with
+                // an Int default and never type-checked in-handler) fall back
+                // to the Int opcode — preserves backward compatibility.
+                let lhs_id = expr_node_id(lhs, ExprNodeKind::Primitive);
+                let operand_ty = self.metadata.expr_types.get(&lhs_id);
+                let is_float = matches!(operand_ty, Some(TypeKind::Float));
+
                 let dst = self.alloc_reg()?;
-                // `==` / `!=` over `Bool` operands compile to `BOOL_EQ` (the VM's
-                // `EQ_I64` only accepts integers; booleans would type-mismatch).
-                // `!=` negates the `BOOL_EQ` result via `NOT_BOOL`.
-                let is_bool_eq = matches!(op, BinOp::Eq | BinOp::Ne)
-                    && matches!(
-                        lhs.kind,
-                        ExprKind::Bool(_) | ExprKind::Field { .. } | ExprKind::Ident(_)
-                    )
-                    && matches!(
-                        rhs.kind,
-                        ExprKind::Bool(_) | ExprKind::Field { .. } | ExprKind::Ident(_)
-                    );
                 let opcode = match op {
-                    BinOp::Add => raw::ADD_I64,
-                    BinOp::Sub => raw::SUB_I64,
-                    BinOp::Mul => raw::MUL_I64,
-                    BinOp::Div => raw::DIV_I64,
-                    BinOp::Rem => raw::MOD_I64,
-                    BinOp::Eq => {
-                        if is_bool_eq {
-                            raw::BOOL_EQ
+                    BinOp::Add => match operand_ty {
+                        Some(TypeKind::Float) => raw::ADD_F64,
+                        Some(TypeKind::String) => raw::STR_CONCAT,
+                        _ => raw::ADD_I64,
+                    },
+                    BinOp::Sub => {
+                        if is_float {
+                            raw::SUB_F64
                         } else {
-                            raw::EQ_I64
+                            raw::SUB_I64
                         }
                     }
-                    BinOp::Ne => {
-                        if is_bool_eq {
-                            raw::BOOL_EQ
+                    BinOp::Mul => {
+                        if is_float {
+                            raw::MUL_F64
                         } else {
-                            raw::EQ_I64
+                            raw::MUL_I64
                         }
-                    } // equality with negated result
-                    BinOp::Lt => raw::LT_I64,
-                    BinOp::Gt => raw::GT_I64,
-                    BinOp::Le => raw::LTE_I64,
-                    BinOp::Ge => raw::GTE_I64,
+                    }
+                    BinOp::Div => {
+                        if is_float {
+                            raw::DIV_F64
+                        } else {
+                            raw::DIV_I64
+                        }
+                    }
+                    BinOp::Rem => raw::MOD_I64,
+                    BinOp::Eq => match operand_ty {
+                        Some(TypeKind::Float) => raw::EQ_F64,
+                        Some(TypeKind::Bool) => raw::BOOL_EQ,
+                        Some(TypeKind::String) => raw::STR_EQ,
+                        _ => raw::EQ_I64,
+                    },
+                    BinOp::Ne => match operand_ty {
+                        Some(TypeKind::Float) => raw::EQ_F64,
+                        Some(TypeKind::Bool) => raw::BOOL_EQ,
+                        Some(TypeKind::String) => raw::STR_EQ,
+                        _ => raw::EQ_I64,
+                    },
+                    BinOp::Lt => {
+                        if is_float {
+                            raw::LT_F64
+                        } else {
+                            raw::LT_I64
+                        }
+                    }
+                    BinOp::Gt => {
+                        if is_float {
+                            raw::GT_F64
+                        } else {
+                            raw::GT_I64
+                        }
+                    }
+                    // Float `<=`/`>=`: the ISA has no LTE_F64 / GTE_F64.
+                    // Emit the complementary comparison and negate with
+                    // NOT_BOOL (a <= b  ≡  !(a > b),  a >= b  ≡  !(a < b)).
+                    // See Appendix E §E.2 "ISA gap: missing Float <=/>= ops".
+                    BinOp::Le => {
+                        if is_float {
+                            raw::GT_F64
+                        } else {
+                            raw::LTE_I64
+                        }
+                    }
+                    BinOp::Ge => {
+                        if is_float {
+                            raw::LT_F64
+                        } else {
+                            raw::GTE_I64
+                        }
+                    }
                     BinOp::And => raw::AND_BOOL,
                     BinOp::Or => raw::OR_BOOL,
                     _ => {
@@ -1413,8 +1469,11 @@ impl<'a> Emitter<'a> {
                 self.code.push(dst);
                 self.code.push(a);
                 self.code.push(b);
-                if *op == BinOp::Ne {
-                    // Flip EQ result into a NEQ.
+                // `Ne` negates its `Eq` opcode; float `<=`/`>=` negate the
+                // complementary comparison (no LTE_F64/GTE_F64 in the ISA).
+                let negate =
+                    matches!(op, BinOp::Ne) || (is_float && matches!(op, BinOp::Le | BinOp::Ge));
+                if negate {
                     let negated = self.alloc_reg()?;
                     self.code.push(raw::NOT_BOOL);
                     self.code.push(negated);
@@ -1759,25 +1818,30 @@ mod tests {
     /// Builds a handler body with `n` sequential `sN = sN + 1` state declarations
     /// against distinct signals, to exercise the register allocator.
     fn build_handler_with_n_sequential_increments(n: usize) -> Vec<BlockItem> {
-        (0..n).map(|i| {
-            let name = format!("s{i}");
-            BlockItem::State(StateDecl {
-                name: Ident { name, span: span() },
-                ty: None,
-                init: Expr {
-                    kind: ExprKind::Binary {
-                        op: BinOp::Add,
-                        lhs: Box::new(Expr {
-                            kind: ExprKind::Ident(Ident { name: format!("s{i}"), span: span() }),
-                            span: span(),
-                        }),
-                        rhs: Box::new(int(1)),
+        (0..n)
+            .map(|i| {
+                let name = format!("s{i}");
+                BlockItem::State(StateDecl {
+                    name: Ident { name, span: span() },
+                    ty: None,
+                    init: Expr {
+                        kind: ExprKind::Binary {
+                            op: BinOp::Add,
+                            lhs: Box::new(Expr {
+                                kind: ExprKind::Ident(Ident {
+                                    name: format!("s{i}"),
+                                    span: span(),
+                                }),
+                                span: span(),
+                            }),
+                            rhs: Box::new(int(1)),
+                        },
+                        span: span(),
                     },
                     span: span(),
-                },
-                span: span(),
+                })
             })
-        }).collect()
+            .collect()
     }
 
     /// Scans bytecode for clobbered const loads: for each `LOAD_*_CONST rX`,
@@ -1791,14 +1855,22 @@ mod tests {
         // the three register operands (i+1, i+2, i+3) must not all equal the
         // same register (which would indicate clobbering).
         use flux_syntax::opcode::raw;
-        let arith = [raw::ADD_I64, raw::ADD_F64, raw::SUB_I64, raw::SUB_F64,
-                     raw::MUL_I64, raw::MUL_F64, raw::DIV_I64, raw::DIV_F64,
-                     raw::MOD_I64];
+        let arith = [
+            raw::ADD_I64,
+            raw::ADD_F64,
+            raw::SUB_I64,
+            raw::SUB_F64,
+            raw::MUL_I64,
+            raw::MUL_F64,
+            raw::DIV_I64,
+            raw::DIV_F64,
+            raw::MOD_I64,
+        ];
         for i in 0..code.len().saturating_sub(4) {
             if arith.contains(&code[i]) {
-                let dst = code[i+1];
-                let s1 = code[i+2];
-                let s2 = code[i+3];
+                let dst = code[i + 1];
+                let s1 = code[i + 2];
+                let s2 = code[i + 3];
                 // The constant must load into a DIFFERENT register than the
                 // READ_SIGNAL dst; otherwise the ADD sums a clobbered value.
                 assert!(
@@ -1900,7 +1972,10 @@ mod tests {
             &body,
             &count_scope(),
             &std::collections::HashSet::new(),
-            &std::collections::HashMap::new(),
+            &IrMetadata {
+                field_indices: &std::collections::HashMap::new(),
+                expr_types: &std::collections::HashMap::new(),
+            },
             span(),
             &mut |_s| StringTable::new().intern(_s),
         )
@@ -1961,7 +2036,7 @@ mod tests {
                             span: span(),
                         }),
                     },
-            span: span(),
+                    span: span(),
                 },
                 span: span(),
             },
@@ -1976,7 +2051,7 @@ mod tests {
                             span: span(),
                         }),
                     },
-            span: span(),
+                    span: span(),
                 },
                 span: span(),
             },
@@ -1997,7 +2072,10 @@ mod tests {
             &body,
             &scope,
             &std::collections::HashSet::new(),
-            &std::collections::HashMap::new(),
+            &IrMetadata {
+                field_indices: &std::collections::HashMap::new(),
+                expr_types: &std::collections::HashMap::new(),
+            },
             span(),
             &mut |_s| StringTable::new().intern(_s),
         )
@@ -2055,7 +2133,10 @@ mod tests {
         let mut table = StringTable::new();
         let (bytecode, deps, layout) = compile_prop_thunk(
             &[(prop_idx, &literal)],
-            &std::collections::HashMap::new(),
+            &IrMetadata {
+                field_indices: &std::collections::HashMap::new(),
+                expr_types: &std::collections::HashMap::new(),
+            },
             &count_scope(),
             &mut |s| table.intern(s),
         )
@@ -2110,7 +2191,10 @@ mod tests {
         let mut table = StringTable::new();
         let (bytecode, deps, _) = compile_prop_thunk(
             &[(flux_syntax::PropIdx::from(0u16), &literal)],
-            &std::collections::HashMap::new(),
+            &IrMetadata {
+                field_indices: &std::collections::HashMap::new(),
+                expr_types: &std::collections::HashMap::new(),
+            },
             &count_scope(),
             &mut |s| table.intern(s),
         )
@@ -2160,7 +2244,10 @@ mod tests {
             &body,
             &count_scope(),
             &std::collections::HashSet::new(),
-            &std::collections::HashMap::new(),
+            &IrMetadata {
+                field_indices: &std::collections::HashMap::new(),
+                expr_types: &std::collections::HashMap::new(),
+            },
             span(),
             &mut |_s| StringTable::new().intern(_s),
         )
@@ -2224,7 +2311,10 @@ mod tests {
             &body,
             &scope,
             &std::collections::HashSet::new(),
-            &std::collections::HashMap::new(),
+            &IrMetadata {
+                field_indices: &std::collections::HashMap::new(),
+                expr_types: &std::collections::HashMap::new(),
+            },
             span(),
             &mut |_s| StringTable::new().intern(_s),
         )
@@ -2247,7 +2337,11 @@ mod tests {
     fn twenty_sequential_statements_do_not_clobber_registers() {
         let n = 20;
         let items = build_handler_with_n_sequential_increments(n);
-        let body = Block { params: vec![], items, span: span() };
+        let body = Block {
+            params: vec![],
+            items,
+            span: span(),
+        };
         let scope: SignalScope = (0..n)
             .map(|i| (format!("s{i}"), SignalId::from(i as u32 + 1)))
             .collect();
@@ -2256,7 +2350,10 @@ mod tests {
             &[],
             &scope,
             &HashSet::new(),
-            &HashMap::new(),
+            &IrMetadata {
+                field_indices: &HashMap::new(),
+                expr_types: &HashMap::new(),
+            },
             span(),
             &mut |_s| StringTable::new().intern(_s),
         );
@@ -2317,7 +2414,10 @@ mod tests {
             &[],
             &scope,
             &HashSet::new(),
-            &HashMap::new(),
+            &IrMetadata {
+                field_indices: &HashMap::new(),
+                expr_types: &HashMap::new(),
+            },
             span(),
             &mut |_s| StringTable::new().intern(_s),
         );
@@ -2330,6 +2430,194 @@ mod tests {
         assert!(
             code.contains(&raw::MATCH_TAG),
             "literal match arms must emit MATCH_TAG for type gate: {code:?}"
+        );
+    }
+
+    #[test]
+    fn typed_opcode_selection_float_add_emits_add_f64() {
+        // `count + 1.0` where count: Float → ADD_F64, never ADD_I64.
+        // This verifies T-103: the opcode family is chosen from the type
+        // checker's inferred TypeKind, not a syntactic heuristic.
+        let lhs = ident("count");
+        let mut expr_types = HashMap::new();
+        expr_types.insert(expr_node_id(&lhs, ExprNodeKind::Primitive), TypeKind::Float);
+
+        let body = Block {
+            params: vec![],
+            items: vec![BlockItem::Expr(Expr {
+                kind: ExprKind::Binary {
+                    op: BinOp::Add,
+                    lhs: Box::new(lhs),
+                    rhs: Box::new(Expr {
+                        kind: ExprKind::Float(1.0),
+                        span: span(),
+                    }),
+                },
+                span: span(),
+            })],
+            span: span(),
+        };
+
+        let (bytecode, _) = compile_handler(
+            &body,
+            &count_scope(),
+            &std::collections::HashSet::new(),
+            &IrMetadata {
+                field_indices: &std::collections::HashMap::new(),
+                expr_types: &expr_types,
+            },
+            span(),
+            &mut |_s| StringTable::new().intern(_s),
+        )
+        .expect("compiles");
+
+        assert!(
+            bytecode.contains(&raw::ADD_F64),
+            "expected ADD_F64 for Float operands: {bytecode:?}"
+        );
+        assert!(
+            !bytecode.contains(&raw::ADD_I64),
+            "ADD_I64 must not appear for Float operands: {bytecode:?}"
+        );
+    }
+
+    #[test]
+    fn typed_opcode_selection_float_le_emits_gt_f64_plus_not_bool() {
+        // `count <= 1.0` where count: Float → GT_F64 + NOT_BOOL.
+        // Appendix E §E.2: the ISA has no LTE_F64, so `<=` is lowered to
+        // `!(a > b)` via GT_F64 followed by NOT_BOOL.
+        let lhs = ident("count");
+        let mut expr_types = HashMap::new();
+        expr_types.insert(expr_node_id(&lhs, ExprNodeKind::Primitive), TypeKind::Float);
+
+        let body = Block {
+            params: vec![],
+            items: vec![BlockItem::Expr(Expr {
+                kind: ExprKind::Binary {
+                    op: BinOp::Le,
+                    lhs: Box::new(lhs),
+                    rhs: Box::new(Expr {
+                        kind: ExprKind::Float(1.0),
+                        span: span(),
+                    }),
+                },
+                span: span(),
+            })],
+            span: span(),
+        };
+
+        let (bytecode, _) = compile_handler(
+            &body,
+            &count_scope(),
+            &std::collections::HashSet::new(),
+            &IrMetadata {
+                field_indices: &std::collections::HashMap::new(),
+                expr_types: &expr_types,
+            },
+            span(),
+            &mut |_s| StringTable::new().intern(_s),
+        )
+        .expect("compiles");
+
+        assert!(
+            bytecode.contains(&raw::GT_F64),
+            "expected GT_F64 for Float `<=`: {bytecode:?}"
+        );
+        assert!(
+            bytecode.contains(&raw::NOT_BOOL),
+            "expected NOT_BOOL to negate the GT_F64 result: {bytecode:?}"
+        );
+    }
+
+    #[test]
+    fn typed_opcode_selection_string_add_emits_str_concat() {
+        // `"a" + "b"` where lhs: String → STR_CONCAT, not ADD_I64 or ADD_F64.
+        let lhs = Expr {
+            kind: ExprKind::Str(vec![flux_parser::StrPart::Text("a".to_owned())]),
+            span: span(),
+        };
+        let mut expr_types = HashMap::new();
+        expr_types.insert(
+            expr_node_id(&lhs, ExprNodeKind::Primitive),
+            TypeKind::String,
+        );
+
+        let body = Block {
+            params: vec![],
+            items: vec![BlockItem::Expr(Expr {
+                kind: ExprKind::Binary {
+                    op: BinOp::Add,
+                    lhs: Box::new(lhs),
+                    rhs: Box::new(Expr {
+                        kind: ExprKind::Str(vec![flux_parser::StrPart::Text("b".to_owned())]),
+                        span: span(),
+                    }),
+                },
+                span: span(),
+            })],
+            span: span(),
+        };
+
+        let (bytecode, _) = compile_handler(
+            &body,
+            &count_scope(),
+            &std::collections::HashSet::new(),
+            &IrMetadata {
+                field_indices: &std::collections::HashMap::new(),
+                expr_types: &expr_types,
+            },
+            span(),
+            &mut |_s| StringTable::new().intern(_s),
+        )
+        .expect("compiles");
+
+        assert!(
+            bytecode.contains(&raw::STR_CONCAT),
+            "expected STR_CONCAT for String operands: {bytecode:?}"
+        );
+        assert!(
+            !bytecode.contains(&raw::ADD_I64),
+            "ADD_I64 must not appear for String operands: {bytecode:?}"
+        );
+        assert!(
+            !bytecode.contains(&raw::ADD_F64),
+            "ADD_F64 must not appear for String operands: {bytecode:?}"
+        );
+    }
+
+    #[test]
+    fn typed_opcode_selection_unknown_falls_back_to_int() {
+        // Without type info (empty expr_types map), `count + 1` falls back
+        // to ADD_I64 — preserves backward compatibility for untyped call sites.
+        let body = Block {
+            params: vec![],
+            items: vec![BlockItem::Expr(Expr {
+                kind: ExprKind::Binary {
+                    op: BinOp::Add,
+                    lhs: Box::new(ident("count")),
+                    rhs: Box::new(int(1)),
+                },
+                span: span(),
+            })],
+            span: span(),
+        };
+
+        let (bytecode, _) = compile_handler(
+            &body,
+            &count_scope(),
+            &std::collections::HashSet::new(),
+            &IrMetadata {
+                field_indices: &std::collections::HashMap::new(),
+                expr_types: &std::collections::HashMap::new(),
+            },
+            span(),
+            &mut |_s| StringTable::new().intern(_s),
+        )
+        .expect("compiles");
+
+        assert!(
+            bytecode.contains(&raw::ADD_I64),
+            "expected ADD_I64 fallback when type is absent: {bytecode:?}"
         );
     }
 }

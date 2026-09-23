@@ -61,7 +61,7 @@ use crate::arena::IRArena;
 use crate::builder::{ArenaBuilder, Node};
 use crate::closure::ClosureIR;
 use crate::instance::InstanceRegistry;
-use crate::lower::bytecode::{collect_read_signals, compile_prop_thunk, variant_tag};
+use crate::lower::bytecode::{IrMetadata, collect_read_signals, compile_prop_thunk, variant_tag};
 use ids::{ExprNodeKind, decl_node_id, expr_node_id};
 
 /// The fully lowered program.
@@ -305,7 +305,15 @@ impl<'a> Lowerer<'a> {
         let scope = &self.signal_scope;
         if !prop_exprs.is_empty() {
             let mut intern = |s: &str| self.builder.intern_string(s);
-            match compile_prop_thunk(prop_exprs, &self.typed.field_indices, scope, &mut intern) {
+            match compile_prop_thunk(
+                prop_exprs,
+                &IrMetadata {
+                    field_indices: &self.typed.field_indices,
+                    expr_types: &self.typed.types,
+                },
+                scope,
+                &mut intern,
+            ) {
                 Ok((bytecode, deps, layout)) => {
                     let thunk_id = self.next_handler();
                     let closure =
@@ -599,13 +607,8 @@ impl<'a> Lowerer<'a> {
                 // a key like `|t| t.id` marks the node dirty when `id` changes.
                 let mut deps = collect_read_signals(&[items_expr], &self.signal_scope);
                 deps.extend(collect_read_signals(&[key_expr], &self.signal_scope));
-                self.builder.signal_metadata(
-                    id,
-                    deps,
-                    None,
-                    Vec::new(),
-                    Some(item_slot),
-                );
+                self.builder
+                    .signal_metadata(id, deps, None, Vec::new(), Some(item_slot));
                 Ok(Child::Node(id))
             }
             flux_parser::ExprKind::When {
@@ -775,7 +778,11 @@ impl<'a> Lowerer<'a> {
 
         let node = Node {
             id,
-            kind: if is_user_compo { NodeKind::Component } else { NodeKind::Primitive },
+            kind: if is_user_compo {
+                NodeKind::Component
+            } else {
+                NodeKind::Primitive
+            },
             component_id,
             props,
             children,
@@ -890,7 +897,10 @@ impl<'a> Lowerer<'a> {
                     &pattern_params,
                     &self.signal_scope,
                     &self.record_ctors,
-                    &self.typed.field_indices,
+                    &IrMetadata {
+                        field_indices: &self.typed.field_indices,
+                        expr_types: &self.typed.types,
+                    },
                     expr.span,
                     &mut intern,
                 )?;

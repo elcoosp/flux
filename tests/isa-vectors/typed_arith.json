@@ -1,0 +1,20 @@
+{
+  "name": "typed_arith",
+  "description": "Float comparison (<=) lowers to GT_F64 + NOT_BOOL (T-103 typed opcode selection). Tests both branches: !(3.5>1.0)=false and !(1.0>3.5)=true.",
+  "bytecode_hex": "b1000000000000000c40b101000000000000f03f37020001420302b104000000000000f03fb1050000000000000c403706040542070600",
+  "initial_signals": [],
+  "payload": null,
+  "expected_signals": [],
+  "expected_registers": {
+    "r3": {
+      "type": "Bool",
+      "value": 0
+    },
+    "r7": {
+      "type": "Bool",
+      "value": 1
+    }
+  },
+  "expected_error": null,
+  "expected_gas_used": 8
+}
