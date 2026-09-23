@@ -54,11 +54,10 @@ impl IRArena {
         }
 
         // 2. Bottom-up pass: a parent-independent *local* content id per node, derived
-        //    from its own content and its children's local ids (recursive, acyclic).
+        //    from its own content and its children's local ids. Uses an explicit
+        //    stack (not recursion) so deep trees cannot overflow (audit P2.12 part a).
         let mut local_ids: AHashMap<NodeId, NodeId> = AHashMap::with_capacity(ids.len());
-        for &id in &ids {
-            compute_local_id(&mut local_ids, self, id);
-        }
+        compute_all_local_ids(&mut local_ids, self, &ids);
 
         // 3. Top-down pass: mix the parent's final id + this node's position into the
         //    final id. Parent is assigned before child, so this never cycles. Roots get
@@ -69,20 +68,7 @@ impl IRArena {
             .copied()
             .filter(|id| parent_of.get(id).copied().flatten().is_none())
             .collect();
-        for (root_slot, root) in roots.iter().enumerate() {
-            // Audit P2.20: roots all get parent=0, so identical roots
-            // would collapse to one id. Mix the root's index among the
-            // arena's root list into the hash (as position) to keep
-            // distinct roots distinct.
-            assign_final_id(
-                0,
-                root_slot as u64,
-                *root,
-                &local_ids,
-                &mut final_ids,
-                self,
-            );
-        }
+        assign_all_final_ids(&local_ids, &mut final_ids, self, &roots);
 
         // 4. Rebuild a fresh arena with remapped ids and remapped child references.
         let mut builder = ArenaBuilder::new();
@@ -130,86 +116,142 @@ impl IRArena {
     }
 }
 
-/// Bottom-up memoised computation of a node's *local* content id.
+/// Bottom-up memoised computation of every node's *local* content id.
 ///
-/// The local id folds the node's kind/component_id/prop hash and the local ids of
-/// its children (resolved recursively first), but NOT its parent or position — so
+/// The local id folds the node's kind/component_id/prop hash and the local ids
+/// of its children (resolved first), but NOT its parent or position — so
 /// identical subtrees share a local id. The top-down pass turns local ids into
 /// final, position-disambiguated ids.
-fn compute_local_id(local: &mut AHashMap<NodeId, NodeId>, arena: &IRArena, id: NodeId) -> NodeId {
-    if let Some(&cached) = local.get(&id) {
-        return cached;
+///
+/// Uses an explicit stack rather than recursion so deep trees cannot overflow
+/// the Rust call stack (audit P2.12 part a). A two-phase marker
+/// (`children_processed` bool) preserves post-order semantics: a node's local
+/// id is computed only after every descendant's local id is cached.
+fn compute_all_local_ids(local: &mut AHashMap<NodeId, NodeId>, arena: &IRArena, ids: &[NodeId]) {
+    // Stack entries: (node_id, children_have_been_processed).
+    // Phase 1 (false): push children that aren't cached yet, then re-push
+    // self with true. Phase 2 (true): all children are cached, compute self.
+    let mut stack: Vec<(NodeId, bool)> = ids.iter().map(|&id| (id, false)).collect();
+    while let Some((id, children_done)) = stack.pop() {
+        if local.contains_key(&id) {
+            continue;
+        }
+        if children_done {
+            let view = arena
+                .get(id)
+                .expect("node present during content addressing");
+            let remapped_children: Vec<Child> = view
+                .children()
+                .iter()
+                .map(|child| match child {
+                    Child::Node(cid) => Child::Node(
+                        *local
+                            .get(cid)
+                            .expect("child local id computed before parent"),
+                    ),
+                    Child::Splice { items } => Child::Splice {
+                        items: items
+                            .iter()
+                            .map(|(k, cid)| {
+                                (
+                                    *k,
+                                    *local
+                                        .get(cid)
+                                        .expect("spliced child local id computed before parent"),
+                                )
+                            })
+                            .collect(),
+                    },
+                    other => other.clone(),
+                })
+                .collect();
+            let children_hash = hash_children(&remapped_children);
+            let local_id = flux_syntax::content_addressed_id(
+                0,
+                view.kind().tag(),
+                view.component_id(),
+                view.props_hash(),
+                children_hash,
+                None,
+            );
+            local.insert(id, local_id);
+        } else {
+            stack.push((id, true));
+            if let Some(view) = arena.get(id) {
+                for child in &view.children() {
+                    match child {
+                        Child::Node(cid) => {
+                            if !local.contains_key(cid) {
+                                stack.push((*cid, false));
+                            }
+                        }
+                        Child::Splice { items } => {
+                            for (_, cid) in items {
+                                if !local.contains_key(cid) {
+                                    stack.push((*cid, false));
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
     }
-    let view = arena
-        .get(id)
-        .expect("node present during content addressing");
-    let remapped_children: Vec<Child> = view
-        .children()
-        .iter()
-        .map(|child| match child {
-            Child::Node(cid) => Child::Node(compute_local_id(local, arena, *cid)),
-            Child::Splice { items } => Child::Splice {
-                items: items
-                    .iter()
-                    .map(|(k, cid)| (*k, compute_local_id(local, arena, *cid)))
-                    .collect(),
-            },
-            other => other.clone(),
-        })
-        .collect();
-    let children_hash = hash_children(&remapped_children);
-    let local_id = flux_syntax::content_addressed_id(
-        0,
-        view.kind().tag(),
-        view.component_id(),
-        view.props_hash(),
-        children_hash,
-        None,
-    );
-    local.insert(id, local_id);
-    local_id
 }
 
-/// Top-down assignment of a node's *final* content id by mixing in its parent's
-/// final id and its own position (index among the parent's children, or the
-/// `ForEach` splice key for spliced items).
+/// Top-down assignment of every node's *final* content id by mixing in its
+/// parent's final id and its own position (index among the parent's children, or
+/// the `ForEach` splice key for spliced items).
 ///
 /// Runs parent-before-child, so `parent_final` is always already known — the
-/// recursion never revisits the parent and therefore cannot cycle.
-fn assign_final_id(
-    parent_final: NodeId,
-    position: u64,
-    id: NodeId,
+/// stack-based traversal never revisits the parent and therefore cannot cycle.
+/// Uses an explicit stack rather than recursion (audit P2.12 part a). Roots
+/// receive `parent_final = 0` and `position = root_slot` so distinct roots
+/// (audit P2.20) remain distinct even when structurally identical.
+fn assign_all_final_ids(
     local: &AHashMap<NodeId, NodeId>,
     final_ids: &mut AHashMap<NodeId, NodeId>,
     arena: &IRArena,
+    roots: &[NodeId],
 ) {
-    let view = arena
-        .get(id)
-        .expect("node present during content addressing");
-    let children_local = remap_children(&view.children(), local);
-    let children_hash = hash_children(&children_local);
-    let final_id = flux_syntax::content_addressed_id(
-        parent_final,
-        view.kind().tag(),
-        view.component_id(),
-        view.props_hash(),
-        children_hash,
-        Some(position),
-    );
-    final_ids.insert(id, final_id);
+    // Stack entries: (parent_final_id, position, node_id).
+    let mut stack: Vec<(NodeId, u64, NodeId)> = Vec::with_capacity(roots.len() * 2);
+    for (root_slot, root) in roots.iter().enumerate() {
+        stack.push((0, root_slot as u64, *root));
+    }
+    while let Some((parent_final, position, id)) = stack.pop() {
+        let view = arena
+            .get(id)
+            .expect("node present during content addressing");
+        let children_local = remap_children(&view.children(), local);
+        let children_hash = hash_children(&children_local);
+        let final_id = flux_syntax::content_addressed_id(
+            parent_final,
+            view.kind().tag(),
+            view.component_id(),
+            view.props_hash(),
+            children_hash,
+            Some(position),
+        );
+        final_ids.insert(id, final_id);
 
-    for (pos, child) in view.children().iter().enumerate() {
-        match child {
-            Child::Node(cid) => {
-                assign_final_id(final_id, pos as u64, *cid, local, final_ids, arena)
-            }
-            Child::Splice { items } => {
-                for (k, cid) in items {
-                    assign_final_id(final_id, *k, *cid, local, final_ids, arena);
+        // Collect children, then push in reverse so they are processed in
+        // original left-to-right order by the LIFO stack.
+        let mut children: Vec<(u64, NodeId)> = Vec::new();
+        for (pos, child) in view.children().iter().enumerate() {
+            match child {
+                Child::Node(cid) => children.push((pos as u64, *cid)),
+                Child::Splice { items } => {
+                    for (k, cid) in items {
+                        children.push((*k, *cid));
+                    }
                 }
+                _ => {}
             }
-            _ => {}
+        }
+        for (pos, cid) in children.into_iter().rev() {
+            stack.push((final_id, pos, cid));
         }
     }
 }
