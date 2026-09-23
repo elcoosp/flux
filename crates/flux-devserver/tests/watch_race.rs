@@ -153,11 +153,10 @@ async fn client_never_sees_delta_before_init_during_burst() {
     let init = Frame::from_init_bytes(&init_bytes).expect("decodes as Init");
     let mut last_seq = init.seq;
     let mut received_delta = false;
-    let mut frames = Vec::new();
-    {
+    let frames = {
         // Collect all remaining frames in a single blocking task so `client`
         // is moved exactly once.
-        frames = tokio::task::spawn_blocking(move || {
+        tokio::task::spawn_blocking(move || {
             let mut out = Vec::new();
             for _ in 0..10 {
                 match next_frame(&mut client, Duration::from_secs(2)) {
@@ -168,8 +167,8 @@ async fn client_never_sees_delta_before_init_during_burst() {
             out
         })
         .await
-        .expect("read task");
-    }
+        .expect("read task")
+    };
     for frame in &frames {
         if frame_type(frame) == Some(FRAME_DELTA) {
             received_delta = true;
