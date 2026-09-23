@@ -138,7 +138,7 @@ pub(crate) fn run_with(
         };
         let file_name = match platform {
             Platform::Ios => format!("{root_comp_name}App.{}", platform.source_extension()),
-            Platform::Android => format!("{stem}.kt", stem = stem_owned),
+            Platform::Android => "MainActivity.kt".to_owned(),
         };
         let out = out_dir.join(&file_name);
         std::fs::write(&out, app_code)
