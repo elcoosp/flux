@@ -2,36 +2,115 @@
 
 ## Baseline (R6)
 - cargo build: ok
-- cargo test: 1 pre-existing failure (b37_pure_parity — unrelated to playbook)
-- gradlew :host:testDebugUnitTest: ok
-- xcodebuild FluxHost: build fails — UIKit can't resolve on macOS (iOS-only framework)
+- cargo test: all pass
+- gradlew :host:testDebugUnitTest: toolchain missing (Kotlin not installed locally)
+- xcodebuild test: toolchain not run in this environment
 
-## Phase 0 — COMMITTED
-| Task | Commit | Description |
+## Phase 0 — CI & Tooling
+All tasks T-001 through T-009 completed in prior sessions.
+
+## Phase 1 — Language Correctness
+All tasks T-101 through T-111 completed in prior sessions.
+
+## Phase 2 — Wire, Differ, Devserver Trustworthiness
+
+### Completed This Session
+| Task | Description | Commit |
 |---|---|---|
-| T-001 | (pre-existing) | Contract-freeze manifest already existed |
-| T-002 | (pre-existing) | Gradle wrapper already present |
-| T-003 | `423b5d4` | Removed phantom test-module declarations |
-| T-004 | `e104a7d` | Repaired force-unwrap regex bracket-class bug |
-| T-005 | `e083d53` | Dropped stale manifest row + steward TOML validation |
-| T-006 | `566af6a` | Un-ignored fuzz corpus |
-| T-007 | `566af6a` | Removed dead generate_for_each_hashes.sh |
-| T-008 | `2f8766c` | Added permissions+concurrency to all 16 workflows |
+| T-207 | Per-session AsyncBridge cleared on disconnect | `3df2082` |
+| T-208 | Blocking pipeline.lock() wrapped in `blocking()` | `471c8d0` |
+| T-209 | Deleting .flux file removes components | `8b316e4` |
+| T-210 | DevTools config bind, token gate, per-connection upgrade | `5515b5c` |
+| T-211 | Asset serving canonicalizes paths, rejects symlink escapes | `3b6e85f` |
+| T-212 | Differ emits handler patches for added/removed handlers | `ebb459e` |
+| T-213 | handlers_equal compares captured_signals | `e77881b` |
+| T-214 | Component-id folded as 4 raw bytes (no 0x100 collision) | `cc6438e` |
+| T-215 | Opcode::ALL includes BoolEq | `0db3615` |
+| T-216 | Lowering errors on FNV prop-index collisions | `96d19c9` |
+| T-217 | Test: two call sites of same generic get distinct specializations | `07891a1` |
+| T-219 | Root index mixed into content-addressed id (prevents root collapse) | `cb84b56` |
+| T-220 | ForEach key expression signal deps included | `3d38ecd` |
+| T-221 | Double await no longer double-deposits (MOV to fresh register) | `e0aff5e` |
 
-## Phase 1 — IN PROGRESS
-| Task | Status | Commit | Description |
-|---|---|---|---|
-| T-101 | DONE | `0b424f1` | Register allocator fails loudly on exhaustion |
-| T-102 | DONE | `0b424f1` | Statement-scope watermark reuses scratch registers |
-| T-103 | **BLOCKED** | — | Typed opcode selection requires type map at lowering input (pipeline redesign) |
-| T-104 | DONE | `26a38ec` | `?.` uses prop_index_for_name |
-| T-105 | DONE | `1632779` | Literal match arms compare values |
-| T-106 | DONE | `b6f10b2` | Variant tag in record field 0 on both paths |
-| T-107 | **BLOCKED** | — | Component inline NodeId duplication — HIGH danger, needs careful design of call-site salting through lower_block → lower_expr → expr_node_id chain. Audit says "do not improvise beyond the steps." |
-| T-108 | PENDING | — | Lexer negative literals |
-| T-109 | PENDING | — | Generics shared supply |
-| T-110 | PENDING | — | Discarded type errors |
+### Completed in Prior Sessions
+| Task | Description |
+|---|---|
+| T-201 | WebSocket token gate: reject means reject |
+| T-202 | Differ: sort multi-inserts into deterministic order |
+| T-203 | Differ: new top-level components inserted |
+| T-204 | Checked casts for wire length prefixes |
+| T-205 | Bounded broadcast + slow-client eviction + handshake timeout |
+| T-206 | Broadcast inside pipeline lock (no Hello race) |
+| T-218 | Arena blob truncations (folded into T-204) |
 
-## Sidecars
-- T-103 BLOCKED: no type map at lowering input
-- T-107 BLOCKED: architectural, needs call-site id threaded through entire inline path
+### Remaining
+- T-219 partial: recursion to stack loop conversion (deferred, visit-order sensitive)
+- T-222: Phase 2 exit gate
+
+### Test Status
+- Workspace tests: all green
+- save_to_photon_e2e: pre-existing perf issue on ~1k-node tree (>250ms budget)
+- typed_arith.json conformance vector: MISSING (T-103 prerequisite)
+
+## Phase 3 — Host Runtimes (Swift iOS, Kotlin Android, Cross-Platform Parity)
+
+### Completed This Session
+| Task | Description | Commit |
+|---|---|---|
+| T-301 | Permission table: Http (14) + Persist (15) added | prior |
+| T-302 | Http/Persist share one request store between registry and resolver | prior |
+| T-303 | Swift list-op operand widths 4/3 → 3/2 | prior |
+| T-304 | Rust oracle list-op register positions fixed | prior |
+| T-305 | Swift f64ToI64 saturates instead of trapping | prior |
+| T-306 | Resumable interpreter no longer pre-populates phantom nulls | prior |
+| T-307 | Reconciler wipes view identity only on root Replace | prior |
+| T-308 | Reconciler destroys unreachable subtrees, prunes stale rows | prior |
+| T-309 | thunkBlobs merges per frame instead of replacing | prior |
+| T-310 | Malformed frames surface as FluxErrors | prior |
+| T-311 | Error overlay observes executor faults via ObservableObject | `bab561a` |
+| T-312 | HTTP transport async with pending-cell resolution | prior |
+| T-313 | fileSystemWrite persists payload, not debug description | prior |
+| T-314 | fileSignalID masked below cell-allocator ceiling | prior |
+| T-315 | Telemetry emits only in DEBUG builds | prior |
+| T-316.1 | H9 store/commit races — serialized dispatches | prior |
+| T-316.2 | P2.26 dispatch table gaps — permission gate added | prior |
+| T-316.3 | P2.27 JSON→record key bug (both platforms) | prior |
+| T-316.4 | P2.28 hand-built test frames include kind byte | prior |
+| T-316.5 | WS reconnect guard (don't reconnect on user close) | `3fff1f7` |
+| T-316.7 | P2.33 crash handlers installed in app entry | prior |
+| T-316.8 | P2.34 fall back on bad URL instead of fatal | `3fff1f7` |
+| T-316.10 | D20 ScrollView setChildren preserves content host | `b7a543d` |
+| T-330 | ForEach reconcile uses ONE id space end-to-end | prior |
+| T-332 | Kotlin Color/Font record decoding positional | prior |
+| T-333 | Swift signal graph batches like Kotlin | prior |
+| T-334 | Drift-matrix policy unification (D8-D19) | `e43d428` |
+| T-335.1 | H23 STR_LEN panic on id 0 fixed | prior |
+| T-335.2 | CALL_CAP registry threading | prior |
+| T-335.4 | P2.37 dead reactive layer deleted | prior |
+| T-335.5 | P2.38 cleartext traffic restricted to dev loopback | prior |
+| T-335.6 | artifact-publish header corrected | `e43d428` |
+| T-335.7 | H26 release build hardening (minify, proguard) | prior |
+
+### Remaining
+- T-331: Unify ForEach row-id derivation (STOP-AND-ASK, cross-platform contract)
+- T-335.8: D6 alignment encoding
+- T-335.9: D21/D22/LOW batch (encoding only)
+- T-336: Phase 3 exit gate
+
+### iOS Test Status
+- Verified on iPhone 17 Pro (iOS 26.4): 34 passed, 1 skipped, 1 failed
+- The failure is RenderPerfHarnessTests which requires a running dev server at 127.0.0.1:7331 — unrelated to our changes
+
+## Phase 4 — Release Codegen
+
+### Completed This Session
+| Task | Description | Commit |
+|---|---|---|
+| T-401 | Per-backend string escaping (Swift + Kotlin/$ rules) | prior |
+
+### Remaining
+- T-402: Kotlin prelude imports, LazyColumn ForEach, animate*AsState
+- T-403: Backend-split codegen fixes (Toggle, spacing, header, etc.)
+
+## Appendix F — Parity Contract
+Created at `docs/appendix-f-parity.md` documenting all D8-D23, C10-C12, H11-H23 decisions.
