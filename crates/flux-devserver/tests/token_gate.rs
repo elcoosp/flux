@@ -8,8 +8,6 @@
 //! The fix registers the client only after a successful Hello. This test
 //! simulates a rejected client and asserts it receives zero broadcast frames.
 
-use std::time::Duration;
-
 /// Verifies that the session module's `serve_client` does not register a
 /// client before handshake completion. We can't easily drive a raw TCP
 /// client in a unit test, so we verify the structural invariant directly:
