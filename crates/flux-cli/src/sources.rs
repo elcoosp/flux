@@ -42,10 +42,9 @@ fn collect_into(dir: &Path, out: &mut Vec<(PathBuf, String)>) -> std::io::Result
             match fs::read_to_string(&path) {
                 Ok(source) => out.push((path, source)),
                 Err(error) => {
-                    return Err(anyhow::anyhow!(
-                        "cannot read source file {}: {}",
-                        path.display(),
-                        error
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("cannot read source file {}: {}", path.display(), error),
                     ));
                 }
             }
