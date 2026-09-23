@@ -222,6 +222,7 @@ pub const DEFAULT_DEVTOOLS_PORT: u16 = 7333;
 /// `token` gates the WebSocket upgrade: when `Some`, the client must present a
 /// matching `?token=<value>` query parameter, otherwise the connection is
 /// rejected with HTTP 401 (audit P2.3).
+#[allow(clippy::result_large_err)]
 pub async fn serve_devtools(
     addr: std::net::SocketAddr,
     router: std::sync::Arc<parking_lot::Mutex<DevToolsRouter>>,
