@@ -35,7 +35,7 @@ All tasks T-101 through T-111 completed.
 | T-215 | Opcode::ALL includes BoolEq | `0db3615` |
 | T-216 | Lowering errors on FNV prop-index collisions | `96d19c9` |
 | T-217 | Test: two call sites of same generic get distinct specializations | `07891a1` |
-| T-219 | Root index mixed into content-addressed id (prevents root collapse) | `cb84b56` |
+| T-219 | Content-addressed id recursion → explicit stack loops (T-219 part a) + root-slot mixing (part b) | `cb84b56` + `e2f9bbc4` |
 | T-220 | ForEach key expression signal deps included | `3d38ecd` |
 | T-221 | Double await no longer double-deposits (MOV to fresh register) | `e0aff5e` |
 
@@ -51,8 +51,17 @@ All tasks T-101 through T-111 completed.
 | T-218 | Arena blob truncations (folded into T-204) |
 
 ### Remaining
-- T-219 partial: recursion to stack loop conversion (deferred, visit-order sensitive)
 - T-222: Phase 2 exit gate
+
+### SIDECAR (T-222 — unfuzzed decoders, Phase 6 hygiene T-606)
+- `crates/flux-ir-serde/src/frame.rs`: no fuzz target for `TelemetryFrame` decode
+- `crates/flux-ir-serde/src/frame.rs`: no fuzz target for `DebugCommandFrame` decode
+- `crates/flux-ir-serde/src/frame.rs`: no fuzz target for `AwaitSuspend`/`Resume` frame decode
+- `crates/flux-ir-serde/src/frame.rs`: no fuzz target for `DispatchReport` decode
+- `crates/flux-ir-serde/src/frame.rs`: no fuzz target for `HostAnnounce` decode
+- `crates/flux-ir-serde/src/wire/string_entry.rs`: no fuzz target for intern-string frame decode
+- `crates/flux-ir-serde/src/wire/value.rs`: no fuzz target for `decode_value_blob`
+- `crates/flux-ir/src/arena/blob.rs`: no fuzz target for `validate_bytecode`
 
 ### Test Status
 - Workspace tests: all green
