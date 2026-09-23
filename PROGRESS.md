@@ -10,7 +10,14 @@
 All tasks T-001 through T-009 completed in prior sessions.
 
 ## Phase 1 — Language Correctness
-All tasks T-101 through T-111 completed in prior sessions.
+All tasks T-101 through T-111 completed.
+
+### Completed This Session
+| Task | Description | Commit |
+|---|---|---|
+| T-103 | Typed opcode selection from checker-recorded types (IrMetadata, Float/Str/Bool dispatch) | `ee53055e` |
+| T-107 | Salt inlined component NodeIds with call-site parent id (expr_node_id_salted) | `e334face` |
+| T-111 | Phase 1 exit gate (workspace build + tests green, conformance vectors present) | `e334face` |
 
 ## Phase 2 — Wire, Differ, Devserver Trustworthiness
 
@@ -50,7 +57,6 @@ All tasks T-101 through T-111 completed in prior sessions.
 ### Test Status
 - Workspace tests: all green
 - save_to_photon_e2e: pre-existing perf issue on ~1k-node tree (>250ms budget)
-- typed_arith.json conformance vector: MISSING (T-103 prerequisite)
 
 ## Phase 3 — Host Runtimes (Swift iOS, Kotlin Android, Cross-Platform Parity)
 
