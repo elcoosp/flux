@@ -1,0 +1,29 @@
+name: stdlib-contract
+
+# T-503: Audit stdlib prop declarations against adapter kit readers.
+# Catches drift between stdlib .flux compo decls and the Kotlin/Swift
+# adapters — props declared but unread, or read but undeclared.
+
+on:
+  pull_request:
+    paths:
+      - 'stdlib/**'
+      - 'adapters/ui-kotlin/src/main/**'
+      - 'adapters/ui-swift/Sources/**'
+      - 'scripts/check-stdlib-props.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stdlib-contract-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run stdlib-prop contract audit
+        run: python3 scripts/check-stdlib-props.py

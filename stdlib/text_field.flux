@@ -4,10 +4,8 @@
 //   text           String          controlled value, defaults to ""
 //   onChangeText   Handler         fired on every text change (RN TextInput verb)
 //   placeholder    Option[String]  hint text, defaults to None
-//   ref            Option[Ref[TextInput]] native view handle, defaults to None
 //   enabled        Bool            editable, defaults to true
 //   secureTextEntry Bool           password masking, defaults to false
-//   keyboardType   Option[KeyboardType] soft keyboard flavor, defaults to None
 //
 // The `= ""` / `= true` / `= false` / `= None` defaults encode Appendix F.5's
 // optional props. `prop_decl` carries an optional `"=" expr` default
@@ -21,9 +19,7 @@ compo TextInput(
   text: String = "",
   onChangeText: Handler,
   placeholder: Option[String] = None,
-  ref: Option[Ref[TextInput]] = None,
   enabled: Bool = true,
   secureTextEntry: Bool = false,
-  keyboardType: Option[KeyboardType] = None,
 )
   // Adapter leaf — native rendering defined by Appendix F.5.

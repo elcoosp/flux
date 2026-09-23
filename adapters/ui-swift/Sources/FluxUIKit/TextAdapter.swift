@@ -15,7 +15,6 @@ import UIKit
 /// - `color: Option[Color]`
 /// - `alignment: Option[Alignment]`
 /// - `maxLines: Option[Int]`
-/// - `overflow: Option[Overflow]`
 public final class TextAdapter: FluxAdapter {
     public typealias View = UILabel
     weak var executor: (any FluxExecutor)?

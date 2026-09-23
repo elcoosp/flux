@@ -35,7 +35,7 @@ public object PropsIndex {
     public val TEXT_COLOR: UShort = propIndexForName("color")
     public val TEXT_ALIGNMENT: UShort = propIndexForName("alignment")
     public val TEXT_MAX_LINES: UShort = propIndexForName("maxLines")
-    public val TEXT_OVERFLOW: UShort = propIndexForName("overflow")
+    // overflow removed — T-503: declared in stdlib but read by neither kit.
 
     // Button (F.2)
     public val BUTTON_TEXT: UShort = propIndexForName("text")
@@ -69,10 +69,9 @@ public object PropsIndex {
     public val TEXT_INPUT_TEXT: UShort = propIndexForName("text")
     public val TEXT_INPUT_ON_CHANGE_TEXT: UShort = propIndexForName("onChangeText")
     public val TEXT_INPUT_PLACEHOLDER: UShort = propIndexForName("placeholder")
-    public val TEXT_INPUT_REF: UShort = propIndexForName("ref")
     public val TEXT_INPUT_ENABLED: UShort = propIndexForName("enabled")
     public val TEXT_INPUT_SECURE_TEXT_ENTRY: UShort = propIndexForName("secureTextEntry")
-    public val TEXT_INPUT_KEYBOARD_TYPE: UShort = propIndexForName("keyboardType")
+    // keyboardType removed — T-503: declared in stdlib but read by neither kit.
 
     // Font sub-record
     public val FONT_SIZE: UShort = propIndexForName("size")

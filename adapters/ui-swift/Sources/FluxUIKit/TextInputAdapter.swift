@@ -13,10 +13,9 @@ import UIKit
 //  - `text: String = ""` (controlled value)
 //  - `onChangeText: Handler`
 //  - `placeholder: Option[String]`
-//  - `ref: Option[Ref]` (unused in dev; the view itself is the ref)
 //  - `enabled: Bool = true`
 //  - `secureTextEntry: Bool = false`
-//  - `keyboardType: Option[String]`
+//
 //
 //  Editing changes dispatch `onChangeText` with the new text as the payload, so
 //  the runtime's handler can write the bound signal. A `UITextFieldDelegate`
