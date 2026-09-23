@@ -77,6 +77,15 @@ fn next_frame(client: &mut Client, timeout: Duration) -> Option<Vec<u8>> {
     None
 }
 
+/// Sends a `Hello` handshake (required before any other frame) and returns the
+/// `Init` reply. The server's `serve_client` loop ignores all non-Hello frames
+/// before the handshake completes (§3.10, brittleness 4a).
+fn handshake(client: &mut Client) -> Option<Vec<u8>> {
+    let hello = Frame::hello("test", "test", &[]).to_bytes();
+    client.send(Message::Binary(hello.into())).expect("send Hello");
+    next_frame(client, Duration::from_secs(5))
+}
+
 /// Sends an `InternString` request for `text` and decodes the reply.
 fn intern(client: &mut Client, text: &str) -> StringInternedFrame {
     let request = Frame::intern_string(text.as_bytes()).to_bytes();
@@ -101,6 +110,7 @@ async fn intern_string_returns_a_stable_canonical_id() {
 
     tokio::task::spawn_blocking(move || {
         let mut client = connect_client(addr);
+        handshake(&mut client);
         let first = intern(&mut client, "host-generated-label");
         assert!(
             first.id < STRING_ID_CANONICAL_CEILING,
@@ -135,12 +145,14 @@ async fn intern_string_is_shared_across_sessions() {
 
     tokio::task::spawn_blocking(move || {
         let mut first_client = connect_client(addr);
+        handshake(&mut first_client);
         let id = intern(&mut first_client, "shared-label").id;
         drop(first_client);
 
         // The string table is global to the server, so a second host resolves
         // the same text to the same canonical id.
         let mut second_client = connect_client(addr);
+        handshake(&mut second_client);
         assert_eq!(
             intern(&mut second_client, "shared-label").id,
             id,
@@ -161,6 +173,7 @@ async fn a_string_already_in_the_tree_resolves_to_its_arena_id() {
 
     tokio::task::spawn_blocking(move || {
         let mut client = connect_client(addr);
+        handshake(&mut client);
         // `tap` is a literal in the compiled source. The server keeps a single
         // canonical id per distinct string: interning the same literal through
         // the live API must return the same id — it must never mint a second
@@ -197,6 +210,7 @@ async fn a_silent_client_does_not_block_another_session() {
         let _silent = connect_client(addr);
 
         let mut active = connect_client(addr);
+        handshake(&mut active);
         let started = Instant::now();
         let id = intern(&mut active, "still-served").id;
         assert!(id < STRING_ID_CANONICAL_CEILING);
