@@ -62,7 +62,7 @@ use crate::builder::{ArenaBuilder, Node};
 use crate::closure::ClosureIR;
 use crate::instance::InstanceRegistry;
 use crate::lower::bytecode::{IrMetadata, collect_read_signals, compile_prop_thunk, variant_tag};
-use ids::{ExprNodeKind, decl_node_id, expr_node_id};
+use ids::{ExprNodeKind, decl_node_id, expr_node_id_salted};
 
 /// The fully lowered program.
 ///
@@ -192,6 +192,12 @@ struct Lowerer<'a> {
     /// Audit P2.9: prop-index registry so FNV collisions are detected
     /// at compile time instead of silently overwriting SET_FIELD slots.
     prop_indices: std::collections::HashMap<u16, String>,
+    /// When set, the NodeId of the call-site expression whose inlined
+    /// component body we are currently lowering. Mixed into every
+    /// `expr_node_id` derivation so two inlinings of the same body
+    /// produce distinct child ids (audit C6 — without it the arena
+    /// silently keeps only the last).
+    inline_salt: Option<NodeId>,
 }
 
 impl<'a> Lowerer<'a> {
@@ -211,6 +217,7 @@ impl<'a> Lowerer<'a> {
             record_ctors: std::collections::HashSet::new(),
             component_decls: std::collections::HashMap::new(),
             prop_indices: std::collections::HashMap::new(),
+            inline_salt: None,
         }
     }
 
@@ -504,7 +511,7 @@ impl<'a> Lowerer<'a> {
                 then_block,
                 else_branch,
             } => {
-                let id = expr_node_id(expr, ExprNodeKind::If);
+                let id = expr_node_id_salted(expr, ExprNodeKind::If, self.inline_salt);
                 let mut children = Vec::with_capacity(2);
                 children.extend(self.lower_block(then_block, owner)?);
                 if let Some(other) = else_branch {
@@ -538,7 +545,7 @@ impl<'a> Lowerer<'a> {
                 key: key_expr,
                 body,
             } => {
-                let id = expr_node_id(expr, ExprNodeKind::ForEach);
+                let id = expr_node_id_salted(expr, ExprNodeKind::ForEach, self.inline_salt);
                 // Real ForEach lowering (FLUX-072 / ADR-0050): lower the loop
                 // body into the child nodes that the host reconciles per item.
                 // The `item` binding is a runtime-scoped variable supplied by the
@@ -620,7 +627,7 @@ impl<'a> Lowerer<'a> {
                 // codegen layer renders it as `if/else` (spec FR-011). Lowering
                 // emits an `If` node whose children are the two branches'
                 // UI producers.
-                let id = expr_node_id(expr, ExprNodeKind::If);
+                let id = expr_node_id_salted(expr, ExprNodeKind::If, self.inline_salt);
                 let mut children = Vec::with_capacity(2);
                 children.extend(self.lower_block(then_block, owner)?);
                 if let Some(other) = otherwise {
@@ -640,7 +647,7 @@ impl<'a> Lowerer<'a> {
                 Ok(Child::Node(id))
             }
             flux_parser::ExprKind::Match { scrutinee, arms } => {
-                let id = expr_node_id(expr, ExprNodeKind::Match);
+                let id = expr_node_id_salted(expr, ExprNodeKind::Match, self.inline_salt);
                 let mut children = Vec::with_capacity(arms.len());
                 for arm in arms {
                     children.push(self.lower_expr(&arm.body, owner)?);
@@ -685,7 +692,7 @@ impl<'a> Lowerer<'a> {
             }
         };
 
-        let id = expr_node_id(expr, ExprNodeKind::Primitive);
+        let id = expr_node_id_salted(expr, ExprNodeKind::Primitive, self.inline_salt);
         // A call to a generic component resolves to its *specialised* name
         // (`Counter[Int]` → `Counter_Int`) so each instantiation gets its own
         // `ComponentId` and the release backends emit one native type per
@@ -710,7 +717,7 @@ impl<'a> Lowerer<'a> {
         // path when inlining isn't possible.
         let inline_children = if is_user_compo {
             let comp = self.component_decls.get(&interned).unwrap().clone();
-            self.try_inline_component(&comp, args, trailing, owner)?
+            self.try_inline_component(&comp, args, trailing, owner, id)?
         } else {
             None
         };
@@ -810,6 +817,7 @@ impl<'a> Lowerer<'a> {
         args: &[flux_parser::Arg],
         trailing: Option<&flux_parser::Block>,
         owner: ComponentId,
+        call_site_id: NodeId,
     ) -> Result<Option<Vec<Child>>, LoweringError> {
         // Map prop name → argument expression.
         let mut arg_by_prop: std::collections::HashMap<String, &flux_parser::Expr> =
@@ -857,7 +865,14 @@ impl<'a> Lowerer<'a> {
         for (name, sig) in &bindings {
             self.signal_scope.push((name.clone(), *sig));
         }
+        // Salt every child id with the call-site's own NodeId so two
+        // instantiations of the same component body don't alias in the
+        // arena (audit C6). The call-site id is the `id` computed for the
+        // `ComponentCall` node in `lower_call` — passed here as `owner`.
+        let saved_salt = self.inline_salt;
+        self.inline_salt = Some(call_site_id);
         let children = self.lower_block(&comp.body, owner)?;
+        self.inline_salt = saved_salt;
         for _ in &bindings {
             self.signal_scope.pop();
         }
@@ -1048,5 +1063,27 @@ mod tests {
         // Verify the free function maps both to the same idx.
         assert_eq!(prop_index_for_name("foo"), prop_index_for_name(&collision));
         assert_ne!("foo", collision);
+    }
+
+    /// Two inlined bodies of the same component must produce distinct
+    /// NodeIds for the same child expression (audit C6). Without the
+    /// call-site salt, `expr_node_id` derives identical ids from identical
+    /// spans and the arena silently drops one.
+    #[test]
+    fn inlined_component_bodies_get_distinct_ids_per_call_site() {
+        let src = "compo Row(label: String)\n  Text(label)\n\ncompo App\n  state a: String = \"x\"\n  state b: String = \"y\"\n  Row(label: a)\n  Row(label: b)\n";
+        let ast = flux_parser::parse(src, 0, "test.flux").expect("parses");
+        let typed = flux_types::type_check(&ast).expect("well-typed");
+        let lowered = lower(&ast, &typed).expect("lowers");
+
+        let mut ids: Vec<NodeId> = lowered.arena.all_ids().collect();
+        let mut unique = std::collections::BTreeSet::new();
+        for id in &ids {
+            assert!(unique.insert(*id), "duplicate NodeId {id:#x} in arena");
+        }
+        // With two Row inlinings, each containing a Text child, we expect
+        // at least: 2 component decls + 1 App component + 2 Row call-sites
+        // + 2 inlined Text nodes = 7 distinct ids.
+        assert!(ids.len() >= 7, "expected >= 7 nodes, got {}", ids.len());
     }
 }

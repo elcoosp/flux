@@ -64,5 +64,21 @@ pub(crate) fn decl_node_id(decl: &Decl) -> NodeId {
 /// lowered statically.
 #[must_use]
 pub(crate) fn expr_node_id(expr: &Expr, _kind: ExprNodeKind) -> NodeId {
-    compute_node_id(0, ExprTag(EXPR_TAG), expr.span, None)
+    expr_node_id_salted(expr, _kind, None)
+}
+
+/// Salted variant: `salt` (a call-site [`NodeId`]) is mixed into the parent
+/// field of the ID derivation.
+///
+/// `compute_node_id` folds the `parent` bytes into the FNV-1a-32 digest, so
+/// distinct salts produce distinct IDs for the same `(tag, span, key)` tuple.
+/// This is what lets two inlinings of the same component body occupy
+/// separate arena slots instead of silently aliasing each other (audit C6).
+#[must_use]
+pub(crate) fn expr_node_id_salted(
+    expr: &Expr,
+    _kind: ExprNodeKind,
+    salt: Option<NodeId>,
+) -> NodeId {
+    compute_node_id(salt.unwrap_or(0), ExprTag(EXPR_TAG), expr.span, None)
 }
