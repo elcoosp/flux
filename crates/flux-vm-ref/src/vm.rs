@@ -225,6 +225,23 @@ impl CapabilityRegistry {
             ],
         }
     }
+
+    /// Creates an empty registry for tests that inject custom capability fakes (T-335.2).
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+        }
+    }
+
+    /// Registers a capability implementation for `(cap_id, method_id)`.
+    ///
+    /// Later registrations take precedence (mirrors the `lookup` reverse-order
+    /// behavior), so fakes can shadow the parity stubs without removing them.
+    pub fn register(&mut self, cap_id: u32, method_id: u16, impl_: CapabilityImpl) -> &mut Self {
+        self.entries.push((cap_id, method_id, impl_));
+        self
+    }
 }
 
 /// v1 parity stub: `Camera.take(arg)` writes `arg[0]` into signal 99 and returns 99.
@@ -297,8 +314,9 @@ pub fn run_resumable(
     )
 }
 
-/// Audit T-335.2: run_resumable with an explicit capability registry (for conformance tests).
-pub(crate) fn run_resumable_with_registry(
+/// Audit T-335.2: exposed for conformance tests that need to inject a custom
+/// capability registry.
+pub fn run_resumable_with_registry(
     bytecode: &[u8],
     signals: &mut impl SignalStore,
     strings: &StringTable,
@@ -358,8 +376,9 @@ pub fn resume(
     )
 }
 
-/// Audit T-335.2: resume with an explicit capability registry (for conformance tests).
-pub(crate) fn resume_with_registry(
+/// Audit T-335.2: exposed for conformance tests that need to inject a custom
+/// capability registry.
+pub fn resume_with_registry(
     state: SuspendState,
     signals: &mut impl SignalStore,
     strings: &StringTable,
@@ -862,8 +881,10 @@ pub fn run(
     )
 }
 
-/// Audit T-335.2: run with an explicit capability registry (for conformance tests).
-pub(crate) fn run_with_registry(
+/// Audit T-335.2: exposed for conformance tests that need to inject a custom
+/// capability registry (e.g. real fakes instead of the parity stubs). Existing
+/// callers use the public [`run`] which defaults to [`CapabilityRegistry::with_parity_stubs`].
+pub fn run_with_registry(
     bytecode: &[u8],
     signals: &mut impl SignalStore,
     strings: &StringTable,

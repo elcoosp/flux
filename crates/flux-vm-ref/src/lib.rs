@@ -33,7 +33,8 @@ pub use decode::{Instruction, decode_program};
 pub use error::{VmError, VmErrorKind};
 pub use vm::{
     CapabilityImpl, CapabilityRegistry, CellState, InMemorySignals, RunResult, SignalStore,
-    SuspendState, VmOutcome, resume, run, run_resumable,
+    SuspendState, VmOutcome, resume, resume_with_registry, run, run_resumable,
+    run_resumable_with_registry, run_with_registry,
 };
 
 #[cfg(test)]

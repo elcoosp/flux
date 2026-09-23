@@ -5,8 +5,10 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use flux_syntax::{PropIdx, StringId, StringTable, Value};
-use flux_vm_ref::{InMemorySignals, SignalStore, VmErrorKind, run};
+use flux_syntax::{PropIdx, SignalId, StringId, StringTable, Value};
+use flux_vm_ref::{
+    CapabilityRegistry, InMemorySignals, SignalStore, VmErrorKind, run, run_with_registry,
+};
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -285,4 +287,54 @@ fn all_isa_vectors_pass() {
         failed.join("\n")
     );
     eprintln!("conformance: {passed}/{} vectors passed", vectors.len());
+}
+
+#[test]
+fn custom_registry_injects_real_capability_fake() {
+    // T-335.2: a conformance test that injects a real capability fake via
+    // `run_with_registry`, proving CALL_CAP dispatches to a caller-supplied
+    // registry rather than the hardcoded parity stubs.
+    //
+    // Bytecode:
+    //   LOAD_INT_CONST r0, 77   ; B0 00 <77 as i64 LE>
+    //   CALL_CAP  r1, cap=42, method=1, args=r0  ; 90 01 <42 u32 LE> <1 u16 LE> 00
+    //   HALT                     ; 00
+    let bytecode = vec![
+        0xB0, 0x00, 0x4D, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // LOAD_INT_CONST r0, 77
+        0x90, 0x01, 0x2A, 0x00, 0x00, 0x00, 0x01, 0x00,
+        0x00, // CALL_CAP r1, cap=42, m=1, args=r0
+        0x00, // HALT
+    ];
+
+    // Real fake: cap 42, method 1 — writes the incoming arg to signal 200
+    // and returns 200 as the result-cell id.
+    fn fake_cap(
+        _cap_id: u32,
+        _method_id: u16,
+        args: &Value,
+        signals: &mut dyn SignalStore,
+    ) -> SignalId {
+        signals.write(200, args.clone());
+        200
+    }
+
+    let mut registry = CapabilityRegistry::new();
+    registry.register(42, 1, fake_cap);
+
+    let mut signals = InMemorySignals::default();
+    let out = run_with_registry(
+        &bytecode,
+        &mut signals,
+        &StringTable::new(),
+        Value::Null,
+        &registry,
+    )
+    .expect("CALL_CAP with injected registry must run");
+
+    // The result-cell id (200) lands in r1.
+    assert_eq!(out.registers[1], Value::Int(200));
+    // The fake wrote the argument (77) into signal 200.
+    assert_eq!(signals.read(200), Some(Value::Int(77)));
+    // Gas: LOAD_INT_CONST + CALL_CAP = 2 (HALT is free).
+    assert_eq!(out.gas_used, 2);
 }
