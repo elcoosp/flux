@@ -306,6 +306,7 @@ pub fn normalize_view_name(name: &str) -> String {
         "Box" => "Stack",
         "LazyVerticalGrid" => "Grid",
         "Scaffold" => "SafeArea",
+        "Switch" => "Toggle",
         other => other,
     }
     .to_owned()
