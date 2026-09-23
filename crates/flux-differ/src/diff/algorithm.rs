@@ -4,7 +4,7 @@ use super::tree::*;
 
 use ahash::{AHashMap, AHashSet};
 use flux_ir::IRArena;
-use flux_syntax::{NodeId, Patch};
+use flux_syntax::{Child, NodeId, NodeKind, Patch, Span};
 
 /// Computes the minimal [`Patch`] stream transforming `old` into `new`.
 ///
@@ -262,18 +262,18 @@ mod tests {
         let old = build_tree(1, NodeKind::Component, &[]);
         let mut b = ArenaBuilder::new();
         b.pack(Node {
-            id: NodeId::from(1),
+            id: NodeId::from(1u32),
             kind: NodeKind::Component,
-            component_id: ComponentId::from(1),
+            component_id: ComponentId::from(1u32),
             props: Props::from_fields(vec![]),
             children: vec![],
             handlers: vec![],
             span: Span::new(0, 0, 10),
         });
         b.pack(Node {
-            id: NodeId::from(2),
+            id: NodeId::from(2u32),
             kind: NodeKind::Component,
-            component_id: ComponentId::from(2),
+            component_id: ComponentId::from(2u32),
             props: Props::from_fields(vec![]),
             children: vec![],
             handlers: vec![],
@@ -299,7 +299,7 @@ fn is_root_of_new(new: &flux_ir::IRArena, id: &NodeId) -> bool {
 
 /// Audit C9: the stable synthetic wrapper id for multi-root Init frames.
 fn synthetic_root_id() -> NodeId {
-    flux_syntax::compute_node_id(0, NodeKind::Component, Span::new(0, 0, 0), None)
+    flux_ir::compute_node_id(0, NodeKind::Component, Span::new(0, 0, 0), None)
 }
 
 /// Audit C9: the index of `id` among the new tree's roots.
