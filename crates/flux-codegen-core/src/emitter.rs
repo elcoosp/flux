@@ -96,6 +96,13 @@ impl<'a, B: Backend> Emitter<'a, B> {
             if node.kind() != flux_syntax::NodeKind::Component {
                 continue;
             }
+            // Skip component *call* nodes: their IDs are expression-tagged
+            // (ExprTag) and are emitted inline by `emit_node` when the parent
+            // component's body is traversed. Only emit the *declaration* nodes
+            // (DeclTag IDs that the bridge recognises).
+            if self.bridge.component(id).is_none() {
+                continue;
+            }
             if !(first && self.bridge.types().is_empty()) {
                 self.out.push('\n');
             }
@@ -208,14 +215,14 @@ impl<'a, B: Backend> Emitter<'a, B> {
         };
         match node.kind() {
             flux_syntax::NodeKind::Component => {
+                // A `NodeKind::Component` can be either a component *declaration*
+                // (its ID is a `DeclTag` ID that the bridge recognises) or a
+                // component *call* (its ID is an `ExprTag` ID that the bridge
+                // doesn't store). For a call, fall back to the arena's
+                // `component_names` table — keyed by `ComponentId` — to recover
+                // the callee name (e.g. `Profile`).
                 if let Some(comp) = self.bridge.component(id) {
                     let name = &comp.name.name;
-                    // A specialised (monomorphised) call site carries the
-                    // specialised component id in `component_names`, which is the
-                    // name the host actually reconciles (e.g. `Counter_Int`). When
-                    // the id maps to a distinct name, use it; otherwise fall back
-                    // to the generic source name. This is what makes
-                    // `Counter(initial: 0)` emit `Counter_Int()` (roadmap Phase 1).
                     let resolved = self
                         .lowered
                         .component_names
@@ -223,6 +230,17 @@ impl<'a, B: Backend> Emitter<'a, B> {
                         .find(|(cid, _)| *cid == node.component_id())
                         .map(|(_, n)| n.clone())
                         .unwrap_or_else(|| name.to_owned());
+                    self.line(indent, &format!("{resolved}()"));
+                } else if let Some(node) = self.lowered.arena.get(id) {
+                    // Component call site: resolve the name from the interned
+                    // component_names table keyed by ComponentId.
+                    let resolved = self
+                        .lowered
+                        .component_names
+                        .iter()
+                        .find(|(cid, _)| *cid == node.component_id())
+                        .map(|(_, n)| n.clone())
+                        .unwrap_or_else(|| format!("FluxComponent_{}", id));
                     self.line(indent, &format!("{resolved}()"));
                 }
             }
@@ -648,9 +666,13 @@ impl<'a, B: Backend> Emitter<'a, B> {
         let start_destination = match node {
             Some(n) => {
                 let route_idx = flux_ir::lower::prop_index_for_name("initialRouteName");
-                let route = n.props().get(route_idx)
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|| "home".to_string());
+                // Audit T-403.7: resolve the route string through the arena's
+                // string table instead of `Value::to_string()` (which does not
+                // exist — interned strings are `StringId`, not `Display`).
+                let route = n
+                    .props()
+                    .get_str(route_idx, &self.lowered.arena.string_table())
+                    .unwrap_or("home");
                 format!("\"{}\"", route)
             }
             None => "\"home\"".to_string(),
