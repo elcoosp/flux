@@ -4,7 +4,8 @@
 //  Each test hand-builds a byte vector matching the normative layout in the
 //  spec and asserts the decoded `FluxFrame`/`FluxValue`/`ShadowNode`. There is
 //  no shared binary fixture directory for the wire layer, so these are explicit
-//  round-trip constructions that pin the byte contract.
+//  round-trip constructions that pin the byte contract. The shared
+//  `fixtures/wire/*.bin` binaries (FLUX-083) are loaded via `FLUX_WIRE_FIXTURES`.
 
 import XCTest
 
@@ -282,11 +283,11 @@ final class WireDecodeTests: XCTestCase {
 
     /// The committed `fixtures/wire/unsupported-version.bin` (FLUX-083) is a v2
     /// Init frame with version byte `0x03` — rejected by every host decoder.
-    /// Runs only when the fixture directory is supplied (wire CI).
+    /// Loads the fixture from `FLUX_WIRE_FIXTURES` (set in project.yml).
     func testSharedUnsupportedVersionFixtureRejected() throws {
         let env = ProcessInfo.processInfo.environment["FLUX_WIRE_FIXTURES"]
-        try XCTSkipIf(env == nil, "FLUX_WIRE_FIXTURES not set; fixture runs in wire CI")
-        let url = URL(fileURLWithPath: env!, isDirectory: true)
+            ?? "../../fixtures/wire"
+        let url = URL(fileURLWithPath: env, isDirectory: true)
             .appendingPathComponent("unsupported-version.bin")
         let bytes = try Data(contentsOf: url)
         XCTAssertEqual(bytes[4], 0x03, "fixture must carry unsupported version 3")
@@ -295,6 +296,30 @@ final class WireDecodeTests: XCTestCase {
         XCTAssertThrowsError(try FrameDeserializer.decode(frame)) { error in
             XCTAssertTrue(error is WireError, "shared fixture must surface as WireError")
         }
+    }
+
+    /// FLUX-083: decode the committed `init_v2.bin` fixture.
+    func testInitV2FixtureDecodes() throws {
+        let env = ProcessInfo.processInfo.environment["FLUX_WIRE_FIXTURES"]
+            ?? "../../fixtures/wire"
+        let url = URL(fileURLWithPath: env, isDirectory: true)
+            .appendingPathComponent("init_v2.bin")
+        let bytes = try Data(contentsOf: url)
+        let frame = [UInt8](bytes)
+        let decoded = try FrameDeserializer.decode(frame)
+        XCTAssertNotNil(decoded.root, "init_v2 must have a root node")
+    }
+
+    /// FLUX-083: decode the committed `delta_v2.bin` fixture.
+    func testDeltaV2FixtureDecodes() throws {
+        let env = ProcessInfo.processInfo.environment["FLUX_WIRE_FIXTURES"]
+            ?? "../../fixtures/wire"
+        let url = URL(fileURLWithPath: env, isDirectory: true)
+            .appendingPathComponent("delta_v2.bin")
+        let bytes = try Data(contentsOf: url)
+        let frame = [UInt8](bytes)
+        let decoded = try FrameDeserializer.decode(frame)
+        XCTAssertFalse(decoded.patches.isEmpty(), "delta_v2 must carry patches")
     }
 
     /// `InternString` (0x07) and `StringInterned` (0x08) decode to control

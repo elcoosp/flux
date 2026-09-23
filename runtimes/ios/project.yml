@@ -87,6 +87,7 @@ targets:
         # resolves to the repo-root `tests/isa-vectors` (read-only, shared with
         # the Rust reference VM and the Kotlin VM).
         FLUX_ISA_VECTORS: "$(SRCROOT)/../../tests/isa-vectors"
+        FLUX_WIRE_FIXTURES: "$(SRCROOT)/../../fixtures/wire"
     sources:
       - path: Tests
         createIntermediateGroups: true
