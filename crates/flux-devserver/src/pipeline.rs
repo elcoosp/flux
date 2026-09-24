@@ -765,9 +765,21 @@ impl Pipeline {
     ) -> Vec<u8> {
         let root = root_node(arena);
         let extra_nodes = flatten_extra_nodes(&root, arena);
-        tracing::debug!("build_init root id={} kind={:?} component_id={} extra={}", root.id, root.kind, root.component_id, extra_nodes.len());
+        tracing::debug!(
+            "build_init root id={} kind={:?} component_id={} extra={}",
+            root.id,
+            root.kind,
+            root.component_id,
+            extra_nodes.len()
+        );
         for (i, n) in extra_nodes.iter().enumerate() {
-            tracing::debug!("build_init extra[{}] id={} kind={:?} component_id={}", i, n.id, n.kind, n.component_id);
+            tracing::debug!(
+                "build_init extra[{}] id={} kind={:?} component_id={}",
+                i,
+                n.id,
+                n.kind,
+                n.component_id
+            );
         }
         let source_map = self.source_map();
         let signal_meta = signal_meta_for(arena);
@@ -1321,9 +1333,15 @@ mod tests {
         pipeline.remove_file(file_id_b);
 
         // Recompile: only A's components should reach the codegen store.
-        pipeline.compile().expect("recompile after deletion succeeds");
+        pipeline
+            .compile()
+            .expect("recompile after deletion succeeds");
         let sources = pipeline.compiled_sources();
-        assert_eq!(sources.len(), 1, "only surviving file reaches codegen store");
+        assert_eq!(
+            sources.len(),
+            1,
+            "only surviving file reaches codegen store"
+        );
         assert_eq!(
             sources[0].0,
             Path::new("/tmp/project/a.flux"),
