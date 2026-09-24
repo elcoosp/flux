@@ -38,3 +38,23 @@ silently drift from the encoder.
 ```sh
 cargo test -p flux-ir-serde --test round_trip unsupported_protocol_version
 ```
+
+## Three-decoder gate (T-505)
+
+Every committed fixture must decode identically (or fail-closed identically)
+across all three host decoders. The gate script runs each decoder's fixture
+test and exits non-zero on any mismatch:
+
+```sh
+bash scripts/wire-fixtures-gate.sh
+```
+
+| Decoder | Test | Fixture path |
+|---|---|---|
+| Rust `flux-ir-serde` | `fixtures_golden.rs` | `fixtures/wire/*.bin` |
+| Kotlin `FrameDeserializer` | `FrameDeserializerTest` (host) + `WireFixtureContractTest` (app) | `FLUX_WIRE_FIXTURES` env or classpath |
+| Swift `FrameDeserializer` | `WireDecodeTests` | `FLUX_WIRE_FIXTURES` env or `../../fixtures/wire` |
+
+A decoder whose toolchain is absent is reported as `SKIP`, not a failure.
+At least one decoder must run; if none can, the script exits 0 with a `SKIP`
+notice.
