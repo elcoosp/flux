@@ -162,7 +162,9 @@ impl DevServer {
             let router = std::sync::Arc::clone(&shared.devtools_router);
             let token = config.auth_token().map(str::to_owned);
             async move {
-                if let Err(e) = crate::debug_bridge::serve_devtools(devtools_addr, router, token).await {
+                if let Err(e) =
+                    crate::debug_bridge::serve_devtools(devtools_addr, router, token).await
+                {
                     tracing::warn!(error = %e, "devtools endpoint stopped");
                 }
             }
