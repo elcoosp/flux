@@ -82,7 +82,9 @@ fn next_frame(client: &mut Client, timeout: Duration) -> Option<Vec<u8>> {
 /// before the handshake completes (§3.10, brittleness 4a).
 fn handshake(client: &mut Client) -> Option<Vec<u8>> {
     let hello = Frame::hello("test", "test", &[]).to_bytes();
-    client.send(Message::Binary(hello.into())).expect("send Hello");
+    client
+        .send(Message::Binary(hello.into()))
+        .expect("send Hello");
     next_frame(client, Duration::from_secs(5))
 }
 
