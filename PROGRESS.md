@@ -110,8 +110,8 @@ All tasks T-101 through T-111 completed.
 | T-335.9 | D21/D22 Appendix F documentation (image cache, string-id ranges) | docs-only |
 
 ### Remaining
-- T-331: Unify ForEach row-id derivation (STOP-AND-ASK, cross-platform contract) — NEEDS DECISION
-- T-336: Phase 3 exit gate (blocked on T-331)
+| T-331 | Unify ForEach row-id derivation — IMPLEMENTED + VERIFIED cross-platform (Rust ✓, Swift ✓, Kotlin ✓) | `4393b9fe` |
+| T-336 | Phase 3 exit gate (unblocked by T-331) | pending |
 
 ### iOS Test Status
 - Verified on iPhone 17 Pro (iOS 26.4): 34 passed, 1 skipped, 1 failed
