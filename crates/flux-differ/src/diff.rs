@@ -78,7 +78,7 @@ mod emit_tests {
         let mut new = flux_ir::IRArena::new();
         new.add_closure(flux_ir::ClosureIR::new(
             hid,
-            vec![0x01, 0x02], // same bytecode
+            vec![0x01, 0x02],            // same bytecode
             vec![SignalId::from(20u32)], // different captured signals
             Span::new(0, 0, 0),
         ));
