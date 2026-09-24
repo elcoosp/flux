@@ -7,9 +7,9 @@
 //! `text` is excluded because codegen renders it positionally or as a child
 //! Text node — it never survives as a named arg in generated source.
 
+use flux_parity::ViewNode;
 use flux_parity::compile;
 use flux_parity::from_ast;
-use flux_parity::ViewNode;
 
 /// Helper: find the first Primitive node with the given name in a subtree
 /// and return its props.
