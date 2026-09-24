@@ -53,6 +53,9 @@ public sealed interface FluxValue {
         /** Integer field at [index], or `null`. */
         public fun getInt(index: UShort): kotlin.Long? = (get(index) as? Int)?.value
 
+        /** Int value at the record's positional [slot], or `null`. (audit D6) */
+        public fun intAt(slot: kotlin.Int): kotlin.Long? = (fields.getOrNull(slot)?.value as? FluxValue.Int)?.value
+
         /** Boolean field at [index], or [default] when absent/mistyped. */
         public fun getBool(
             index: UShort,

@@ -15,7 +15,6 @@ import org.junit.jupiter.api.Test
  * marker bits so it can never collide with a real server node id (< 0x8000_0000).
  */
 class ForEachIdDerivationTest {
-
     private val tree: ShadowTree = ShadowTree(AdapterRegistry.fromStringTable(emptyList()))
 
     /** Parses the frozen vector file and returns the list of vector objects. */
@@ -32,12 +31,17 @@ class ForEachIdDerivationTest {
         for (v in loadVectors()) {
             val inp = v.getJSONObject("input")
             val foreachId = inp.getLong("foreach_id").toUInt()
-            val rowIndex = inp.getLong("row_index").toLong().toULong()
-            val expected = v.getString("row_id").toUInt(16).toUInt()
+            val seed =
+                if (inp.has("splice_key")) {
+                    inp.getLong("splice_key").toULong()
+                } else {
+                    inp.getLong("row_index").toULong()
+                }
+            val expected = v.getString("row_id").removePrefix("0x").toUInt(16)
 
-            val got = tree.deriveForEachRowId(foreachId, rowIndex)
+            val got = tree.deriveForEachRowId(foreachId, seed)
 
-            assertEquals(expected, got, "row_id mismatch for input=${v}")
+            assertEquals(expected, got, "row_id mismatch for input=$v")
         }
     }
 
@@ -46,14 +50,19 @@ class ForEachIdDerivationTest {
         for (v in loadVectors()) {
             val inp = v.getJSONObject("input")
             val foreachId = inp.getLong("foreach_id").toUInt()
-            val rowIndex = inp.getLong("row_index").toLong().toULong()
+            val seed =
+                if (inp.has("splice_key")) {
+                    inp.getLong("splice_key").toULong()
+                } else {
+                    inp.getLong("row_index").toULong()
+                }
             val origId = inp.getLong("orig_id").toUInt()
-            val expected = v.getString("child_id").toUInt(16).toUInt()
+            val expected = v.getString("child_id").removePrefix("0x").toUInt(16)
 
-            val rowId = tree.deriveForEachRowId(foreachId, rowIndex)
+            val rowId = tree.deriveForEachRowId(foreachId, seed)
             val got = tree.deriveForEachChildId(rowId, origId)
 
-            assertEquals(expected, got, "child_id mismatch for input=${v}")
+            assertEquals(expected, got, "child_id mismatch for input=$v")
         }
     }
 
@@ -63,24 +72,29 @@ class ForEachIdDerivationTest {
             val inp = v.getJSONObject("input")
             if (!inp.has("splice_key")) continue
             val foreachId = inp.getLong("foreach_id").toUInt()
-            val key = inp.getLong("splice_key").toLong().toULong()
+            val key = inp.getLong("splice_key").toULong()
             val origId = inp.getLong("orig_id").toUInt()
-            val expected = v.getString("key_child_id").toUInt(16).toUInt()
+            val expected = v.getString("key_child_id").removePrefix("0x").toUInt(16)
 
             val rowId = tree.deriveForEachRowId(foreachId, key)
             val got = tree.deriveForEachKeyChild(rowId, key)
 
-            assertEquals(expected, got, "key_child_id mismatch for input=${v}")
+            assertEquals(expected, got, "key_child_id mismatch for input=$v")
         }
     }
 
     @Test
-    fun `collision guard: all derived ids carry marker bits`() {
+    fun `collision guard - all derived ids carry marker bits`() {
         // Test over the frozen vectors AND additional random-ish inputs.
-        val inputs = listOf(
-            1u to 0uL, 1u to 1uL, 1u to 42uL, 20u to 1uL, 20u to 0uL,
-            0xFFFFFFFFu to 0xFFFFFFFFuL,
-        )
+        val inputs =
+            listOf(
+                1u to 0uL,
+                1u to 1uL,
+                1u to 42uL,
+                20u to 1uL,
+                20u to 0uL,
+                0xFFFFFFFFu to 0xFFFFFFFFuL,
+            )
         for ((fid, seed) in inputs) {
             val rowId = tree.deriveForEachRowId(fid, seed)
             assert(rowId and 0x8000_0000u != 0u) { "row id missing marker: 0x${rowId.toString(16)}" }

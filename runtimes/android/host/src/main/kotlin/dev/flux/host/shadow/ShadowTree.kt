@@ -7,10 +7,10 @@ import dev.flux.host.vm.FluxBytecodeVM
 import dev.flux.host.vm.FluxValue
 import dev.flux.host.vm.StringResolver
 import dev.flux.host.vm.VmResult
-import dev.flux.host.wire.ClosureRef
-import dev.flux.host.wire.FluxFrame
 import dev.flux.host.vm.debug.TelemetryBridge
 import dev.flux.host.vm.debug.TelemetryEvent
+import dev.flux.host.wire.ClosureRef
+import dev.flux.host.wire.FluxFrame
 import dev.flux.host.wire.NodeSignalMeta
 import dev.flux.host.wire.Patch
 import dev.flux.host.wire.PropDiff
@@ -75,10 +75,13 @@ public class ShadowTree(
 ) {
     internal val nodes = LinkedHashMap<UInt, ShadowNode>()
     internal val parents = LinkedHashMap<UInt, UInt>()
+
     /** Per-frame clones of expanded ForEach row `WireNode`s, keyed by derived id. */
     private val expandedIndex = LinkedHashMap<UInt, WireNode>()
+
     /** Expansion-time `signalMeta` overrides for derived ForEach row ids. */
     internal val signalMetaOverride = LinkedHashMap<UInt, NodeSignalMeta>()
+
     /**
      * Per-row (itemSlot, element) captured so a handler tap inside a ForEach row
      * can re-seed the shared `itemSlot` before the VM reads it — removing the
@@ -86,10 +89,12 @@ public class ShadowTree(
      * `forEachRowContext`.
      */
     internal val forEachRowContext = LinkedHashMap<UInt, Pair<UInt, FluxValue>>()
+
     /** Template row `WireNode` for each ForEach node id, captured at build time so
      * [reconcileForEach] can re-expand rows on list-signal change without a frame.
      */
     private val forEachTemplate = LinkedHashMap<UInt, WireNode>()
+
     /** Per-ForEach splice key seeds (one per list element, or empty when
      * the splice is anonymous), captured at build time so
      * [reconcileForEach] can re-derive the same row ids on a list-signal
@@ -97,6 +102,7 @@ public class ShadowTree(
      */
     private val forEachSpliceKeys = LinkedHashMap<UInt, List<ULong>>()
     internal var root: ShadowNode? = null
+
     /** Snapshot of the Init frame's wire index, stored so [reconcileForEach]
      * can deep-clone ForEach template children with per-row derived ids
      * (FLUX-092). */
@@ -598,14 +604,15 @@ public class ShadowTree(
                 // subtree). Re-key the built ShadowNode from oldId to newId instead
                 // of tearing it down and rebuilding (which would reset state).
                 val wire = patch.node ?: return
-                val existing = nodes.remove(patch.oldId) ?: run {
-                    // No live instance to preserve: build the replacement fresh
-                    // rather than going blank.
-                    val built = build(wire, patchIndex + (wire.id to wire), executor, depth = 0u)
-                    nodes[built.id] = built
-                    collect(built)
-                    return
-                }
+                val existing =
+                    nodes.remove(patch.oldId) ?: run {
+                        // No live instance to preserve: build the replacement fresh
+                        // rather than going blank.
+                        val built = build(wire, patchIndex + (wire.id to wire), executor, depth = 0u)
+                        nodes[built.id] = built
+                        collect(built)
+                        return
+                    }
                 // Re-key the SAME live instance from oldId to newId so its signal
                 // state, refs and scroll/focus survive (ShadowNode is a class with
                 // an immutable `id`, so we re-key the map entry, not the node).
@@ -682,11 +689,12 @@ public class ShadowTree(
         depth: UInt,
     ): ShadowNode {
         val isForEach = signalMeta[wire.id]?.itemSlot != null || signalMetaOverride[wire.id]?.itemSlot != null
-        val adapter = if (isForEach) {
-            FluxUiKit.adapters["container"]?.create()
-        } else {
-            adapterFor(wire.kind, wire.componentId)
-        }
+        val adapter =
+            if (isForEach) {
+                FluxUiKit.adapters["container"]?.create()
+            } else {
+                adapterFor(wire.kind, wire.componentId)
+            }
         // ADR-0027 (FA-IRWIRE): materialise dynamic props (interpolations, signal
         // reads) by running the node's prop thunk against the live graph. Stored
         // `wireProps` keep the shipped (raw) fields for diffing; the adapter
@@ -716,9 +724,11 @@ public class ShadowTree(
         // `Screen` is visible (see `routerActiveChild`).
         val isRouter = adapter?.kind == ROUTER_KIND
         val deps =
-            (signalMeta[wire.id]?.deps?.toMutableSet()
-                ?: signalMetaOverride[wire.id]?.deps?.toMutableSet()
-                ?: mutableSetOf()).apply {
+            (
+                signalMeta[wire.id]?.deps?.toMutableSet()
+                    ?: signalMetaOverride[wire.id]?.deps?.toMutableSet()
+                    ?: mutableSetOf()
+            ).apply {
                 addAll(signalDepsFrom(wire.props))
                 if (isRouter) add(NAVIGATION_ROUTE_SIGNAL_ID)
             }
@@ -817,7 +827,11 @@ public class ShadowTree(
      * like any other child. For a non-ForEach node (no `itemSlot` metadata) it
      * returns the static child ids unchanged, so existing nodes are untouched.
      */
-    private fun expandForEach(wire: WireNode, index: Map<UInt, WireNode>, executor: FluxExecutor): List<UInt> {
+    private fun expandForEach(
+        wire: WireNode,
+        index: Map<UInt, WireNode>,
+        executor: FluxExecutor,
+    ): List<UInt> {
         val meta = signalMeta[wire.id] ?: return childIdList(wire)
         val itemSlot = meta.itemSlot ?: return childIdList(wire)
         val listSignal = meta.deps.firstOrNull() ?: return childIdList(wire)
@@ -832,9 +846,12 @@ public class ShadowTree(
         // T-331: capture splice key seeds from the ForEach's splice child so
         // reconcileForEach can re-derive identical row ids later. Keys are
         // u64 from the wire; fall back to index when no splice or empty.
-        val spliceKeys = wire.children
-            .filterIsInstance<WireChild.Splice>()
-            .firstOrNull()?.items?.map { it.first } ?: emptyList()
+        val spliceKeys =
+            wire.children
+                .filterIsInstance<WireChild.Splice>()
+                .firstOrNull()
+                ?.items
+                ?.map { it.first } ?: emptyList()
         forEachSpliceKeys[wire.id] = spliceKeys
         val expanded = mutableListOf<UInt>()
         for ((i, elem) in list.items.withIndex()) {
@@ -914,8 +931,9 @@ public class ShadowTree(
                 val child =
                     nodes[rootId] ?: run {
                         val childIds = linkedSetOf<UInt>()
-                        val wire = expandedIndex[rootId]
-                            ?: cloneWireNode(template, rowId, childIds, wireIndex)
+                        val wire =
+                            expandedIndex[rootId]
+                                ?: cloneWireNode(template, rowId, childIds, wireIndex)
                         elem?.let { element ->
                             childIds.forEach { forEachRowContext[it] = itemSlot to element }
                         }
@@ -953,7 +971,7 @@ public class ShadowTree(
     internal fun fnv1a(bytes: ByteArray): UInt {
         var h: UInt = 0x811c9dc5u
         for (b in bytes) {
-            h = h xor b.toUInt()
+            h = h xor (b.toUInt() and 0xFFu)
             h = h * 0x01000193u
         }
         return h
@@ -969,16 +987,25 @@ public class ShadowTree(
      * bit guarantees the id is ≥ 0x8000_0000, never colliding with a real server
      * node id (D2).
      */
-    internal fun deriveForEachRowId(foreachId: UInt, seed: ULong): UInt {
+    internal fun deriveForEachRowId(
+        foreachId: UInt,
+        seed: ULong,
+    ): UInt {
         val bytes = ByteArray(4 + 1 + 8)
         // foreachId as u32 LE (4 bytes)
         var i = 0
-        var v = foreachId.toUInt()
-        for (j in 0..3) { bytes[i++] = (v and 0xFFu).toByte(); v = v shr 8 }
-        bytes[i++] = 0x2C  // marker byte
+        var v = foreachId
+        for (j in 0..3) {
+            bytes[i++] = (v and 0xFFu).toByte()
+            v = v shr 8
+        }
+        bytes[i++] = 0x2C // marker byte
         // seed as u64 LE (8 bytes)
         var sv = seed
-        for (j in 0..7) { bytes[i++] = (sv and 0xFFu).toByte(); sv = sv shr 8 }
+        for (j in 0..7) {
+            bytes[i++] = (sv and 0xFFu).toByte()
+            sv = sv shr 8
+        }
         return fnv1a(bytes) or 0x80000000u
     }
 
@@ -990,14 +1017,23 @@ public class ShadowTree(
      * The 0x3F separator and 0xC0 marker pair distinguish child ids from row
      * ids (0x80…) so both live in the derived-id space without collision (D2).
      */
-    internal fun deriveForEachChildId(rowId: UInt, origId: UInt): UInt {
+    internal fun deriveForEachChildId(
+        rowId: UInt,
+        origId: UInt,
+    ): UInt {
         val bytes = ByteArray(8 + 1 + 8)
         var i = 0
-        var rv = rowId.value.toULong()
-        for (j in 0..7) { bytes[i++] = (rv and 0xFFu).toByte(); rv = rv shr 8 }
-        bytes[i++] = 0x3F  // marker byte
+        var rv = rowId.toULong()
+        for (j in 0..7) {
+            bytes[i++] = (rv and 0xFFu).toByte()
+            rv = rv shr 8
+        }
+        bytes[i++] = 0x3F // marker byte
         var ov = origId.toULong()
-        for (j in 0..7) { bytes[i++] = (ov and 0xFFu).toByte(); ov = ov shr 8 }
+        for (j in 0..7) {
+            bytes[i++] = (ov and 0xFFu).toByte()
+            ov = ov shr 8
+        }
         return fnv1a(bytes) or 0xC0000000u
     }
 
@@ -1008,16 +1044,26 @@ public class ShadowTree(
      * [deriveForEachChildId], but keyed by the wire splice key so keyed
      * children keep a stable, edit-immune identity (T-331 / D10).
      */
-    internal fun deriveForEachKeyChild(rowId: UInt, key: ULong): UInt {
+    internal fun deriveForEachKeyChild(
+        rowId: UInt,
+        key: ULong,
+    ): UInt {
         val bytes = ByteArray(8 + 1 + 8)
         var i = 0
         var rv = rowId.toULong()
-        for (j in 0..7) { bytes[i++] = (rv and 0xFFu).toByte(); rv = rv shr 8 }
-        bytes[i++] = 0x3F  // marker byte
+        for (j in 0..7) {
+            bytes[i++] = (rv and 0xFFu).toByte()
+            rv = rv shr 8
+        }
+        bytes[i++] = 0x3F // marker byte
         var kv = key
-        for (j in 0..7) { bytes[i++] = (kv and 0xFFu).toByte(); kv = kv shr 8 }
+        for (j in 0..7) {
+            bytes[i++] = (kv and 0xFFu).toByte()
+            kv = kv shr 8
+        }
         return fnv1a(bytes) or 0xC0000000u
     }
+
     /**
      * Recursively deep-clones [template] into a per-row wire subtree, rewriting
      * each node's id via [deriveForEachChildId]. Populate [outIds] with every
@@ -1037,41 +1083,49 @@ public class ShadowTree(
         // Mirror iOS cloneSubtree: copy the original node's signalMeta for the
         // derived id so prop-thunk materialisation resolves against the live graph.
         signalMeta[template.id]?.let { signalMetaOverride[newId] = it }
-        val newChildren = template.children.map { child ->
-            when (child) {
-                is WireChild.Node -> {
-                    val childId = deriveForEachChildId(rowId, child.id)
-                    val childWire = expandedIndex[child.id] ?: index[child.id]
-                    if (childWire != null) {
-                        val cloned = cloneWireNode(childWire, rowId, outIds, index)
-                        expandedIndex[cloned.id] = cloned
-                    }
-                    WireChild.Node(childId)
-                }
-                is WireChild.Splice -> {
-                    val newItems = child.items.map { (key, nodeId) ->
-                        // T-331: keyed splice children derive from the splice key
-                        // (stable across edits), not the template node id; anonymous
-                        // splices (key == 0) fall back to node-id derivation.
-                        val childId = if (key != 0uL) deriveForEachKeyChild(rowId, key)
-                            else deriveForEachChildId(rowId, nodeId)
-                        val childWire = expandedIndex[nodeId] ?: index[nodeId]
+        val newChildren =
+            template.children.map { child ->
+                when (child) {
+                    is WireChild.Node -> {
+                        val childId = deriveForEachChildId(rowId, child.id)
+                        val childWire = expandedIndex[child.id] ?: index[child.id]
                         if (childWire != null) {
                             val cloned = cloneWireNode(childWire, rowId, outIds, index)
                             expandedIndex[cloned.id] = cloned
                         }
-                        key to childId
+                        WireChild.Node(childId)
                     }
-                    WireChild.Splice(newItems)
+                    is WireChild.Splice -> {
+                        val newItems =
+                            child.items.map { (key, nodeId) ->
+                                // T-331: keyed splice children derive from the splice key
+                                // (stable across edits), not the template node id; anonymous
+                                // splices (key == 0) fall back to node-id derivation.
+                                val childId =
+                                    if (key != 0uL) {
+                                        deriveForEachKeyChild(rowId, key)
+                                    } else {
+                                        deriveForEachChildId(rowId, nodeId)
+                                    }
+                                val childWire = expandedIndex[nodeId] ?: index[nodeId]
+                                if (childWire != null) {
+                                    val cloned = cloneWireNode(childWire, rowId, outIds, index)
+                                    expandedIndex[cloned.id] = cloned
+                                }
+                                key to childId
+                            }
+                        WireChild.Splice(newItems)
+                    }
                 }
             }
-        }
         return template.copy(id = newId, children = newChildren)
     }
 
     /** True when [node]'s resolved child id list differs from [fresh] (T5). */
-    private fun childListChanged(node: ShadowNode, fresh: List<UInt>): Boolean =
-        node.wireProps.childIds != fresh
+    private fun childListChanged(
+        node: ShadowNode,
+        fresh: List<UInt>,
+    ): Boolean = node.wireProps.childIds != fresh
 
     /**
      * Seeds a ForEach row's `itemSlot` signal with the element for [nodeId]
@@ -1214,14 +1268,15 @@ public class ShadowTree(
         // `RecordVal` (first field = the id). Accept BOTH shapes, mirroring the iOS
         // `RouterAdapter.routerActiveChildId`, so navigation never silently no-ops
         // (the reported "go to settings does nothing" bug).
-        val routeId = when (raw) {
-            is dev.flux.host.vm.FluxValue.StrVal -> raw.id
-            is dev.flux.host.vm.FluxValue.RecordVal -> {
-                val field = raw.fields.firstOrNull()?.value ?: return null
-                (field as? dev.flux.host.vm.FluxValue.StrVal)?.id ?: return null
+        val routeId =
+            when (raw) {
+                is dev.flux.host.vm.FluxValue.StrVal -> raw.id
+                is dev.flux.host.vm.FluxValue.RecordVal -> {
+                    val field = raw.fields.firstOrNull()?.value ?: return null
+                    (field as? dev.flux.host.vm.FluxValue.StrVal)?.id ?: return null
+                }
+                else -> return null
             }
-            else -> return null
-        }
         return stringLookup(routeId)
     }
 
@@ -1263,8 +1318,7 @@ public class ShadowTree(
      * `setChildren`, but the Compose projection must consult it too, otherwise
      * every screen stacks in a column and tapping navigate does nothing.
      */
-    public fun activeChildOf(node: ShadowNode): ShadowNode? =
-        if (node.kind == ROUTER_KIND) routerActiveChild(node) else null
+    public fun activeChildOf(node: ShadowNode): ShadowNode? = if (node.kind == ROUTER_KIND) routerActiveChild(node) else null
 
     private companion object {
         /** FNV-1a prop-index for the `route` prop name (matches the wire encoder). */
