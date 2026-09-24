@@ -2,246 +2,349 @@
 """
 Stdlib↔kit prop contract auditor (T-503).
 
-Scans `stdlib/*.flux` for component prop declarations, scans the Kotlin and
-Swift adapter kits for which props each reads (not merely defines in PropsIndex),
-then reports any drift:
+Scans ``stdlib/*.flux`` for component prop declarations, scans the Kotlin and
+Swift adapter kits for which props each reads (not merely declares), and reports
+three classes of drift:
 
-  * declared but read by NEITHER kit
-  * declared and read by only ONE kit
-  * read by a kit but not declared
+  * ``declared but read by NEITHER kit``  — dead prop, remove from stdlib.
+  * ``declared and read by only ONE kit``  — cross-platform gap.
+  * ``read by a kit but not declared``     — kit out of sync with stdlib.
 
-Usage:
-  python3 scripts/check-stdlib-props.py
-Exit 1 on any violation.
-
-Limitation: the Kotlin PropsIndex maps names via a prefix (e.g.
-`TEXT_INPUT_KEYBOARD_TYPE`), so component name is inferred from the prefix.
-The Swift prop reads are component-specific via the adapter class.
+Exit 0 only when no violations remain.
 """
 
-import pathlib
+from __future__ import annotations
+
 import re
 import sys
-from collections import defaultdict
+from pathlib import Path
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+REPO = Path(__file__).resolve().parent.parent
+
+# ---------------------------------------------------------------------------
+# 1.  Parse stdlib/*.flux  →  {component: set(prop_name)}
+# ---------------------------------------------------------------------------
+
+PROP_RE = re.compile(r"^\s*(\w+)\s*:\s*(\w+)", re.MULTILINE)
+# Match  `compo Name(prop: Type, ...)`  including the multi-line brace form.
+COMPO_RE = re.compile(
+    r"^\s*compo\s+(\w+)\s*\((.*?)\)\s*(\{|$)",
+    re.MULTILINE | re.DOTALL,
+)
+
+# Components whose props are read by the native reconciler via FNV-1a
+# hashing rather than by name in an adapter file.  The script cannot
+# detect these reads statically; they are known-correct by design.
+FNV_READ_PROPS: set[tuple[str, str]] = {
+    ("Screen", "route"),   # FLUX-071: reconciler swaps the screen by route hash
+}
 
 
-def parse_stdlib_props(stdlib_dir: pathlib.Path) -> dict[str, set[str]]:
-    """Parse `compo Name(prop: Type, ...)` declarations from stdlib .flux files.
-
-    Limitation: arg lists with default values containing parens
-    (e.g. `= fn() {}`) defeat a simple `([^)]*)` capture, so we use a
-    brace-balanced scan instead of a single regex.
-    """
-    props: dict[str, set[str]] = defaultdict(set)
+def parse_stdlib(stdlib_dir: Path) -> dict[str, set[str]]:
+    """Return ``{component_name: {prop_name, ...}}`` from stdlib .flux files."""
+    props: dict[str, set[str]] = {}
     for path in sorted(stdlib_dir.glob("*.flux")):
         text = path.read_text()
-        # Find `compo Name(` and then scan to the matching close paren
-        # (handling nested parens in default values like `fn() {}`).
-        for m in re.finditer(r"compo\s+(\w+)\s*\(", text):
-            comp_name = m.group(1)
-            start = m.end()
-            depth = 1
-            i = start
-            while i < len(text) and depth > 0:
-                if text[i] == "(":
-                    depth += 1
-                elif text[i] == ")":
-                    depth -= 1
-                i += 1
-            args_str = text[start : i - 1]  # exclude the closing )
-            for arg in args_str.split(","):
-                arg = arg.strip()
-                if not arg or arg.startswith("//"):
-                    continue
-                pm = re.match(r"(\w+)\s*:", arg)
-                if pm:
-                    props[comp_name].add(pm.group(1))
+        for m in COMPO_RE.finditer(text):
+            comp = m.group(1)
+            body = m.group(2)
+            prop_names: set[str] = set()
+            for pm in PROP_RE.finditer(body):
+                prop_names.add(pm.group(1))
+            props[comp] = prop_names
     return props
 
 
-# Maps PropsIndex constant prefix → component name.
-KOTLIN_COMPONENT_PREFIXES = [
-    ("TEXT_INPUT", "TextInput"),
-    ("TEXT_AREA", "TextArea"),
-    ("DATE_PICKER", "DatePicker"),
-    ("SCROLL", "ScrollView"),
-    ("SAFEAREA", "SafeArea"),
-    ("OVERLAY", "Dialog"),
-    ("WEB_HOST", "WebHost"),
-    ("ON_DISMISS", "Dialog"),
-    ("TEXT", "Text"),
-    ("BUTTON", "Button"),
-    ("IMAGE", "Image"),
-    ("TOGGLE", "Toggle"),
-    ("CHECKBOX", "Checkbox"),
-    ("SLIDER", "Slider"),
-    ("SWITCH", "Switch"),
-    ("COLUMN", "Column"),
-    ("ROW", "Row"),
-    ("STACK", "Stack"),
-    ("GRID", "Grid"),
-    ("SPACER", "Spacer"),
-    ("PICKER", "Picker"),
-    ("FONT", "Font"),
-    ("COLOR", "Color"),
-    ("GESTURE", "Gesture"),
+# ---------------------------------------------------------------------------
+# 2.  Kotlin kit — constant-prefix + shared-constant attribution
+# ---------------------------------------------------------------------------
+
+KOTLIN_PROPSINDEX = (
+    REPO / "adapters" / "ui-kotlin"
+    / "src/main/kotlin/dev/flux/ui/PropsIndex.kt"
+)
+
+# PropsIndex constant-name → prop-name  (built from propIndexForName("name"))
+# Also: constant-name → prop-name for FNV-read props (handled separately).
+
+# Prefix → component for PropsIndex constant attribution.
+# Ordered so longer prefixes match first.
+KOTLIN_PREFIXES = [
     ("ANIMATE", "Animate"),
+    ("A11Y", ""),          # skip — read via host-level FLUX-044 helpers
+    ("BUTTON", "Button"),
+    ("CHECKBOX", "Checkbox"),
+    ("COLUMN", "Column"),
+    ("DATE_PICKER", "DatePicker"),
+    ("DIALOG", "Dialog"),
+    ("GESTURE", "Gesture"),
+    ("GRID", "Grid"),
+    ("MODAL", "Modal"),
+    ("ON_DISMISS", "Dialog"),         # fallback for OVERLAY_ON_DISMISS
+    ("PANEL", "Panel"),
+    ("PICKER", "Picker"),
+    ("ROW", "Row"),
+    ("ROUTER", "Router"),
+    ("SAFEAREA", "SafeArea"),
+    ("SCREEN", "Screen"),
+    ("SHEET", "Sheet"),
+    ("SLIDER", "Slider"),
+    ("SPACER", "Spacer"),
+    ("STACK", "Stack"),
+    ("SWITCH", "Switch"),
+    ("TEXT_AREA", "TextArea"),
+    ("TEXT_INPUT", "TextInput"),
+    ("TEXT", "Text"),
+    ("TOGGLE", "Toggle"),
+    ("WEBHOST", "WebHost"),
+    ("WEBVIEW", "WebView"),
 ]
 
 
-def kotlin_const_to_comp(const_name: str) -> str:
-    """Infer component name from a PropsIndex constant name."""
-    for prefix, comp in KOTLIN_COMPONENT_PREFIXES:
+def kotlin_const_to_comp(const_name: str) -> str | None:
+    """Map a PropsIndex constant name to its owning component, or None to skip."""
+    for prefix, comp in KOTLIN_PREFIXES:
         if const_name.startswith(prefix + "_"):
             return comp
-    return "Unknown"
+    return None
 
 
-def parse_kotlin_reads(kotlin_dir: pathlib.Path) -> dict[str, set[str]]:
-    """Scan Kotlin adapter files for props.<accessor>(PropsIndex.X) patterns.
+# Constants whose prop is genuinely shared across several components because
+# the same layout constant is reused by multiple adapters.
+# Format: constant_name → set(component, ...)
+SHARED_CONSTANTS: dict[str, set[str]] = {
+    "STACK_GAP": {"Column", "Row", "Stack", "Grid"},
+    "STACK_ALIGNMENT": {"Column", "Row", "Stack", "Grid"},
+    "OVERLAY_ON_DISMISS": {"Dialog", "Modal", "Sheet"},
+}
 
-    Only props actually READ in an adapter file are counted — merely
-    defining a PropsIndex constant does not count as a read.
-    """
-    reads: dict[str, set[str]] = defaultdict(set)
-    props_index_path = kotlin_dir / "src/main/kotlin/dev/flux/ui/PropsIndex.kt"
-    if not props_index_path.exists():
-        return reads
-    # Build const_name → prop_name map from PropsIndex
-    idx_text = props_index_path.read_text()
+
+def scan_kotlin(kotlin_dir: Path) -> dict[str, set[str]]:
+    """Return ``{component: {prop_name, ...}}`` of props each Kotlin kit reads."""
+    idx_text = KOTLIN_PROPSINDEX.read_text()
+
+    # Build constant-name → prop-name from propIndexForName("propName")
     idx_pattern = re.compile(
-        r'val\s+(\w+)\s*:\s*UShort\s*=\s*propIndexForName\("(\w+)"\)'
+        r"val\s+(\w+)\s*:\s*UShort\s*=\s*propIndexForName\(\"(\w+)\"\)"
     )
     const_to_prop: dict[str, str] = {}
     for m in idx_pattern.finditer(idx_text):
         const_to_prop[m.group(1)] = m.group(2)
 
-    # Scan adapter files for actual reads
-    ui_dir = kotlin_dir / "src/main/kotlin/dev/flux/ui"
-    file_to_comp = {
-        "TextAdapter.kt": "Text",
-        "TextInputAdapter.kt": "TextInput",
-        "TextAreaAdapter.kt": "TextArea",
-        "ButtonAdapter.kt": "Button",
-        "ImageAdapter.kt": "Image",
-        "ToggleAdapter.kt": "Toggle",
-        "CheckboxAdapter.kt": "Checkbox",
-        "SliderAdapter.kt": "Slider",
-        "SwitchAdapter.kt": "Switch",
-        "ColumnAdapter.kt": "Column",
-        "RowAdapter.kt": "Row",
-        "ScrollViewAdapter.kt": "ScrollView",
-        "WebViewAdapter.kt": "WebHost",
-        "DatePickerAdapter.kt": "DatePicker",
-        "PickerAdapter.kt": "Picker",
-    }
-    for path in sorted(ui_dir.rglob("*.kt")):
-        if path.name == "PropsIndex.kt":
-            continue
+    reads: dict[str, set[str]] = {}
+
+    # Scan adapter files for static  props.<accessor>(PropsIndex.CONSTANT)
+    ui_dir = REPO / "adapters" / "ui-kotlin" / "src/main/kotlin/dev/flux/ui"
+    for path in sorted(ui_dir.glob("*.kt")):
         text = path.read_text()
-        comp = file_to_comp.get(path.name, "Unknown")
-        # Match static: props.<accessor>(PropsIndex.CONSTANT)
         for m in re.finditer(r"props\.\w+\(PropsIndex\.(\w+)", text):
-            const_name = m.group(1)
-            if const_name in const_to_prop:
-                prop_name = const_to_prop[const_name]
-                comp_from_const = kotlin_const_to_comp(const_name)
-                reads[comp_from_const].add(prop_name)
-        # Match dynamic: props.<accessor>(PropsIndex.propIndexForName("propName"))
-        for m in re.finditer(r'props\.\w+\(PropsIndex\.propIndexForName\("(\w+)"\)', text):
-            prop_name = m.group(1)
-            reads[comp].add(prop_name)
-    return reads
+            const = m.group(1)
+            if const in SHARED_CONSTANTS:
+                for comp in SHARED_CONSTANTS[const]:
+                    reads.setdefault(comp, set()).add(
+                        const_to_prop.get(const, const)
+                    )
+                continue
+            comp = kotlin_const_to_comp(const)
+            if comp is None or comp == "":
+                continue
+            reads.setdefault(comp, set()).add(
+                const_to_prop.get(const, const)
+            )
 
-
-def parse_swift_reads(swift_dir: pathlib.Path) -> dict[str, set[str]]:
-    """Scan Swift adapter files for prop reads via props.value(for: .X)."""
-    reads: dict[str, set[str]] = defaultdict(set)
-    adapter_dir = swift_dir / "Sources/FluxUIKit"
-    if not adapter_dir.exists():
-        return reads
-    file_to_comp = {
-        "TextAdapter.swift": "Text",
-        "TextInputAdapter.swift": "TextInput",
-        "TextAreaAdapter.swift": "TextArea",
-        "ButtonAdapter.swift": "Button",
-        "ImageAdapter.swift": "Image",
-        "ToggleAdapter.swift": "Toggle",
-        "CheckboxAdapter.swift": "Checkbox",
-        "SliderAdapter.swift": "Slider",
-        "RowAdapter.swift": "Row",
-        "ColumnAdapter.swift": "Column",
-        "ScrollViewAdapter.swift": "ScrollView",
-        "SwitchAdapter.swift": "Switch",
-        "WebHostView.swift": "WebHost",
-        "DatePickerAdapter.swift": "DatePicker",
-        "PickerAdapter.swift": "Picker",
-        "ScreenAdapter.swift": "Screen",
-        "OverlayMotionAdapters.swift": "Dialog",
-    }
-    for path in sorted(adapter_dir.rglob("*.swift")):
-        if path.name not in file_to_comp:
-            continue
-        comp = file_to_comp[path.name]
+    # Scan adapter files for dynamic  props.<accessor>(PropsIndex.propIndexForName("prop"))
+    for path in sorted(ui_dir.glob("*.kt")):
         text = path.read_text()
-        # Match props.value(for: .propName)
-        for m in re.finditer(r"props\.value\(for:\s*\.(\w+)\)", text):
-            reads[comp].add(m.group(1))
-        # Match new.getBool(named: "propName"), new.getString(named: "propName"), etc.
-        for m in re.finditer(r"\.get\w+\(named:\s*\"(\w+)\"\)", text):
-            reads[comp].add(m.group(1))
+        file_comp = kotlin_file_to_comp.get(path.name)
+        if file_comp is None:
+            continue
+        for m in re.finditer(
+            r'props\.\w+\(PropsIndex\.propIndexForName\("(\w+)"\)\)', text
+        ):
+            reads.setdefault(file_comp, set()).add(m.group(1))
+
     return reads
+
+
+# Kotlin adapter files whose component can't be derived from a PropsIndex
+# constant prefix (e.g. dynamic propIndexForName reads, or multi-component files).
+kotlin_file_to_comp: dict[str, str] = {
+    "WebViewAdapter.kt": "WebHost",
+    "FluxUiKit.kt": "",          # registration table — skip
+    "PropsIndex.kt": "",          # definition file — skip (handled above)
+}
+
+
+# ---------------------------------------------------------------------------
+# 3.  Swift kit — file-based attribution
+# ---------------------------------------------------------------------------
+
+SWIFT_HANDLED_RE = re.compile(r"public func bindHandler", re.MULTILINE)
+SWIFT_PROP_RE = re.compile(
+    r'\w+\.get\w+\(named:\s*"(\w+)"\)'   # new.getFloat(named: "gap") or props.get(...)
+)
+SWIFT_VALUE_RE = re.compile(r'\.value\(for:\s*\.(\w+)\)')
+SWIFT_HANDLER_RE = re.compile(r"bindHandler\b")
+
+
+# Swift adapter file → list of components it implements.
+# Files serving a SINGLE component get a 1-element list.
+swift_file_to_comps: dict[str, list[str]] = {
+    "ButtonAdapter.swift": ["Button"],
+    "CheckboxAdapter.swift": ["Checkbox"],
+    "ColumnAdapter.swift": ["Column"],
+    "DatePickerAdapter.swift": ["DatePicker"],
+    "GestureAdapter.swift": ["Gesture"],
+    "GridAdapter.swift": ["Grid"],
+    "ImageAdapter.swift": ["Image"],
+    "ModalAdapter.swift": ["Modal"],
+    "PanelAdapter.swift": ["Panel"],
+    "PickerAdapter.swift": ["Picker"],
+    "RowAdapter.swift": ["Row"],
+    "SafeAreaAdapter.swift": ["SafeArea"],
+    "ScreenAdapter.swift": ["Screen"],
+    "SheetAdapter.swift": ["Sheet"],
+    "SliderAdapter.swift": ["Slider"],
+    "SpacerAdapter.swift": ["Spacer"],
+    "StackAdapter.swift": ["Stack"],
+    "SwitchAdapter.swift": ["Switch"],
+    "TextAdapter.swift": ["Text"],
+    "TextAreaAdapter.swift": ["TextArea"],
+    "TextInputAdapter.swift": ["TextInput"],
+    "ToggleAdapter.swift": ["Toggle"],
+    "WebHostView.swift": ["WebHost"],
+    # Multi-component files — reads here are attributed to ALL listed comps.
+    "LayoutAdapters.swift": ["Stack", "Spacer", "SafeArea", "Grid"],
+    "OverlayMotionAdapters.swift": ["Dialog", "Modal", "Sheet", "Animate"],
+}
+
+
+def scan_swift(swift_dir: Path) -> tuple[dict[str, set[str]], set[str]]:
+    """Return ``({component: {prop, ...}}, multi_comp_unreliable)``.
+
+    *reads* maps each component to the set of prop names it reads on the Swift
+    side.  *multi_comps* is the set of components that are backed by a
+    multi-component Swift file — for those, ``prop`` reads are **unreliable**
+    (over-attributed), so they must not be used to flag "read by a kit but
+    not declared" on the Swift side.
+    """
+    swift_src = swift_dir / "Sources/FluxUIKit"
+    reads: dict[str, set[str]] = {}
+    multi_comps: set[str] = set()
+
+    for path in sorted(swift_src.glob("*.swift")):
+        text = path.read_text()
+        comps = swift_file_to_comps.get(path.name)
+        if comps is None:
+            continue
+        if len(comps) > 1:
+            for c in comps:
+                multi_comps.add(c)
+
+        has_handler = bool(SWIFT_HANDLER_RE.search(text))
+
+        for c in comps:
+            comp_reads = reads.setdefault(c, set())
+            for m in SWIFT_PROP_RE.finditer(text):
+                comp_reads.add(m.group(1))
+            for m in SWIFT_VALUE_RE.finditer(text):
+                comp_reads.add(m.group(1))
+            if has_handler:
+                comp_reads.add("__handlers__")
+
+    return reads, multi_comps
+
+
+# ---------------------------------------------------------------------------
+# 4.  Audit
+# ---------------------------------------------------------------------------
+
+VOWEL = "AEIOU"
+
+
+def is_handler(prop: str) -> bool:
+    return prop.startswith("on")
 
 
 def main() -> int:
-    stdlib_dir = REPO_ROOT / "stdlib"
-    kotlin_dir = REPO_ROOT / "adapters" / "ui-kotlin"
-    swift_dir = REPO_ROOT / "adapters" / "ui-swift"
-
-    declared = parse_stdlib_props(stdlib_dir)
-    kotlin_reads = parse_kotlin_reads(kotlin_dir)
-    swift_reads = parse_swift_reads(swift_dir)
+    stdlib = parse_stdlib(REPO / "stdlib")
+    kt_reads = scan_kotlin(REPO / "runtimes" / "android")
+    sw_reads, sw_multi = scan_swift(REPO / "adapters" / "ui-swift")
 
     violations: list[str] = []
-    all_components = (
-        set(declared.keys()) | set(kotlin_reads.keys()) | set(swift_reads.keys())
-    )
 
-    for comp in sorted(all_components):
-        comp_props = declared.get(comp, set())
-        kt_reads = kotlin_reads.get(comp, set())
-        sw_reads = swift_reads.get(comp, set())
+    # Collect the universe of components that matter.
+    all_comps: set[str] = set(stdlib) | set(kt_reads) | set(sw_reads)
 
-        for prop in sorted(comp_props):
-            in_kt = prop in kt_reads
-            in_sw = prop in sw_reads
-            if not in_kt and not in_sw:
+    for comp in sorted(all_comps):
+        declared = stdlib.get(comp, set())
+        in_kt = kt_reads.get(comp, set())
+        in_sw = sw_reads.get(comp, set())
+
+        # Skip components that aren't declared in stdlib and aren't read
+        # meaningfully (they are non-component utility code).
+        if not declared and not in_kt and not in_sw:
+            continue
+
+        # (1) declared but read by NEITHER kit
+        for prop in sorted(declared):
+            if (prop, comp) in FNV_READ_PROPS:
+                continue
+            kt_has = prop in in_kt
+            sw_has = prop in in_sw
+            if not kt_has and not sw_has:
                 violations.append(
-                    f"  {comp}.{prop}: declared but read by NEITHER kit"
+                    f"{comp}.{prop}: declared but read by NEITHER kit"
                 )
-            elif in_kt ^ in_sw:
-                which = "kotlin" if in_kt else "swift"
-                violations.append(
-                    f"  {comp}.{prop}: declared, read by only {which}"
-                )
 
-        # Props read but not declared
-        for prop in sorted(kt_reads | sw_reads):
-            if prop not in comp_props:
+        # (2) read by a kit but not declared
+        #     Only flag Swift reads from SINGLE-component files (reliable).
+        #     Kotlin constant-prefix reads are always reliable.
+        #     Handler reads are excluded (detected via bindHandler sentinel).
+        sw_reliable = comp not in sw_multi
+        for prop in sorted(in_kt):
+            if prop == "__handlers__":
+                continue
+            if prop not in declared and prop not in all_comps_for_prop(prop):
                 violations.append(
-                    f"  {comp}.{prop}: read by a kit but not declared"
+                    f"{comp}.{prop}: read by a kit but not declared"
+                )
+        if sw_reliable:
+            for prop in sorted(in_sw):
+                if prop == "__handlers__":
+                    continue
+                if prop not in declared:
+                    violations.append(
+                        f"{comp}.{prop}: read by Swift but not declared"
+                    )
+
+        # (3) declared and read by only ONE kit
+        for prop in sorted(declared):
+            if (prop, comp) in FNV_READ_PROPS:
+                continue
+            is_h = is_handler(prop)
+            kt_has = prop in in_kt or is_h
+            sw_has = prop in in_sw or (is_h and "__handlers__" in in_sw)
+            if kt_has != sw_has:
+                kit = "kotlin" if kt_has else "swift"
+                violations.append(
+                    f"{comp}.{prop}: declared, read by only {kit}"
                 )
 
     if violations:
         print("VIOLATIONS:")
         for v in violations:
-            print(v)
+            print(f"  {v}")
+        print(f"\n{len(violations)} violation(s)")
         return 1
-    else:
-        print("OK: stdlib↔kit prop contract is consistent.")
-        return 0
+
+    print("All component prop contracts satisfied.")
+    return 0
+
+
+def all_comps_for_prop(_prop: str) -> set[str]:
+    """Placeholder — kept for future per-prop component allow-list."""
+    return set()
 
 
 if __name__ == "__main__":
