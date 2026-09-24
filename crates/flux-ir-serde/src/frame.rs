@@ -174,7 +174,11 @@ fn write_closures(w: &mut Writer, closures: &[ClosureIR]) {
     for closure in closures {
         let offset = blob.len() as u32;
         blob.extend_from_slice(&closure.bytecode);
-        offsets.push((closure.id, offset, u16::try_from(closure.bytecode.len()).expect("bytecode len exceeds u16 (audit H14)")));
+        offsets.push((
+            closure.id,
+            offset,
+            u16::try_from(closure.bytecode.len()).expect("bytecode len exceeds u16 (audit H14)"),
+        ));
     }
     encode_bytecode_blob(w, &blob);
     w.u16_len(closures.len(), "frame.closures");
@@ -1102,7 +1106,8 @@ impl Frame {
         InternStringFrame {
             version: PROTOCOL_VERSION,
             kind: FrameKind::InternString,
-            len: u16::try_from(bytes.len()).expect("InternString payload exceeds u16 len (audit H14)"),
+            len: u16::try_from(bytes.len())
+                .expect("InternString payload exceeds u16 len (audit H14)"),
             bytes: bytes.to_vec(),
         }
     }
