@@ -128,7 +128,9 @@ pub(crate) fn run_with(
                 // (the entry point owns them) so a single-file app compiles.
                 let body = component_code
                     .lines()
-                    .skip_while(|l| l.starts_with("package ") || l.starts_with("import ") || l.is_empty())
+                    .skip_while(|l| {
+                        l.starts_with("package ") || l.starts_with("import ") || l.is_empty()
+                    })
                     .collect::<Vec<_>>()
                     .join("\n");
                 format!(
