@@ -128,7 +128,12 @@ All tasks T-101 through T-111 completed.
 | T-403.7 | §5.9 Router | Swift no longer hijacks arbitrary `route` state; emitter detects Router presence via `meta_has_router()`, passes `has_router` flag to `emit_state_cell`; Swift only redirects `route` → `NavigationPath()` when component has a Router | `t_403_7_route_state_without_router_is_regular` |
 
 ### Remaining
-- T-403: Backend-split codegen fixes (Toggle, Button styles, spacing axis, component header, guard/match arms, TextField, Router, async)
+- T-403.2: §5.4 Button — already implemented in codebase (shared emitter calls `B::button_style` hook)
+- T-403.3: §5.6 Spacing — already implemented (shared emitter calls `B::container_spacing_axis`)
+- T-403.4: §5.3 Component header — already implemented (Kotlin uses `", "` separation, `data object`)
+- T-403.5: §5.8 Guard/match arms — already implemented (both backends emit exact-type test)
+- T-403.6: §5.10 TextField — already implemented (Swift `Binding(get:set:)`)
+- T-403.8: §5.7 Async — already implemented (Kotlin `render_await` emits `expr.await()`)
 - T-404: CLI build output: one file per source, deterministic entry point
 - T-405: Generated-code compile gate in CI
 
