@@ -11,10 +11,14 @@ const SRC1: &str = "compo Counter\n    state count: Int = 0\n\n    Column(gap: 8
 // dev server ships as a Delta frame (Remove+Insert whole tree).
 const SRC3: &str = "compo Counter\n    state count: Int = 0\n\n    Column(gap: 8.0) {\n        Text(text: \"tapped {count} times!\")\n        Button(text: \"Increment\", onPress: fn() { count = count + 1 })\n    }\n\n";
 
-const INIT_OUT: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/../../runtimes/android/host/src/test/resources/counter_init_frame.bin");
-const DELTA_OUT: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/../../runtimes/android/host/src/test/resources/counter_delta_interp.bin");
+const INIT_OUT: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../runtimes/android/host/src/test/resources/counter_init_frame.bin"
+);
+const DELTA_OUT: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../runtimes/android/host/src/test/resources/counter_delta_interp.bin"
+);
 
 #[test]
 fn gen_frames() {
