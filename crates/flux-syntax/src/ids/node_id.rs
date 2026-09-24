@@ -156,10 +156,20 @@ mod tests {
     #[test]
     fn component_id_collision_at_0x100_is_resolved() {
         let id_a = content_addressed_id(
-            0, 1, 0x0000_0100, 0x1111_2222_3333_4444, 0x5555_6666_7777_8888, None,
+            0,
+            1,
+            0x0000_0100,
+            0x1111_2222_3333_4444,
+            0x5555_6666_7777_8888,
+            None,
         );
         let id_b = content_addressed_id(
-            0, 1, 0x0000_0200, 0x1111_2222_3333_4444, 0x5555_6666_7777_8888, None,
+            0,
+            1,
+            0x0000_0200,
+            0x1111_2222_3333_4444,
+            0x5555_6666_7777_8888,
+            None,
         );
         assert_ne!(
             id_a, id_b,
