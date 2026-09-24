@@ -145,7 +145,9 @@ async fn build_android_writes_generated_kotlin() {
     .await
     .expect("android build succeeds");
 
-    let generated = dir.path().join("platforms/android/Generated/MainActivity.kt");
+    let generated = dir
+        .path()
+        .join("platforms/android/Generated/MainActivity.kt");
     assert!(generated.is_file(), "generated kotlin file exists");
     let source = std::fs::read_to_string(&generated).expect("readable");
     assert!(!source.is_empty(), "generated source is non-empty");
