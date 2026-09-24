@@ -291,8 +291,14 @@ pub fn normalize_view_name(name: &str) -> String {
         "Dialog" => "Modal",
         "FullScreenCover" => "Modal",
         "Sheet" => "Sheet",
-        // FLUX-042: both backends emit `withAnimation(...)` for `Animate`.
+        // FLUX-042: both backends emit an animation wrapper for `Animate`.
+        // Swift emits `withAnimation`; Kotlin emits `AnimatedContent` around
+        // its `animateFloatAsState` state cell. Both reduce to the common
+        // `Animate` surface name. `Animate` is NOT a container — its trailing
+        // block is a leaf-adapter wrapper whose children are consumed but not
+        // recovered as structural children, matching the dev-path reduction.
         "withAnimation" => "Animate",
+        "AnimatedContent" => "Animate",
         // FLUX-043: the native theme extension surface names reduce to `Theme`.
         "MaterialTheme" | "FluxTheme" => "Theme",
         // FLUX-037: the release backends emit native container names that the

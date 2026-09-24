@@ -15,7 +15,7 @@
 
 use std::collections::HashMap;
 
-use flux_parser::{Expr, TypeDecl};
+use flux_parser::{Block, Expr, TypeDecl};
 
 use crate::emitter::Emitter;
 use crate::model::ComponentMeta;
@@ -226,11 +226,35 @@ pub trait Backend {
     /// (FLUX-042). `curve` is the `Animate` node's `curve` prop value rendered
     /// as a Flux expression (e.g. `"easeInOut"` / `"spring"`); the backend maps
     /// it onto the host-native curve spelling. SwiftUI: `withAnimation(.easeInOut)`
-    /// / `.spring()`; Compose: `withAnimation(...)`. The signal the animation
-    /// drives is data the host consumes; this returns only the spec that wraps
-    /// the child subtree.
+    /// / `.spring()`; Compose: `tween(easing = …)` (a bare `AnimationSpec`, no
+    /// `withAnimation` wrapper — Kotlin has no `withAnimation`). The signal the
+    /// animation drives is data the host consumes; this returns only the spec
+    /// that wraps the child subtree (Swift) or feeds `animate*AsState` (Kotlin).
     #[must_use]
     fn animation_spec(curve: &str) -> String;
+
+    /// Emits an `Animate` primitive (FLUX-042). The shared emitter calls this
+    /// instead of inlining `animation_spec + { children }` so each backend can
+    /// choose its own native animation shape.
+    ///
+    /// Default (Swift): `withAnimation(spec) { <children> }`.
+    /// Kotlin: declares `val anim = animateFloatAsState(…)` then wraps children
+    /// in a `Box { }` so the val has a valid composable scope — no
+    /// `withAnimation(` in the output.
+    fn emit_animate(
+        em: &mut Emitter<'_, Self>,
+        curve: &str,
+        trailing: Option<&Block>,
+        node_id: flux_syntax::NodeId,
+        indent: usize,
+    ) where
+        Self: Sized,
+    {
+        let spec = Self::animation_spec(curve);
+        em.line(indent, &format!("{spec} {{"));
+        em.emit_trailing_or_children(trailing, node_id, indent + Self::CHILD_STEP);
+        em.line(indent, "}");
+    }
 
     /// Emits the native design-token theme extension (FLUX-043) covering every
     /// token in `tokens`. The extension is a top-level declaration the generated

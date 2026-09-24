@@ -36,3 +36,4 @@ mod codegen;
 
 pub use codegen::codegen;
 pub use flux_codegen_core::CodegenError;
+pub use backend_impl::Kotlin;

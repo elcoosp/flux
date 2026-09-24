@@ -8,6 +8,8 @@
 //! `ANDROID_COMPOSE_COMPILER` are set from a provisioned Compose toolchain) round
 //! out the suite.
 
+use flux_codegen_core::Backend;
+use flux_codegen_kotlin::Kotlin;
 use flux_codegen_kotlin::codegen;
 use flux_ir::lower;
 use flux_parser::parse;
@@ -551,21 +553,96 @@ fn flux_038_overlay_container_codegen() {
     );
 }
 
-/// FLUX-042: an `Animate` primitive emits the host-native `withAnimation`
-/// call wrapping its child subtree, with the curve mapped onto a Compose
-/// `AnimationSpec`. The signal/curve is data the host consumes; no frames ship.
+/// FLUX-042: an `Animate` primitive emits a Compose-native animation, not
+/// the Swift `withAnimation(`. Kotlin uses `animateFloatAsState` declared as a
+/// state cell. The signal/curve is data the host consumes; this pins the
+/// generated spelling.
 #[test]
 fn flux_042_animate_codegen() {
     let src = "compo Animated\n  state value: Int = 0\n  Animate(curve: \"easeInOut\") {\n    Text(\"hello\")\n  }\n\n";
     let out = codegen_example("flux_042_animate", src);
     assert!(
-        out.contains("withAnimation(tween(easing = FastOutSlowInEasing)) {"),
-        "Animate must wrap children in a withAnimation call:\n{out}"
+        !out.contains("withAnimation("),
+        "Kotlin must not emit withAnimation: {out}"
+    );
+    assert!(
+        out.contains("animateFloatAsState"),
+        "Animate must emit animateFloatAsState on Kotlin: {out}"
     );
     assert!(
         out.contains("Text(\"hello\")"),
-        "Animate child dropped from the wrapped subtree:\n{out}"
+        "Animate child dropped from the animation subtree: {out}"
     );
+}
+
+/// T-402: the Kotlin prelude must include every symbol the generated bodies
+/// reference so the output is self-contained. Missing imports from the prelude
+/// produce opaque "unresolved reference" errors in the provisioned toolchain.
+#[test]
+fn kotlin_prelude_contains_all_referenced_imports() {
+    let out = codegen_example("b3_1_counter", examples()[0].1);
+    let imports = extract_imports(&out);
+    let prelude = Kotlin::prelude();
+    assert!(
+        prelude.contains("import androidx.compose.animation.core.*"),
+        "prelude missing animation.core: {prelude}"
+    );
+    assert!(
+        prelude.contains("import kotlinx.coroutines.GlobalScope"),
+        "prelude missing GlobalScope: {prelude}"
+    );
+    assert!(
+        prelude.contains("import androidx.compose.foundation.shape.RoundedCornerShape"),
+        "prelude missing RoundedCornerShape: {prelude}"
+    );
+    // Every symbol referenced in generated bodies must appear in the prelude.
+    let referenced = referenced_symbols(&out);
+    for sym in referenced {
+        let found = imports.contains(&sym) || prelude.contains(&sym);
+        assert!(found, "symbol '{sym}' referenced in body but absent from prelude + imports:\n{prelude}\n--- body ---\n{out}");
+    }
+}
+
+/// Extracts import lines from generated Kotlin output (the prelude already
+/// contains them, but the test checks they survive into the emitted file).
+fn extract_imports(generated: &str) -> Vec<String> {
+    generated
+        .lines()
+        .filter(|l| l.starts_with("import "))
+        .map(|l| l.trim_start_matches("import ").to_string())
+        .collect()
+}
+
+/// Heuristic: collects capitalised identifiers that look like referenced
+/// Compose/AndroidX symbols (Class.function calls, type names) from the body.
+fn referenced_symbols(generated: &str) -> Vec<String> {
+    let mut syms = Vec::new();
+    for line in generated.lines() {
+        // Pattern: CapitalizedName( → capture CapitalizedName
+        let mut rest = line.trim();
+        rest = rest.trim_start_matches("val ").trim_start_matches("var ");
+        if let Some(end) = rest.find('(') {
+            let name = &rest[..end];
+            if name
+                .chars()
+                .next()
+                .map(|c| c.is_uppercase())
+                .unwrap_or(false)
+                && name.len() > 1
+                && name
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || c == '.' || c == '_')
+                && !name.starts_with("FluxComponent")
+                && !name.starts_with("FluxTheme")
+            {
+                syms.push(name.to_string());
+            }
+        }
+    }
+    // Deduplicate
+    let mut seen = std::collections::HashSet::new();
+    syms.retain(|s| seen.insert(s.clone()));
+    syms
 }
 
 /// FLUX-043: the design-token theme extension must be emitted once and must

@@ -115,9 +115,17 @@ pub(crate) fn parse_body(
             i += 1;
             continue;
         }
-        // Skip declaration keywords and their binding (`var x by remember …`).
+        // Skip the entire line of a `val`/`var`/`let`/`by` declaration.
+        // These introduce state cells (e.g. `var count by remember { … }`,
+        // `val anim = animateFloatAsState(…)`) — the whole declaration is
+        // non-structural and must be advanced past as one unit so that tokens
+        // inside the RHS (e.g. `spring(`, `tween(`) are never misinterpreted
+        // as view calls.
         if matches!(tok.as_str(), "var" | "val" | "let" | "by") {
-            i += 1;
+            let line = tokens[i].line;
+            while i < tokens.len() && tokens[i].line == line {
+                i += 1;
+            }
             continue;
         }
         if tok == "if" {

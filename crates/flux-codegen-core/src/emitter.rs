@@ -543,18 +543,16 @@ impl<'a, B: Backend> Emitter<'a, B> {
                 self.line(indent, &format!("{name}()"));
             }
             PrimitiveKind::Animate => {
-                // FLUX-042: wrap the child subtree in the host-native
-                // `withAnimation(spec) { … }` call. The curve is data the host
-                // consumes; the signal is read off the `signal` prop.
+                // FLUX-042: the shared emitter delegates to the backend's
+                // `emit_animate` hook so each language renders its native
+                // animation shape (Swift `withAnimation`; Kotlin
+                // `animateFloatAsState`).
                 let curve = props
                     .get("curve")
                     .or_else(|| props.get("signal"))
                     .map(String::as_str)
                     .unwrap_or("");
-                let spec = B::animation_spec(curve);
-                self.line(indent, &format!("{spec} {{"));
-                self.emit_trailing_or_children(trailing.as_deref(), id, indent + B::CHILD_STEP);
-                self.line(indent, "}");
+                B::emit_animate(self, curve, trailing.as_deref(), id, indent);
             }
             PrimitiveKind::Router | PrimitiveKind::Screen => {
                 // `Router`/`Screen` lower as `Primitive` nodes (not dedicated
@@ -706,7 +704,7 @@ impl<'a, B: Backend> Emitter<'a, B> {
     }
 
     /// Emits the body of a trailing block (component children) at `indent`.
-    fn emit_trailing_or_children(&mut self, trailing: Option<&Block>, id: NodeId, indent: usize) {
+    pub fn emit_trailing_or_children(&mut self, trailing: Option<&Block>, id: NodeId, indent: usize) {
         if let Some(block) = trailing {
             self.emit_block_body(block, indent);
         } else {

@@ -15,7 +15,7 @@ use flux_codegen_core::primitives::PrimitiveSpec;
 use flux_parser::{Expr, ExprKind, TypeDecl};
 
 /// The Kotlin/Compose backend.
-pub(crate) struct Kotlin;
+pub struct Kotlin;
 
 impl Backend for Kotlin {
     const INDENT_UNIT: usize = 4;
@@ -222,7 +222,7 @@ impl Backend for Kotlin {
     }
 
     fn prelude() -> &'static str {
-        "package dev.flux.app\n\nimport androidx.compose.foundation.Image\nimport androidx.compose.foundation.layout.*\nimport androidx.compose.foundation.text.KeyboardActions\nimport androidx.compose.foundation.text.KeyboardOptions\nimport androidx.compose.material3.*\nimport androidx.compose.runtime.*\nimport androidx.compose.ui.Alignment\nimport androidx.compose.ui.Modifier\nimport androidx.compose.ui.res.painterResource\nimport androidx.compose.ui.text.input.KeyboardType\nimport androidx.compose.ui.unit.dp\nimport androidx.navigation.NavHostController\nimport androidx.navigation.compose.NavHost\nimport androidx.navigation.compose.composable\nimport androidx.navigation.compose.rememberNavController\nimport kotlinx.coroutines.launch\n\n"
+        "package dev.flux.app\n\nimport androidx.compose.animation.core.*\nimport androidx.compose.foundation.Image\nimport androidx.compose.foundation.layout.*\nimport androidx.compose.foundation.lazy.*\nimport androidx.compose.foundation.shape.RoundedCornerShape\nimport androidx.compose.foundation.text.KeyboardActions\nimport androidx.compose.foundation.text.KeyboardOptions\nimport androidx.compose.material3.*\nimport androidx.compose.material3.Button\nimport androidx.compose.material3.Text\nimport androidx.compose.runtime.*\nimport androidx.compose.ui.Alignment\nimport androidx.compose.ui.Modifier\nimport androidx.compose.ui.res.painterResource\nimport androidx.compose.ui.text.input.KeyboardType\nimport androidx.compose.ui.unit.dp\nimport androidx.navigation.NavHostController\nimport androidx.navigation.compose.NavHost\nimport androidx.navigation.compose.composable\nimport androidx.navigation.compose.rememberNavController\nimport kotlinx.coroutines.GlobalScope\nimport kotlinx.coroutines.launch\n\n"
     }
 
     fn escape_text(s: &str) -> String {
@@ -244,24 +244,48 @@ impl Backend for Kotlin {
 
     fn animation_spec(curve: &str) -> String {
         // FLUX-042: map the Flux curve name onto a Compose `AnimationSpec`.
-        // Named curves reduce to the standard spellings; unknown curves fall
-        // back to `tween()` so the generated source always compiles.
+        // Returns a bare spec (no `withAnimation` wrapper — Kotlin has no
+        // `withAnimation`); the `emit_animate` hook wraps it in
+        // `animateFloatAsState(…)`.
         let trimmed = curve.trim().trim_matches('"');
-        let spec = match trimmed {
-            "spring" => "spring()",
-            "easeIn" => "tween(easing = FastOutLinearInEasing)",
-            "easeOut" => "tween(easing = LinearOutSlowInEasing)",
-            "easeInOut" => "tween(easing = FastOutSlowInEasing)",
-            "linear" => "tween(easing = LinearEasing)",
+        match trimmed {
+            "spring" => "spring()".to_owned(),
+            "bouncy" => "spring(dampingRatio = 0.5f)".to_owned(),
+            "smooth" => "tween(300)".to_owned(),
+            "easeIn" => "tween(easing = FastOutLinearInEasing)".to_owned(),
+            "easeOut" => "tween(easing = LinearOutSlowInEasing)".to_owned(),
+            "easeInOut" => "tween(easing = FastOutSlowInEasing)".to_owned(),
+            "linear" => "tween(easing = LinearEasing)".to_owned(),
             other => {
                 if other.is_empty() {
-                    "tween()"
+                    "tween()".to_owned()
                 } else {
-                    other
+                    other.to_owned()
                 }
             }
-        };
-        format!("withAnimation({spec})")
+        }
+    }
+
+    fn emit_animate(
+        em: &mut Emitter<'_, Self>,
+        curve: &str,
+        trailing: Option<&flux_parser::Block>,
+        node_id: flux_syntax::NodeId,
+        indent: usize,
+    ) {
+        // T-402.3: Kotlin emits `animateFloatAsState` as a state cell, not
+        // `withAnimation(…)`. The val declaration lives at `indent`; children
+        // follow inside an `AnimatedContent(…)` wrapper so the composable
+        // scope is valid and the parity recognizer can fold both backends
+        // to the common `Animate` name.
+        let spec = Self::animation_spec(curve);
+        em.line(
+            indent,
+            &format!("val anim = animateFloatAsState(targetValue = 0f, animationSpec = {spec})"),
+        );
+        em.line(indent, &format!("AnimatedContent(targetState = anim) {{"));
+        em.emit_trailing_or_children(trailing, node_id, indent + Self::CHILD_STEP);
+        em.line(indent, "}");
     }
 
     fn theme_extension(tokens: &[flux_codegen_core::primitives::DesignToken]) -> String {
