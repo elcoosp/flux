@@ -23,7 +23,7 @@ use std::collections::HashMap;
 use crate::backend::Backend;
 use crate::bridge::Bridge;
 use crate::expressions::{render_expr, render_handler_body};
-use crate::model::{native_type, ComponentMeta};
+use crate::model::{ComponentMeta, native_type};
 use crate::primitives::{PrimitiveKind, PrimitiveSpec};
 use flux_ir::lower::Monomorphization;
 
