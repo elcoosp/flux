@@ -17,7 +17,7 @@ use flux_ir::LoweredIr;
 use flux_parser::{Arg, BinOp, BlockItem, Expr, ExprKind, MatchPattern, MatchPatternKind, StrPart};
 use flux_syntax::{NodeId, NodeKind};
 
-use crate::bridge::{expr_id, Bridge};
+use crate::bridge::{Bridge, expr_id};
 
 /// A single node in the language-neutral structural view tree.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
