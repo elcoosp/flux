@@ -65,7 +65,7 @@ pub(crate) fn render_float(value: f64) -> String {
 /// Renders a string literal, translating `{expr}` interpolations into the
 /// backend's interpolation syntax.
 #[must_use]
-pub(crate) fn render_string<B: Backend>(parts: &[StrPart]) -> String {
+pub fn render_string<B: Backend>(parts: &[StrPart]) -> String {
     let mut body = String::new();
     for part in parts {
         match part {

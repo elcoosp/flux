@@ -442,4 +442,58 @@ mod tests {
             "async handler not wrapped in launch: {out}"
         );
     }
+
+    #[test]
+    fn kotlin_escapes_dollar_sign() {
+        // T-401: the scaffold fixture `tapped $count times` must produce `\$`
+        // in Kotlin output so `$` is not treated as a string-template token.
+        let escaped = <Kotlin as Backend>::escape_text("tapped $count times");
+        assert!(
+            escaped.contains(r"\$"),
+            "Kotlin must escape `$`: got {escaped}"
+        );
+    }
+
+    #[test]
+    fn kotlin_escapes_quotes() {
+        // `Text("say \"hi\"")` — inner quotes must become Kotlin `\"`.
+        let escaped = <Kotlin as Backend>::escape_text("say \"hi\"");
+        assert_eq!(escaped, r#"say \"hi\""#);
+    }
+
+    #[test]
+    fn kotlin_injection_cannot_terminate_literal() {
+        let payload = "\"){ evil() }";
+        let escaped = <Kotlin as Backend>::escape_text(payload);
+        assert!(
+            escaped.contains(r#"\""#),
+            "Kotlin must escape `\"`: got {escaped}"
+        );
+        // Wrap in quotes like render_string does; verify no bare `"` in the body.
+        let lit = format!("\"{}\"", escaped);
+        let inner = &lit[1..lit.len() - 1];
+        assert_no_bare_quote(inner);
+    }
+
+    /// Asserts that `body` contains no unescaped `"`. A `"` is "escaped" only
+    /// when it immediately follows an odd number of backslashes.
+    fn assert_no_bare_quote(body: &str) {
+        let bytes = body.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'"' {
+                let mut backslashes = 0;
+                let mut j = i;
+                while j > 0 && bytes[j - 1] == b'\\' {
+                    backslashes += 1;
+                    j -= 1;
+                }
+                assert!(
+                    backslashes % 2 == 1,
+                    "unescaped bare `\"` in string body: {body}"
+                );
+            }
+            i += 1;
+        }
+    }
 }

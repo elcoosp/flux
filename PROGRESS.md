@@ -122,7 +122,7 @@ All tasks T-101 through T-111 completed.
 ### Completed This Session
 | Task | Description | Commit |
 |---|---|---|
-| T-401 | Per-backend string escaping (Swift + Kotlin/$ rules) | prior |
+| T-401 | Per-backend string escaping (Swift + Kotlin/$ rules) — impl prior; tests added (escaping.rs + backend test modules) | verified |
 
 ### Remaining
 - T-402: Kotlin prelude imports, LazyColumn ForEach, animate*AsState
