@@ -101,6 +101,7 @@ All tasks T-101 through T-111 completed.
 | T-334 | Drift-matrix policy unification (D8-D19) | `e43d428` |
 | T-335.1 | H23 STR_LEN panic on id 0 fixed | prior |
 | T-335.2 | CALL_CAP registry threading | prior |
+| T-335.3 | Two FNVs on Android consolidated (ShadowTree.kt → PropsIndex) | `6839351` |
 | T-335.4 | P2.37 dead reactive layer deleted | prior |
 | T-335.5 | P2.38 cleartext traffic restricted to dev loopback | prior |
 | T-335.6 | artifact-publish header corrected | `e43d428` |
@@ -108,7 +109,6 @@ All tasks T-101 through T-111 completed.
 
 ### Remaining
 - T-331: Unify ForEach row-id derivation (STOP-AND-ASK, cross-platform contract)
-- T-335.8: D6 alignment encoding
 - T-335.9: D21/D22/LOW batch (encoding only)
 - T-336: Phase 3 exit gate
 
