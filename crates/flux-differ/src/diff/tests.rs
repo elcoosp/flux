@@ -6,7 +6,7 @@
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diff::emit::{emit_handler, closure_ref};
+    use crate::diff::emit::{closure_ref, emit_handler};
     use flux_syntax::{HandlerId, Patch, SignalId, Span};
 
     /// Verifies that `emit_handler` emits a `Patch::Handler` for a handler
@@ -46,12 +46,7 @@ mod tests {
     fn handler_unchanged_emits_no_patches() {
         let mut new = flux_ir::IRArena::new();
         let hid = HandlerId::from(1u32);
-        let closure = flux_ir::ClosureIR::new(
-            hid,
-            vec![0x01, 0x02],
-            vec![],
-            Span::new(0, 0, 0),
-        );
+        let closure = flux_ir::ClosureIR::new(hid, vec![0x01, 0x02], vec![], Span::new(0, 0, 0));
         new.add_closure(closure);
 
         let mut patches = Vec::new();
