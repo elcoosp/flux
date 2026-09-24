@@ -190,14 +190,15 @@ impl DevToolsRouter {
             self.last_enriched.drain(0..self.last_enriched.len() - 1024);
         }
         let mut reached = 0;
-        self.devtools.retain(|tx| match tx.try_send(enriched.clone()) {
-            Ok(()) => {
-                reached += 1;
-                true
-            }
-            // Disconnected or lagged (buffer full): evict the slow client.
-            Err(_) => false,
-        });
+        self.devtools
+            .retain(|tx| match tx.try_send(enriched.clone()) {
+                Ok(()) => {
+                    reached += 1;
+                    true
+                }
+                // Disconnected or lagged (buffer full): evict the slow client.
+                Err(_) => false,
+            });
         tracing::debug!(reached, "route_telemetry: broadcast complete");
         reached
     }
