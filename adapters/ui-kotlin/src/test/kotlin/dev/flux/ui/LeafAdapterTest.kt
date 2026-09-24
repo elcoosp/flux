@@ -74,6 +74,42 @@ class LeafAdapterTest {
     }
 
     @Test
+    fun `text adapter writes font size on update`() {
+        val adapter = TextAdapter.create()
+        val view = adapter.create(7u)
+        adapter.update(view, propsOf(PropsIndex.TEXT_SIZE to FluxValue.Float(18.0)))
+        assertEquals(18.0, view.getProperty(TextAdapter.PROP_FONT_SIZE))
+    }
+
+    @Test
+    fun `text adapter writes color on update`() {
+        val adapter = TextAdapter.create()
+        val view = adapter.create(8u)
+        val color = FluxColor(1.0, 0.0, 0.0, 1.0)
+        adapter.update(view, propsOf(PropsIndex.TEXT_COLOR to color.toRecord()))
+        assertEquals(color, view.getProperty(TextAdapter.PROP_COLOR))
+    }
+
+    @Test
+    fun `text field adapter writes secureTextEntry flag`() {
+        val adapter = TextInputAdapter.create()
+        val view = adapter.create(9u)
+        adapter.update(view, propsOf(PropsIndex.TEXT_INPUT_SECURE_TEXT_ENTRY to FluxValue.Bool(true)))
+        assertEquals(true, view.getProperty(TextInputAdapter.PROP_SECURE))
+
+        adapter.update(view, propsOf(PropsIndex.TEXT_INPUT_SECURE_TEXT_ENTRY to FluxValue.Bool(false)))
+        assertEquals(false, view.getProperty(TextInputAdapter.PROP_SECURE))
+    }
+
+    @Test
+    fun `text field adapter writes placeholder on update`() {
+        val adapter = TextInputAdapter.create()
+        val view = adapter.create(10u)
+        adapter.update(view, propsOf(PropsIndex.TEXT_INPUT_PLACEHOLDER to FluxValue.Str("Enter…")))
+        assertEquals("Enter…", view.getProperty(TextInputAdapter.PROP_PLACEHOLDER))
+    }
+
+    @Test
     fun `destroy clears bound executor to break retain cycle`() {
         val adapter = ButtonAdapter.create()
         val view = adapter.create(6u)

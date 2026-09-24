@@ -33,6 +33,9 @@ public final class SliderAdapter: FluxAdapter {
             view.maximumValue = Float(max)
         }
         // UIKit has no native step; record the requested step but keep value continuous.
+        if let step = new.getFloat(named: "step") {
+            view.fluxRecord(FluxRecordedProp.step, step)
+        }
         if let value = new.getFloat(named: "value"), view.value != Float(value) {
             view.value = Float(value)
         }

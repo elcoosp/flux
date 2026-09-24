@@ -36,8 +36,11 @@ enum FluxRecordedProp {
     static let signal = "signal"
     /// `Animate` easing curve (Android `PROP_CURVE`).
     static let curve = "curve"
-    /// `Animate` duration in seconds (Android `PROP_DURATION`).
     static let duration = "duration"
+    /// `Slider` tick step (Android `PROP_STEP` = `step`). UIKit renders the
+    /// slider as a continuous control but the host reads the requested step
+    /// for parity so `onChange` can quantize when the native presentation is wired.
+    static let step = "step"
 }
 
 extension UIView {

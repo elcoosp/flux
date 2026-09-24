@@ -47,6 +47,7 @@ public final class GestureAdapter: FluxAdapter {
             return
         }
         attachRecognizer(kind: kind, to: view)
+        view.gestureEnvironment?.threshold = Double(new.getFloat(named: "threshold") ?? 0.0)
     }
 
     public func setChildren(_ children: [AnyObject], on view: UIView) {
