@@ -319,8 +319,7 @@ compo App
 #[test]
 fn record_ctor_wrong_field_type_is_rejected() {
     // Record constructor arg type errors must propagate (H20).
-    let src =
-        "record Task { label: String, done: Bool }
+    let src = "record Task { label: String, done: Bool }
 compo App
   let t = Task(label: 42, done: true)
 ";
