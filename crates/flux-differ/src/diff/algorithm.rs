@@ -205,21 +205,27 @@ pub(crate) fn reattach_pairs(
     pairs
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use flux_ir::{ArenaBuilder, Node};
     use flux_syntax::{Child, ComponentId, NodeId, NodeKind, Props, Span};
 
-    fn build_tree(root_id: u32, root_kind: NodeKind, children: &[(u32, NodeKind)]) -> flux_ir::IRArena {
+    fn build_tree(
+        root_id: u32,
+        root_kind: NodeKind,
+        children: &[(u32, NodeKind)],
+    ) -> flux_ir::IRArena {
         let mut b = ArenaBuilder::new();
         let root = Node {
             id: NodeId::from(root_id),
             kind: root_kind,
             component_id: ComponentId::from(0u32),
             props: Props::from_fields(vec![]),
-            children: children.iter().map(|(cid, _)| Child::Node(NodeId::from(*cid))).collect(),
+            children: children
+                .iter()
+                .map(|(cid, _)| Child::Node(NodeId::from(*cid)))
+                .collect(),
             handlers: vec![],
             span: Span::new(0, 0, 10),
         };
@@ -242,19 +248,31 @@ mod tests {
     #[test]
     fn multi_insert_emits_ascending_indices_per_parent() {
         let old = build_tree(1, NodeKind::Component, &[(2, NodeKind::Primitive)]);
-        let new = build_tree(1, NodeKind::Component, &[
-            (3, NodeKind::Primitive),
-            (4, NodeKind::Primitive),
-            (2, NodeKind::Primitive),
-        ]);
+        let new = build_tree(
+            1,
+            NodeKind::Component,
+            &[
+                (3, NodeKind::Primitive),
+                (4, NodeKind::Primitive),
+                (2, NodeKind::Primitive),
+            ],
+        );
         let patches = diff(&old, &new);
-        let inserts: Vec<(u32, u32)> = patches.iter().filter_map(|p| match p {
-            Patch::Insert { parent, index, .. } => Some((u32::from(*parent), u32::from(*index))),
-            _ => None,
-        }).collect();
+        let inserts: Vec<(u32, u32)> = patches
+            .iter()
+            .filter_map(|p| match p {
+                Patch::Insert { parent, index, .. } => {
+                    Some((u32::from(*parent), u32::from(*index)))
+                }
+                _ => None,
+            })
+            .collect();
         let mut sorted = inserts.clone();
         sorted.sort();
-        assert_eq!(inserts, sorted, "inserts must be emitted in (parent, index) order (audit C8)");
+        assert_eq!(
+            inserts, sorted,
+            "inserts must be emitted in (parent, index) order (audit C8)"
+        );
     }
 
     #[test]
@@ -292,7 +310,9 @@ mod tests {
 fn is_root_of_new(new: &flux_ir::IRArena, id: &NodeId) -> bool {
     !new.all_ids().any(|nid| {
         new.get(nid).map_or(false, |n| {
-            n.children().iter().any(|c| matches!(c, Child::Node(n) if *n == *id))
+            n.children()
+                .iter()
+                .any(|c| matches!(c, Child::Node(n) if *n == *id))
         })
     })
 }
@@ -309,7 +329,9 @@ fn root_position(new: &flux_ir::IRArena, id: &NodeId) -> u16 {
         .filter(|nid| {
             !new.all_ids().any(|pid| {
                 new.get(pid).map_or(false, |p| {
-                    p.children().iter().any(|c| matches!(c, Child::Node(n) if *n == *nid))
+                    p.children()
+                        .iter()
+                        .any(|c| matches!(c, Child::Node(n) if *n == *nid))
                 })
             })
         })
