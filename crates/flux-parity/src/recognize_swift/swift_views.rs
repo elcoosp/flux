@@ -307,10 +307,7 @@ fn collect_value(tokens: &[&str]) -> Option<(String, usize)> {
         // String literal — count until closing quote token.
         let mut result = first.to_owned();
         let mut j = 1;
-        while j < tokens.len()
-            && !tokens[j].ends_with('"')
-            && tokens[j] != ","
-        {
+        while j < tokens.len() && !tokens[j].ends_with('"') && tokens[j] != "," {
             result.push_str(tokens[j]);
             j += 1;
         }
