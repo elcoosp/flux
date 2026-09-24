@@ -1,0 +1,36 @@
+{
+  "name": "foreach_ids",
+  "description": "Normative ForEach row/child/key-child id derivation (D1/D2). Single source of truth; both host kits load this vector file and assert identical ids.",
+  "row_id": "fnv1a-32: start=0x811c9dc5; foreach_id u32 LE; 0x2C marker byte; index_or_key u64 LE (use splice key when present, else row index); multiply 0x0100_0193 after each byte; final u32 OR 0x8000_0000",
+  "child_id": "fnv1a-32: start=0x811c9dc5; row_id u64 LE; 0x3F marker byte; orig_id u64 LE; multiply 0x0100_0193 after each byte; final u32 OR 0xC000_0000",
+  "key_child_id": "fnv1a-32: start=0x811c9dc5; row_id u64 LE; 0x3F marker byte; splice_key u64 LE; multiply 0x0100_0193 after each byte; final u32 OR 0xC000_0000",
+  "markers": {
+    "row": "0x8000_0000",
+    "child": "0xC000_0000",
+    "note": "final u32 result ORed with the marker; derived ids are always >= 0x8000_0000 so they never collide with real server node ids (< 0x8000_0000)"
+  },
+  "collision_guard": "derived_id & 0x8000_0000 != 0  (row) / derived_id & 0xC000_0000 == 0xC000_0000 (child)",
+  "vectors": [
+    {
+      "input": { "foreach_id": 20, "row_index": 1, "orig_id": 10 },
+      "row_id": "0xF7F64E76",
+      "child_id": "0xD05CFC35"
+    },
+    {
+      "input": { "foreach_id": 20, "row_index": 0, "orig_id": 10 },
+      "row_id": "0xD557AD97",
+      "child_id": "0xC0F8B904"
+    },
+    {
+      "input": { "foreach_id": 1, "row_index": 0, "orig_id": 1 },
+      "row_id": "0xD135E7F8",
+      "child_id": "0xD176B97E"
+    },
+    {
+      "input": { "foreach_id": 1, "row_index": 0, "splice_key": 42, "orig_id": 1 },
+      "row_id": "0xF4C1C912",
+      "child_id": "0xDD07E4CB",
+      "key_child_id": "0xEDACEA40"
+    }
+  ]
+}

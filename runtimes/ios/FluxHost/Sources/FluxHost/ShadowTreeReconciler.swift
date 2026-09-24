@@ -529,16 +529,20 @@ struct ShadowTreeReconciler {
             // (FLUX-072 #1 — "add task doesn't render"). Without this the list
             // never re-expands and appended tasks are invisible.
             var templateChildIds: [UInt32] = []
+            var spliceKeys: [UInt64] = []
             for child in node.children {
                 switch child {
                 case let .node(id): templateChildIds.append(id)
-                case let .splice(_, items): templateChildIds.append(contentsOf: items.map { $0.node })
+                case let .splice(_, items):
+                    templateChildIds.append(contentsOf: items.map { $0.node })
+                    spliceKeys.append(contentsOf: items.map { $0.key })
                 }
             }
             #if DEBUG
             NSLog("[FluxRT] ForEach node \(nodeId): expanding \(templateChildIds.count) template children")
             #endif
-            let (ids, expanded, elements) = expandForEach(nodeId: nodeId, templateChildIds: templateChildIds, nodes: nodes)
+            let (ids, expanded, elements) = expandForEach(nodeId: nodeId,
+                templateChildIds: templateChildIds, spliceKeys: spliceKeys, nodes: nodes)
             #if DEBUG
             NSLog("[FluxRT] ForEach node \(nodeId): expanded to \(ids.count) rows, \(expanded.count) nodes, \(elements.count) elements")
             #endif
@@ -626,6 +630,7 @@ struct ShadowTreeReconciler {
     private mutating func expandForEach(
         nodeId: UInt32,
         templateChildIds: [UInt32],
+        spliceKeys: [UInt64],
         nodes: [UInt32: ShadowNode]
     ) -> (childIds: [UInt32], expanded: [UInt32: ShadowNode], elements: [FluxValue]) {
         guard let meta = signalMeta[nodeId],
@@ -639,8 +644,12 @@ struct ShadowTreeReconciler {
         var childIds: [UInt32] = []
         var expanded: [UInt32: ShadowNode] = [:]
         var elements: [FluxValue] = []
-        for (_, element) in items.enumerated() {
-            let rowId = deriveForEachRowId(foreachId: nodeId, index: UInt32(childIds.count))
+        for (index, element) in items.enumerated() {
+            // T-331: use the splice key as the row seed when present (non-zero);
+            // fall back to the list index for anonymous (unkeyed) ForEach.
+            let key: UInt64 = index < spliceKeys.count ? spliceKeys[index] : 0
+            let seed: UInt64 = key != 0 ? key : UInt64(index)
+            let rowId = deriveForEachRowId(foreachId: nodeId, seed: seed)
             // The id the caller will reconcile is the *cloned template* node
             // (the inlined row), not the row key: `cloneSubtree` stores the
             // template clone under `deriveForEachChildId(rowId, templateId)`
@@ -674,27 +683,53 @@ struct ShadowTreeReconciler {
         return (childIds, expanded, elements)
     }
 
-    /// Derives a stable per-row id from the `ForEach` id + element index.
-    private func deriveForEachRowId(foreachId: UInt32, index: UInt32) -> UInt32 {
-        // FNV-ish mix; deterministic and collision-resistant for practical trees.
-        var h: UInt32 = foreachId &* 0x0100_0193
-        h = h ^ index
-        h = h &* 0x0100_0193
-        return h | 0x8000_0000 // high bit marks expanded rows
+    /// FNV-1a-32 over a byte slice (D1/D2 normative; shared with the Kotlin host).
+    internal func fnv1a(_ bytes: [UInt8]) -> UInt32 {
+        var h: UInt32 = 0x811c_9dc5
+        for b in bytes {
+            h = (h ^ UInt32(b)) &* 0x0100_0193
+        }
+        return h
     }
-
-    /// Derives a stable per-row id for a *child* of an expanded `ForEach` row,
-    /// from the row id + the child's original template id. This keeps every
-    /// row's subtree (incl. a component body inlined at the call site) a distinct
-    /// set of node ids, so each row renders its own per-row `itemSlot` value
-    /// instead of the shared template's signal (the multi-row ForEach bug,
-    /// FLUX-072 / ADR-0050).
-    private func deriveForEachChildId(rowId: UInt32, origId: UInt32) -> UInt32 {
-        var h: UInt32 = rowId &* 0x0100_0193
-        h = h ^ origId
-        h = h &* 0x0100_0193
-        h = h ^ 0x5555_5555
-        return h | 0xC000_0000 // distinct high bits mark expanded row children
+    /// Serializes a `UInt32` into 4 little-endian bytes.
+    internal func leBytes(_ v: UInt32) -> [UInt8] { [
+        UInt8(v & 0xFF), UInt8((v >> 8) & 0xFF),
+        UInt8((v >> 16) & 0xFF), UInt8((v >> 24) & 0xFF)
+    ] }
+    /// Serializes a `UInt64` into 8 little-endian bytes.
+    internal func leBytes(_ v: UInt64) -> [UInt8] { [
+        UInt8(v & 0xFF), UInt8((v >> 8) & 0xFF), UInt8((v >> 16) & 0xFF),
+        UInt8((v >> 24) & 0xFF), UInt8((v >> 32) & 0xFF), UInt8((v >> 40) & 0xFF),
+        UInt8((v >> 48) & 0xFF), UInt8((v >> 56) & 0xFF)
+    ] }
+    /// Derives a stable per-row id: `fnv1a(foreachId u32 LE || 0x2C || seed u64 LE) | 0x8000_0000`.
+    /// The 0x2C separator prevents index 0 under `foreachId=1` colliding with index 1
+    /// under `foreachId=0`; the 0x80 marker guarantees the id ≥ 0x8000_0000, never a real
+    /// server node id (D1/D2).
+    internal func deriveForEachRowId(foreachId: UInt32, seed: UInt64) -> UInt32 {
+        var bytes: [UInt8] = leBytes(foreachId)
+        bytes.append(0x2C)
+        bytes.append(contentsOf: leBytes(seed))
+        return fnv1a(bytes) | 0x8000_0000
+    }
+    /// Derives a stable per-row id for a *child* of an expanded `ForEach` row:
+    /// `fnv1a(rowId u64 LE || 0x3F || origId u64 LE) | 0xC000_0000`.
+    internal func deriveForEachChildId(rowId: UInt32, origId: UInt32) -> UInt32 {
+        var bytes: [UInt8] = leBytes(UInt64(rowId))
+        bytes.append(0x3F)
+        bytes.append(contentsOf: leBytes(UInt64(origId)))
+        return fnv1a(bytes) | 0xC000_0000
+    }
+    /// Derives a child id for a *keyed* `WireChild.Splice` item of an expanded
+    /// ForEach row — uses the splice `key` (u64) instead of the template's
+    /// `origId`. Same FNV-1a stream + 0x3F + 0xC000_0000 marker as
+    /// [deriveForEachChildId], but keyed by the wire splice key so keyed
+    /// children keep a stable, edit-immune identity (T-331 / D10).
+    internal func deriveForEachKeyChild(rowId: UInt32, key: UInt64) -> UInt32 {
+        var bytes: [UInt8] = leBytes(UInt64(rowId))
+        bytes.append(0x3F)
+        bytes.append(contentsOf: leBytes(key))
+        return fnv1a(bytes) | 0xC000_0000
     }
 
     /// Deep-clones the subtree rooted at `origId` into `expanded`, rewriting each
@@ -719,7 +754,18 @@ struct ShadowTreeReconciler {
                 cloneSubtree(cid, rowId: rowId, nodes: nodes, into: &expanded, meta: &meta)
                 childRefs.append(.node(deriveForEachChildId(rowId: rowId, origId: cid)))
             case let .splice(count, items):
-                let newItems = items.map { (key: $0.key, node: deriveForEachChildId(rowId: rowId, origId: $0.node)) }
+                let newItems = items.map { item -> (key: UInt64, node: UInt32) in
+                    // T-331: keyed splice children derive from the splice key
+                    // (stable across edits), falling back to node-id derivation
+                    // for anonymous splices (key == 0).
+                    let derived: UInt32
+                    if item.key != 0 {
+                        derived = deriveForEachKeyChild(rowId: rowId, key: item.key)
+                    } else {
+                        derived = deriveForEachChildId(rowId: rowId, origId: item.node)
+                    }
+                    return (item.key, derived)
+                }
                 for it in items {
                     cloneSubtree(it.node, rowId: rowId, nodes: nodes, into: &expanded, meta: &meta)
                 }
@@ -762,11 +808,13 @@ struct ShadowTreeReconciler {
         let activeChildId = (node.kind == .router || componentNames[node.componentId] == "Router") ? routerActiveChildId(node, nodes: nodes) : nil
         for child in node.children {
             let childIds: [UInt32]
+            var spliceKeys: [UInt64] = []
             switch child {
             case let .node(id):
                 childIds = [id]
             case let .splice(_, items):
                 childIds = items.map { $0.node }
+                spliceKeys = items.map { $0.key }
             }
             let expandedChildIds: [UInt32]
             let mergedNodes: [UInt32: ShadowNode]
@@ -781,7 +829,7 @@ struct ShadowTreeReconciler {
                 // every row bound to its own value. A single shared itemSlot
                 // seeded once for all rows would leave every row showing the last
                 // element (the multi-row ForEach bug, FLUX-072 / ADR-0050).
-                let (ids, expanded, elements) = expandForEach(nodeId: node.id, templateChildIds: childIds, nodes: nodes)
+                let (ids, expanded, elements) = expandForEach(nodeId: node.id, templateChildIds: childIds, spliceKeys: spliceKeys, nodes: nodes)
                 expandedChildIds = ids
                 mergedNodes = nodes.merging(expanded) { $1 }
                 expandedNodeTable.merge(expanded) { $1 }

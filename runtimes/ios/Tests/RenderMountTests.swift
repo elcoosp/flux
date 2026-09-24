@@ -544,16 +544,31 @@ final class RenderMountTests: XCTestCase {
     /// Mirrors `ShadowTreeReconciler.deriveForEachRowId` + `deriveForEachChildId`
     /// so the test can address the expanded row's template clone (the id under
     /// which `built[…]` stores its view) without reaching into the reconciler.
+    /// T-331: FNV-1a-32 (0x811c9dc5 start, 0x01000193 mul) with marker bytes.
     private func deriveRowId(_ foreachId: UInt32, index: UInt32, templateId: UInt32) -> UInt32 {
-        var h: UInt32 = foreachId &* 0x0100_0193
-        h = h ^ index
-        h = h &* 0x0100_0193
-        let rowId = h | 0x8000_0000
-        // Row views live under the derived child id (0xC0…), not the raw row id.
-        h = rowId &* 0x0100_0193
-        h = h ^ templateId
-        h = h &* 0x0100_0193
-        h = h ^ 0x5555_5555
-        return h | 0xC000_0000
+        func fnv1a(_ bytes: [UInt8]) -> UInt32 {
+            var h: UInt32 = 0x811c_9dc5
+            for b in bytes { h = (h ^ UInt32(b)) &* 0x0100_0193 }
+            return h
+        }
+        func leBytes(_ v: UInt32) -> [UInt8] {
+            [UInt8(v & 0xFF), UInt8((v >> 8) & 0xFF),
+             UInt8((v >> 16) & 0xFF), UInt8((v >> 24) & 0xFF)]
+        }
+        func leBytes(_ v: UInt64) -> [UInt8] {
+            [UInt8(v & 0xFF), UInt8((v >> 8) & 0xFF), UInt8((v >> 16) & 0xFF),
+             UInt8((v >> 24) & 0xFF), UInt8((v >> 32) & 0xFF), UInt8((v >> 40) & 0xFF),
+             UInt8((v >> 48) & 0xFF), UInt8((v >> 56) & 0xFF)]
+        }
+        // Row id: fnv1a(foreachId u32 LE || 0x2C || index u64 LE) | 0x8000_0000.
+        var rbytes: [UInt8] = leBytes(foreachId)
+        rbytes.append(0x2C)
+        rbytes.append(contentsOf: leBytes(UInt64(index)))
+        let rowId = fnv1a(rbytes) | 0x8000_0000
+        // Child id: fnv1a(rowId u64 LE || 0x3F || templateId u64 LE) | 0xC000_0000.
+        var cbytes: [UInt8] = leBytes(UInt64(rowId))
+        cbytes.append(0x3F)
+        cbytes.append(contentsOf: leBytes(UInt64(templateId)))
+        return fnv1a(cbytes) | 0xC000_0000
     }
 }

@@ -87,8 +87,15 @@ public class ShadowTree(
      */
     internal val forEachRowContext = LinkedHashMap<UInt, Pair<UInt, FluxValue>>()
     /** Template row `WireNode` for each ForEach node id, captured at build time so
-     *  [reconcileForEach] can re-expand rows on list-signal change without a frame. */
+     * [reconcileForEach] can re-expand rows on list-signal change without a frame.
+     */
     private val forEachTemplate = LinkedHashMap<UInt, WireNode>()
+    /** Per-ForEach splice key seeds (one per list element, or empty when
+     * the splice is anonymous), captured at build time so
+     * [reconcileForEach] can re-derive the same row ids on a list-signal
+     * change without the wire node (T-331). Empty list → fall back to index.
+     */
+    private val forEachSpliceKeys = LinkedHashMap<UInt, List<ULong>>()
     internal var root: ShadowNode? = null
     /** Snapshot of the Init frame's wire index, stored so [reconcileForEach]
      * can deep-clone ForEach template children with per-row derived ids
@@ -822,9 +829,17 @@ public class ShadowTree(
             (executor as? HostExecutor)?.materializationSignals?.read(listSignal)
                 as? dev.flux.host.vm.FluxValue.ListVal ?: return childIdList(wire)
         val templateMeta = signalMeta[templateRowId]
+        // T-331: capture splice key seeds from the ForEach's splice child so
+        // reconcileForEach can re-derive identical row ids later. Keys are
+        // u64 from the wire; fall back to index when no splice or empty.
+        val spliceKeys = wire.children
+            .filterIsInstance<WireChild.Splice>()
+            .firstOrNull()?.items?.map { it.first } ?: emptyList()
+        forEachSpliceKeys[wire.id] = spliceKeys
         val expanded = mutableListOf<UInt>()
         for ((i, elem) in list.items.withIndex()) {
-            val rowId = deriveForEachRowId(wire.id, i.toUInt())
+            val seed = spliceKeys.getOrNull(i)?.takeIf { it != 0uL } ?: i.toULong()
+            val rowId = deriveForEachRowId(wire.id, seed)
             val childIds = linkedSetOf<UInt>()
             val clonedWire = cloneWireNode(templateRow, rowId = rowId, outIds = childIds, index = index)
             expandedIndex[rowId] = clonedWire
@@ -864,9 +879,13 @@ public class ShadowTree(
             host.materializationSignals.read(listSignal) as? FluxValue.ListVal ?: return
         val templateMeta = signalMeta[template.id] ?: signalMetaOverride[template.id]
         // Desired row ids, one per current list element, in order.
+        // T-331: use captured splice key seeds (fall back to index) so row ids
+        // are stable across re-expansion.
+        val spliceKeys = forEachSpliceKeys[foreachId] ?: emptyList()
         val desired = linkedSetOf<UInt>()
         list.items.forEachIndexed { i, elem ->
-            val rowId = deriveForEachRowId(foreachId, i.toUInt())
+            val seed = spliceKeys.getOrNull(i)?.takeIf { it != 0uL } ?: i.toULong()
+            val rowId = deriveForEachRowId(foreachId, seed)
             val rootId = deriveForEachChildId(rowId, template.id)
             val childIds = linkedSetOf<UInt>()
             expandedIndex[rootId] = cloneWireNode(template, rowId, childIds, wireIndex)
@@ -889,7 +908,8 @@ public class ShadowTree(
         // seeded `item` slot so each row shows its own list element.
         val newChildren =
             list.items.mapIndexed { i, elem ->
-                val rowId = deriveForEachRowId(foreachId, i.toUInt())
+                val seed = spliceKeys.getOrNull(i)?.takeIf { it != 0uL } ?: i.toULong()
+                val rowId = deriveForEachRowId(foreachId, seed)
                 val rootId = deriveForEachChildId(rowId, template.id)
                 val child =
                     nodes[rootId] ?: run {
@@ -926,11 +946,78 @@ public class ShadowTree(
         }
     }
 
-    /** Stable derived id for the `i`-th row of ForEach node `foreachId`. */
-    private fun deriveForEachRowId(foreachId: UInt, i: UInt): UInt = foreachId * 2654435761u + i * 40503u + 0x9E3779B9u
-    private fun deriveForEachChildId(rowId: UInt, origId: UInt): UInt =
-        ((rowId * 2654435761u).xor(origId * 40503u)).xor(0x55555555u)
+    /**
+     * FNV-1a-32 over a byte slice (D1/D2 normative algorithm; the single shared
+     * helper per P2.36 — both row-id and child-id derivation go through here).
+     */
+    internal fun fnv1a(bytes: ByteArray): UInt {
+        var h: UInt = 0x811c9dc5u
+        for (b in bytes) {
+            h = h xor b.toUInt()
+            h = h * 0x01000193u
+        }
+        return h
+    }
 
+    /**
+     * Derives the row id from the ForEach [foreachId] and either the splice
+     * [key] (when present, a u64 from the wire splice items) or the [rowIndex].
+     *
+     * Algorithm: `fnv1a(foreachId LE || 0x2C || seed LE) | 0x8000_0000`.
+     * The 0x2C marker byte separates the ForEach id from the row seed so the
+     * same index under different ForEach nodes diverges (D1). The 0x80 marker
+     * bit guarantees the id is ≥ 0x8000_0000, never colliding with a real server
+     * node id (D2).
+     */
+    internal fun deriveForEachRowId(foreachId: UInt, seed: ULong): UInt {
+        val bytes = ByteArray(4 + 1 + 8)
+        // foreachId as u32 LE (4 bytes)
+        var i = 0
+        var v = foreachId.toUInt()
+        for (j in 0..3) { bytes[i++] = (v and 0xFFu).toByte(); v = v shr 8 }
+        bytes[i++] = 0x2C  // marker byte
+        // seed as u64 LE (8 bytes)
+        var sv = seed
+        for (j in 0..7) { bytes[i++] = (sv and 0xFFu).toByte(); sv = sv shr 8 }
+        return fnv1a(bytes) or 0x80000000u
+    }
+
+    /**
+     * Derives a child id for a child of expanded ForEach row [rowId], from the
+     * original template/child [origId].
+     *
+     * Algorithm: `fnv1a(row_id LE || 0x3F || orig_id LE) | 0xC000_0000`.
+     * The 0x3F separator and 0xC0 marker pair distinguish child ids from row
+     * ids (0x80…) so both live in the derived-id space without collision (D2).
+     */
+    internal fun deriveForEachChildId(rowId: UInt, origId: UInt): UInt {
+        val bytes = ByteArray(8 + 1 + 8)
+        var i = 0
+        var rv = rowId.value.toULong()
+        for (j in 0..7) { bytes[i++] = (rv and 0xFFu).toByte(); rv = rv shr 8 }
+        bytes[i++] = 0x3F  // marker byte
+        var ov = origId.toULong()
+        for (j in 0..7) { bytes[i++] = (ov and 0xFFu).toByte(); ov = ov shr 8 }
+        return fnv1a(bytes) or 0xC0000000u
+    }
+
+    /**
+     * Derives a child id for a *keyed* `WireChild.Splice` item of an expanded
+     * ForEach row — uses the splice `key` (u64) instead of the template's
+     * `origId`. Same FNV-1a stream + 0x3F + 0xC000_0000 marker as
+     * [deriveForEachChildId], but keyed by the wire splice key so keyed
+     * children keep a stable, edit-immune identity (T-331 / D10).
+     */
+    internal fun deriveForEachKeyChild(rowId: UInt, key: ULong): UInt {
+        val bytes = ByteArray(8 + 1 + 8)
+        var i = 0
+        var rv = rowId.toULong()
+        for (j in 0..7) { bytes[i++] = (rv and 0xFFu).toByte(); rv = rv shr 8 }
+        bytes[i++] = 0x3F  // marker byte
+        var kv = key
+        for (j in 0..7) { bytes[i++] = (kv and 0xFFu).toByte(); kv = kv shr 8 }
+        return fnv1a(bytes) or 0xC0000000u
+    }
     /**
      * Recursively deep-clones [template] into a per-row wire subtree, rewriting
      * each node's id via [deriveForEachChildId]. Populate [outIds] with every
@@ -963,7 +1050,11 @@ public class ShadowTree(
                 }
                 is WireChild.Splice -> {
                     val newItems = child.items.map { (key, nodeId) ->
-                        val childId = deriveForEachChildId(rowId, nodeId)
+                        // T-331: keyed splice children derive from the splice key
+                        // (stable across edits), not the template node id; anonymous
+                        // splices (key == 0) fall back to node-id derivation.
+                        val childId = if (key != 0uL) deriveForEachKeyChild(rowId, key)
+                            else deriveForEachChildId(rowId, nodeId)
                         val childWire = expandedIndex[nodeId] ?: index[nodeId]
                         if (childWire != null) {
                             val cloned = cloneWireNode(childWire, rowId, outIds, index)
