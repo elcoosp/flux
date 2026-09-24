@@ -106,10 +106,11 @@ All tasks T-101 through T-111 completed.
 | T-335.5 | P2.38 cleartext traffic restricted to dev loopback | prior |
 | T-335.6 | artifact-publish header corrected | `e43d428` |
 | T-335.7 | H26 release build hardening (minify, proguard) | prior |
+| T-335.8 | D6 alignment encoding (Alignment ADT → record {0:Int}) | `cdd8760` |
+| T-335.9 | D21/D22 Appendix F documentation (image cache, string-id ranges) | docs-only |
 
 ### Remaining
 - T-331: Unify ForEach row-id derivation (STOP-AND-ASK, cross-platform contract)
-- T-335.9: D21/D22/LOW batch (encoding only)
 - T-336: Phase 3 exit gate
 
 ### iOS Test Status
