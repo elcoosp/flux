@@ -55,10 +55,7 @@ fn elide_wrappers(nodes: &[ViewNode]) -> Vec<ViewNode> {
     // kept as-is so a real `Column { Text }` is never equated with
     // `Row { Text }`.
     if nodes.len() == 1 {
-        if let ViewNode::Primitive {
-            name, children, ..
-        } = &nodes[0]
-        {
+        if let ViewNode::Primitive { name, children, .. } = &nodes[0] {
             if children.len() == 1 {
                 if let ViewNode::Primitive {
                     name: inner_name, ..
@@ -85,7 +82,12 @@ fn map_children(node: &ViewNode, f: impl Fn(&[ViewNode]) -> Vec<ViewNode> + Copy
             name: name.clone(),
             children: f(children),
         },
-        ViewNode::Primitive { name, props, children, .. } => ViewNode::Primitive {
+        ViewNode::Primitive {
+            name,
+            props,
+            children,
+            ..
+        } => ViewNode::Primitive {
             name: name.clone(),
             props: props.clone(),
             children: f(children),
@@ -305,7 +307,8 @@ fn arms_equal(a: &[(String, Vec<ViewNode>)], b: &[(String, Vec<ViewNode>)]) -> b
     // within an if/else is not significant across backends.
     let mut matched = vec![false; b.len()];
     for (la, ca) in a {
-        let found = (0..b.len()).find(|&i| !matched[i] && la == &b[i].0 && structurally_equal(ca, &b[i].1));
+        let found =
+            (0..b.len()).find(|&i| !matched[i] && la == &b[i].0 && structurally_equal(ca, &b[i].1));
         match found {
             Some(i) => matched[i] = true,
             None => return false,
@@ -392,14 +395,16 @@ mod tests {
     /// T-502.1: Match arms compare as an unordered multiset.
     #[test]
     fn match_arms_are_unordered() {
-        let arm = |pat: &str| (
-            pat.to_string(),
-            vec![ViewNode::Primitive {
-                name: "Text".to_string(),
-                props: vec![],
-                children: vec![],
-            }],
-        );
+        let arm = |pat: &str| {
+            (
+                pat.to_string(),
+                vec![ViewNode::Primitive {
+                    name: "Text".to_string(),
+                    props: vec![],
+                    children: vec![],
+                }],
+            )
+        };
         let left = ViewNode::Match {
             scrutinee: "x".to_string(),
             arms: vec![arm("A"), arm("B")],
