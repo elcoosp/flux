@@ -1,4 +1,3 @@
-
 use super::*;
 
 fn span(start: u32, end: u32) -> Span {
