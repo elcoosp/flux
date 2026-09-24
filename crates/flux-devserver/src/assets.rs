@@ -215,7 +215,10 @@ mod tests {
         std::fs::create_dir_all(dir.join("img")).expect("create img subdir");
         std::fs::write(dir.join("img/logo.png"), b"").expect("create logo.png");
         // Canonicalize the expected path too — on macOS `/var` → `/private/var`.
-        let expected = dir.join("img/logo.png").canonicalize().expect("canonicalize");
+        let expected = dir
+            .join("img/logo.png")
+            .canonicalize()
+            .expect("canonicalize");
         assert_eq!(resolve(&dir, "img/logo.png"), Some(expected));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -225,14 +228,11 @@ mod tests {
         // Audit P2.4: a symlink inside the project root that points outside
         // it must be rejected after canonicalization.
         let dir = temp_asset_dir();
-        let target = std::env::temp_dir().join(format!(
-            "flux-symlink-target-{}",
-            std::process::id()
-        ));
+        let target =
+            std::env::temp_dir().join(format!("flux-symlink-target-{}", std::process::id()));
         std::fs::write(&target, b"secret").expect("write target");
         #[cfg(unix)]
-        std::os::unix::fs::symlink(&target, dir.join("escape"))
-            .expect("symlink creation");
+        std::os::unix::fs::symlink(&target, dir.join("escape")).expect("symlink creation");
         #[cfg(not(unix))]
         panic!("symlink test requires unix");
         assert!(
