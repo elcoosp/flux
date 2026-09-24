@@ -60,17 +60,9 @@ public data class Props(
     // adapters/ui-swift Color.swift + TextAdapter.swift.
 
     /** Float value at the record's positional [slot], or `null`. */
-    private fun FluxValue.Record.floatAt(slot: Int): kotlin.Double? =
-        (fields.getOrNull(slot)?.value as? FluxValue.Float)?.value
+    private fun FluxValue.Record.floatAt(slot: Int): kotlin.Double? = (fields.getOrNull(slot)?.value as? FluxValue.Float)?.value
 
-    private fun FluxValue.Record.stringAt(slot: Int): String? {
-        return (fields.getOrNull(slot)?.value as? FluxValue.Str)?.value
-    }
-
-    /** Int value at the record's positional [slot], or `null`. (audit D6) */
-    private fun FluxValue.Record.intAt(slot: Int): kotlin.Long? =
-        (fields.getOrNull(slot)?.value as? FluxValue.Int)?.value
-
+    private fun FluxValue.Record.stringAt(slot: Int): String? = (fields.getOrNull(slot)?.value as? FluxValue.Str)?.value
 
     /** Decodes the `Color` record at [index] into a [FluxColor], or `null`. */
     public fun getColor(index: UShort): FluxColor? {
