@@ -22,6 +22,7 @@ import dev.flux.ui.FluxExecutor
 import dev.flux.ui.FluxNativeView
 import dev.flux.ui.FluxUiKit
 import dev.flux.ui.Props
+import dev.flux.ui.PropsIndex
 import java.lang.ref.WeakReference
 import dev.flux.host.FluxExecutor as HostExecutor
 
@@ -1176,16 +1177,7 @@ public class ShadowTree(
 
     private companion object {
         /** FNV-1a prop-index for the `route` prop name (matches the wire encoder). */
-        val ROUTE_PROP_INDEX: UShort = fnv1aPropIndexForName("route")
-
-        /** FNV-1a (32-bit) hash of [name], matching the wire's `prop_index_for_name`. */
-        fun fnv1aPropIndexForName(name: String): UShort {
-            var h: UInt = 0x811c9dc5u
-            for (b in name.toByteArray(Charsets.UTF_8)) {
-                h = (h xor b.toUInt()) * 0x1000193u
-            }
-            return h.toUShort()
-        }
+        val ROUTE_PROP_INDEX: UShort = PropsIndex.propIndexForName("route")
     }
 
     /** Converts a VM [FluxValue] (thunk result) into the kit [dev.flux.ui.FluxValue],
