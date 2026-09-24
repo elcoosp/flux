@@ -15,7 +15,7 @@
 // This file declares the auxiliary value types referenced by the adapter
 // prop contracts in Appendix F. They are algebraic data types so that the
 // codegen pass can map each variant onto the platform spelling
-// (e.g. Alignment.Center -> SwiftUI .center, Compose Alignment.Center).
+// (e.g. Alignment.value=1 → SwiftUI .center, Compose Alignment.Center).
 //
 // List, Map, and Option are language-intrinsic collection types (mlp-spec
 // §18.3 "Stdlib types (imported by default)"); Option's constructors are
@@ -26,13 +26,10 @@
 type Option[T] = | None | Some(T)
 
 // Text alignment along one axis; maps to platform alignment enums.
-type Alignment =
-  | Leading
-  | Center
-  | Trailing
-  | Top
-  | Bottom
-  | Fill
+// Encoded as a positional record `{0: Int}` (audit D6): 0=start, 1=center, 2=end.
+// Mirrors Color's positional record contract so the IR lowers it as a real
+// value (ADTs lower to Null in the dev oracle — audit D6).
+record Alignment { value: Int }
 
 // Text overflow behavior when content exceeds `maxLines`.
 type Overflow =

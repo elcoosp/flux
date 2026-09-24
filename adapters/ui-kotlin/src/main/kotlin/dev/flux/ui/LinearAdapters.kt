@@ -59,6 +59,11 @@ public open class FluxLinearAdapter(
         props.getFloat(PropsIndex.STACK_GAP)?.let { gap ->
             if (view.getProperty(PROP_GAP) != gap) view.setProperty(PROP_GAP, gap)
         }
+        // Alignment is a positional record `{0: Int}` per D6:
+        // 0=start, 1=center, 2=end. The host maps the Int to the native enum.
+        props.getRecord(PropsIndex.STACK_ALIGNMENT)?.intAt(0)?.let { align ->
+            if (view.getProperty(PROP_ALIGNMENT) != align) view.setProperty(PROP_ALIGNMENT, align)
+        }
         if (view.getProperty(PROP_ORIENTATION) != orientation) view.setProperty(PROP_ORIENTATION, orientation)
     }
 
@@ -88,5 +93,6 @@ public open class FluxLinearAdapter(
     internal companion object {
         const val PROP_GAP = "gap"
         const val PROP_ORIENTATION = "orientation"
+        const val PROP_ALIGNMENT = "alignment"
     }
 }

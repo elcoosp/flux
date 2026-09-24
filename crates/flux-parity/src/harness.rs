@@ -22,8 +22,7 @@
 
 use flux_codegen_core::ViewNode;
 use flux_parser::Ast;
-use flux_syntax::SignalId;
-use flux_syntax::Value;
+use flux_syntax::{SignalId, StringTable, Value};
 use flux_types::TypedAST;
 use flux_vm_ref::{InMemorySignals, VmOutcome, run};
 
@@ -159,7 +158,8 @@ pub struct InteractionOutcome {
 /// Surfaces any VM fault (e.g. `DivByZero`, `InvalidDispatch`) as [`RenderError`].
 pub fn run_tap(program: &[u8], entry: Value) -> Result<InteractionOutcome, RenderError> {
     let mut signals = InMemorySignals::default();
-    let vm = run(program, &mut signals, entry).map_err(|e| RenderError(format!("vm: {e}")))?;
+    let vm = run(program, &mut signals, &StringTable::new(), entry)
+        .map_err(|e| RenderError(format!("vm: {e}")))?;
     Ok(InteractionOutcome {
         signals: vm.signals.clone(),
         vm,

@@ -17,7 +17,7 @@ use flux_perf_harness::{
     gate::{Budgets, evaluate},
     metric::{LatencyMs, MetricKind, MetricRecord, MetricSample, Scenario},
 };
-use flux_syntax::Value;
+use flux_syntax::{StringTable, Value};
 use flux_vm_ref::{InMemorySignals, run};
 
 /// `READ_SIGNAL r0, 1 ; LOAD_INT_CONST r1, 1 ; ADD_I64 r0, r0, r1 ;
@@ -36,7 +36,7 @@ const INCREMENT: &[u8] = &[
 fn measure_vm_dispatch(_tree: &FixtureTree) -> MetricSample {
     let mut signals = InMemorySignals::from_signals([(1u32, Value::Int(0))]);
     let start = std::time::Instant::now();
-    let _ = run(INCREMENT, &mut signals, Value::Null);
+    let _ = run(INCREMENT, &mut signals, &StringTable::new(), Value::Null);
     let elapsed_ms = start.elapsed().as_secs_f64() * 1_000.0;
     MetricSample::latency(LatencyMs::from_raw(elapsed_ms))
 }

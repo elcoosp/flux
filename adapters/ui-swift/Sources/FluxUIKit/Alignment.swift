@@ -6,17 +6,19 @@ import UIKit
 /// A horizontal alignment in the adapter layer, decoded from a Flux
 /// `Alignment` record.
 ///
-/// Canonical encoding: a string `horizontal` field with value `"start"`,
-/// `"center"`, or `"end"`. Field index is `AlignmentField.horizontal`.
+/// Canonical encoding (Appendix F `Alignment`, audit D6): a positional record
+/// `{0: Int}` where 0=start, 1=center, 2=end — the same positional-record
+/// contract `Color` uses, so the IR lowers it as a real value (ADTs lower to
+/// `Null` in the dev oracle).
 public struct FluxAlignment: Sendable, Hashable {
     /// The horizontal alignment bias.
-    public enum Horizontal: String, Sendable, Hashable {
-        /// Leading edge.
-        case start = "start"
+    public enum Horizontal: Int64, Sendable, Hashable {
+        /// Leading edge (start).
+        case start = 0
         /// Centered.
-        case center = "center"
-        /// Trailing edge.
-        case end = "end"
+        case center = 1
+        /// Trailing edge (end).
+        case end = 2
     }
 
     /// The resolved horizontal alignment.
@@ -25,11 +27,12 @@ public struct FluxAlignment: Sendable, Hashable {
     /// Construct with a default of `.start`.
     public init(horizontal: Horizontal = .start) { self.horizontal = horizontal }
 
-    /// Decode from a record using `AlignmentField` indices.
+    /// Decode from a record using `AlignmentField` indices. The record's
+    /// positional slot 0 holds the Int alignment value (audit D6).
     public init?(record: Props) {
-        let h = record.getString(AlignmentField.horizontal.rawValue)
+        let v = record.getInt(AlignmentField.horizontal.rawValue)
             .flatMap(Horizontal.init(rawValue:)) ?? .start
-        self.init(horizontal: h)
+        self.init(horizontal: v)
     }
 
     /// The equivalent `NSTextAlignment` (for `UILabel`).

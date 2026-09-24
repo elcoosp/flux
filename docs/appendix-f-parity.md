@@ -75,4 +75,6 @@ Telemetry emits only in DEBUG builds. Hot path is clean in Release.
 `thunkBlobs` merges per frame instead of replacing (stale-thunk loss fixed).
 
 ## H23 — STR_LEN
-Returns digit count of id as proxy; real string length requires string table access which `exec_tail` doesn't have. Panics fixed for id 0.
+Returns the byte length of the interned string (`StringTable::resolve(id).len()`),
+not the digit count of the id (T-335.1). `&StringTable` is threaded through all
+VM entry points (`run`, `run_resumable`, `resume`, `*_with_registry`, `exec_tail`).

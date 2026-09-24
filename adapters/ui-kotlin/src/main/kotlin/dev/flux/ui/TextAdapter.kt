@@ -39,7 +39,9 @@ public class TextAdapter private constructor() : FluxAdapter<FluxNativeView> {
             if (view.getProperty(PROP_FONT_SIZE) != size) view.setProperty(PROP_FONT_SIZE, size)
         }
 
-        props.getString(PropsIndex.TEXT_ALIGNMENT)?.let { align ->
+        // Alignment is a positional record `{0: Int}` per D6:
+        // 0=start, 1=center, 2=end. The host maps the Int to the native enum.
+        props.getRecord(PropsIndex.TEXT_ALIGNMENT)?.intAt(0)?.let { align ->
             if (view.getProperty(PROP_ALIGNMENT) != align) view.setProperty(PROP_ALIGNMENT, align)
         }
 

@@ -17,7 +17,7 @@
 //! `Pending` cell, so `AWAIT` genuinely parks.
 
 use flux_ir_serde::{AwaitSuspendFrame, ResumeFrame};
-use flux_syntax::Value;
+use flux_syntax::{StringTable, Value};
 use flux_vm_ref::{InMemorySignals, RunResult, SignalStore, resume, run_resumable};
 
 /// `CALL_CAP` (0x90), 9 bytes: `[op][result_reg][cap u32][method u16][args_reg]`.
@@ -45,7 +45,9 @@ fn suspending_handler() -> Vec<u8> {
 fn suspend_once(signals: &mut InMemorySignals) -> (flux_vm_ref::SuspendState, u32) {
     let program = suspending_handler();
     let payload = Value::Record(vec![(0u16, Value::Int(7))]);
-    let state = match run_resumable(&program, signals, payload).expect("handler runs") {
+    let state = match run_resumable(&program, signals, &StringTable::new(), payload)
+        .expect("handler runs")
+    {
         RunResult::Suspended(state) => state,
         RunResult::Halt(_) => {
             panic!("an async capability must leave the cell Pending, so AWAIT parks")
@@ -89,10 +91,11 @@ fn a_resume_frame_completes_the_suspended_handler() {
     assert!(!delivered.is_error, "a Ready cell is not an error");
 
     signals.resolve_cell(cell, delivered.value.clone());
-    let outcome = match resume(state, &mut signals, delivered.value).expect("resumes") {
-        RunResult::Halt(outcome) => outcome,
-        RunResult::Suspended(_) => panic!("a settled cell must not park again"),
-    };
+    let outcome =
+        match resume(state, &mut signals, &StringTable::new(), delivered.value).expect("resumes") {
+            RunResult::Halt(outcome) => outcome,
+            RunResult::Suspended(_) => panic!("a settled cell must not park again"),
+        };
 
     let written: std::collections::HashMap<u32, Value> = outcome.signals.into_iter().collect();
     assert_eq!(
@@ -114,10 +117,11 @@ fn the_wire_value_is_what_the_handler_observes() {
     assert_eq!(delivered.value, sent, "the payload must survive the wire");
 
     signals.resolve_cell(cell, delivered.value.clone());
-    let outcome = match resume(state, &mut signals, delivered.value).expect("resumes") {
-        RunResult::Halt(outcome) => outcome,
-        RunResult::Suspended(_) => panic!("must not park again"),
-    };
+    let outcome =
+        match resume(state, &mut signals, &StringTable::new(), delivered.value).expect("resumes") {
+            RunResult::Halt(outcome) => outcome,
+            RunResult::Suspended(_) => panic!("must not park again"),
+        };
     let written: std::collections::HashMap<u32, Value> = outcome.signals.into_iter().collect();
     assert_eq!(written.get(&2), Some(&sent));
 }
@@ -134,7 +138,9 @@ fn signal_writes_made_before_the_suspend_survive_the_round_trip() {
     program.push(0x00u8);
 
     let mut signals = InMemorySignals::default();
-    let state = match run_resumable(&program, &mut signals, Value::Int(7)).expect("runs") {
+    let state = match run_resumable(&program, &mut signals, &StringTable::new(), Value::Int(7))
+        .expect("runs")
+    {
         RunResult::Suspended(state) => state,
         RunResult::Halt(_) => panic!("the async capability must park"),
     };
@@ -148,10 +154,11 @@ fn signal_writes_made_before_the_suspend_survive_the_round_trip() {
     };
 
     signals.resolve_cell(cell, Value::Int(1));
-    let outcome = match resume(state, &mut signals, Value::Int(1)).expect("resumes") {
-        RunResult::Halt(outcome) => outcome,
-        RunResult::Suspended(_) => panic!("must not park again"),
-    };
+    let outcome =
+        match resume(state, &mut signals, &StringTable::new(), Value::Int(1)).expect("resumes") {
+            RunResult::Halt(outcome) => outcome,
+            RunResult::Suspended(_) => panic!("must not park again"),
+        };
     let written: std::collections::HashMap<u32, Value> = outcome.signals.into_iter().collect();
     assert_eq!(
         written.get(&5),
