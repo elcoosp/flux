@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use flux_codegen_core::backend::Backend;
 use flux_codegen_core::emitter::Emitter;
-use flux_codegen_core::model::{native_type, ComponentMeta};
+use flux_codegen_core::model::{ComponentMeta, native_type};
 use flux_codegen_core::primitives::PrimitiveSpec;
 use flux_parser::{Expr, ExprKind, TypeDecl};
 
@@ -156,7 +156,10 @@ impl Backend for Swift {
         // Audit T-403.6: use a mutable Binding to make the TextField editable.
         let getter = format!("get: {{ {} }}", value);
         let setter = format!("set: {{ newValue in {} = newValue }}", value);
-        format!("TextField({placeholder}, text: Binding({}, {}))", getter, setter)
+        format!(
+            "TextField({placeholder}, text: Binding({}, {}))",
+            getter, setter
+        )
     }
 
     fn key_extractor(key: &Expr) -> String {
