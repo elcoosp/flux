@@ -128,9 +128,10 @@ async fn handle_host_frame(bytes: &[u8], shared: &Arc<Shared>) -> Vec<Vec<u8>> {
         }
         // Brittleness 4a: the host asks for a canonical `StringId` instead of
         // synthesising one locally.
-        Some(flux_ir_serde::FRAME_INTERN_STRING) => {
-            handle_intern_string(bytes, shared).await.into_iter().collect()
-        }
+        Some(flux_ir_serde::FRAME_INTERN_STRING) => handle_intern_string(bytes, shared)
+            .await
+            .into_iter()
+            .collect(),
         Some(flux_ir_serde::FRAME_HELLO) => handle_hello(bytes, shared).await.into_iter().collect(),
         // Host telemetry (spec §4.1): the iOS/Android host ships `Telemetry`
         // (`0x10`) frames over the same patch-channel WebSocket the Simulator
@@ -381,8 +382,7 @@ async fn handle_intern_string(bytes: &[u8], shared: &Arc<Shared>) -> Option<Vec<
     // through spawn_blocking to avoid holding the reactor on the std Mutex.
     let text_owned = text.to_owned();
     let shared_req = Arc::clone(shared);
-    let id = blocking(move || shared_req.pipeline.lock().intern_string(&text_owned))
-        .await?;
+    let id = blocking(move || shared_req.pipeline.lock().intern_string(&text_owned)).await?;
     tracing::debug!(id, text, "interned host string");
     Some(StringInternedFrame::new(id).to_bytes())
 }
@@ -405,7 +405,10 @@ async fn handle_dispatch_report(bytes: &[u8], shared: &Arc<Shared>) {
     // may re-diff/reconcile — route through spawn_blocking to keep the I/O
     // reactor free.
     let shared_req = Arc::clone(shared);
-    if let Some(frame) = blocking(move || shared_req.pipeline.lock().handle_dispatch_report(report)).await.flatten() {
+    if let Some(frame) = blocking(move || shared_req.pipeline.lock().handle_dispatch_report(report))
+        .await
+        .flatten()
+    {
         shared.broadcast(frame);
         tracing::debug!(handler = ?report.handler_id, "shipped minimal dispatch delta");
     }
