@@ -9,15 +9,11 @@
 //!
 //! Run:  cargo run -p flux-ir-serde --example dump_fixtures
 
-use flux_ir_serde::{serialize_patches, Frame};
-use flux_syntax::{
-    Child, NodeKind, Patch, PropDiff, Props, Span,
-    StringId, StringTable, Value,
-};
+use flux_ir_serde::{Frame, serialize_patches};
+use flux_syntax::{Child, NodeKind, Patch, PropDiff, Props, Span, StringId, StringTable, Value};
 
 fn main() {
-    let fixture_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../fixtures/wire");
+    let fixture_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/wire");
     std::fs::create_dir_all(&fixture_dir).unwrap();
 
     // ---- init_v2.bin: minimal tree (Text + Button) ----
@@ -75,8 +71,7 @@ fn main() {
     );
 
     let init_bytes = init_frame.to_bytes();
-    std::fs::write(fixture_dir.join("init_v2.bin"), &init_bytes)
-        .expect("write init_v2.bin");
+    std::fs::write(fixture_dir.join("init_v2.bin"), &init_bytes).expect("write init_v2.bin");
     println!("wrote init_v2.bin ({} bytes)", init_bytes.len());
 
     // ---- delta_v2.bin: one prop-change Update patch ----
@@ -88,7 +83,6 @@ fn main() {
         },
     }];
     let delta_bytes = serialize_patches(&patches, &table, &[]);
-    std::fs::write(fixture_dir.join("delta_v2.bin"), &delta_bytes)
-        .expect("write delta_v2.bin");
+    std::fs::write(fixture_dir.join("delta_v2.bin"), &delta_bytes).expect("write delta_v2.bin");
     println!("wrote delta_v2.bin ({} bytes)", delta_bytes.len());
 }
