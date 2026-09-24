@@ -208,7 +208,8 @@ pub(crate) fn parse_view(
     if tokens.get(i).map(|t| t.text.as_str()) == Some("(") {
         let end = match_paren(tokens, i)
             .ok_or_else(|| KotlinRecognitionError(format!("unbalanced args in {normalized}")))?;
-        props = crate::recognize_swift::swift_views::extract_swift_props(&normalized, &tokens[i..=end]);
+        props =
+            crate::recognize_swift::swift_views::extract_swift_props(&normalized, &tokens[i..=end]);
         i = end + 1;
     }
     if tokens.get(i).map(|t| t.text.as_str()) == Some("{") {
