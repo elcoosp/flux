@@ -586,8 +586,14 @@ impl<'s> Lexer<'s> {
         });
         self.prev_can_end_value = matches!(
             kind,
-            TokenKind::Int | TokenKind::Float | TokenKind::Str | TokenKind::Bool
-                | TokenKind::Ident | TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace
+            TokenKind::Int
+                | TokenKind::Float
+                | TokenKind::Str
+                | TokenKind::Bool
+                | TokenKind::Ident
+                | TokenKind::RParen
+                | TokenKind::RBracket
+                | TokenKind::RBrace
         );
     }
 
