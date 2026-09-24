@@ -2,11 +2,11 @@
 
 use flux_syntax::{NodeKind, NodeRef};
 
+use super::WireError;
 use super::child::{decode_child, encode_child};
 use super::cursor::Reader;
 use super::props::{decode_props, encode_props};
 use super::span::{decode_span, encode_span};
-use super::WireError;
 
 pub(crate) fn encode_node(w: &mut super::cursor::Writer, node: &NodeRef) {
     w.u32(node.id);
