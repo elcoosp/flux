@@ -12,7 +12,7 @@
 //!
 //! ```rust
 //! use flux_vm_ref::{run, InMemorySignals};
-//! use flux_syntax::Value;
+//! use flux_syntax::{StringTable, Value};
 //!
 //! // LOAD_INT_CONST r0, 7 ; HALT. Gas is charged once (HALT is free per ADR-0021).
 //! let prog = [0xB0, 0, 7, 0, 0, 0, 0, 0, 0, 0,   // LOAD_INT_CONST r0, 7
