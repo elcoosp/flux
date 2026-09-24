@@ -15,8 +15,8 @@ fn fixture_path(name: &str) -> std::path::PathBuf {
 #[test]
 fn init_v2_fixture_decodes() {
     let path = fixture_path("init_v2.bin");
-    let bytes =
-        std::fs::read(&path).unwrap_or_else(|e| panic!("fixture {} missing: {}", path.display(), e));
+    let bytes = std::fs::read(&path)
+        .unwrap_or_else(|e| panic!("fixture {} missing: {}", path.display(), e));
     let frame =
         Frame::from_init_bytes(&bytes).unwrap_or_else(|e| panic!("init_v2.bin must decode: {}", e));
     assert!(
@@ -28,8 +28,8 @@ fn init_v2_fixture_decodes() {
 #[test]
 fn delta_v2_fixture_decodes() {
     let path = fixture_path("delta_v2.bin");
-    let bytes =
-        std::fs::read(&path).unwrap_or_else(|e| panic!("fixture {} missing: {}", path.display(), e));
+    let bytes = std::fs::read(&path)
+        .unwrap_or_else(|e| panic!("fixture {} missing: {}", path.display(), e));
     let frame = Frame::from_delta_bytes(&bytes)
         .unwrap_or_else(|e| panic!("delta_v2.bin must decode: {}", e));
     assert!(
@@ -41,8 +41,8 @@ fn delta_v2_fixture_decodes() {
 #[test]
 fn unsupported_version_fixture_is_rejected() {
     let path = fixture_path("unsupported-version.bin");
-    let bytes =
-        std::fs::read(&path).unwrap_or_else(|e| panic!("fixture {} missing: {}", path.display(), e));
+    let bytes = std::fs::read(&path)
+        .unwrap_or_else(|e| panic!("fixture {} missing: {}", path.display(), e));
     assert_eq!(
         bytes[4], 3,
         "unsupported-version.bin must carry an unsupported version byte"
