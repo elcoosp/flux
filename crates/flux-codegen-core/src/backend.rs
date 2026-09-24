@@ -302,12 +302,16 @@ pub trait Backend {
 
     /// Emits one state-cell declaration (`var … by remember` / `@State private var`).
     /// `subst` maps generic parameters to their concrete arguments.
+    /// `has_router` is true when the enclosing component body contains a
+    /// `Router` primitive — used by Swift to redirect a `route` state into
+    /// `NavigationPath()` only in Router components (T-403.7).
     fn emit_state_cell(
         em: &mut Emitter<'_, Self>,
         name: &str,
         ty: &str,
         init: &str,
         subst: &HashMap<String, String>,
+        has_router: bool,
     ) where
         Self: Sized;
 

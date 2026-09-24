@@ -162,6 +162,14 @@ impl Backend for Swift {
         )
     }
 
+    /// T-403.1: Swift `Toggle` uses an interactive `Binding(get:set:)` so the
+    /// user can flip it, not a read-only `.constant()`.
+    fn toggle_open(value: &str) -> String {
+        let getter = format!("get: {{ {} }}", value);
+        let setter = format!("set: {{ newValue in {} = newValue }}", value);
+        format!("Toggle(isOn: Binding({}, {})) {{", getter, setter)
+    }
+
     fn key_extractor(key: &Expr) -> String {
         if let ExprKind::Lambda { params, body } = &key.kind {
             if let Some(param) = params.first() {
@@ -318,10 +326,13 @@ impl Backend for Swift {
         ty: &str,
         init: &str,
         _subst: &HashMap<String, String>,
+        has_router: bool,
     ) {
-        // The Flux `route` state drives the NavigationStack path; it must be a
-        // `NavigationPath` so `route.append(...)` pushes properly.
-        if name == "route" {
+        // T-403.7: only redirect `route` state to NavigationPath() when the
+        // enclosing component actually contains a Router primitive. A component
+        // that merely has a state called `route` (but no Router) must emit a
+        // regular @State var with its declared type.
+        if has_router && name == "route" {
             em.append_line("    @State private var route = NavigationPath()");
         } else {
             em.append_line(&format!("    @State private var {name}: {ty} = {init}"));

@@ -123,10 +123,14 @@ All tasks T-101 through T-111 completed.
 | Task | Description | Commit |
 |---|---|---|
 | T-401 | Per-backend string escaping (Swift + Kotlin/$ rules) — impl prior; tests added (escaping.rs + backend test modules) | verified |
+| T-402 | Kotlin prelude imports + Animate (animateFloatAsState + AnimatedContent) + parity recognizer fixes | `54311fb4` |
+| T-403.1 | §5.1 Toggle | Swift `toggle_open` now emits `Binding(get:set:)` for interactive toggles, not read-only `.constant()` | `t_403_1_toggle_uses_binding` |
+| T-403.7 | §5.9 Router | Swift no longer hijacks arbitrary `route` state; emitter detects Router presence via `meta_has_router()`, passes `has_router` flag to `emit_state_cell`; Swift only redirects `route` → `NavigationPath()` when component has a Router | `t_403_7_route_state_without_router_is_regular` |
 
 ### Remaining
-- T-402: Kotlin prelude imports, LazyColumn ForEach, animate*AsState
-- T-403: Backend-split codegen fixes (Toggle, spacing, header, etc.)
+- T-403: Backend-split codegen fixes (Toggle, Button styles, spacing axis, component header, guard/match arms, TextField, Router, async)
+- T-404: CLI build output: one file per source, deterministic entry point
+- T-405: Generated-code compile gate in CI
 
 ## Appendix F — Parity Contract
 Created at `docs/appendix-f-parity.md` documenting all D8-D23, C10-C12, H11-H23 decisions.

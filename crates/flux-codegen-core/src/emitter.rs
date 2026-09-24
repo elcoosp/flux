@@ -404,6 +404,11 @@ impl<'a, B: Backend> Emitter<'a, B> {
 
     /// Emits `@State`/remember state cells for a component.
     fn emit_state(&mut self, meta: &ComponentMeta<'_>) {
+        // T-403.7: detect whether this component body contains a `Router`
+        // primitive so the Swift backend only redirects a `route` state into
+        // `NavigationPath()` for genuine Router components, not any component
+        // that happens to have a `route` state variable.
+        let has_router = meta_has_router(meta);
         for state in meta.states() {
             let ty = match &state.ty {
                 Some(t) => native_type::<B>(t, &self.subst),
@@ -411,7 +416,7 @@ impl<'a, B: Backend> Emitter<'a, B> {
             };
             let init = render_expr::<B>(&state.init);
             let subst_ref = self.subst.clone();
-            B::emit_state_cell(self, &state.name.name, &ty, &init, &subst_ref);
+            B::emit_state_cell(self, &state.name.name, &ty, &init, &subst_ref, has_router);
         }
     }
 
@@ -868,4 +873,24 @@ fn primary_value<B: Backend>(
 /// declaratively.
 fn render_inline(value: String) -> String {
     value
+}
+
+/// T-403.7: scans a component's AST body for a `Router` call expression.
+/// Returns true if the component body contains a `Router { … }` primitive,
+/// so the emitter can pass this to `emit_state_cell` and the Swift backend
+/// can redirect a `route` state into `NavigationPath()` only for genuine
+/// Router components — not any component that happens to have a `route` state.
+fn meta_has_router(meta: &ComponentMeta<'_>) -> bool {
+    for item in &meta.decl.body.items {
+        if let flux_parser::BlockItem::Expr(expr) = item {
+            if let ExprKind::Call { callee, .. } = &expr.kind {
+                if let ExprKind::Ident(ident) = &callee.kind {
+                    if ident.name == "Router" {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
 }

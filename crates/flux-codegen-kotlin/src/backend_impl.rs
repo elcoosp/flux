@@ -363,6 +363,7 @@ impl Backend for Kotlin {
         ty: &str,
         init: &str,
         _subst: &HashMap<String, String>,
+        _has_router: bool,
     ) {
         em.append_line(&format!(
             "    var {name} by remember {{ mutableStateOf<{ty}>({init}) }}"

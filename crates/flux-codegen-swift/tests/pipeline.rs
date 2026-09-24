@@ -327,6 +327,44 @@ fn flux_043_theme_extension_codegen() {
     }
 }
 
+/// T-403.1: Swift `Toggle` must use an interactive `Binding`, not a read-only
+/// `.constant()`. A `.constant()` binding makes the toggle permanently
+/// non-interactive — the user cannot flip it.
+#[test]
+fn t_403_1_toggle_uses_binding() {
+    let src = "compo Toggles\n  state on: Bool = false\n  Toggle(value: on, onValueChange: fn() { on = !on })\n";
+    let out = codegen_example("t_403_1_toggle", src);
+    assert!(
+        !out.contains(".constant("),
+        "Toggle must not use .constant() — it makes the toggle read-only: {out}"
+    );
+    assert!(
+        out.contains("Binding("),
+        "Toggle must use a Binding for interactivity: {out}"
+    );
+    assert!(
+        out.contains("Toggle(isOn:"),
+        "Toggle must emit Toggle(isOn:) form: {out}"
+    );
+}
+
+/// T-403.7: a `route` state in a component WITHOUT a `Router` must NOT be
+/// hijacked into `NavigationPath()`. Only components that actually contain a
+/// Router should get the `NavigationPath()` treatment for their `route` state.
+#[test]
+fn t_403_7_route_state_without_router_is_regular() {
+    let src = "compo NoRouter\n  state route: String = \"home\"\n  Text(\"route is {route}\")\n";
+    let out = codegen_example("t_403_7_no_router", src);
+    assert!(
+        !out.contains("NavigationPath()"),
+        "a route state in a non-Router component must stay a regular @State var: {out}"
+    );
+    assert!(
+        out.contains("@State private var route: String = \"home\""),
+        "route state without Router must emit as a regular @State var: {out}"
+    );
+}
+
 /// FLUX-079: Router.navigate("settings") must become a native NavigationPath push
 /// so SwiftUI NavigationStack responds with proper push/pop semantics.
 #[test]
