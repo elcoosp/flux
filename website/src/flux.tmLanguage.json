@@ -38,7 +38,7 @@
           "name": "keyword.declaration.flux"
         },
         {
-          "match": "\\b(if|else|when|otherwise|match|effect|onMount|onCleanup|batch|untrack|resource|await|provide|useContext|createRef)\\b",
+          "match": "\\b(if|else|when|otherwise|match|effect|onMount|onCleanup|batch|untrack|resource|await|provide|useContext|createRef|record)\\b",
           "name": "keyword.control.flux"
         }
       ]

@@ -41,7 +41,7 @@
     },
     "keyword": {
       "name": "keyword.control.flux",
-      "match": "\\b(?:compo|component|fn|let|if|else|when|otherwise|match|use|import|type|trait|capability|state|derived|effect|onMount|onCleanup|batch|untrack|resource|await|createRef|provide|useContext)\\b"
+      "match": "\\b(?:compo|component|fn|let|if|else|when|otherwise|match|use|import|type|trait|capability|state|derived|effect|onMount|onCleanup|batch|untrack|resource|await|createRef|provide|useContext|record)\\b"
     },
     "number": {
       "name": "constant.numeric.flux",
