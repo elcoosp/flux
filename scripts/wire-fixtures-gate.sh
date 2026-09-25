@@ -52,9 +52,9 @@ fi
 # ---------------------------------------------------------------------------
 # 2. Kotlin decoder  —  runtimes/android/host  (FrameDeserializerTest)
 # ---------------------------------------------------------------------------
-if [ -x "$REPO/runtimes/android/gradlew" ]; then
-    echo "--- Kotlin (host FrameDeserializerTest) ---"
-    if (cd "$REPO/runtimes/android" && ./gradlew :host:testDebugUnitTest \
+if [ -x "$REPO/gradlew" ]; then
+    echo "--- Kotlin (runtimes/android/host FrameDeserializerTest) ---"
+    if (cd "$REPO" && FLUX_WIRE_FIXTURES="$FIXTURES" ./gradlew :runtimes:android:host:test \
         --tests "dev.flux.host.wire.FrameDeserializerTest" \
         --console=plain 2>&1 | tail -5); then
         echo "[ok] Kotlin host fixture test"
@@ -71,11 +71,12 @@ fi
 # 3. Swift decoder  —  runtimes/ios/FluxHost  (WireDecodeTests)
 # ---------------------------------------------------------------------------
 if command -v xcodebuild >/dev/null 2>&1; then
-    echo "--- Swift (FluxHost WireDecodeTests) ---"
-    if (cd "$REPO/runtimes/ios/FluxHost" && xcodebuild test \
-        -scheme FluxHost \
-        -destination 'platform=macOS' \
-        -only-testing FluxHostTests.WireDecodeTests \
+    echo "--- Swift (FluxApp WireFixtureDecodeTests) ---"
+    if (cd "$REPO/runtimes/ios" && xcodebuild test \
+        -project FluxApp.xcodeproj \
+        -scheme FluxApp \
+        -destination 'platform=iOS Simulator,id=27088715-6C8B-436A-AC66-B2DA978A2944' \
+        -only-testing:FluxAppTests/WireFixtureDecodeTests \
         2>&1 | tail -5); then
         echo "[ok] Swift fixture test"
         SWIFT_OK=1
