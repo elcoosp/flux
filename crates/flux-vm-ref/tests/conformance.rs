@@ -167,7 +167,16 @@ fn load_vectors() -> Vec<Vector> {
             continue;
         }
         let text = std::fs::read_to_string(&path).unwrap();
-        out.push(serde_json::from_str(&text).unwrap());
+        // Skip non-conformance vector files (e.g. foreach_ids.json,
+        // json_object.json) that share this directory but have a different
+        // schema — only files with a `bytecode_hex` field are VM conformance
+        // vectors.
+        let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+        if parsed.get("bytecode_hex").is_none() {
+            continue;
+        }
+        let v: Vector = serde_json::from_value(parsed).unwrap();
+        out.push(v);
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));
     assert!(!out.is_empty(), "no vectors loaded from {dir:?}");
