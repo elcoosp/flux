@@ -30,8 +30,13 @@ pub struct VmOutcome {
 /// The reference VM is a flat register machine with no call stack, so a suspend is
 /// exactly its live interpreter state: the next instruction offset, the register
 /// file, the remaining gas, and the snapshot of signal cells that had been written
-/// before the `AWAIT`. [`resume`] re-enters the interpreter at `resume_ip` with the
-/// delivered value placed in register `r0`.
+/// before the `AWAIT`. [`resume`] re-enters the interpreter at `resume_ip`
+/// with the delivered value placed in `result_reg`.
+/// `SuspendState` struct.
+///
+/// The register file is captured verbatim — the value delivered on `resume`
+/// is written to `result_reg`, **not** `r0`.  Callers that inspect
+/// `registers[future_reg]` to find the future handle are unaffected.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SuspendState {
     /// The original bytecode program, re-decoded on resume so the tail can be
@@ -47,8 +52,14 @@ pub struct SuspendState {
     pub signals: Vec<(SignalId, Value)>,
     /// The register holding the awaited future handle at the point of suspension.
     /// The executor reads `registers[future_reg]` to obtain the future it must
-    /// resolve, then resumes with the resolved value in `r0`.
+    /// resolve, then resumes with the resolved value written to
+    /// `registers[result_reg]`.
     pub future_reg: u8,
+    /// The register that receives the awaited value on resume (the `result_reg`
+    /// field of the suspending `AWAIT` instruction). The compiler currently
+    /// always emits 0, so this preserves existing behavior while allowing
+    /// non-zero result registers for future correctness.
+    pub result_reg: u8,
 }
 
 /// The outcome of a (possibly resumable) handler run.
@@ -280,6 +291,8 @@ fn async_deferred(
 }
 
 const ENTRY_GAS: u32 = 100_000;
+/// Base-10 radix for the synthetic `StringId` produced by `StrConcat` (Appendix E §E.5).
+const STR_CONCAT_BASE: u32 = 10_000_000;
 
 /// Returns the byte offset of the instruction that follows `instr` in the program.
 #[must_use]
@@ -337,6 +350,7 @@ pub fn run_resumable_with_registry(
         ControlFlow::Suspend {
             resume_ip,
             future_reg,
+            result_reg,
         } => {
             let written = snapshot_sorted(signals);
             Ok(RunResult::Suspended(SuspendState {
@@ -346,6 +360,7 @@ pub fn run_resumable_with_registry(
                 gas_remaining: gas,
                 signals: written,
                 future_reg,
+                result_reg,
             }))
         }
     }
@@ -391,7 +406,7 @@ pub fn resume_with_registry(
     let program = decode_program(&state.program)?;
     let offsets: Vec<u32> = program.iter().map(|i| i.offset).collect();
     let mut regs = state.registers;
-    regs[0] = value; // The awaited value lands in r0.
+    regs[usize::from(state.result_reg)] = value;
     let mut gas = state.gas_remaining;
 
     match exec_tail(
@@ -408,6 +423,7 @@ pub fn resume_with_registry(
         ControlFlow::Suspend {
             resume_ip,
             future_reg,
+            result_reg,
         } => {
             let written = snapshot_sorted(signals);
             Ok(RunResult::Suspended(SuspendState {
@@ -417,6 +433,7 @@ pub fn resume_with_registry(
                 gas_remaining: gas,
                 signals: written,
                 future_reg,
+                result_reg,
             }))
         }
     }
@@ -428,7 +445,11 @@ enum ControlFlow {
     Halt,
     /// Hit `AWAIT`; `resume_ip` is the byte offset of the next instruction and
     /// `future_reg` is the register holding the awaited future handle.
-    Suspend { resume_ip: u32, future_reg: u8 },
+    Suspend {
+        resume_ip: u32,
+        future_reg: u8,
+        result_reg: u8,
+    },
 }
 
 /// Sorts a signal snapshot for deterministic suspension capture.
@@ -482,10 +503,9 @@ fn exec_tail(
 
         match op {
             Opcode::Await => {
-                // `future_reg` holds the register containing the result-cell signal id
-                // returned by CALL_CAP (ADR-0045). Park only while the cell is `Pending`;
-                // a `Ready` cell continues with its value in r0 (one re-entry, no real park),
-                // and an `Error` cell faults the handler rather than resuming.
+                // `result_reg` (u8 operand 0) is where the resolved value lands;
+                // `future_reg` (u8 operand 1) holds the result-cell signal id.
+                let result_reg = instr.u8(0);
                 let future_reg = instr.u8(1);
                 let cell_id = match regs[usize::from(future_reg)] {
                     Value::Int(n) if n >= 0 => n as SignalId,
@@ -494,12 +514,13 @@ fn exec_tail(
                 let st = signals.cell_state(cell_id);
                 match st {
                     CellState::Ready(value) => {
-                        regs[0] = value;
+                        regs[usize::from(result_reg)] = value;
                     }
                     CellState::Pending => {
                         return Ok(ControlFlow::Suspend {
                             resume_ip: next_offset(instr),
                             future_reg,
+                            result_reg,
                         });
                     }
                     CellState::Error(_) => {
@@ -569,7 +590,7 @@ fn exec_tail(
                 let b = reg!(instr.u8(2));
                 let (x, y) = expect_floats(a, b, instr.offset)?;
                 let r = match op {
-                    Opcode::EqF64 => (x == y) || (x.is_nan() && y.is_nan()),
+                    Opcode::EqF64 => x == y,
                     Opcode::LtF64 => x < y,
                     Opcode::GtF64 => x > y,
                     _ => unreachable!(),
@@ -638,8 +659,11 @@ fn exec_tail(
             }
             Opcode::StrConcat => {
                 let (x, y) = expect_strs(reg!(instr.u8(1)), reg!(instr.u8(2)), instr.offset)?;
-                regs[usize::from(instr.u8(0))] =
-                    Value::Str(x.wrapping_mul(10_000_000).wrapping_add(y));
+                let combined = x
+                    .checked_mul(STR_CONCAT_BASE)
+                    .and_then(|v| v.checked_add(y))
+                    .ok_or_else(|| VmError::at(VmErrorKind::Overflow, instr.offset))?;
+                regs[usize::from(instr.u8(0))] = Value::Str(combined);
             }
             Opcode::ToString => {
                 let rendered = render_value(reg!(instr.u8(1)));
@@ -650,7 +674,7 @@ fn exec_tail(
                 continue;
             }
             Opcode::CondJump | Opcode::CondJumpNot => {
-                let taken = truthy(&regs[usize::from(instr.u8(0))]);
+                let taken = truthy(&regs[usize::from(instr.u8(0))], instr.offset)?;
                 let want = op == Opcode::CondJump;
                 if taken == want {
                     ip_index = jump_target(instr, next_index, offsets, instr.i32(1))?;
@@ -992,11 +1016,11 @@ fn synthetic_str_id(text: &str) -> flux_syntax::StringId {
     0x8000_0000 | (hash & 0x7FFF_FFFF)
 }
 
-fn truthy(v: &Value) -> bool {
+fn truthy(v: &Value, off: u32) -> Result<bool, VmError> {
     match v {
-        Value::Bool(b) => *b,
-        Value::Int(i) => *i != 0,
-        _ => false,
+        Value::Bool(b) => Ok(*b),
+        Value::Int(_) => Err(VmError::at(VmErrorKind::TypeMismatch, off)),
+        _ => Ok(false),
     }
 }
 

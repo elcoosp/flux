@@ -11,18 +11,18 @@
 //!
 //! Scenario A — synchronous capability (no real park):
 //!   CALL_CAP r2, cap=1, method=1, args=r0   ; r2 = result-cell id (99)
-//!   AWAIT   r0, r2                           ; cell 99 is Ready → continue, r0 = value
-//!   WRITE_SIGNAL s2, r0                       ; signal 2 = the resolved value
+//!   AWAIT   r3, r2                           ; cell 99 is Ready → continue, r3 = value
+//!   WRITE_SIGNAL s2, r3                       ; signal 2 = the resolved value
 //!   HALT
 //! The `AWAIT` does not suspend: a Ready cell continues on the next interpreter
 //! re-entry with the value placed in r0 (ADR-0045 §4).
 //!
 //! Scenario B — asynchronous capability (real suspend):
 //!   CALL_CAP r2, cap=2, method=99, args=r0   ; r2 = a fresh Pending cell id
-//!   AWAIT   r0, r2                           ; Pending → Suspend
+//!   AWAIT   r3, r2                           ; Pending → Suspend
 //!   ... host resolves the cell with `resolve_cell` ...
-//!   resume(state, value)                     ; cell now Ready → continues, r0 = value
-//!   WRITE_SIGNAL s2, r0
+//!   resume(state, value)                     ; cell now Ready → continues, r3 = value
+//!   WRITE_SIGNAL s2, r3
 //!   HALT
 //!
 //! The v1 `run` entry point must NOT silently suspend: an `AWAIT` in v1 bytecode
@@ -47,10 +47,12 @@ fn await_suspends_then_resume_completes() {
     let load: Vec<u8> = Vec::new();
     // CALL_CAP r2, cap=1, method=1, args=r0  → r2 = 99 (result-cell id)
     let call = call_cap(2, 1, 1, 0);
-    // AWAIT r0, r2  (0xE0 + result_reg + future_reg); parks on cell[99]
-    let await_op = [0xE0u8, 0, 2];
-    // WRITE_SIGNAL s2, r0
-    let write2 = [0x11u8, 2, 0, 0, 0, 0];
+    // AWAIT r3, r2  (0xE0 + result_reg=3 + future_reg=2); parks on cell[99]
+    // Using result_reg=3 (not 0) exercises the result_reg fix; if the VM
+    // ignored it and always wrote r0, signal 2 below would read null.
+    let await_op = [0xE0u8, 3, 2];
+    // WRITE_SIGNAL s2, r3  — r3 is where AWAIT deposits the resolved value.
+    let write2 = [0x11u8, 2, 0, 0, 0, 3];
     // HALT
     let halt = [0x00u8];
 
@@ -88,7 +90,7 @@ fn await_suspends_then_resume_completes() {
     assert_eq!(
         written.get(&2),
         Some(&Value::Int(42)),
-        "AWAIT on Ready cell placed the value in r0 → signal 2 = 42"
+        "AWAIT on Ready cell placed the value in r3 → signal 2 = 42"
     );
 
     // Scenario B: re-run against the reference async capability (cap 2, method 99), which
