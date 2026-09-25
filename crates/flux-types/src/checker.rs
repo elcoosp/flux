@@ -151,15 +151,20 @@ impl Checker {
     /// Fully applies the current substitution to `ty`.
     fn resolve(&self, ty: &TcType) -> TcType {
         let mut out = ty.clone();
-        // Zeronk repeated passes until stable.
-        for _ in 0..4 {
+        for _ in 0..64 {
             let next = out.apply(&self.subst);
             if next == out {
-                break;
+                return out;
             }
             out = next;
         }
-        out
+        // A substitution that fails to converge after 64 passes implies
+        // a cycle (e.g. X→Y, Y→X), which cannot arise from a well-typed
+        // program or a sound type checker. This is a checker bug.
+        unreachable!(
+            "resolve exceeded 64 substitution passes without convergence \
+             — substitution contains a cycle"
+        )
     }
 
     fn fresh(&mut self) -> u32 {
