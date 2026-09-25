@@ -50,7 +50,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -84,7 +84,7 @@ jobs:
         # extract classes.jar from the AARs, and locate the Kotlin Compose
         # compiler plugin jar. No Android platform and no Gradle project needed.
         run: |
-          set -uo pipefail
+          set -euo pipefail
           BOM_VER="2026.08.00"
           KOTLIN_VER="2.4.10"
           GOOGLE="https://dl.google.com/dl/android/maven2"
