@@ -5,7 +5,7 @@
 //! host alone: the value it is waiting for is produced by an async capability
 //! whose completion the dev server observes. Two frames close that loop:
 //!
-//! - `AwaitSuspend` (`0x12`, Host → Server): "handler `H` parked on cell `C`;
+//! - `AwaitSuspend` (`0x14`, Host → Server): "handler `H` parked on cell `C`;
 //!   its continuation resumes at bytecode offset `resume_ip`". This is the
 //!   `SuspendState` identity — the host keeps the register file and gas locally,
 //!   so only the three ids travel, keeping the frame fixed-width.
@@ -24,11 +24,11 @@ use crate::frame::{MAGIC, PROTOCOL_VERSION};
 use crate::wire::{Reader, WireError, Writer, decode_value, encode_value};
 
 /// `frame_type` byte for the `AwaitSuspend` frame (Host → Server).
-pub const FRAME_AWAIT_SUSPEND: u8 = 0x12;
+pub const FRAME_AWAIT_SUSPEND: u8 = 0x14;
 /// `frame_type` byte for the `Resume` frame (Server → Host).
 pub const FRAME_RESUME: u8 = 0x13;
 
-/// A host-reported handler suspension (Host → Server, frame `0x12`).
+/// A host-reported handler suspension (Host → Server, frame `0x14`).
 ///
 /// Layout after the shared `magic(4) version(1) frame_type(1)` prefix:
 /// `handler_id(u32) | cell(u32) | resume_ip(u32)`.
