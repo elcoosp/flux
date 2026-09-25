@@ -42,6 +42,7 @@ pub(crate) fn parse_source(source: &str, file_id: u32, path: &str) -> Result<Ast
         path,
         pos: 0,
         block_postfix: true,
+        depth: 0,
     };
     parser.parse_program()
 }
@@ -49,6 +50,10 @@ pub(crate) fn parse_source(source: &str, file_id: u32, path: &str) -> Result<Ast
 /// Maximum brace-nesting depth accepted before the source is rejected with an
 /// actionable diagnostic instead of overflowing the call stack.
 const MAX_NESTING_DEPTH: usize = 16;
+
+/// Maximum expression/type/statement recursion depth accepted before the
+/// parser rejects the input with `"expression nesting too deep"` (T-604.2).
+const MAX_PARSE_DEPTH: usize = 512;
 
 /// Rejects source whose `{` brace nesting exceeds [`MAX_NESTING_DEPTH`], so deeply
 /// nested trees fail fast with a hint to extract a component (AGENTS.md §3.7).
@@ -133,6 +138,9 @@ struct Parser<'s> {
     /// `match` scrutinee so the `{` is read as the match body delimiter rather
     /// than a postfix block attached to the scrutinee.
     block_postfix: bool,
+    /// Current recursion depth for expression/type/statement parsing.
+    /// Guards against stack overflow on maliciously nested input (T-604.2).
+    depth: usize,
 }
 
 /// The signature tuple returned by [`Parser::fn_sig`].
@@ -914,8 +922,22 @@ impl<'s> Parser<'s> {
 
     // ----- expressions ------------------------------------------------------
 
+    /// Increments the recursion-depth counter, returning an error past
+    /// [`MAX_PARSE_DEPTH`] so deeply-nested input cannot overflow the stack.
+    fn inc_depth(&mut self, tok: Token) -> Result<(), ParseError> {
+        if self.depth >= MAX_PARSE_DEPTH {
+            Err(self.error(tok, "expression nesting too deep", None))
+        } else {
+            self.depth += 1;
+            Ok(())
+        }
+    }
+
     fn expr(&mut self) -> Result<Expr, ParseError> {
-        self.assign_expr()
+        self.inc_depth(self.peek())?;
+        let result = self.assign_expr();
+        self.depth -= 1;
+        result
     }
 
     fn assign_expr(&mut self) -> Result<Expr, ParseError> {
@@ -1015,8 +1037,11 @@ impl<'s> Parser<'s> {
 
     fn unary_expr(&mut self) -> Result<Expr, ParseError> {
         if self.at(TokenKind::Not) {
+            self.inc_depth(self.peek())?;
             self.pos += 1;
-            let operand = self.unary_expr()?;
+            let operand_result = self.unary_expr();
+            self.depth -= 1;
+            let operand = operand_result?;
             let end = operand.span.end;
             // Desugar `!x` to `x != true` so it reuses the existing `BinOp::Ne`
             // lowering (EQ + NOT_BOOL) without inventing a new expression kind.
@@ -1347,6 +1372,7 @@ impl<'s> Parser<'s> {
             path: self.path,
             pos: 0,
             block_postfix: true,
+            depth: 0,
         };
         let expr = sub
             .expr()
@@ -1613,16 +1639,21 @@ impl<'s> Parser<'s> {
 
     fn let_pattern(&mut self) -> Result<LetPattern, ParseError> {
         if self.at(TokenKind::LParen) {
-            self.eat(TokenKind::LParen)?;
-            let mut parts = Vec::new();
-            while !self.at(TokenKind::RParen) {
-                parts.push(self.let_pattern()?);
-                if !self.try_eat(TokenKind::Comma) {
-                    break;
+            self.inc_depth(self.peek())?;
+            let result = (|| {
+                self.eat(TokenKind::LParen)?;
+                let mut parts = Vec::new();
+                while !self.at(TokenKind::RParen) {
+                    parts.push(self.let_pattern()?);
+                    if !self.try_eat(TokenKind::Comma) {
+                        break;
+                    }
                 }
-            }
-            self.eat(TokenKind::RParen)?;
-            return Ok(LetPattern::Tuple(parts));
+                self.eat(TokenKind::RParen)?;
+                Ok(LetPattern::Tuple(parts))
+            })();
+            self.depth -= 1;
+            return result;
         }
         if self.at(TokenKind::LBrace) {
             self.eat(TokenKind::LBrace)?;
@@ -1760,92 +1791,87 @@ impl<'s> Parser<'s> {
     }
 
     fn ty(&mut self) -> Result<Type, ParseError> {
-        let tok = self.peek();
-        match tok.kind {
-            TokenKind::Fn => {
-                self.pos += 1;
-                self.eat(TokenKind::LParen)?;
-                let mut params = Vec::new();
-                while !self.at(TokenKind::RParen) {
-                    params.push(self.ty()?);
-                    if !self.try_eat(TokenKind::Comma) {
-                        break;
-                    }
-                }
-                self.eat(TokenKind::RParen)?;
-                self.eat(TokenKind::Arrow)?;
-                let ret = self.ty()?;
-                Ok(Type {
-                    kind: TypeKindAst::Fn {
-                        params,
-                        ret: Box::new(ret),
-                    },
-                    span: self.span_of(tok),
-                })
-            }
-            TokenKind::LBrace => {
-                self.eat(TokenKind::LBrace)?;
-                let mut fields = Vec::new();
-                while !self.at(TokenKind::RBrace) {
-                    let name = self.ident()?;
-                    self.eat(TokenKind::Colon)?;
-                    let ty = self.ty()?;
-                    fields.push((name, ty));
-                    if !self.try_eat(TokenKind::Comma) {
-                        break;
-                    }
-                }
-                let end = self.eat(TokenKind::RBrace)?;
-                Ok(Type {
-                    kind: TypeKindAst::Record(fields),
-                    span: Span::new(self.file_id, tok.start as u32, end.end as u32),
-                })
-            }
-            TokenKind::Ident => {
-                let name = self.ident_at(tok);
-                self.pos += 1;
-                // `Fn(A, B) -> C` is the function-type spelling (uppercase `Fn`).
-                if name.name == "Fn" && self.at(TokenKind::LParen) {
-                    return self.fn_type(name.span);
-                }
-                let mut args = Vec::new();
-                if self.at(TokenKind::LBracket) {
-                    args = self.generic_args()?;
-                } else if self.at(TokenKind::LParen) {
+        self.inc_depth(self.peek())?;
+        let result = (|| {
+            let tok = self.peek();
+            match tok.kind {
+                TokenKind::Fn => {
+                    self.pos += 1;
                     self.eat(TokenKind::LParen)?;
+                    let mut params = Vec::new();
                     while !self.at(TokenKind::RParen) {
-                        args.push(self.ty()?);
+                        params.push(self.ty()?);
                         if !self.try_eat(TokenKind::Comma) {
                             break;
                         }
                     }
                     self.eat(TokenKind::RParen)?;
+                    self.eat(TokenKind::Arrow)?;
+                    let ret = self.ty()?;
+                    Ok(Type {
+                        kind: TypeKindAst::Fn {
+                            params,
+                            ret: Box::new(ret),
+                        },
+                        span: self.span_of(tok),
+                    })
                 }
-                let kind = if Self::is_primitive_scalar(&name.name) {
-                    TypeKindAst::Primitive(name.name.clone())
-                } else {
-                    TypeKindAst::Named {
-                        name: name.clone(),
-                        args,
+                TokenKind::LBrace => {
+                    self.eat(TokenKind::LBrace)?;
+                    let mut fields = Vec::new();
+                    while !self.at(TokenKind::RBrace) {
+                        let name = self.ident()?;
+                        self.eat(TokenKind::Colon)?;
+                        let ty = self.ty()?;
+                        fields.push((name, ty));
+                        if !self.try_eat(TokenKind::Comma) {
+                            break;
+                        }
                     }
-                };
-                Ok(Type {
-                    kind,
-                    span: name.span,
-                })
-            }
-            _ => {
-                if tok.kind == TokenKind::Bool {
-                    return Err(self.error(tok, "expected a type", None));
+                    let end = self.eat(TokenKind::RBrace)?;
+                    Ok(Type {
+                        kind: TypeKindAst::Record(fields),
+                        span: Span::new(self.file_id, tok.start as u32, end.end as u32),
+                    })
                 }
-                let text = self.text_of(tok).to_owned();
-                self.pos += 1;
-                Ok(Type {
-                    kind: TypeKindAst::Primitive(text),
-                    span: self.span_of(tok),
-                })
+                TokenKind::Ident => {
+                    let name = self.ident_at(tok);
+                    self.pos += 1;
+                    // `Fn(A, B) -> C` is the function-type spelling (uppercase `Fn`).
+                    if name.name == "Fn" && self.at(TokenKind::LParen) {
+                        return self.fn_type(name.span);
+                    }
+                    let mut args = Vec::new();
+                    if self.at(TokenKind::LBracket) {
+                        args = self.generic_args()?;
+                    } else if self.at(TokenKind::LParen) {
+                        self.eat(TokenKind::LParen)?;
+                        while !self.at(TokenKind::RParen) {
+                            args.push(self.ty()?);
+                            if !self.try_eat(TokenKind::Comma) {
+                                break;
+                            }
+                        }
+                        self.eat(TokenKind::RParen)?;
+                    }
+                    let kind = if Self::is_primitive_scalar(&name.name) {
+                        TypeKindAst::Primitive(name.name.clone())
+                    } else {
+                        TypeKindAst::Named {
+                            name: name.clone(),
+                            args,
+                        }
+                    };
+                    Ok(Type {
+                        kind,
+                        span: name.span,
+                    })
+                }
+                _ => Err(self.error(tok, "expected a type", None)),
             }
-        }
+        })();
+        self.depth -= 1;
+        result
     }
 
     // ----- identifiers ------------------------------------------------------

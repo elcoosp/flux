@@ -22,8 +22,16 @@ flux-ir-serde = { path = "../crates/flux-ir-serde" }
 flux-syntax = { path = "../crates/flux-syntax" }
 flux-ir = { path = "../crates/flux-ir" }
 
+flux-parser = { path = "../crates/flux-parser" }
+
 [[bin]]
 name = "decode_frame"
 path = "fuzz_targets/decode_frame.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "parse_flux"
+path = "fuzz_targets/parse_flux.rs"
 test = false
 doc = false
