@@ -13,6 +13,7 @@
 
 import Foundation
 import UIKit
+import OSLog
 import FluxUIKit
 
 /// The outcome of dispatching one frame.
@@ -629,7 +630,7 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
     public func dispatch(_ event: FluxEvent) {
         #if DEBUG
         let payloadDesc = event.payload.map { "\($0)" } ?? "nil"
-        NSLog("[fluxdbg:dispatch] handlerId=\(event.handlerId) nodeId=\(event.nodeId) payload=\(payloadDesc)")
+        os_log("handlerId=%@ nodeId=%u payload=%@", log: .default, type: .debug, String(describing: event.handlerId), event.nodeId, payloadDesc)
         #endif
         guard let entry = handlerClosures[event.handlerId] else {
             lastError = VmError(kind: .invalidDispatch, offset: 0)
