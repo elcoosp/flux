@@ -51,7 +51,7 @@ RECORDS_FILE="$OUTDIR/host-records.txt"
 # ---- Android host (pure JVM, no emulator) ----
 echo "== 2a/3 Android host render-perf (JVM, no emulator) =="
 if [[ -x "./gradlew" ]]; then
-  ./gradlew :runtimes:android:host:test --tests "dev.flux.host.RenderPerfHarnessTest" -q 2>/dev/null || true
+  ./gradlew :runtimes:android:host:test --tests "dev.flux.host.RenderPerfHarnessTest" -q 2>/dev/null
   AXML="$(find runtimes/android/host/build/test-results -name '*RenderPerfHarnessTest*.xml' 2>/dev/null | head -1 || true)"
   if [[ -n "${AXML:-}" ]] && grep -q 'RENDER_PERF' "$AXML"; then
     grep 'RENDER_PERF' "$AXML" >> "$RECORDS_FILE"
@@ -67,23 +67,39 @@ fi
 echo "== 2b/3 iOS host render-perf (simulator) =="
 SIM_ID="$(xcrun simctl list devices booted 2>/dev/null | grep -oE '[0-9A-Fa-f-]{36}' | head -1 || true)"
 if [[ -n "${SIM_ID:-}" ]] && command -v xcodebuild >/dev/null 2>&1; then
-  set +e
   xcodebuild test -scheme FluxApp \
     -destination "platform=iOS Simulator,id=$SIM_ID" \
     -only-testing 'FluxAppTests/RenderPerfHarnessTests' 2>&1 \
     | grep 'RENDER_PERF' >> "$RECORDS_FILE"
-  set -e
   echo "  iOS xcodebuild run complete (record, if any, captured above)"
 else
   echo "  SKIP: no booted iOS simulator in this environment (FLUX-066 needs a sim)"
 fi
 
 # ---- Gate the real measurements ----
-echo "== 3/3 gating collected on-device records against §3.10 budgets =="
+echo "== 3/3 gating collected on-device records against §3.10 budgets ==="
+ANDROID_EXPECTED=false
+IOS_EXPECTED=false
+if [[ -x "./gradlew" ]]; then
+  ANDROID_EXPECTED=true
+fi
+SIM_ID="$(xcrun simctl list devices booted 2>/dev/null | grep -oE '[0-9A-Fa-f-]{36}' | head -1 || true)"
+if [[ -n "${SIM_ID:-}" ]] && command -v xcodebuild >/dev/null 2>&1; then
+  IOS_EXPECTED=true
+fi
+
 if [[ ! -s "$RECORDS_FILE" ]]; then
   echo "  No on-device records collected in this environment; Rust-core gate already passed above."
   echo "  (On a machine with the Android toolchain and/or a booted iOS simulator the host"
   echo "   records are collected and gated here — see FLUX-066.)"
+  if [[ "$ANDROID_EXPECTED" == "true" ]]; then
+    echo "PERF RECORD MISSING: android"
+    exit 1
+  fi
+  if [[ "$IOS_EXPECTED" == "true" ]]; then
+    echo "PERF RECORD MISSING: ios"
+    exit 1
+  fi
   exit 0
 fi
 cargo run -q -p flux-perf-harness --example ci_ondevice "$RECORDS_FILE"
