@@ -28,6 +28,10 @@ class FrameDeserializerTest {
         assumeTrue(dir.isDirectory, "FLUX_WIRE_FIXTURES points at a missing directory")
         val files = dir.listFiles { f -> f.extension == "bin" } ?: emptyArray()
         for (file in files) {
+            // `unsupported-version.bin` is intentionally v3 and must be rejected
+            // (see `rejects the shared FLUX-083 unsupported-version fixture`);
+            // skip it here so this test stays a "all valid fixtures decode" gate.
+            if (file.name == "unsupported-version.bin") continue
             val bytes = file.readBytes()
             val frame = FrameDeserializer.deserialize(bytes)
             assertNotNull(frame, "failed to decode ${file.name}")
