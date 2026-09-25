@@ -1163,8 +1163,15 @@ impl InternStringFrame {
     /// fallback.
     #[must_use]
     pub fn intern_into(&self, table: &mut StringTable) -> StringInternedFrame {
-        let text = self.as_str().unwrap_or_default();
-        let id = table.intern(text);
+        let id = match self.as_str() {
+            Some(valid) => table.intern(valid),
+            None => {
+                tracing::warn!(
+                    "InternString payload was not valid UTF-8; interning fallback empty string"
+                );
+                table.intern("")
+            }
+        };
         StringInternedFrame::new(id)
     }
 }
