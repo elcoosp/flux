@@ -25,7 +25,7 @@ jobs:
     # release-gate consumes this job's result; skipping would fake a green gate
     if: true
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
@@ -76,7 +76,7 @@ jobs:
     # O(n·r·i) blow-up (which would be seconds). Runs on every event so a
     # regression that re-introduces the scan is caught in CI, not on a 10k tree.
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
 
       - name: Install nightly toolchain
         run: |
@@ -124,7 +124,7 @@ jobs:
     # a JSON MetricRecord. Cheap (~30s for two tree sizes) so it runs on every
     # event; the gate is non-blocking until a regression trips `passed=false`.
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
 
       - name: Install nightly toolchain
         run: |
