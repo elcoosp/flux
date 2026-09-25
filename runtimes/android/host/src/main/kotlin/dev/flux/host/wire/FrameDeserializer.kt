@@ -68,8 +68,7 @@ public object FrameDeserializer {
             // host + new server (or vice-versa) must surface an actionable red
             // banner, not a silent mis-decode / crash.
             throw WireError(
-                "protocol version 0x%02X not supported by host (expected 0x%02X); " +
-                    "update the host or the dev server".format(version.toInt(), PROTOCOL_VERSION.toInt()),
+                String.format("protocol version 0x%02X not supported by host (expected 0x%02X); update the host or the dev server", version.toInt(), PROTOCOL_VERSION.toInt())
             )
         }
         val kind = r.u8().toUByte()
@@ -275,9 +274,13 @@ public object FrameDeserializer {
         )
     }
 
-    /** Decodes the handler (closure) section (Appendix D §D.12, Gap G1). */
+    /** Decodes the handler (closure) section (Appendix D §D.12, Gap G1).
+     *  When the bytecode blob is empty, return immediately without reading
+     *  a handler count — the encoder (D.12) writes no trailing count for an
+     *  empty closure set, matching the Rust decoder's early return. */
     private fun decodeHandlerSection(r: ByteReader, version: UByte): Pair<BytecodeBlob, List<HandlerDef>> {
         val blob = decodeBytecodeBlob(r)
+        if (blob.len == 0) { return blob to emptyList() }
         val defs = ArrayList<HandlerDef>(0)
         val count = r.u16()
         repeat(count) { defs.add(decodeHandlerDef(r, version)) }
