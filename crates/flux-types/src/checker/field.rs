@@ -81,14 +81,16 @@ impl Checker {
                         )))
                     }
                 } else {
+                    // Named type is not a registered record constructor.
+                    // It may be an opaque platform type (e.g. `Ref`) that
+                    // carries methods known only to the host; defer
+                    // resolution with a fresh var rather than erroring.
                     Ok(self.fresh_ty())
                 }
             }
             TcType::Var(_)
             | TcType::Constrained(_, _)
-            | TcType::Variant(_, _)
             | TcType::Fn(_, _)
-            | TcType::List(_)
             | TcType::Option(_)
             | TcType::Map(_, _) => Ok(self.fresh_ty()),
             other => Err(TypeError::new(
