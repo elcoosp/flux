@@ -22,7 +22,7 @@ jobs:
   steward:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
 
       - name: Report pending requests
         run: bash scripts/manifest-steward.sh --dry-run
