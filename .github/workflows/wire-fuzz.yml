@@ -44,7 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
       - name: Install Rust nightly toolchain (cargo-fuzz needs nightly)
         # TODO(sha-pin): resolve the commit SHA for this third-party action before v1.0
