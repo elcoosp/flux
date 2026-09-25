@@ -772,15 +772,6 @@ impl Pipeline {
             root.component_id,
             extra_nodes.len()
         );
-        for (i, n) in extra_nodes.iter().enumerate() {
-            tracing::debug!(
-                "build_init extra[{}] id={} kind={:?} component_id={}",
-                i,
-                n.id,
-                n.kind,
-                n.component_id
-            );
-        }
         let source_map = self.source_map();
         let signal_meta = signal_meta_for(arena);
         let mut frame: InitFrame = Frame::init(

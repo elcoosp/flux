@@ -57,16 +57,20 @@ impl ComponentTreeView {
 
     /// Toggles the collapsed state of `node_id` and repaints the pane.
     fn toggle(&mut self, node_id: u32, cx: &mut Context<'_, Self>) {
-        eprintln!("[DT-COLLAPSE] toggle called for node {node_id}");
+        if cfg!(debug_assertions) {
+            eprintln!("[DT-COLLAPSE] toggle called for node {node_id}");
+        }
         if self.collapsed.contains(&node_id) {
             self.collapsed.remove(&node_id);
         } else {
             self.collapsed.insert(node_id);
         }
-        eprintln!(
-            "[DT-COLLAPSE] collapsed now = {:?}",
-            self.collapsed.iter().collect::<Vec<_>>()
-        );
+        if cfg!(debug_assertions) {
+            eprintln!(
+                "[DT-COLLAPSE] collapsed now = {:?}",
+                self.collapsed.iter().collect::<Vec<_>>()
+            );
+        }
         cx.notify();
     }
 
@@ -94,7 +98,9 @@ impl ComponentTreeView {
     /// "Toggle all" button). If any branch is currently expanded it collapses
     /// all of them; otherwise it expands all.
     fn toggle_all(&mut self, cx: &mut Context<'_, Self>) {
-        eprintln!("[DT-COLLAPSE] toggle_all called");
+        if cfg!(debug_assertions) {
+            eprintln!("[DT-COLLAPSE] toggle_all called");
+        }
         let tree = self.tree();
         let mut branches: Vec<u32> = Vec::new();
         fn collect(nodes: &[TreeNode], out: &mut Vec<u32>) {
@@ -114,10 +120,12 @@ impl ComponentTreeView {
                 self.collapsed.remove(id);
             }
         }
-        eprintln!(
-            "[DT-COLLAPSE] toggle_all -> {} branches, collapsed={any_expanded}",
-            branches.len()
-        );
+        if cfg!(debug_assertions) {
+            eprintln!(
+                "[DT-COLLAPSE] toggle_all -> {} branches, collapsed={any_expanded}",
+                branches.len()
+            );
+        }
         cx.notify();
     }
 
@@ -289,7 +297,9 @@ impl ComponentTreeView {
         let total: usize = tree.iter().map(|r| 1 + r.children.len()).sum();
         if total != self.last_tree_len {
             self.last_tree_len = total;
-            eprintln!("[DT-TREE] populated roots={} nodes={}", tree.len(), total);
+            if cfg!(debug_assertions) {
+                eprintln!("[DT-TREE] populated roots={} nodes={}", tree.len(), total);
+            }
         }
         let mut rows: Vec<AnyElement> = Vec::new();
         self.render_tree(&tree, 0, this.clone(), cx, &mut rows);
