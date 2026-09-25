@@ -32,10 +32,12 @@ pub(crate) fn encode_value(w: &mut Writer, value: &Value) {
                 encode_value(w, val);
             }
         }
-        // `Value` is `#[non_exhaustive]`; an unknown variant cannot be encoded
-        // without a tag, so it is skipped. The value codec is exercised only
-        // on values lowered by the (known) type checker.
-        _ => {}
+        // `Value` is `#[non_exhaustive]` (flux-syntax): all variants from the
+        // type checker are handled above. An unknown variant means a new
+        // `Value` variant was added without an encoder (audit P2.25). The tag
+        // byte is already on the wire, so silencing this desyncs every
+        // downstream frame.
+        _ => unreachable!("unknown Value variant — add an encoder arm for it (audit P2.25)"),
     }
 }
 

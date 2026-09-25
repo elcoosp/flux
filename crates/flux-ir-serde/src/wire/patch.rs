@@ -51,10 +51,13 @@ pub(crate) fn encode_patch(w: &mut super::cursor::Writer, patch: &Patch) {
             w.u32(*new_id);
             encode_node(w, node);
         }
-        // `Patch` is `#[non_exhaustive]`. An unknown variant cannot be encoded
-        // without a wire tag, so it is skipped; the differ/pre-flight stage
-        // guarantees only known variants reach the serializer.
-        _ => {}
+        // `Patch` is `#[non_exhaustive]` (flux-syntax): external additions
+        // require a `_` arm. All variants produced by the differ are handled
+        // above; an unknown variant means a new `Patch` variant was added to
+        // `flux-syntax` without a matching encoder (audit P2.25). Replacing
+        // this with a no-op desyncs the wire stream because the tag byte
+        // was already written.
+        _ => unreachable!("unknown Patch variant — add an encoder arm for it (audit P2.25)"),
     }
 }
 

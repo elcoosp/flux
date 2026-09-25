@@ -19,11 +19,11 @@ pub(crate) fn encode_child(w: &mut Writer, child: &Child) {
                 w.u32(*id);
             }
         }
-        // `Child` is `#[non_exhaustive]` for future slot kinds; we cannot
-        // encode an unknown kind, so we emit nothing rather than panic. The
-        // dev server rejects trees containing unknown children before they
-        // reach serialization (AGENTS.md: no `unreachable!` in prod).
-        _ => {}
+        // `Child` is `#[non_exhaustive]` (flux-syntax): all variants are
+        // handled above. An unknown variant means a new `Child` slot kind
+        // was added without an encoder (audit P2.25). The parent's item-count
+        // prefix is already written, so skipping desyncs the reader.
+        _ => unreachable!("unknown Child variant — add an encoder arm for it (audit P2.25)"),
     }
 }
 
