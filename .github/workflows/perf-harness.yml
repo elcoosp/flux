@@ -35,6 +35,9 @@ on:
 permissions:
   contents: read
 
+env:
+  FLUX_SIM_DEVICE: "iPhone 17 Pro"
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
@@ -76,7 +79,7 @@ jobs:
       - name: Boot iOS simulator
         run: |
           runtime_id=$(xcrun simctl list runtimes | grep -E 'iOS [0-9]' | tail -1 | awk '{print $NF}' | tr -d '()')
-          sim_id=$(xcrun simctl create "FluxPerf" "iPhone 17 Pro" "$runtime_id")
+          sim_id=$(xcrun simctl create "FluxPerf" "$FLUX_SIM_DEVICE" "$runtime_id")
           echo "sim_id=$sim_id" >> "$GITHUB_OUTPUT"
           xcrun simctl boot "$sim_id"
       - name: Run perf harness (core + ios host gate)
