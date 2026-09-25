@@ -75,12 +75,7 @@ pub(crate) fn check_exhaustive(
 fn has_catch_all(arms: &[MatchArm]) -> bool {
     arms.iter().any(|arm| match &arm.pattern.kind {
         MatchPatternKind::Wildcard => true,
-        MatchPatternKind::Variant { name, fields } => {
-            name.name == "_"
-                || fields
-                    .iter()
-                    .all(|f| matches!(f, flux_parser::Pattern::Wildcard(_)))
-        }
+        MatchPatternKind::Variant { name, .. } => name.name == "_",
         MatchPatternKind::Literal(_) | MatchPatternKind::Guard { .. } => false,
         _ => false,
     })
