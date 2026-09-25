@@ -129,7 +129,12 @@ impl FluxLsp {
         let uri = params.text_document.uri.clone();
         let version = params.text_document.version;
         // Fold the incremental content changes into the cached document.
-        let mut docs = self.documents.lock().expect("documents mutex poisoned");
+        let mut docs = match self.documents.lock() {
+            Ok(guard) => guard,
+            Err(_) => return ControlFlow::Break(Err(
+                async_lsp::ResponseError::new(async_lsp::ErrorCode::INTERNAL_ERROR, "state mutex poisoned").into(),
+            )),
+        };
         let text = docs.entry(uri.clone()).or_default();
         for change in params.content_changes {
             match change.range {
@@ -151,7 +156,12 @@ impl FluxLsp {
         drop(docs);
 
         // Record this version and schedule a debounced publish tied to it.
-        let mut versions = self.versions.lock().expect("versions mutex poisoned");
+        let mut versions = match self.versions.lock() {
+            Ok(guard) => guard,
+            Err(_) => return ControlFlow::Break(Err(
+                async_lsp::ResponseError::new(async_lsp::ErrorCode::INTERNAL_ERROR, "state mutex poisoned").into(),
+            )),
+        };
         let counter = versions
             .entry(uri.clone())
             .or_insert_with(|| Arc::new(AtomicU32::new(0)));
@@ -162,13 +172,15 @@ impl FluxLsp {
         if let Some(client) = self.client.clone() {
             let uri_for_task = uri.clone();
             let path = std::path::PathBuf::from(uri.path());
-            let text = self
-                .documents
-                .lock()
-                .expect("documents mutex poisoned")
-                .get(&uri)
-                .cloned()
-                .unwrap_or_default();
+            let text = match self.documents.lock() {
+                Ok(docs) => docs.get(&uri).cloned().unwrap_or_default(),
+                Err(_) => {
+                    return ControlFlow::Break(Err(
+                        async_lsp::ResponseError::new(async_lsp::ErrorCode::INTERNAL_ERROR, "state mutex poisoned")
+                            .into(),
+                    ));
+                }
+            };
             tokio::spawn(async move {
                 tokio::time::sleep(Duration::from_millis(FluxLsp::DEBOUNCE_MS)).await;
                 // A newer edit superseded this one — skip the stale publish.
@@ -372,10 +384,13 @@ impl LanguageServer for FluxLsp {
         let DidOpenTextDocumentParams {
             text_document: TextDocumentItem { uri, text, .. },
         } = params;
-        self.documents
-            .lock()
-            .expect("documents mutex poisoned")
-            .insert(uri, text);
+        let mut docs = match self.documents.lock() {
+            Ok(guard) => guard,
+            Err(_) => return ControlFlow::Break(Err(
+                async_lsp::ResponseError::new(async_lsp::ErrorCode::INTERNAL_ERROR, "state mutex poisoned").into(),
+            )),
+        };
+        docs.insert(uri, text);
         ControlFlow::Continue(())
     }
 
@@ -395,13 +410,17 @@ impl LanguageServer for FluxLsp {
         // `BoxFuture<'static>`). The highlight pass itself is CPU-bound and runs
         // inside the future.
         let uri = params.text_document.uri;
-        let text = self
-            .documents
-            .lock()
-            .expect("documents mutex poisoned")
-            .get(&uri)
-            .cloned()
-            .unwrap_or_default();
+        let text = match self.documents.lock() {
+            Ok(docs) => docs.get(&uri).cloned().unwrap_or_default(),
+            Err(_) => {
+                return Box::pin(async move {
+                    Err(async_lsp::ResponseError::new(
+                        async_lsp::ErrorCode::INTERNAL_ERROR,
+                        "state mutex poisoned",
+                    ))
+                });
+            }
+        };
         Box::pin(async move {
             let data = semantic_tokens::tokens_for_text(&text);
             Ok(Some(async_lsp::lsp_types::SemanticTokensResult::Tokens(
@@ -422,13 +441,17 @@ impl LanguageServer for FluxLsp {
     > {
         let uri = params.text_document_position_params.text_document.uri;
         let pos = params.text_document_position_params.position;
-        let text = self
-            .documents
-            .lock()
-            .expect("documents mutex poisoned")
-            .get(&uri)
-            .cloned()
-            .unwrap_or_default();
+        let text = match self.documents.lock() {
+            Ok(docs) => docs.get(&uri).cloned().unwrap_or_default(),
+            Err(_) => {
+                return Box::pin(async move {
+                    Err(async_lsp::ResponseError::new(
+                        async_lsp::ErrorCode::INTERNAL_ERROR,
+                        "state mutex poisoned",
+                    ))
+                });
+            }
+        };
         Box::pin(async move {
             let Some(cursor) = util::position_to_offset(&text, pos.line, pos.character) else {
                 return Ok(None);
@@ -452,13 +475,17 @@ impl LanguageServer for FluxLsp {
     ) -> futures::future::BoxFuture<'static, Result<Option<Hover>, async_lsp::ResponseError>> {
         let uri = params.text_document_position_params.text_document.uri;
         let pos = params.text_document_position_params.position;
-        let text = self
-            .documents
-            .lock()
-            .expect("documents mutex poisoned")
-            .get(&uri)
-            .cloned()
-            .unwrap_or_default();
+        let text = match self.documents.lock() {
+            Ok(docs) => docs.get(&uri).cloned().unwrap_or_default(),
+            Err(_) => {
+                return Box::pin(async move {
+                    Err(async_lsp::ResponseError::new(
+                        async_lsp::ErrorCode::INTERNAL_ERROR,
+                        "state mutex poisoned",
+                    ))
+                });
+            }
+        };
         Box::pin(async move {
             let Some(cursor) = util::position_to_offset(&text, pos.line, pos.character) else {
                 return Ok(None);
@@ -482,13 +509,17 @@ impl LanguageServer for FluxLsp {
     > {
         let uri = params.text_document_position.text_document.uri;
         let pos = params.text_document_position.position;
-        let text = self
-            .documents
-            .lock()
-            .expect("documents mutex poisoned")
-            .get(&uri)
-            .cloned()
-            .unwrap_or_default();
+        let text = match self.documents.lock() {
+            Ok(docs) => docs.get(&uri).cloned().unwrap_or_default(),
+            Err(_) => {
+                return Box::pin(async move {
+                    Err(async_lsp::ResponseError::new(
+                        async_lsp::ErrorCode::INTERNAL_ERROR,
+                        "state mutex poisoned",
+                    ))
+                });
+            }
+        };
         Box::pin(async move { Ok(completion::completions_at(&text, pos)) })
     }
 }
