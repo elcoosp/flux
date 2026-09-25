@@ -85,6 +85,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
     *values* shift, which parity does not compare). No protocol bump — hosts still
     consume opaque `u32`.
 
+### Android: ForEach remove-wrong-row — FLUX-092 — `[verified]`
+- The Kotlin `reconcileForEach` tore down and rebuilt every row on each list
+  mutation, and from the second mutation onward `adapter.update()` ran against a
+  destroyed view (T-330). Fixed by unifying the row/child id derivation to the
+  FNV-1a + marker-bit scheme (`tests/isa-vectors/foreach_ids.json`, cross-platform
+  Rust/Swift/Kotlin parity). Residual identity-drift bug is tracked as C12;
+  `native_kit_parity.rs` covers the adapter-drift gate.
+
 ## 2026-08-29 — Flux syntax highlighting: grammar rebuild + compiler-driven LSP tokens
 
 ### Docs site + LSP (flux-lsp, flux-parser) — `[verified]`
@@ -116,7 +124,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
     (`compo` → keyword color).
 
 
-## [Unreleased]
+### [Unreleased] — Release evidence gate / contract freeze
 
 ### Release — 1.0 beta evidence gate / contract freeze (FLUX-069, PRD-U) — DONE
 - **The 1.0 cut is a set of evidence criteria (roadmap §1), not a feature list.**
@@ -1397,7 +1405,7 @@ Resolution (see `docs/adr/ADR-0028-adr-naming-and-numbering.md`):
 
 ---
 
-## [Unreleased] — reconciled from working tree (a8c86d0..HEAD)
+### [Unreleased] — Reconciled from working tree (a8c86d0..HEAD)
 
 The entries below cover every landed commit between `a8c86d0` (2026-08-27) and
 `HEAD`; statuses were reconciled against the issue frontmatter (see

@@ -1,6 +1,6 @@
 name: website-check
 
-# FLUX-092 (LANE-DOCS, Phase 3 — docs/website) — promote `check-i18n-drift.ts`
+# FLUX-093 (LANE-DOCS, Phase 3 — docs/website) — promote `check-i18n-drift.ts`
 # from an advisory-only script to a REQUIRED, build-gating CI check.
 #
 # The docs site is multi-locale: English lives at `src/content/docs/` and
@@ -61,7 +61,7 @@ jobs:
 
       - name: i18n-drift parity check (required gate)
         # HARD step: exits 1 on any English page missing its es/fr counterpart.
-        # This is the enforceable gate promoted by FLUX-092.
+        # This is the enforceable gate promoted by FLUX-093.
         run: pnpm run check:i18n
 
       - name: Build site (also runs check:i18n)

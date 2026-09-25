@@ -1,6 +1,6 @@
 # Flux standard library (`/stdlib`)
 
-The twelve `.flux` files here are the Flux standard library per mlp-spec §18.3
+The 32 `.flux` files here (20 adapter components + 12 value/type/trait/ capability/platform prelude sources) are the Flux standard library per mlp-spec §18.3
 and the Appendix F adapter prop contracts. They are declarations only: the
 component bodies are supplied natively by the platform adapters.
 
@@ -10,7 +10,7 @@ component bodies are supplied natively by the platform adapters.
 | `traits.flux` | `Numeric`, `Eq`, `Show` |
 | `color.flux` | `Color` (`RGB`) + `red`/`green`/`blue`/`black`/`white` |
 | `font.flux` | `Font`, `Weight`, `Style` + `body`/`title`/`caption` presets |
-| `text.flux`, `button.flux`, `column.flux`, `row.flux`, `text_field.flux` | adapter components (Appendix F.1–F.5) |
+|| `text.flux`, `button.flux`, `column.flux`, `row.flux`, `text_field.flux`, `scrollview.flux`, `toggle.flux`, `checkbox.flux`, `switch.flux`, `image.flux`, `slider.flux`, `grid.flux`, `stack.flux`, `spacer.flux`, `safearea.flux`, `sheet.flux`, `modal.flux`, `picker.flux`, `date_picker.flux`, `dialog.flux`, `text_area.flux`, `animate.flux`, `gesture.flux`, `web.flux` | adapter components (Appendix F.1–F.5, plus FLUX-056 ScrollView and FLUX-048 gesture/animate/sheet/modal/picker/date_picker/dialog/text_area/spacer/grid/stack/switch/checkbox/toggle/image/slider/safearea/web) |
 | `router.flux` | `Router` + `Screen` |
 | `capabilities.flux` | capability declarations (spec §24.1) |
 | `platform.flux` | platform tag and query helpers |
@@ -36,7 +36,7 @@ so nothing here may edit the root `Cargo.toml`. All files involved live under
 `/stdlib`.
 
 The parser crate additionally carries `crates/flux-parser/tests/stdlib.rs`,
-which parses the same twelve files inside `cargo nextest run -p flux-parser`.
+which parses the same 32 files inside `cargo nextest run -p flux-parser`.
 That is the CI-visible gate; this script is the stdlib-side equivalent that
 works without touching the parser crate.
 
