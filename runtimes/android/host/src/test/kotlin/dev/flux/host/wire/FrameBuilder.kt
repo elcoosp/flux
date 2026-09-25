@@ -62,8 +62,10 @@ class FrameBuilder {
         // no-op marker kept for readability; magic is emitted by [build].
     }
 
-    /** Sets the protocol version byte (default `1`). */
-    fun version(v: Int) = Unit // emitted by build(); retained for call-site readability
+    /** Sets the protocol version byte (retained for call-site readability;
+     *  build() emits the host's PROTOCOL_VERSION, not this value — v1 was
+     *  removed in Audit D8). */
+    fun version(v: Int) = Unit
 
     /** Sets the sequence number (emitted by [build] in the correct slot). */
     fun seq(v: Int): FrameBuilder {
@@ -296,7 +298,7 @@ class FrameBuilder {
         out.write(0x55)
         out.write(0x5C)
         out.write(0x46) // 0x465C5558 LE
-        out.write(0x01) // version
+        out.write(0x02) // protocol version (matches PROTOCOL_VERSION + committed fixtures)
         when (mode) {
             Mode.INIT -> buildInit(out)
             Mode.DELTA -> buildDelta(out)
