@@ -9,11 +9,10 @@ name: compat-matrix
 #     Kotlin versions").
 #
 # The build/test steps mirror ios-check.yml / android-check.yml so a version bump only
-# touches the `matrix:` block, never the commands. The Android cells are HARD
-# (ubuntu-24.04 preinstalls android-37 + Build-tools 37, so every AGP/Kotlin cell
-# resolves and runs). The iOS cells stay best-effort (continue-on-error) because
-# Xcode-version availability on the macos runners is a separate environment concern,
-# not a code-correctness gate — the point of the matrix is to surface version drift.
+# touches the `matrix:` block, never the commands. All cells are HARD (no
+# continue-on-error): version-drift is a release-blocking finding, and a missing
+# Xcode version on the runner surfaces as an environment failure, not a
+# code-correctness pass.
 
 on:
   workflow_call:
@@ -41,6 +40,9 @@ on:
 permissions:
   contents: read
 
+env:
+  FLUX_SIM_DEVICE: "iPhone 17 Pro"
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
@@ -49,7 +51,6 @@ jobs:
   ios-matrix:
     name: iOS (Xcode ${{ matrix.xcode }})
     runs-on: macos-latest
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
@@ -57,7 +58,7 @@ jobs:
         xcode: ["16.0", "26.0"]
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
       - name: Select Xcode ${{ matrix.xcode }}
         run: sudo xcode-select -s "/Applications/Xcode_${{ matrix.xcode }}.app"
@@ -74,7 +75,7 @@ jobs:
         run: |
           runtime_id=$(xcrun simctl list runtimes | grep -E 'iOS [0-9]' | tail -1 | awk '{print $NF}' | tr -d '()')
           echo "runtime_id=$runtime_id" >> "$GITHUB_OUTPUT"
-          sim_id=$(xcrun simctl create "FluxCI" "iPhone 16" "$runtime_id")
+          sim_id=$(xcrun simctl create "FluxCI" "$FLUX_SIM_DEVICE" "$runtime_id")
           echo "sim_id=$sim_id" >> "$GITHUB_OUTPUT"
 
       - name: Build & test FluxApp
@@ -92,10 +93,8 @@ jobs:
   android-matrix:
     name: Android (AGP ${{ matrix.agp }}, Kotlin ${{ matrix.kotlin }})
     # HARD GATE (Android cells): ubuntu-24.04 preinstalls android-37 + Build-tools
-    # 37, so every AGP/Kotlin cell resolves the SDK and runs. These cells must
-    # pass for a 1.0 cut (FLUX-069 / PRD-U contract-version surface). The iOS
-    # cells stay best-effort (Xcode-version availability is a separate runner
-    # concern, not a code-correctness gate).
+    # 37, so every AGP/Kotlin cell resolves the SDK and runs. All cells are HARD
+    # (no continue-on-error) per T-601.2.
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -105,7 +104,7 @@ jobs:
         kotlin: ["2.0.21", "2.1.0"]
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -129,7 +128,7 @@ jobs:
         # Compose compiler plugin) so the kotlinc codegen check runs without an
         # Android platform.
         run: |
-          set -uo pipefail
+          set -euo pipefail
           BOM_VER="2026.08.00"
           GOOGLE="https://dl.google.com/dl/android/maven2"
           MAVEN="https://repo1.maven.org/maven2"
