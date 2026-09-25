@@ -89,13 +89,15 @@ impl SourceExcerpt {
         // The cited line is the slice from the last newline before `start` to
         // the next newline after `start`.
         let start = span.start as usize;
-        let line_start = source[..start.min(source.len())]
+        let safe_start = start.min(source.len());
+        // Clamp to char boundaries so a mid-UTF-8 span never panics (T-604.11).
+        let line_start = source[..source.floor_char_boundary(safe_start)]
             .rfind('\n')
             .map(|i| i + 1)
             .unwrap_or(0);
-        let line_end = source[start.min(source.len())..]
+        let line_end = source[source.ceil_char_boundary(safe_start)..]
             .find('\n')
-            .map(|i| start + i)
+            .map(|i| source.ceil_char_boundary(safe_start) + i)
             .unwrap_or(source.len());
         let snippet = source[line_start..line_end.min(source.len())]
             .trim()
