@@ -279,6 +279,11 @@ fn write_string(out: &mut String, parts: &[StrPart]) {
                         '\n' => out.push_str("\\n"),
                         '\t' => out.push_str("\\t"),
                         '\r' => out.push_str("\\r"),
+                        // Re-escape braces so interpolated strings round-trip:
+                        // the parser reads `\{` / `\}` as literal braces in text
+                        // (push_escape), so the formatter must emit the escapes.
+                        '{' => out.push_str("\\{"),
+                        '}' => out.push_str("\\}"),
                         other => out.push(other),
                     }
                 }
@@ -387,7 +392,9 @@ fn write_expr_prec(out: &mut String, expr: &Expr, indent: usize, parent_prec: u8
             out.push(' ');
             out.push_str(binop_spelling(*op));
             out.push(' ');
-            write_expr_prec(out, rhs, indent, prec);
+            // For left-associative operators, the right operand of the
+            // same precedence must keep its parens: `a - (b - c)` ≠ `a - b - c`.
+            write_expr_prec(out, rhs, indent, prec + 1);
             if needs_parens {
                 out.push(')');
             }
