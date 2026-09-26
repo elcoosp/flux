@@ -639,24 +639,23 @@ mod tests {
     /// files (entry → `MainActivity.kt`, non-entry → `{stem}.kt`), not both
     /// writing to `MainActivity.kt` and clobbering each other.
     #[test]
-    fn two_file_project_produces_distinct_kt_files() {
+    fn two_file_project_produces_distinct_kt_files() -> anyhow::Result<()> {
         let tmp = std::env::temp_dir().join(format!(
             "flux-build-twofile-{}-{}",
             std::process::id(),
             "android"
         ));
         let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::create_dir_all(&tmp)?;
 
         std::fs::write(
             tmp.join("main.flux"),
             "compo App\n  state count: Int = 0\n\n  Column {\n    Text(text: \"count: ${count}\")\n    Button(text: \"Increment\", onPress: fn() { count = count + 1 })\n  }\n",
-        ).unwrap();
+        )?;
         std::fs::write(
             tmp.join("counter.flux"),
             "compo Counter\n  state value: Int = 0\n\n  Text(text: \"counter: ${value}\")\n",
-        )
-        .unwrap();
+        )?;
 
         let resolver: Box<CommandResolver> = Box::new(|_, _| None);
         let result = run_with(Platform::Android, &tmp, &*resolver);
@@ -669,8 +668,8 @@ mod tests {
         assert!(main_kt.exists(), "entry file MainActivity.kt must exist");
         assert!(counter_kt.exists(), "non-entry file counter.kt must exist");
 
-        let main_src = std::fs::read_to_string(&main_kt).unwrap();
-        let counter_src = std::fs::read_to_string(&counter_kt).unwrap();
+        let main_src = std::fs::read_to_string(&main_kt)?;
+        let counter_src = std::fs::read_to_string(&counter_kt)?;
 
         // Entry file has the MainActivity wrapper + root component call.
         assert!(
@@ -703,23 +702,24 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&tmp);
+        Ok(())
     }
 
     /// Audit T-404 item 4: the scaffolded `init` template uses `onPress:`
     /// (canonical verb), and the handler body survives lowering + codegen.
     #[test]
-    fn scaffold_on_press_handler_survives_lowering() {
+    fn scaffold_on_press_handler_survives_lowering() -> anyhow::Result<()> {
         let tmp = std::env::temp_dir().join(format!(
             "flux-build-scaffold-{}-{}",
             std::process::id(),
             "android"
         ));
         let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
+        std::fs::create_dir_all(&tmp)?;
 
         // Use the real scaffold template — not a hand-rolled copy — so the
         // test fails if someone regresses the verb back to onClick.
-        std::fs::write(tmp.join("main.flux"), crate::init::SAMPLE_ENTRY).unwrap();
+        std::fs::write(tmp.join("main.flux"), crate::init::SAMPLE_ENTRY)?;
 
         let resolver: Box<CommandResolver> = Box::new(|_, _| None);
         let result = run_with(Platform::Android, &tmp, &*resolver);
@@ -732,7 +732,7 @@ mod tests {
             .join("MainActivity.kt");
         assert!(generated.exists(), "MainActivity.kt must be emitted");
 
-        let src = std::fs::read_to_string(&generated).unwrap();
+        let src = std::fs::read_to_string(&generated)?;
         // The scaffold uses `onPress:` — the canonical verb. Verify the handler
         // body rendered from it, not silently dropped. The binary expression may
         // render with or without wrapping parentheses depending on backend.
@@ -748,5 +748,6 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&tmp);
+        Ok(())
     }
 }
