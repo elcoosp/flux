@@ -79,8 +79,9 @@ pub fn deserialize_patches(bytes: &[u8]) -> Result<(Vec<Patch>, Vec<ClosureIR>),
 /// BLAKE3 content hash of a props map.
 ///
 /// The digest is computed order-independently: each `(index, value)` pair is
-/// hashed with `index` in little-endian and XOR-folded into an 8-byte digest,
-/// so two prop maps that differ only in field order hash identically (Appendix
+/// hashed with `index` in little-endian and wrapping-add-folded into an 8-byte
+/// digest (order-insensitive — audit P2.12(c): XOR would cancel duplicate
+/// `{a, a, b}` down to `{b}`, masking multiset differences), so two prop maps
 /// D §D.14). Floats are canonicalised through [`Value::hash_into`].
 ///
 /// # Examples
@@ -102,7 +103,7 @@ pub fn hash_props(fields: &[(PropIdx, Value)]) -> u64 {
         value.hash_into(&mut hasher);
         let mut digest = [0_u8; 8];
         digest.copy_from_slice(&hasher.finalize().as_bytes()[..8]);
-        accumulator ^= u64::from_le_bytes(digest);
+        accumulator = accumulator.wrapping_add(u64::from_le_bytes(digest));
     }
     accumulator
 }

@@ -237,7 +237,9 @@ pub(crate) fn hash_children(children: &[Child]) -> u64 {
         }
         let mut digest = [0_u8; 8];
         digest.copy_from_slice(&hasher.finalize().as_bytes()[..8]);
-        accumulator ^= u64::from_le_bytes(digest);
+        // Audit P2.12(c): wrapping_add instead of XOR so duplicate children
+        // (`{a, a, b}`) are not cancelled to `{b}`.
+        accumulator = accumulator.wrapping_add(u64::from_le_bytes(digest));
     }
     accumulator
 }
