@@ -158,6 +158,9 @@ pub fn validate_bytecode(bytecode: &[u8]) -> Result<(), WireError> {
     }
 
     // Pass 2: every jump must land on an instruction boundary inside the blob.
+    // Build an O(1) offset set (audit P2.12(a): the old `instrs.iter().any`
+    // scan was O(n²)) so the inner lookup is constant-time.
+    let instr_offsets: std::collections::HashSet<usize> = instrs.iter().map(|d| d.offset).collect();
     for decoded in &instrs {
         let opcode = Opcode::from_byte(bytecode[decoded.offset]).expect("known opcode from pass 1");
         let jump = match opcode {
@@ -177,7 +180,7 @@ pub fn validate_bytecode(bytecode: &[u8]) -> Result<(), WireError> {
             });
         }
         // The target must coincide with an instruction boundary.
-        if !instrs.iter().any(|d| d.offset as i64 == target) {
+        if !instr_offsets.contains(&(target as usize)) {
             return Err(WireError::MalformedBytecode {
                 context: "closure.bytecode",
                 detail: "jump-out-of-range",

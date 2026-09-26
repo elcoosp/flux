@@ -183,23 +183,35 @@ pub(crate) fn reattach_pairs(
 ) -> Vec<(NodeId, NodeId)> {
     let mut pairs: Vec<(NodeId, NodeId)> = Vec::new();
     let mut taken: AHashSet<NodeId> = AHashSet::new();
+
+    // Audit P2.12(c): build a lookup from (component_id, kind, parent_slot) to
+    // candidate inserted nodes, so pairing is a hash-join instead of an
+    // O(removed × inserted) nested loop.
+    let mut candidates: AHashMap<(u32, NodeKind, NodeId, u16), Vec<NodeId>> = AHashMap::new();
+    for new_id in inserted {
+        let Some(n) = new.get(*new_id) else { continue };
+        if let Some((parent, index)) = new_index.get(new_id) {
+            candidates
+                .entry((u32::from(n.component_id()), n.kind(), *parent, *index))
+                .or_default()
+                .push(*new_id);
+        }
+    }
+
     for old_id in removed {
         let Some(o) = old.get(*old_id) else { continue };
-        let old_slot = old_index.get(old_id).copied();
-        for new_id in inserted {
-            if taken.contains(new_id) {
-                continue;
+        let Some((parent, index)) = old_index.get(old_id) else {
+            continue;
+        };
+        let key = (u32::from(o.component_id()), o.kind(), *parent, *index);
+        if let Some(cands) = candidates.get(&key) {
+            for new_id in cands {
+                if !taken.contains(new_id) {
+                    taken.insert(*new_id);
+                    pairs.push((*old_id, *new_id));
+                    break;
+                }
             }
-            let Some(n) = new.get(*new_id) else { continue };
-            if o.component_id() != n.component_id() || o.kind() != n.kind() {
-                continue;
-            }
-            if old_slot != new_index.get(new_id).copied() {
-                continue;
-            }
-            taken.insert(*new_id);
-            pairs.push((*old_id, *new_id));
-            break;
         }
     }
     pairs

@@ -1,6 +1,8 @@
 //! Arena helpers for the compile pipeline: root materialisation and multi-file
 //! arena merging (FLUX-019).
 
+use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::path::Path;
 
 use flux_ir::IRArena;
@@ -91,9 +93,11 @@ fn root_ids(arena: &IRArena) -> Vec<NodeId> {
 /// precedes its children, matching the decoder's id-index rebuild.
 pub(crate) fn flatten_extra_nodes(root: &NodeRef, arena: &IRArena) -> Vec<NodeRef> {
     let mut out: Vec<NodeRef> = Vec::new();
-    let mut queue: Vec<NodeId> = root.children.iter().flat_map(Child::node_ids).collect();
-    let mut seen: Vec<NodeId> = queue.clone();
-    while let Some(id) = queue.pop() {
+    // Audit P2.12(b): queue is a VecDeque drained front-to-back so this is
+    // genuinely BFS (a Vec with `.pop()` was DFS, contradicting the comment).
+    let mut queue: VecDeque<NodeId> = root.children.iter().flat_map(Child::node_ids).collect();
+    let mut seen: HashSet<NodeId> = queue.iter().copied().collect();
+    while let Some(id) = queue.pop_front() {
         if let Some(view) = arena.get(id) {
             out.push(NodeRef {
                 id: view.id(),
@@ -105,9 +109,8 @@ pub(crate) fn flatten_extra_nodes(root: &NodeRef, arena: &IRArena) -> Vec<NodeRe
                 span: view.span(),
             });
             for child in view.children().iter().flat_map(Child::node_ids) {
-                if !seen.contains(&child) {
-                    seen.push(child);
-                    queue.push(child);
+                if seen.insert(child) {
+                    queue.push_back(child);
                 }
             }
         }

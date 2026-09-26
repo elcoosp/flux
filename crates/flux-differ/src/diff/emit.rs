@@ -1,6 +1,5 @@
 use std::hash::{Hash, Hasher};
 
-use ahash::AHashSet;
 use flux_ir::{IRArena, NodeView};
 use flux_syntax::{ClosureRef, HandlerId, NodeRef, Patch, SignalId, Span};
 
