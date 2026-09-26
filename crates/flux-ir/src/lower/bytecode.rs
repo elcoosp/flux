@@ -1812,7 +1812,7 @@ mod tests {
     use flux_parser::{BinOp, Block, BlockItem, Expr, ExprKind, Ident, StateDecl};
     use flux_syntax::opcode::raw;
     use flux_syntax::{SignalId, Span, StringTable, Value};
-    use flux_vm_ref::{InMemorySignals, SignalStore, run};
+    use flux_vm_ref::{run, InMemorySignals, SignalStore, VmError};
     use std::collections::HashMap;
 
     /// Builds a handler body with `n` sequential `sN = sN + 1` state declarations
@@ -2122,7 +2122,7 @@ mod tests {
     }
 
     #[test]
-    fn interpolated_prop_thunk_evaluates_signal_into_the_string() {
+    fn interpolated_prop_thunk_evaluates_signal_into_the_string() -> Result<(), VmError> {
         // `Text("tapped {count} times")` where `count` is signal 1.
         let literal = Expr {
             kind: ExprKind::Str(vec![
@@ -2169,7 +2169,7 @@ mod tests {
 
         // The thunk must actually run and leave a record in r1.
         let mut signals = InMemorySignals::from_signals([(SignalId::from(1u32), Value::Int(3))]);
-        let out = run(&bytecode, &mut signals, &table, Value::Null).expect("thunk runs");
+        let out = run(&bytecode, &mut signals, &table, Value::Null)?;
         match &out.registers[1] {
             Value::Record(fields) => {
                 assert_eq!(fields.len(), 1, "one prop field");
@@ -2181,6 +2181,7 @@ mod tests {
             }
             other => panic!("thunk must leave an ALLOC_RECORD in r1, got {other:?}"),
         }
+        Ok(())
     }
 
     #[test]
