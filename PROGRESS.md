@@ -147,9 +147,9 @@ All tasks T-101 through T-111 completed.
 - T-403.4: §5.3 Component header — already implemented (Kotlin uses `", "` separation, `data object`)
 - T-403.5: §5.8 Guard/match arms — already implemented (both backends emit exact-type test)
 - T-403.6: §5.10 TextField — already implemented (Swift `Binding(get:set:)`)
-- T-403.8: §5.7 Async — already implemented (Kotlin `render_await` emits `expr.await()`)
-- T-404: CLI build output: one file per source, deterministic entry point
-- T-405: Generated-code compile gate in CI
+|| T-403.8 | §5.7 Async — already implemented (Kotlin `render_await` emits `expr.await()`) | `t_403_8_async_await` |
+|| T-404 | CLI build: one file per source (stem-derived), deterministic entry, hard error on unreadable, scaffold `onPress` verb | `af01251e` |
+|| T-405 | Generated-code compile gate in CI | pending |
 
 ## Appendix F — Parity Contract
 Created at `docs/appendix-f-parity.md` documenting all D8-D23, C10-C12, H11-H23 decisions.
