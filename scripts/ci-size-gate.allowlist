@@ -17,6 +17,10 @@
 # own issues, not this allowlist.
 
 crates/flux-cli/src/build.rs
+# crates/flux-codegen-core/src/backend.rs — FLUX-088 split pending
+# (Backend trait: no safe split without API changes; backends override
+# prelude/list_type/spacer/emit_animate so extension-trait extraction is not viable)
+crates/flux-codegen-core/src/backend.rs
 crates/flux-codegen-core/src/emitter.rs
 crates/flux-codegen-core/src/native_gen.rs
 crates/flux-codegen-core/src/primitives.rs
