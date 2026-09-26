@@ -65,6 +65,18 @@ struct StringIdCeilingError: LocalizedError {
     }
 }
 
+/// Error raised when an `InternString` payload exceeds the u16 wire limit.
+struct InternStringPayloadTooLargeError: LocalizedError {
+    /// The actual byte count of the payload.
+    let actual: Int
+    var errorDescription: String? {
+        String(
+            format: "InternString payload %d bytes exceeds u16 wire ceiling 65535 (audit P3)",
+            actual
+        )
+    }
+}
+
 /// Builds the wire bytes of an `InternString` request frame (Appendix D §D.12.6).
 ///
 /// Layout (after the shared `magic(4) | version(1) | kind(1)` header):
@@ -78,14 +90,21 @@ struct StringIdCeilingError: LocalizedError {
 ///
 /// - Parameter text: the string to intern. Must be valid UTF-8 (the VM only ever
 ///   interns concrete Swift `String`s, which are valid UTF-8 by construction).
+/// - Throws: `InternStringPayloadTooLargeError` when `text.utf8.count` exceeds
+///   `UInt16.max`.
 /// - Returns: the frame bytes to send over the transport.
-func internStringFrameBytes(_ text: String) -> Data {
+func internStringFrameBytes(_ text: String) throws -> Data {
     let payload = Data(text.utf8)
-    var data = Data()
-    data.append(0x58); data.append(0x55); data.append(0x5C); data.append(0x46) // MAGIC
-    data.append(1) // protocol version
-    data.append(frameKindInternString)
+    // Audit P3: `UInt16(payload.count)` traps on > 64 KB; emit a checked error
+    // instead (wire length prefix is u16, Appendix D §D.12.6).
+    guard payload.count <= Int(UInt16.max) else {
+        throw InternStringPayloadTooLargeError(actual: payload.count)
+    }
     let len = UInt16(payload.count)
+    var data = Data()
+    data.append(0x58); data.append(0x55); data.append(0x5C); data.append(0x46)
+    data.append(2) // protocol version v2 (audit P3: was v1)
+    data.append(frameKindInternString)
     data.append(UInt8(len & 0xFF))
     data.append(UInt8((len >> 8) & 0xFF))
     data.append(payload)

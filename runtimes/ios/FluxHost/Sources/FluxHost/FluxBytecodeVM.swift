@@ -534,7 +534,13 @@ enum FluxBytecodeVM {
                     // existential on the hot path), then copy the writes back.
                     var boxed: any SignalStore = signals
                     let cellId = try impl(capID, methodID, reg(argsReg), &boxed)
-                    signals = boxed as! S
+                    // Audit P3: guard the boxed→concrete downcast instead of
+                    // trapping with `as!`. A mismatched SignalStore type is a
+                    // capability-registration bug, surfaced as a VM error.
+                    guard let typedSignals = boxed as? S else {
+                        throw VmError.typeMismatch(offset: instr.offset)
+                    }
+                    signals = typedSignals
                     // Unified sync/async contract (ADR-0045): the impl creates a
                     // result cell and returns its signal id; `resultReg` receives that
                     // id. A sync method has already written `Ready` into it; an async
@@ -1078,7 +1084,13 @@ enum FluxBytecodeVM {
                 do {
                     var boxed: any SignalStore = signals
                     let cellId = try impl(capID, methodID, reg(argsReg), &boxed)
-                    signals = boxed as! S
+                    // Audit P3: guard the boxed→concrete downcast instead of
+                    // trapping with `as!`. A mismatched SignalStore type is a
+                    // capability-registration bug, surfaced as a VM error.
+                    guard let typedSignals = boxed as? S else {
+                        throw VmError.typeMismatch(offset: instr.offset)
+                    }
+                    signals = typedSignals
                     // Unified sync/async contract (ADR-0045): the impl returns the
                     // result-cell signal id; `resultReg` receives it.
                     regs[Int(resultReg)] = .int(Int64(cellId))

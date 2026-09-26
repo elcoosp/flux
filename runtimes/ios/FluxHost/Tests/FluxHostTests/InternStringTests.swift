@@ -16,13 +16,13 @@ import Foundation
 final class InternStringTests: XCTestCase {
     // MARK: wire encoding
 
-    func testInternStringFrameEncoding() {
-        let bytes = internStringFrameBytes("helloworld")
+    func testInternStringFrameEncoding() throws {
+        let bytes = try internStringFrameBytes("helloworld")
         let raw = Array(bytes) // Materialize once as [UInt8] to index/compare.
         // magic(4) version(1) kind(1) len(2) payload(10)
         XCTAssertEqual(bytes.count, 4 + 1 + 1 + 2 + 10)
         XCTAssertEqual(Array(raw[0..<4]), [0x58, 0x55, 0x5C, 0x46])
-        XCTAssertEqual(raw[4], 1)
+        XCTAssertEqual(raw[4], 2) // protocol v2 (audit P3)
         XCTAssertEqual(raw[5], frameKindInternString)
         let len = Int(raw[6]) | (Int(raw[7]) << 8)
         XCTAssertEqual(len, 10)
