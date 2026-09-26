@@ -385,10 +385,15 @@ class FrameBuilder {
     private fun writeHandlerSection(out: ByteArrayOutputStream) {
         u32(out, blob.size)
         out.writeBytes(blob)
-        u16(out, handlers.size)
-        for ((id, ref) in handlers) {
-            u32(out, id.toInt())
-            writeClosureRef(out, ref)
+        // Decoder skips the handler count when the blob is empty (matching
+        // the Rust encoder per ADR-0027 D.12 / Gap G1), so we only emit it
+        // when there are handlers to count.
+        if (blob.size > 0) {
+            u16(out, handlers.size)
+            for ((id, ref) in handlers) {
+                u32(out, id.toInt())
+                writeClosureRef(out, ref)
+            }
         }
     }
 

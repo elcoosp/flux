@@ -123,9 +123,10 @@ class ForEachRowContextTest {
         val root = tree.applyFrame(frame, executor)
         assertNotNull(root)
 
-        // Row 2 (index 1 = "Walk dog"). The derived ID is the cloned row's
-        // own id: deriveForEachChildId(deriveForEachRowId(20u,1u), templateRowId=10u)
-        val row2DerivedId = ((20u * 2654435761u + 1u * 40503u + 0x9E3779B9u) * 2654435761u xor (10u * 40503u)) xor 0x55555555u
+        // Row 2 (index 1 = "Walk dog"). The derived ID matches the row's
+        // template child: deriveForEachChildId(deriveForEachRowId(20u,1u), template=10u)
+        val row2RowId = tree.deriveForEachRowId(20u, 1u.toULong())
+        val row2DerivedId = tree.deriveForEachChildId(row2RowId, 10u)
 
         // Seed row 2's context → itemSlot should hold StrVal(8u) = "Walk dog".
         tree.seedRowContext(row2DerivedId)
@@ -137,7 +138,8 @@ class ForEachRowContextTest {
         )
 
         // Row 4 (index 3 = "Call mom"). deriveForEachChildId(deriveForEachRowId(20u,3u), 10u)
-        val row4DerivedId = ((20u * 2654435761u + 3u * 40503u + 0x9E3779B9u) * 2654435761u xor (10u * 40503u)) xor 0x55555555u
+        val row4RowId = tree.deriveForEachRowId(20u, 3u.toULong())
+        val row4DerivedId = tree.deriveForEachChildId(row4RowId, 10u)
 
         // Seed row 4's context → itemSlot should hold StrVal(10u) = "Call mom".
         tree.seedRowContext(row4DerivedId)
