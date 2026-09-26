@@ -2169,8 +2169,7 @@ mod tests {
 
         // The thunk must actually run and leave a record in r1.
         let mut signals = InMemorySignals::from_signals([(SignalId::from(1u32), Value::Int(3))]);
-        let out =
-            run(&bytecode, &mut signals, &StringTable::new(), Value::Null).expect("thunk runs");
+        let out = run(&bytecode, &mut signals, &table, Value::Null).expect("thunk runs");
         match &out.registers[1] {
             Value::Record(fields) => {
                 assert_eq!(fields.len(), 1, "one prop field");

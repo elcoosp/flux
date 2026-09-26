@@ -1,16 +1,20 @@
 {
-  "bytecode_hex": "b30001000000b301020000005002000100",
-  "description": "STR_CONCAT joins two string ids.",
+  "bytecode_hex": "b30000000000b301010000005002000100",
+  "description": "STR_CONCAT resolves both ids to text, joins them, and assigns a deterministic synthetic id (synthetic_str_id via FNV-1a with the high-bit reserved range).",
   "expected_error": null,
   "expected_gas_used": 3,
   "expected_registers": {
     "r2": {
       "type": "Str",
-      "value": 10000002
+      "value": 3672962868
     }
   },
   "expected_signals": [],
   "initial_signals": [],
+  "strings": [
+    {"id": 0, "text": "Hello, "},
+    {"id": 1, "text": "World!"}
+  ],
   "name": "str_concat_basic",
   "payload": null
 }

@@ -291,9 +291,6 @@ fn async_deferred(
 }
 
 const ENTRY_GAS: u32 = 100_000;
-/// Base-10 radix for the synthetic `StringId` produced by `StrConcat` (Appendix E §E.5).
-const STR_CONCAT_BASE: u32 = 10_000_000;
-
 /// Returns the byte offset of the instruction that follows `instr` in the program.
 #[must_use]
 fn next_offset(instr: &Instruction) -> u32 {
@@ -659,11 +656,25 @@ fn exec_tail(
             }
             Opcode::StrConcat => {
                 let (x, y) = expect_strs(reg!(instr.u8(1)), reg!(instr.u8(2)), instr.offset)?;
-                let combined = x
-                    .checked_mul(STR_CONCAT_BASE)
-                    .and_then(|v| v.checked_add(y))
-                    .ok_or_else(|| VmError::at(VmErrorKind::Overflow, instr.offset))?;
-                regs[usize::from(instr.u8(0))] = Value::Str(combined);
+                // Resolve both operands to real text via the intern table (matching
+                // the Swift/Kotlin `TableStringResolver`). IDs not present in the
+                // table — e.g. synthetic ids from `TO_STRING` — degrade to their
+                // decimal rendering, matching the oracle's no-table rendering policy
+                // (§3.8). The joined text is then assigned a fresh synthetic id so
+                // the result is deterministic within a single run, mirroring
+                // `synthetic_str_id`. This replaces the old `x*10_000_000 + y`
+                // proxy, which silently wrapped on 32-bit overflow (audit P3:
+                // StrConcat no longer relies on wrapping arithmetic).
+                let x_text = strings
+                    .resolve(x)
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| x.to_string());
+                let y_text = strings
+                    .resolve(y)
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| y.to_string());
+                let joined = format!("{x_text}{y_text}");
+                regs[usize::from(instr.u8(0))] = Value::Str(synthetic_str_id(&joined));
             }
             Opcode::ToString => {
                 let rendered = render_value(reg!(instr.u8(1)));

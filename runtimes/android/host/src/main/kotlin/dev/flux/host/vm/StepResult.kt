@@ -196,12 +196,13 @@ internal fun executeInstruction(
             StepResult.Proceed
         }
         Opcode.STR_CONCAT -> {
-            // `STR_CONCAT` resolves both ids to text, joins them, and interns the
-            // result (Appendix E §E.1). Dynamic interning at runtime is out of
-            // MLP scope (ADR-flux-0028); the default [DecimalStringResolver]
-            // reproduces the oracle's `x*10_000_000 + y` proxy so the golden
-            // vectors stay green, while a real frame table widens the proxy to
-            // the joined text's hashed id so downstream ops observe the result.
+            // `STR_CONCAT` resolves both ids to text, joins them, and assigns a
+            // deterministic synthetic id via the StringResolver (Appendix E §E.1;
+            // mirrors the `flux-vm-ref` oracle's `synthetic_str_id`). Dynamic
+            // canonical interning at runtime is out of MLP scope (ADR-flux-0028);
+            // a real frame table caches the joined text so downstream ops observe
+            // the result, while the decimal fallback resolver (no table) still
+            // produces a deterministic proxy id.
             val x = requireStr(regs[instr.u8(1)], instr.offset)
             val y = requireStr(regs[instr.u8(2)], instr.offset)
             val resultId = strings.concat(x, y)

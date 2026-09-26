@@ -21,17 +21,19 @@ public interface StringResolver {
      *
      * Without a live table the MLP host cannot grow the frame's string table at
      * runtime (dynamic intern is out of scope per ADR-flux-0028); the default
-     * resolver reproduces the `flux-vm-ref` oracle's `x*10_000_000 + y` proxy so
-     * the golden vectors stay green, while [TableStringResolver] widens the
-     * proxy to a deterministic hash of the real joined text. The host never
-     * treats these as canonical ids — a string produced here must be interned
-     * through the dev server ([dev.flux.host.FluxExecutor.internString]) before
-     * it crosses the wire (brittleness 4d).
+     * resolver resolves both ids to text (decimal fallback when unbound),
+     * joins them, and assigns a deterministic synthetic id via FNV-1a with the
+     * high-bit reserved range — reproducing the `flux-vm-ref` oracle's
+     * `synthetic_str_id`. A real frame table widens this to a cached entry so
+     * downstream ops observe the real joined text. The host never treats these
+     * as canonical ids — a string produced here must be interned through the
+     * dev server ([dev.flux.host.FluxExecutor.internString]) before it crosses
+     * the wire (brittleness 4d).
      */
     public fun concat(
         x: UInt,
         y: UInt,
-    ): UInt = (resolve(x).toUInt() * 10_000_000u) + resolve(y).toUInt()
+    ): UInt = syntheticStrId(resolve(x) + resolve(y))
 
     /**
      * Returns the interned id of [text], the inverse of [resolve].
@@ -40,25 +42,20 @@ public interface StringResolver {
      * fresh `StringId` so downstream prop resolution observes a real string.
      * Without a live table the host cannot grow the frame's string table at
      * runtime (dynamic intern is out of scope per ADR-flux-0028); the default
-     * resolver reproduces the `flux-vm-ref` oracle's FNV-1a proxy so the golden
-     * vectors stay green, while [TableStringResolver] widens the proxy to a
-     * deterministic hash of the real text. The result is **not** a canonical id
-     * and must be interned via the dev server before it reaches the wire.
+     * resolver assigns a deterministic synthetic id via FNV-1a with the
+     * high-bit reserved range, matching the `flux-vm-ref` oracle. The result is
+     * **not** a canonical id and must be interned via the dev server before it
+     * reaches the wire.
      */
-    public fun intern(text: String): UInt {
-        var h: UInt = 0x811c9dc5u
-        for (b in text.toByteArray(Charsets.UTF_8)) {
-            h = (h xor b.toUInt()) * 0x1000193u
-        }
-        return h
-    }
+    public fun intern(text: String): UInt = syntheticStrId(text)
 }
 
 /**
  * The default resolver used by the conformance suite and any run with no string
- * table: an id resolves to its own decimal digits, and `concat` reproduces the
- * `flux-vm-ref` oracle's `x*10_000_000 + y` proxy. Mirrors the Rust oracle's
- * str handling, so `STR_LEN`/`STR_CONCAT` agree with the golden vectors.
+ * table: an id resolves to its own decimal digits, and `concat`/`intern`
+ * assign a deterministic synthetic id via FNV-1a with the high-bit reserved
+ * range — mirroring the `flux-vm-ref` oracle's `synthetic_str_id`, so
+ * `STR_LEN`/`STR_CONCAT` agree with the golden vectors.
  */
 public object DecimalStringResolver : StringResolver {
     override fun resolve(id: UInt): String = id.toString()
@@ -90,28 +87,18 @@ public class TableStringResolver(
         y: UInt,
     ): UInt {
         val joined = resolve(x) + resolve(y)
-        val id = internHash(joined)
+        val id = syntheticStrId(joined)
         extra[id] = joined
         return id
     }
 
     override fun intern(text: String): UInt {
-        val id = internHash(text)
+        val id = syntheticStrId(text)
         extra[id] = text
         return id
     }
 
-    /** Deterministic, non-canonical proxy for [text] (FNV-1a). */
-    private fun internHash(text: String): UInt {
-        var h: UInt = 0x811c9dc5u
-        for (b in text.toByteArray(Charsets.UTF_8)) {
-            h = (h xor b.toUInt()) * 0x1000193u
-        }
-        return h
-    }
-
-    /**
-     * Returns a copy of this resolver with [text] bound to [id]. Used by the
+    /** Returns a copy of this resolver with [text] bound to [id]. Used by the
      * executor to cache a server-interned string (brittleness 4d) so subsequent
      * `STR_LEN`/`STR_CONCAT`/`TO_STRING` resolutions observe the canonical id.
      * Runtime-produced [extra] entries are carried forward so a prior
@@ -126,4 +113,19 @@ public class TableStringResolver(
         resolver.extra.putAll(extra)
         return resolver
     }
+}
+
+/**
+ * Derives the `StringId` the oracle assigns to text it had to synthesise
+ * (FNV-1a 32-bit, then sets the high bit to land in the reserved synthetic
+ * range, mirroring `flux-vm-ref::synthetic_str_id`). The host never treats
+ * these as canonical wire ids — runtime-produced strings must be interned
+ * through the dev server before crossing the wire (brittleness 4d).
+ */
+public fun syntheticStrId(text: String): UInt {
+    var h: UInt = 0x811c9dc5u
+    for (b in text.toByteArray(Charsets.UTF_8)) {
+        h = (h xor b.toUInt()) * 0x1000193u
+    }
+    return h or 0x80000000u
 }

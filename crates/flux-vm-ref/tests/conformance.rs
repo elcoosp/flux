@@ -29,7 +29,6 @@ enum ExpectedError {
     InvalidDispatch,
     TypeMismatch,
     DivByZero,
-    Overflow,
 }
 
 impl ExpectedError {
@@ -42,7 +41,6 @@ impl ExpectedError {
             Self::InvalidDispatch => VmErrorKind::InvalidDispatch,
             Self::TypeMismatch => VmErrorKind::TypeMismatch,
             Self::DivByZero => VmErrorKind::DivByZero,
-            Self::Overflow => VmErrorKind::Overflow,
         }
     }
 }

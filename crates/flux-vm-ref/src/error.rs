@@ -33,9 +33,6 @@ pub enum VmErrorKind {
     /// Integer division or remainder by zero (ADR-0023).
     #[error("division by zero")]
     DivByZero,
-    /// A checked arithmetic operation exceeded its representable range.
-    #[error("arithmetic overflow")]
-    Overflow,
 }
 
 /// A VM fault with its location in the bytecode.
