@@ -949,12 +949,16 @@ pub fn run_with_registry(
 }
 
 /// IEEE-754 division: `x/0.0` is `±inf` (ADR-0023), never an error.
+///
+/// Sign of the result when the divisor is ±0 follows the XOR of operand
+/// signs, so `1.0 / -0.0 = -inf` and `-1.0 / -0.0 = +inf` (audit P3: the
+/// old `x >= 0.0` check ignored −0.0's sign). `0.0 / ±0.0` is `NaN`.
 fn fdiv(x: f64, y: f64) -> f64 {
     if y == 0.0 {
-        if x.is_nan() {
+        if x.is_nan() || x == 0.0 {
             return f64::NAN;
         }
-        return if x >= 0.0 {
+        return if x.is_sign_positive() == y.is_sign_positive() {
             f64::INFINITY
         } else {
             f64::NEG_INFINITY

@@ -1442,10 +1442,12 @@ enum FluxBytecodeVM {
     // MARK: - Helpers
 
     /// IEEE-754 division: `x/0.0` is `±inf` (ADR-0023), never an error.
+    /// Sign of the infinity follows XOR of operand signs, so `1.0 / -0.0 = -inf`
+    /// and `-1.0 / -0.0 = +inf` (audit P3: the old `x >= 0.0` check ignored −0.0).
     private static func fdiv(_ x: Double, _ y: Double) -> Double {
         if y == 0.0 {
-            if x.isNaN { return Double.nan }
-            return x >= 0.0 ? Double.infinity : -Double.infinity
+            if x.isNaN || x == 0.0 { return Double.nan }
+            return (x.sign == y.sign) ? Double.infinity : -Double.infinity
         }
         return x / y
     }
