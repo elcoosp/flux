@@ -1373,7 +1373,7 @@ mod tests {
             assert!(rec.scenario == Scenario::LoopbackE2e);
             let json = rec.to_json().expect("serialize");
             let back = MetricRecord::from_json(&json).expect("round-trip");
-            assert_eq!(rec, &back);
+            assert!(rec.approx_eq(&back), "record must round-trip through JSON");
             assert!(!rec.samples.is_empty(), "a record must carry a sample");
         }
     }

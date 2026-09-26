@@ -41,8 +41,14 @@ fn copy_example(root: &Path) {
     let src = example_dir();
     for entry in fs::read_dir(&src).expect("read example dir") {
         let entry = entry.expect("example entry");
+        let src_path = entry.path();
         let dest = root.join(entry.file_name());
-        fs::copy(entry.path(), dest).expect("copy example file");
+        // `fs::copy` handles regular files and symlinks-to-files only;
+        // skip subdirectories (e.g. `platforms/`) which are build output.
+        if !src_path.is_file() {
+            continue;
+        }
+        fs::copy(src_path, dest).expect("copy example file");
     }
 }
 

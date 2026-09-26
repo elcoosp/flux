@@ -215,6 +215,24 @@ impl MetricRecord {
     pub fn from_json(input: &str) -> Result<Self, serde_json::Error> {
         serde_json::from_str(input)
     }
+
+    /// Compares two records for equality, tolerating sub-nanosecond floating-
+    /// point drift in latencies introduced by JSON round-tripping
+    /// (`serde_json` may serialize `0.418` as `0.41800000000000004` and parse
+    /// it back as a different f64 bit-pattern).
+    ///
+    /// All non-latency fields use exact equality.
+    #[must_use]
+    pub fn approx_eq(&self, other: &Self) -> bool {
+        const EPSILON: f64 = 1e-9;
+        self.scenario == other.scenario
+            && self.kind == other.kind
+            && self.tree_size == other.tree_size
+            && self.samples.len() == other.samples.len()
+            && self.samples.iter().zip(&other.samples).all(|(a, b)| {
+                (a.latency.as_f64() - b.latency.as_f64()).abs() < EPSILON && a.size == b.size
+            })
+    }
 }
 
 /// Returns the `quantile` percentile of the sample latencies (nearest-rank), or
