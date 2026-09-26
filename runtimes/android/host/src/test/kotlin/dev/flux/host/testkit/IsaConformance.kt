@@ -2,7 +2,10 @@ package dev.flux.host.testkit
 
 import dev.flux.host.vm.FluxBytecodeVM
 import dev.flux.host.vm.FluxValue
+import dev.flux.host.vm.DecimalStringResolver
 import dev.flux.host.vm.InMemorySignals
+import dev.flux.host.vm.StringResolver
+import dev.flux.host.vm.TableStringResolver
 import dev.flux.host.vm.VmErrorKind
 import dev.flux.host.vm.VmResult
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -33,12 +36,13 @@ public object IsaConformance {
         return File("tests/isa-vectors")
     }
 
-    /** Loads and parses every vector JSON into [Vector] records. */
+    /** Loads and parses every VM vector JSON into [Vector] records. */
     public fun loadVectors(): List<Vector> {
         val dir = vectorDir()
         assertTrue(dir.isDirectory, "isa-vectors dir not found at ${dir.absolutePath}")
         return dir
             .listFiles { f -> f.extension == "json" }!!
+            .filter { isVmTestCase(it.readText()) }
             .map { Vector.parse(it.readText()) }
             .sortedBy { it.name }
             .also { assertTrue(it.isNotEmpty(), "no vectors loaded from ${dir.absolutePath}") }
@@ -58,10 +62,12 @@ public object IsaConformance {
                 v.initialSignals.map { (id, value) -> id to value.toFluxValue() },
             )
         val payload = v.payload?.toFluxValue() ?: FluxValue.NullVal
+        val strings: StringResolver =
+            if (v.strings.isEmpty()) DecimalStringResolver else TableStringResolver(v.strings)
 
         when (v.expectedError) {
             null -> {
-                val result = FluxBytecodeVM.run(bytecode, signals, payload)
+                val result = FluxBytecodeVM.run(bytecode, signals, payload, strings)
                 assertTrue(result is VmResult.Success, "${v.name}: unexpected $result")
                 result as VmResult.Success
                 assertEquals(v.expectedGas, result.outcome.gasUsed, "${v.name}: gas mismatch")
@@ -75,13 +81,22 @@ public object IsaConformance {
                 }
             }
             else -> {
-                val result = FluxBytecodeVM.run(bytecode, signals, payload)
+                val result = FluxBytecodeVM.run(bytecode, signals, payload, strings)
                 assertTrue(result is VmResult.Failure, "${v.name}: expected error ${v.expectedError} but succeeded")
                 result as VmResult.Failure
                 assertEquals(v.expectedError, result.kind, "${v.name}: error kind mismatch")
             }
         }
     }
+}
+
+/** Returns true when `text` is a VM test vector (has `bytecode_hex`). */
+private fun isVmTestCase(text: String): Boolean {
+    // Non-VM specs (e.g. `foreach_ids.json`) omit `bytecode_hex` and are handled
+    // by a separate harness; skip them so `Vector.parse` doesn't NPE.
+    @Suppress("UNCHECKED_CAST")
+    val root = MiniJson.parse(text) as? Map<String, Any?> ?: return false
+    return "bytecode_hex" in root
 }
 
 /** Parsed golden ISA vector (mirrors the JSON schema in `tests/isa-vectors`). */
@@ -94,6 +109,7 @@ public data class Vector(
     val expectedRegisters: Map<String, VecValue>,
     val expectedError: VmErrorKind?,
     val expectedGas: UInt,
+    val strings: Map<UInt, String> = emptyMap(),
 ) {
     public companion object {
         public fun parse(json: String): Vector {
@@ -110,7 +126,12 @@ public data class Vector(
                     .toMap()
             val expectedError = (root["expected_error"] as? String)?.let { errorFrom(it) }
             val expectedGas = (root["expected_gas_used"] as Number).toLong().toUInt()
-            return Vector(name, bytecodeHex, initialSignals, payload, expectedSignals, expectedRegisters, expectedError, expectedGas)
+            val strings = root["strings"]?.let { (it as List<*>).associate { e ->
+                @Suppress("UNCHECKED_CAST")
+                val m = e as Map<String, Any?>
+                (m["id"] as Number).toLong().toUInt() to (m["text"] as String)
+            } } ?: emptyMap()
+            return Vector(name, bytecodeHex, initialSignals, payload, expectedSignals, expectedRegisters, expectedError, expectedGas, strings)
         }
     }
 }

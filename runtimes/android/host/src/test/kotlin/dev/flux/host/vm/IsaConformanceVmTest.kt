@@ -7,6 +7,12 @@ import java.io.File
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import dev.flux.host.vm.DecimalStringResolver
+import dev.flux.host.vm.FluxValue
+import dev.flux.host.vm.StringResolver
+import dev.flux.host.vm.TableStringResolver
+import dev.flux.host.vm.VmResult
+import dev.flux.host.vm.FluxBytecodeVM
 
 /**
  * Tri-platform parity gate for the Kotlin [FluxBytecodeVM] (FLUX-089).
@@ -59,6 +65,7 @@ class IsaConformanceVmTest {
                 "ISA vectors not found; set FLUX_ISA_VECTORS to the directory",
             )
         val urls = dir.listFiles { f -> f.extension == "json" }
+            ?.filter { JSONObject(it.readText()).has("bytecode_hex") }
             ?.sortedBy { it.name }
             ?: emptyList()
         assertFalse(urls.isEmpty(), "no vectors loaded from ${dir.path}")
@@ -74,6 +81,15 @@ class IsaConformanceVmTest {
                     vector.optJSONArray("initial_signals")?.toSignalSeeds().orEmpty()
                         .map { (id, raw) -> id to jsonToFluxValue(raw) },
                 )
+            val stringTable = vector.optJSONArray("strings")?.let { arr ->
+                (0 until arr.length()).associate { i ->
+                    val obj = arr.getJSONObject(i)
+                    obj.getLong("id").toUInt() to obj.getString("text")
+                }
+            }
+            val strings: StringResolver =
+                if (stringTable != null) TableStringResolver(stringTable)
+                else DecimalStringResolver
             val payload = vector.opt("payload")?.let { jsonToFluxValue(it) } ?: FluxValue.NullVal
             val expectedError = vector.optString("expected_error", null)
 
@@ -90,7 +106,7 @@ class IsaConformanceVmTest {
                 }
             } else {
                 val out = when (
-                    val res = FluxBytecodeVM.run(bytecode, signals, payload)
+                    val res = FluxBytecodeVM.run(bytecode, signals, payload, strings)
                 ) {
                     is VmResult.Success -> res.outcome
                     is VmResult.Failure -> {

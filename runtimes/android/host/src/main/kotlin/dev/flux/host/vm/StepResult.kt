@@ -122,7 +122,7 @@ internal fun executeInstruction(
             val (x, y) = requireFloats(regs[instr.u8(1)], regs[instr.u8(2)], instr.offset)
             val r =
                 when (op) {
-                    Opcode.EQ_F64 -> (x == y) || (x.isNaN() && y.isNaN())
+                    Opcode.EQ_F64 -> (x == y)
                     Opcode.LT_F64 -> x < y
                     Opcode.GT_F64 -> x > y
                 }
@@ -192,7 +192,7 @@ internal fun executeInstruction(
             // frame table (via [TableStringResolver]) yields genuine length.
             val id = requireStr(regs[instr.u8(1)], instr.offset)
             val text = strings.resolve(id)
-            regs[instr.u8(0)] = FluxValue.IntVal(text.length.toLong())
+            regs[instr.u8(0)] = FluxValue.IntVal(text.toByteArray(Charsets.UTF_8).size.toLong())
             StepResult.Proceed
         }
         Opcode.STR_CONCAT -> {

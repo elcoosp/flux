@@ -23,8 +23,16 @@ internal fun fdiv(
     y: Double,
 ): Double {
     if (y == 0.0) {
-        if (x.isNaN()) return Double.NaN
-        return if (x >= 0.0) Double.POSITIVE_INFINITY else Double.NEGATIVE_INFINITY
+        if (x.isNaN() || x == 0.0) return Double.NaN
+        // Sign of infinity follows XOR of operand signs, so `1.0 / -0.0 = -inf`.
+        // `Math.copySign` propagates the sign bit of zero, unlike `kotlin.math.sign`
+        // (which returns 0.0 for both +0.0 and -0.0) or `x >= 0.0` (which treats
+        // both zeros as positive).
+        return if (Math.copySign(1.0, x) == Math.copySign(1.0, y)) {
+            Double.POSITIVE_INFINITY
+        } else {
+            Double.NEGATIVE_INFINITY
+        }
     }
     return x / y
 }
