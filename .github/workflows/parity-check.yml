@@ -1,0 +1,52 @@
+name: parity-check
+
+# FLUX-078 / T-504: native kit parity gate.
+# Runs the parity model tests and the stdlib↔kit prop contract sweep so
+# adapter drift cannot land silently on either native platform.
+
+on:
+  workflow_call:
+  push:
+    branches: ["**"]
+    paths-ignore:
+      - "**/*.md"
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  parity:
+    name: dev/release parity + stdlib↔kit contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt, clippy
+          override: false
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: cargo test -p flux-parity (native_kit_parity + model tests)
+        run: cargo test -p flux-parity -- --nocapture
+
+      - name: Stdlib↔kit prop contract sweep
+        run: python3 scripts/check-stdlib-props.py
+
+      - name: Stdlib parse + doc sweep (flux doc + parse-check)
+        run: |
+          bash scripts/parse-check.sh
+          cargo run -q -p flux-cli -- doc | python3 -c "import sys,json; json.load(sys.stdin); print('stdlib doc JSON valid')"

@@ -156,6 +156,22 @@ All tasks T-101 through T-111 completed.
 || T-404 | CLI build: one file per source (stem-derived), deterministic entry, hard error on unreadable, scaffold `onPress` verb | `af01251e` |
 || T-405 | Generated-code compile gate in CI: rewritten `codegen-compile.yml` with HARD Swift (`swiftc -typecheck`) + Kotlin (`kotlinc -cp -Xplugin` via `scripts/provision-compose.sh`); non-empty output assertions; `flux build ios/android --root examples/counter` verified exits 0 locally, generated files non-empty | `f4a9c3ff` |
 
+## Phase 5 — Release Parity & Contract Verification
+
+### Completed This Session
+|| Task | Description |
+|---|---|---|
+| T-501 | Parity props (native_kit_parity + model tests) — already implemented ✓ | verified |
+| T-507.1 | RED-ON-REVERT proof: temporarily altered Swift `native_name` (Text→Label); `native_kit_parity_all_components` FAILED with DIVERGENT; restored → PASS | verified |
+|| T-507.2 | Native kit parity test invocation: `cargo test -p flux-parity --test native_kit_parity` | 14 tests pass ✓ |
+|| T-507.3 | `parity-check.yml` workflow created; `parity-check` job added to `release-gate.yml` umbrella + `needs` + fail-loop | verified |
+|| T-507.4 | Stdlib↔kit prop contract sweep: `python3 scripts/check-stdlib-props.py` exit 0 (all contracts satisfied) | verified |
+|| T-507.5 | Stdlib parse + doc sweep: `bash scripts/parse-check.sh` PASS; `cargo run -p flux-cli -- doc` emits valid JSON | verified |
+|| T-507.6 | Three-decoder version gate: `nativeKitVersion` (Kotlin `1`, Swift `1`) match `contract-versions.toml` (`1`) | verified |
+
+### Remaining
+- T-507 (Phase 5 exit gate): blocked on Phase 3 (T-336 requires gradlew + xcodebuild). Rust-side parity + stdlib sweep fully green.
+
 ## Appendix F — Parity Contract
 Created at `docs/appendix-f-parity.md` documenting all D8-D23, C10-C12, H11-H23 decisions.
 

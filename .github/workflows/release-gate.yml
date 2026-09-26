@@ -5,8 +5,8 @@ name: release-gate
 #
 # Two responsibilities:
 #   1. Aggregate the existing component quality gates (rust-check / ios-check /
-#      android-check / compat-matrix / perf-harness / benchmarks:save-photon /
-#      wire-fuzz) behind ONE `release-gate` status check, so a single green
+#      android-check / compat-matrix / perf-harness / save-photon /
+#      wire-fuzz / parity-check) behind ONE `release-gate` status check, so a single green
 #      check represents the whole quality bar rather than N separate jobs a
 #      reviewer must eyeball. Each component job reuses its own existing
 #      workflow file (no logic duplication).
@@ -75,6 +75,10 @@ jobs:
     name: component · wire robustness fuzz
     uses: ./.github/workflows/wire-fuzz.yml
 
+  parity-check:
+    name: component · dev/release parity + stdlib↔kit contract
+    uses: ./.github/workflows/parity-check.yml
+
   # --- NEW blocking gate: PRD-U contract freeze ---
   contract-freeze:
     name: contract-freeze (wire + adapter versions)
@@ -99,13 +103,14 @@ jobs:
       - save-photon
       - wire-fuzz
       - website-check
+      - parity-check
       - contract-freeze
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any component gate or the contract freeze did not pass
         run: |
           # `needs.*.result` is one of: success | failure | cancelled | skipped.
-          for job in rust-check ios-check android-check compat-matrix perf-harness save-photon wire-fuzz website-check contract-freeze; do
+          for job in rust-check ios-check android-check compat-matrix perf-harness save-photon wire-fuzz website-check parity-check contract-freeze; do
             result="${{ needs[job].result }}"
             echo "$job -> $result"
             if [ "$result" != "success" ]; then
