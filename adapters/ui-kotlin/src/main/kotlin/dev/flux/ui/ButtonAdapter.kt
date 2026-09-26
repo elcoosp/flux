@@ -7,7 +7,7 @@ import kotlin.collections.List as KList
  * Declarative adapter for `Button` (unified tier; AGENTS.md §3.5).
  *
  * Maps a Flux `Button` node to a native button view. Tapping the view
- * dispatches the `onClick` handler through the weakly-held executor. The
+ * dispatches the `onPress` handler through the weakly-held executor. The
  * handler id is read fresh in [bindHandler] so a hot-swapped closure table is
  * used for the next tap.
  *

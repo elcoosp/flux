@@ -228,19 +228,20 @@ fn generated_swift_parses() {
     );
 }
 
-/// Regression test for the Button codegen defect: the `onClick` handler body and
-/// the `text:` label must both reach the generated output. A prior build emitted
-/// an empty `Button(action: {}) { Text("") }`, dropping the tap behaviour. This
-/// locks the correct behaviour for both the named-arg form
-/// (`Button(text:, onClick:)`) used by `examples/counter` and the trailing-block
-/// form (`Button(...) { Text(...) }`).
+/// Regression test for the Button codegen defect: the `onPress` handler body
+/// and the `text:` label must both reach the generated output. A prior build
+/// emitted an empty `Button(action: {}) { Text("") }`, dropping the tap
+/// behaviour. Locks the correct behaviour for both the named-arg form
+/// (`Button(text:, onPress:)`) and the trailing-block form
+/// (`Button(...) { Text(...) }`). Per F1, `onClick` and `onTap` are accepted
+/// aliases that resolve to `onPress`.
 #[test]
 fn button_emits_handler_and_label() {
     let src = "compo Tapped\n  state taps: Int = 0\n  Button(text: \"Tap me\", onPress: fn() { taps = taps + 1 })\n\n";
     let out = codegen_example("button_regression", src);
     assert!(
         out.contains("Button(action: { taps = (taps + 1) })"),
-        "missing onClick handler body in:\n{out}"
+        "missing onPress handler body in:\n{out}"
     );
     assert!(
         out.contains("Text(\"Tap me\")"),
@@ -252,7 +253,7 @@ fn button_emits_handler_and_label() {
     let out2 = codegen_example("button_regression_2", src2);
     assert!(
         out2.contains("Button(action: { taps = (taps + 1) })"),
-        "missing onClick handler body in trailing form:\n{out2}"
+        "missing onPress handler body in trailing form:\n{out2}"
     );
     assert!(
         out2.contains("Text(\"Block\")"),

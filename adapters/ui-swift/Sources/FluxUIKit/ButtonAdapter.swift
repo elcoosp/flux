@@ -14,7 +14,9 @@ import UIKit
 /// - `enabled: Bool = true`
 /// - `color: Option[Color]`
 ///
-/// Tapping the button dispatches `onClick` via the weak executor. The target
+/// Tapping the button dispatches the `onPress` handler through the weakly-held
+/// executor. The canonical prop name is `onPress`; `onTap` and `onClick` are
+/// accepted as aliases by the codegen bridge. The target
 /// is held only by the button's action, which cannot resurrect a deallocated
 /// runtime because it keeps the executor `weak`.
 public final class ButtonAdapter: FluxAdapter {

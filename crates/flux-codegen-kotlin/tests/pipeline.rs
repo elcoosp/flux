@@ -228,6 +228,16 @@ fn emits_composable_and_state() {
         "Button must emit its onClick handler body, not an empty closure: {out}"
     );
 }
+/// Per F1, `onClick` is an accepted alias for the canonical `onPress` verb.
+#[test]
+fn button_click_alias_emits_handler_body() {
+    let src = "compo Tapped2\n  state taps: Int = 0\n  Button(text: \"Tap me\", onClick: fn() { taps = taps + 1 })\n\n";
+    let out = codegen_example("button_click_alias", src);
+    assert!(
+        out.contains("Button(onClick = { taps = (taps + 1) })"),
+        "onClick alias must resolve to the handler body: {out}"
+    );
+}
 
 /// The `gap` prop becomes a Compose `Arrangement.spacedBy(N.dp)` argument
 /// (Appendix F — flat props map to deterministic modifier chains).
@@ -599,7 +609,10 @@ fn kotlin_prelude_contains_all_referenced_imports() {
     let referenced = referenced_symbols(&out);
     for sym in referenced {
         let found = imports.contains(&sym) || prelude.contains(&sym);
-        assert!(found, "symbol '{sym}' referenced in body but absent from prelude + imports:\n{prelude}\n--- body ---\n{out}");
+        assert!(
+            found,
+            "symbol '{sym}' referenced in body but absent from prelude + imports:\n{prelude}\n--- body ---\n{out}"
+        );
     }
 }
 

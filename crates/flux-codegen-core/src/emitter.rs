@@ -709,7 +709,12 @@ impl<'a, B: Backend> Emitter<'a, B> {
     }
 
     /// Emits the body of a trailing block (component children) at `indent`.
-    pub fn emit_trailing_or_children(&mut self, trailing: Option<&Block>, id: NodeId, indent: usize) {
+    pub fn emit_trailing_or_children(
+        &mut self,
+        trailing: Option<&Block>,
+        id: NodeId,
+        indent: usize,
+    ) {
         if let Some(block) = trailing {
             self.emit_block_body(block, indent);
         } else {
@@ -779,13 +784,14 @@ impl<'a, B: Backend> Emitter<'a, B> {
         "\"\"".to_owned()
     }
 
-    /// Finds the `onPress`/`onTap` handler and renders its body as statements.
+    /// Finds the canonical Button handler prop. Per F1 (appendix-f-parity),
+    /// `onPress` is canonical; `onTap` and `onClick` are accepted aliases.
     fn collect_handler(args: &[Arg]) -> String {
         for arg in args {
             let Arg::Named { name, value } = arg else {
                 continue;
             };
-            if name.name != "onPress" && name.name != "onTap" {
+            if !matches!(name.name.as_str(), "onPress" | "onTap" | "onClick") {
                 continue;
             }
             if let Some(body) = render_handler_body::<B>(value) {

@@ -78,3 +78,29 @@ Telemetry emits only in DEBUG builds. Hot path is clean in Release.
 Returns the byte length of the interned string (`StringTable::resolve(id).len()`),
 not the digit count of the id (T-335.1). `&StringTable` is threaded through all
 VM entry points (`run`, `run_resumable`, `resume`, `*_with_registry`, `exec_tail`).
+
+## F1 — Canonical event-verb vocabulary
+Adapters, codegen, and stdlib props agree on a single canonical prop name per
+component. Aliases are accepted at read sites (never emitted) to absorb historical
+inconsistencies in user-authored `.flux` and legacy example projects.
+
+| Prop name            | Component(s)                         | Canonical verb | Documented aliases (accepted at read sites) |
+|----------------------|--------------------------------------|----------------|---------------------------------------------|
+| `onPress`            | Button                               | `onPress`      | `onTap`, `onClick`                          |
+| `onChange`           | Switch, Checkbox, Slider, DatePicker, Picker, TextArea | `onChange` | `onValueChange`, `onChangeText`             |
+| `onValueChange`      | Toggle                               | `onValueChange`| `onChange`, `onValueChanged`                |
+| `onGesture`          | Gesture                              | `onGesture`    | —                                           |
+| `onChangeText`       | TextField                            | `onChangeText` | `onChange`, `onValueChange`                 |
+
+Alias resolution: `collect_handler` (`flux-codegen-core/src/emitter.rs`) and
+adapter `bindHandler` / `getHandler` call sites accept every alias listed above
+and map to the canonical prop. The first matching prop (canonical or alias, in
+source order) wins. At most one handler is collected per node prop slot.
+
+Code-gen output naming differs by platform (native parameter labels, not Flux
+prop aliases):
+
+| Backend  | Button handler rendered as        |
+|----------|-----------------------------------|
+| Swift    | `Button(action: {{ … })`          |
+| Kotlin   | `Button(onClick = {{ … })`        |
