@@ -42,3 +42,6 @@ dump.txt
 docs/ideas
 fuzz/target
 fuzz/artifacts
+
+# Generated code output from `flux build --root examples/*`
+examples/*/platforms/
