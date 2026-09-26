@@ -171,6 +171,38 @@ All tasks T-101 through T-111 completed.
 
 ### Remaining
 - T-507 (Phase 5 exit gate): blocked on Phase 3 (T-336 requires gradlew + xcodebuild). Rust-side parity + stdlib sweep fully green.
+- T-503: all known offenders already resolved in-codebase (keyboardType/ref/overflow removed, toggle.flux existing, WebHost.src declared). Script `scripts/check-stdlib-props.py` exits 0.
+- T-505: wire fixtures + three-decoder version gate — partially done (check-contract-freeze.sh exists, fixtures/wire/ needs populating). Blocked on Kotlin/Xcode toolchains for host-side gates.
+- T-506: iOS test-coverage ports — blocked on toolchain.
+
+## Phase 6 — Release Hardening & Hygiene
+
+### Completed This Session
+| Task | Description |
+|---|---|
+| T-602.3 | Renumbered website-check.yml `FLUX-030/092` → `FLUX-030 parity gate` so ticket IDs are unique | `b595e688` |
+
+### Already Implemented (verified in-codebase)
+| Task | Status |
+|---|---|
+| T-601.1 | perf-harness.yml `set -euo pipefail`, gradle failure swallowed, iOS under `set +e` | done ✓ |
+| T-601.2 | `compat-matrix.yml` `continue-on-error` removed | done ✓ |
+| T-601.3 | `android-check.yml`/`compat-matrix.yml` `set -euo pipefail` | done ✓ |
+| T-601.4 | Hardcoded simulator names: all 3 iOS workflows use `FLUX_SIM_DEVICE` env var | done ✓ |
+| T-601.5 | `distributionSha256Sum` present in `gradle/wrapper/gradle-wrapper.properties` | done ✓ |
+| T-601.6 | All 26 `actions/checkout@` uses normalized to v4 | done ✓ |
+| T-601.7 | `adr-numbering.yml` paths (`docs/adr/**`, `docs/spec/mlp-appendices.md`, `docs/scripts/check-adr-numbering.sh`) all exist | done ✓ |
+| T-602.1 | Single `## [Unreleased]` header in CHANGELOG.md | done ✓ |
+| T-602.2 | FLUX-092 entry exists in CHANGELOG.md (ForEach remove-wrong-row fixed) | done ✓ |
+| T-602.4 | stdlib/README.md count updated to 32 files; cites `scripts/parse-check.sh` as the real gate | done ✓ |
+| T-603.1 | `eprintln!` calls in `component_tree.rs` already gated behind `cfg!(debug_assertions)` | done ✓ |
+| T-603.2 | Per-node `tracing::debug!` loop in `build_init` already removed (only single debug! calls remain) | done ✓ |
+| T-603.3 | `tracing::warn!` already present in `intern_into` (`frame.rs:1178`) | done ✓ |
+
+### Remaining
+- T-603.4-T-603.6: Swift `print(` sweep, UserDefaults log sink, dead `dbg` closure — require Xcode toolchain (not run in this environment)
+- T-604.x: P2/P3 correctness sweep items — see roadmap for status; many already fixed in prior sessions
+- T-605: Final release rehearsal — partial (Rust OK; gradlew/xcodebuild toolchain missing)
 
 ## Appendix F — Parity Contract
 Created at `docs/appendix-f-parity.md` documenting all D8-D23, C10-C12, H11-H23 decisions.
