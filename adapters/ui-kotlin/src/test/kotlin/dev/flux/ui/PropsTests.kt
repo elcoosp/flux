@@ -73,6 +73,6 @@ class PropsTests {
         assertEquals(PropsIndex.propIndexForName("text"), PropsIndex.TEXT_TEXT)
         assertEquals(PropsIndex.propIndexForName("color"), PropsIndex.TEXT_COLOR)
         assertEquals(PropsIndex.propIndexForName("onPress"), PropsIndex.BUTTON_ON_PRESS)
-        assertEquals(PropsIndex.propIndexForName("value"), PropsIndex.TEXT_INPUT_TEXT)
+        assertEquals(PropsIndex.propIndexForName("value"), PropsIndex.SWITCH_VALUE)
     }
 }
