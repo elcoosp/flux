@@ -24,6 +24,9 @@ flux-ir = { path = "../crates/flux-ir" }
 
 flux-parser = { path = "../crates/flux-parser" }
 
+# DispatchReport decoder lives in flux-devserver (audit T-604.19).
+flux-devserver = { path = "../crates/flux-devserver" }
+
 [[bin]]
 name = "decode_frame"
 path = "fuzz_targets/decode_frame.rs"
@@ -33,5 +36,53 @@ doc = false
 [[bin]]
 name = "parse_flux"
 path = "fuzz_targets/parse_flux.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "telemetry_frame"
+path = "fuzz_targets/telemetry_frame.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "debug_command"
+path = "fuzz_targets/debug_command.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "host_announce"
+path = "fuzz_targets/host_announce.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "await_suspend_resume"
+path = "fuzz_targets/await_suspend_resume.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "dispatch_report"
+path = "fuzz_targets/dispatch_report.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "intern_string"
+path = "fuzz_targets/intern_string.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "decode_value_blob"
+path = "fuzz_targets/decode_value_blob.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "validate_bytecode"
+path = "fuzz_targets/validate_bytecode.rs"
 test = false
 doc = false
