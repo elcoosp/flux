@@ -74,6 +74,19 @@ pub enum WireError {
         /// The hard ceiling in bytes.
         ceiling: usize,
     },
+    /// A `Delta` frame's `handler_count` header did not match the number of
+    /// `HandlerDef`s decoded from the handler section (T-316.6).
+    #[error(
+        "handler_count mismatch: header declares {expected} handlers but section decodes {actual} at offset {at}"
+    )]
+    HandlerCountMismatch {
+        /// Byte offset where the handler section was decoded.
+        at: usize,
+        /// The count declared in the Delta header.
+        expected: u32,
+        /// The count decoded from the handler section.
+        actual: u32,
+    },
 }
 
 /// Hard ceiling on a decoded `Init`/`Delta` payload (Appendix D §D.12 + D.1),

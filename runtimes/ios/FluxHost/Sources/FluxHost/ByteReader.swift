@@ -18,6 +18,10 @@ enum WireError: Error, Equatable, Sendable {
     /// (FLUX-050 / ADR-0056). The handshake fails closed: an old host must not
     /// mis-decode a newer server's frames, nor a new host a older server's.
     case unsupportedVersion(offset: Int, actual: UInt8, expected: UInt8)
+    /// The Delta frame's D.1 `handler_count` header does not match the number of
+    /// `HandlerDef`s decoded from the D.12 handler section (T-316.6). A mismatch
+    /// means the server and host disagree on the frame layout.
+    case handlerCountMismatch(expected: Int, actual: Int)
 }
 
 /// A forward-only, little-endian reader over an immutable byte buffer.

@@ -179,9 +179,17 @@ enum FrameDeserializer {
         for _ in 0..<strCount {
             strings.append(try decodeStringEntry(&r))
         }
-        // Handler (closure) section (Appendix D §D.12, Gap G1) — present when
-        // `handlerCount > 0`; `decodeHandlerSection` tolerates a zero blob.
+        // Handler (closure) section (Appendix D §D.12, Gap G1) — always present
+        // as a self-describing blob + HandlerDef stream. Validate the decoded count
+        // against `handlerCount` from the D.1 header (T-316.6): a mismatch means
+        // the server and host disagree on the frame layout.
         let handlers = try decodeHandlerSection(&r)
+        if handlers.count != Int(handlerCount) {
+            throw WireError.handlerCountMismatch(
+                expected: Int(handlerCount),
+                actual: handlers.count
+            )
+        }
         // ADR-0027 (FA-IRWIRE): `signal_meta` trails a Delta directly (no marker
         // byte, unlike Init) only when its `flags` carry
         // `FLAG_NODE_HAS_SIGNAL_DEPS`; the encoder emits the section immediately

@@ -818,7 +818,7 @@ impl Frame {
         let seq = r.u32("delta.seq")?;
         let flags = r.u8("delta.flags")?;
         let patch_count = r.u16("delta.patch_count")? as usize;
-        let _handler_count = r.u16("delta.handler_count")?;
+        let handler_count = r.u16("delta.handler_count")? as usize;
         let str_count = r.u16("delta.string_count")? as usize;
         let mut patches = Vec::with_capacity(patch_count);
         r.ensure_capacity(patch_count, "delta.patches")?;
@@ -832,6 +832,15 @@ impl Frame {
         }
         // D.12 handler section (Gap G1): shared blob, then HandlerDef stream.
         let closures = decode_closures(&mut r)?;
+        // T-316.6: validate the D.1 `handler_count` header against the decoded
+        // closure count. A mismatch means the server and host disagree on layout.
+        if closures.len() != handler_count {
+            return Err(WireError::HandlerCountMismatch {
+                at: r.pos(),
+                expected: handler_count as u32,
+                actual: closures.len() as u32,
+            });
+        }
         // ADR-0027 (FA-IRWIRE): `signal_meta` section, present only when the
         // Delta `flags` carry `FLAG_NODE_HAS_SIGNAL_DEPS`.
         let signal_meta = if flags & FLAG_NODE_HAS_SIGNAL_DEPS != 0 {

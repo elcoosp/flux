@@ -52,6 +52,8 @@ pub enum WireErrorKind {
     MalformedBytecode,
     /// A frame whose declared payload exceeds the hard ceiling.
     FrameTooLarge,
+    /// The Delta frame's `handler_count` header did not match the decoded count.
+    HandlerCountMismatch,
 }
 
 impl From<&WireError> for WireErrorKind {
@@ -62,6 +64,7 @@ impl From<&WireError> for WireErrorKind {
             WireError::InvalidUtf8 { .. } => WireErrorKind::InvalidUtf8,
             WireError::MalformedBytecode { .. } => WireErrorKind::MalformedBytecode,
             WireError::FrameTooLarge { .. } => WireErrorKind::FrameTooLarge,
+            WireError::HandlerCountMismatch { .. } => WireErrorKind::HandlerCountMismatch,
         }
     }
 }

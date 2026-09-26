@@ -168,8 +168,13 @@ public object FrameDeserializer {
         val strings = ArrayList<StringEntry>(strCount)
         repeat(strCount) { strings.add(decodeStringEntry(r)) }
         val (blob, handlers) = decodeHandlerSection(r, version)
-        // ADR-0027 (FA-IRWIRE): `signal_meta` trails a Delta directly (no marker
-        // byte, unlike Init) only when its `flags` carry FLAG_NODE_HAS_SIGNAL_DEPS.
+        // Validate handlerCount (T-316.6): the D.1 header count must match the
+        // HandlerDef count decoded from the D.12 handler section.
+        if (handlers.size != handlerCount) {
+            throw WireError(
+                "handler_count mismatch: header=%d decoded=%d".format(handlerCount, handlers.size)
+            )
+        }
         var signalMeta = emptyMap<UInt, NodeSignalMeta>()
         if ((flags and FLAG_NODE_HAS_SIGNAL_DEPS.toInt()) != 0) {
             signalMeta = decodeSignalMetaSection(r, version)
