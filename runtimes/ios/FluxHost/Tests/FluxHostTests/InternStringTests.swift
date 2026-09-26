@@ -43,24 +43,4 @@ final class InternStringTests: XCTestCase {
         XCTAssertNil(decodeStringInternedFrame([0x58, 0x55])) // too short
         XCTAssertNil(decodeStringInternedFrame([0, 0, 0, 0, 1, frameKindStringInterned, 0, 0, 0, 0])) // bad magic
     }
-
-    // MARK: FLUX-084 — canonical-id ceiling guard
-
-    func testCanonicalIdBelowCeilingPasses() throws {
-        // Everyday canonical ids (server assigns densely from zero) must pass.
-        XCTAssertNoThrow(try assertCanonicalStringId(0x0000_1234))
-        XCTAssertNoThrow(try assertCanonicalStringId(stringIdCanonicalCeiling - 1))
-    }
-
-    func testCanonicalIdAtCeilingThrows() {
-        // A >=ceiling id is a synthetic fallback that must never be emitted. The
-        // guard must reject it so a wire path that synthesizes one fails loud.
-        XCTAssertThrowsError(try assertCanonicalStringId(stringIdCanonicalCeiling)) { error in
-            XCTAssertTrue(error is StringIdCeilingError)
-        }
-    }
-
-    func testCanonicalIdAboveCeilingThrows() {
-        XCTAssertThrowsError(try assertCanonicalStringId(0xFFFF_FFFF))
-    }
 }

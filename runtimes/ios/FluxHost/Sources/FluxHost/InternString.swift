@@ -9,8 +9,9 @@
 //  server. The wire frame types and constants below are retained so the host can
 //  recognize and drop any `StringInterned` reply a legacy/connected server might
 //  still emit (it is a no-op under local interning, handled in
-//  `FluxExecutor.handleFrame`). The canonical-id ceiling guard
-//  (`assertCanonicalStringId`) remains active: host-local derived ids are `>=
+//  `FluxExecutor.handleFrame`). The canonical-id ceiling
+//  (`stringIdCanonicalCeiling`, see FLUX-084) is enforced at the interning site
+//  in `MaterializationStringTable`: host-local derived ids are `>=`
 //  0xC000_0000` and must never be placed into a `FluxValue.str` the host
 //  publishes on the Init/Delta path — only server-seeded ids cross the wire.
 
@@ -34,36 +35,6 @@ let frameKindStringInterned: UInt8 = 0x08
 /// anything at or above is a host-local derived id (see `MaterializationStringTable`)
 /// that must never cross the wire (AGENTS.md §3.8 — canonicality is absolute).
 let stringIdCanonicalCeiling: UInt32 = 0x8000_0000
-
-/// Asserts `id` is a canonical wire id (`< stringIdCanonicalCeiling`).
-///
-/// Ids at/above the ceiling are host-side synthetic fallbacks that must never
-/// be emitted on the Init/Delta path. A server `InternString` reply is
-/// server-assigned and must always be canonical; if it is not, the emit path
-/// has a bug and we fail loud (FLUX-084) rather than silently placing a
-/// non-canonical id where the VM/adapter expects a canonical one.
-///
-/// - Parameter id: the id to validate.
-/// - Throws: `StringIdCeilingError` when `id >= stringIdCanonicalCeiling`.
-func assertCanonicalStringId(_ id: UInt32) throws {
-    guard id < stringIdCanonicalCeiling else {
-        throw StringIdCeilingError(id: id)
-    }
-}
-
-/// Error raised by `assertCanonicalStringId` when a wire path would emit a
-/// `>= stringIdCanonicalCeiling` id (FLUX-084).
-struct StringIdCeilingError: LocalizedError {
-    /// The offending id.
-    let id: UInt32
-    var errorDescription: String? {
-        String(
-            format: "canonical string id 0x%08X must be below ceiling 0x%08X; a >=ceiling id is a synthetic fallback that must never be emitted",
-            id,
-            stringIdCanonicalCeiling
-        )
-    }
-}
 
 /// Error raised when an `InternString` payload exceeds the u16 wire limit.
 struct InternStringPayloadTooLargeError: LocalizedError {

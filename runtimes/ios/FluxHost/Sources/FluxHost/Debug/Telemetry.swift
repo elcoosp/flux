@@ -293,23 +293,6 @@ public final class TelemetryBridge: VMTelemetrySink {
 /// state rule does not apply.
 nonisolated(unsafe) public var fluxDevtoolsSink: (any VMTelemetrySink)?
 
-/// Safe append-only diagnostic logger to the app's Documents directory.
-/// The simulator's container lives on the Mac filesystem, so this is the
-/// reliable way to observe package-target (FluxHost) behaviour from the host.
-func fluxTrace(_ line: String) {
-    let fm = FileManager.default
-    guard let dir = fm.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
-    let f = dir.appendingPathComponent("flux_tele.log")
-    let stamped = "\(Date()) \(line)\n"
-    if let fh = try? FileHandle(forWritingTo: f) {
-        fh.seekToEndOfFile()
-        fh.write(stamped.data(using: .utf8)!)
-        try? fh.close()
-    } else {
-        try? stamped.data(using: .utf8)?.write(to: f)
-    }
-}
-
 /// Opens the host → DevTools channel and installs the telemetry sink so
 /// emitted VM/signal events flow to the dev server. Telemetry is sent over the
 /// existing host patch-channel WebSocket (`send`, supplied by the app — it is

@@ -53,7 +53,16 @@ All tasks T-101 through T-111 completed.
 ### Remaining
 - T-222: Phase 2 exit gate
 
-### SIDECAR (T-222 — unfuzzed decoders, Phase 6 hygiene T-606)
+### SIDECAR (T-604.17 — initialRouteName)
+- `Router.initialRouteName` is NOT dead — codegen (T-403.7) reads it for `startDestination`; preserved.
+
+### Completed This Session
+| Task | Description | Commit |
+|---|---|---|
+| T-604.16 | Canonical event-verb vocabulary + onClick alias | `3e98b6f6` |
+| T-604.17 | Router capability renamed to RouterNav | `3c594a04` |
+| T-604.19 | Fuzz targets for all wire decoders | `ac32e595` |
+| T-604.20 | Delete dead `fluxTrace` + `assertCanonicalStringId` | `pending` |
 - `crates/flux-ir-serde/src/frame.rs`: no fuzz target for `TelemetryFrame` decode
 - `crates/flux-ir-serde/src/frame.rs`: no fuzz target for `DebugCommandFrame` decode
 - `crates/flux-ir-serde/src/frame.rs`: no fuzz target for `AwaitSuspend`/`Resume` frame decode
