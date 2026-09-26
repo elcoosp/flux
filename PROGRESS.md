@@ -51,8 +51,13 @@ All tasks T-101 through T-111 completed.
 | T-218 | Arena blob truncations (folded into T-204) |
 
 ### Remaining
-- T-222: Phase 2 exit gate
 - T-605: Final release rehearsal (in progress)
+
+### SIDECAR (T-222 — Phase 2 exit gate verification)
+- `cargo test --workspace`: 6 pre-existing `data_driven_surface` type-check failures (P2.16/P2.21; `append` on `List[String]`), confirmed on clean `git stash` before any StrConcat work — unrelated to Phase 2 fixes. All Phase 2 tasks green.
+- `tests/isa-vectors/typed_arith.json`: exists ✓
+- `fuzz/fuzz_targets/decode_frame.rs`: exists ✓
+- All 10 wire decoders now have fuzz targets (resolved by T-604.19: decoded_frame, parse_flux, decode_value_blob, validate_bytecode, telemetry_frame, debug_command, await_suspend_resume, dispatch_report, host_announce, intern_string). The "no fuzz target for …" SIDECAR rows previously listed under T-604.19 are stale — all decoders are covered.
 
 ### SIDECAR (T-604.17 — initialRouteName)
 - `Router.initialRouteName` is NOT dead — codegen (T-403.7) reads it for `startDestination`; preserved.
