@@ -247,7 +247,7 @@ Created at `docs/appendix-f-parity.md` documenting all D8-D23, C10-C12, H11-H23 
 | 8c | `xcodebuild test -scheme FluxApp -destination 'platform=iOS Simulator,...'` | TEST SUCCEEDED (43 passed, 1 skipped, 1 pre-existing failure: RenderPerfHarnessTests needs running dev server) |
 
 ### Pre-existing failures (not introduced by this session)
-\- `handshake_hello_returns_init_frame_quickly`: timing assertion (10ms budget) exceeded by 2.25ms under load — not a correctness issue; flaky under parallel `cargo test --workspace`.
+\- `handshake_hello_returns_init_frame_quickly`: timing assertion (10ms budget) — flakes under parallel `cargo test --workspace` load (passes in isolation at 45ms; fails at 56ms+ under concurrent load). Not a correctness issue.
 \- `RenderPerfHarnessTests` (Swift): requires a running dev server at 127.0.0.1:7331 — environment-dependent, not a code defect.
 \- `CapabilityRegistry.kt` ktlint parse violation — pre-existing (fails on clean `git stash`); unrelated to this session's changes.
 
