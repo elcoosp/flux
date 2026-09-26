@@ -35,12 +35,18 @@ jobs:
         run: cargo build -p flux-cli --release
       - name: Emit Swift + Kotlin code for stdlib examples
         run: |
-          ./target/release/flux build --platform ios --root examples/counter
-          ./target/release/flux build --platform ios --root examples/todo
-          ./target/release/flux build --platform ios --root examples/router
-          ./target/release/flux build --platform android --root examples/counter
-          ./target/release/flux build --platform android --root examples/todo
-          ./target/release/flux build --platform android --root examples/router
+          source $HOME/.cargo/env 2>/dev/null || true
+          for example in counter todo router; do
+            ./target/release/flux build ios --root examples/$example
+            ./target/release/flux build android --root examples/$example
+            # T-405 acceptance bar: generated output must be non-empty.
+            ios_files=$(find examples/$example/platforms/ios/Generated -name '*.swift' 2>/dev/null)
+            android_files=$(find examples/$example/platforms/android/Generated -name '*.kt' 2>/dev/null)
+            test -n "$ios_files" || { echo "FAIL: no Swift files generated for $example"; exit 1; }
+            test -n "$android_files" || { echo "FAIL: no Kotlin files generated for $example"; exit 1; }
+            for f in $ios_files; do test -s "$f" || { echo "FAIL: empty Swift file $f"; exit 1; }; done
+            for f in $android_files; do test -s "$f" || { echo "FAIL: empty Kotlin file $f"; exit 1; }; done
+          done
 
   compile-swift:
     needs: build-codegen
@@ -58,34 +64,64 @@ jobs:
         run: |
           source $HOME/.cargo/env
           for example in counter todo router; do
-            ./target/release/flux build --platform ios --root examples/$example
-            swiftc -typecheck platforms/ios/Generated/*.swift || {
-              echo "TOOLCHAIN MISSING: swiftc typecheck failed"
+            ./target/release/flux build ios --root examples/$example
+            swiftc -typecheck examples/$example/platforms/ios/Generated/*.swift || {
+              echo "swiftc typecheck failed for $example"
               exit 1
             }
           done
 
   compile-kotlin:
     needs: build-codegen
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - name: Install Kotlin
-        uses: nic0flint/kotlin-action@v1
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          kotlin-version: '2.1.0'
+          fetch-depth: 0
+
+      - name: FLUX-087 structural gate
+        run: bash scripts/ci-size-gate.sh --base origin/main --head HEAD
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform
+        run: |
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager "platforms;android-37"
+
+      - name: Provision Compose toolchain from Google Maven
+        run: bash scripts/provision-compose.sh
+
+      - name: Install Kotlin
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Build flux-cli
         run: |
           curl --protocol '=https' --tlsv1.2 https://sh.rustup.rs | sh
           source $HOME/.cargo/env
           cargo build -p flux-cli --release
+
       - name: Emit and typecheck Kotlin
         run: |
           source $HOME/.cargo/env
           for example in counter todo router; do
-            ./target/release/flux build --platform android --root examples/$example
-            find platforms/android/Generated -name '*.kt' -exec kotlinc -script {} \; 2>/dev/null || true
-            # kotlinc -script may not handle multi-file projects; use a minimal
-            # gradle project if the script approach fails.
+            ./target/release/flux build android --root examples/$example
+            kt_files=$(find examples/$example/platforms/android/Generated -name '*.kt' -print0)
+            android_jar="$ANDROID_HOME/platforms/android-37/android.jar"
+            kotlinc \
+              -Xplugin="$ANDROID_COMPOSE_COMPILER" \
+              -Xplugin="$ANDROID_COMPOSE_COMPILER_EMBEDDABLE" \
+              -classpath "$ANDROID_COMPOSE_CLASSPATH:$android_jar" \
+              -jvm-target 11 \
+              -Xallow-no-source-files \
+              $(find examples/$example/platforms/android/Generated -name '*.kt')
           done
-        continue-on-error: true
