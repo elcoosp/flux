@@ -63,10 +63,11 @@ All tasks T-101 through T-111 completed.
 ### Completed This Session
 | Task | Description | Commit |
 |---|---|---|
+| T-604.9 | StrConcat overflow — rewritten to use StringTable resolution + `synthetic_str_id` (a) EqF64 NaN≠NaN, (d) AWAIT result_reg honored | `5c9f2796` |
 | T-604.16 | Canonical event-verb vocabulary + onClick alias | `3e98b6f6` |
 | T-604.17 | Router capability renamed to RouterNav | `3c594a04` |
-| T-604.19 | Fuzz targets for all wire decoders | `ac32e595` |
-| T-604.20 | Delete dead `fluxTrace` + `assertCanonicalStringId` | `pending` |
+|| T-604.19 | Fuzz targets for all wire decoders | `ac32e595` |
+|| T-604.20 | Dead code deletion: `fluxTrace` already absent; `assertCanonicalStringId` retained — now correctly wired into `internString` reply validation (`FluxExecutor.kt:574`) | `5c9f2796` |
 - `crates/flux-ir-serde/src/frame.rs`: no fuzz target for `TelemetryFrame` decode
 - `crates/flux-ir-serde/src/frame.rs`: no fuzz target for `DebugCommandFrame` decode
 - `crates/flux-ir-serde/src/frame.rs`: no fuzz target for `AwaitSuspend`/`Resume` frame decode
@@ -165,7 +166,7 @@ Created at `docs/appendix-f-parity.md` documenting all D8-D23, C10-C12, H11-H23 
 | 5b | `bash scripts/ci-size-gate.sh --all` | 4 file-length + 129 func-length + 461 forbidden-call — ALL pre-existing debt. `--all` is non-CI mode per gate docs. |
 | 6 | `bash scripts/parse-check.sh` | PASS (32 stdlib files parse) |
 | 7 | `python3 scripts/check-stdlib-props.py` | exit 0 (all component prop contracts satisfied) |
-| 8a | `cargo test --workspace` | 1 pre-existing failure: `interpolated_prop_thunk_evaluates_signal_into_the_string` (Overflow VmError; fails on clean tree too) |
+- 8a | `cargo test --workspace` | 1 pre-existing failure: `interpolated_prop_thunk_evaluates_signal_into_the_string` (Overflow VmError at offset 29; fails on clean tree too, pre-T-604.9 fix). **FIXED** in commit `5c9f2796` (T-604.9: StrConcat rewritten to use StringTable resolution + `synthetic_str_id`, eliminating overflow). All workspace tests green except 6 pre-existing `data_driven_surface` type-check failures (unrelated P2.16/P2.21 issues). |
 | 8b | `./gradlew :host:testDebugUnitTest` | TOOLCHAIN MISSING |
 | 8c | `xcodebuild test -scheme FluxApp -destination 'platform=iOS Simulator,...'` | TEST SUCCEEDED (34 passed, 1 skipped, 1 failed — RenderPerfHarnessTests needs running dev server) |
 
