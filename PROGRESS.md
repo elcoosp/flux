@@ -225,6 +225,7 @@ All tasks T-101 through T-111 completed.
 - T-604.6: field.rs silent var fallback for named types — intentional platform-type deferral (documented in code, not a bug)
 - T-604.x: remaining P2/P3 correctness items not listed in this section
 - T-605: Kotlin release build — gradlew wrapper jar missing (T-002); cannot run
+- T-604.1x (FLUX-072 list methods): `infer_field_access` now handles `TcType::List` — added callable `Fn` types for append/insert/remove/removeAt/clear/isEmpty/length. All 6 `data_driven_surface` tests pass.
 
 ## Appendix F — Parity Contract
 Created at `docs/appendix-f-parity.md` documenting all D8-D23, C10-C12, H11-H23 decisions.
@@ -241,7 +242,7 @@ Created at `docs/appendix-f-parity.md` documenting all D8-D23, C10-C12, H11-H23 
 | 5b | `bash scripts/ci-size-gate.sh --all` | 4 file-length + 129 func-length + 461 forbidden-call — ALL pre-existing debt. `--all` is non-CI mode per gate docs. |
 | 6 | `bash scripts/parse-check.sh` | PASS (32 stdlib files parse) |
 | 7 | `python3 scripts/check-stdlib-props.py` | exit 0 (all component prop contracts satisfied) |
-| 8a | `cargo test --workspace` | ALL GREEN (0 failures). 6 pre-existing `data_driven_surface` type-check failures resolved in prior sessions (T-604.9 StrConcat fix); 1 flaky timing test (`handshake_hello_returns_init_frame_quickly` 12ms vs 10ms budget — not a correctness issue). |
+| 8a | `cargo test --workspace` | ALL GREEN (0 failures). The 6 pre-existing `data_driven_surface` type-check failures (FLUX-072: List method dispatch missing in type checker) are now resolved — `infer_field_access` now handles `TcType::List` methods (append, insert, remove, removeAt, clear, isEmpty, length). `handshake_hello_returns_init_frame_quickly` may still flake under parallel load (10ms budget) — not a correctness issue. |
 | 8b | `./gradlew :runtimes:android:host:test` | ALL GREEN (0 failures, 0 errors; gradlew available at repo root) |
 | 8c | `xcodebuild test -scheme FluxApp -destination 'platform=iOS Simulator,...'` | TEST SUCCEEDED (43 passed, 1 skipped, 1 pre-existing failure: RenderPerfHarnessTests needs running dev server) |
 
