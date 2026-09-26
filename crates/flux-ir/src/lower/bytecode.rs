@@ -2214,7 +2214,7 @@ mod tests {
     fn capability_call_lowers_to_manifest_ids() {
         // Regression for the CALL_CAP id-contract split (compiler hashed names
         // to ids while the native registries key on the small sequential ids in
-        // `CAPABILITY_IDL`). A handler calling `Router.navigate("settings")` must
+        // `CAPABILITY_IDL`). A handler calling `RouterNav.navigate("settings")` must
         // emit `CALL_CAP` with `cap_id = 3` and `method_id = 1` — the exact
         // `(cap_id, method_id)` the host `CapabilityRegistry` is built from — and
         // NOT a blake3-derived hash (which would be ~809260280 / ~3000 and fault
@@ -2223,7 +2223,7 @@ mod tests {
             kind: ExprKind::Call {
                 callee: Box::new(Expr {
                     kind: ExprKind::Field {
-                        base: Box::new(ident("Router")),
+                        base: Box::new(ident("RouterNav")),
                         field: Ident {
                             name: "navigate".to_owned(),
                             span: span(),
@@ -2255,10 +2255,10 @@ mod tests {
             span(),
             &mut |_s| StringTable::new().intern(_s),
         )
-        .expect("Router.navigate lowers to CALL_CAP");
+        .expect("RouterNav.navigate lowers to CALL_CAP");
         assert!(
             bytecode.contains(&raw::CALL_CAP),
-            "Router.navigate must lower to CALL_CAP: {bytecode:?}"
+            "RouterNav.navigate must lower to CALL_CAP: {bytecode:?}"
         );
         // CALL_CAP layout: opcode, result_reg(u8), cap_id(u32 LE), method_id(u16 LE), args_reg(u8).
         let pos = bytecode
@@ -2270,7 +2270,7 @@ mod tests {
         assert_eq!(cap_id, 3, "Router cap_id must be 3 (CAPABILITY_IDL)");
         assert_eq!(
             method_id, 1,
-            "Router.navigate method_id must be 1 (CAPABILITY_IDL)"
+            "RouterNav.navigate method_id must be 1 (CAPABILITY_IDL)"
         );
     }
 

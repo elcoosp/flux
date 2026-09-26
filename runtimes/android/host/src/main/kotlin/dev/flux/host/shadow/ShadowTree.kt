@@ -124,7 +124,7 @@ public class ShadowTree(
     internal val ROUTER_KIND: String = "router"
 
     /**
-     * The signal `Router.navigate(target)` writes its target into (ADR-0045).
+     * The signal `RouterNav.navigate(target)` writes its target into (ADR-0045).
      * The registry stores the whole argument record there; this tree reads the
      * record's first field (the route string id) to decide which `Screen` shows.
      */
@@ -719,7 +719,7 @@ public class ShadowTree(
         // node with an empty dependency set and it is never re-materialised on
         // a tap (the label freezes at "tapped 0 times").
         // A `Router` node must re-reconcile whenever its navigation target
-        // changes, so it subscribes to the `Router.navigate` result signal
+        // changes, so it subscribes to the `RouterNav.navigate` result signal
         // (97, ADR-0045). The reconciler reads that signal to pick which child
         // `Screen` is visible (see `routerActiveChild`).
         val isRouter = adapter?.kind == ROUTER_KIND
@@ -1252,9 +1252,9 @@ public class ShadowTree(
     }
 
     /**
-     * Resolves the active route string from the `Router.navigate` signal (97).
+     * Resolves the active route string from the `RouterNav.navigate` signal (97).
      *
-     * `Router.navigate(target)` writes the argument **record** to signal 97
+     * `RouterNav.navigate(target)` writes the argument **record** to signal 97
      * (ADR-0045); the route is that record's first field, an interned string id.
      * Returns the resolved route literal, or `null` when the signal is unset or
      * malformed (in which case callers fall back to the first child screen).
@@ -1262,7 +1262,7 @@ public class ShadowTree(
     private fun activeRouteFromSignal(): String? {
         val host = executorRef as? HostExecutor ?: return null
         val raw = host.materializationSignals.read(97u) ?: return null
-        // `Router.navigate(target)` writes the target to signal 97 (ADR-0045). The
+        // `RouterNav.navigate(target)` writes the target to signal 97 (ADR-0045). The
         // compiler emits `LOAD_STR_CONST` + `CALL_CAP`, so a real tap stores a raw
         // `StrVal` holding the interned route-string id; some seeds wrap it in a
         // `RecordVal` (first field = the id). Accept BOTH shapes, mirroring the iOS
@@ -1313,7 +1313,7 @@ public class ShadowTree(
      * active navigation signal (97, ADR-0045). Returns `null` for a non-router
      * node or a router with no screens. The Android Compose renderer
      * ([dev.flux.app.ShadowTreeRenderer]) uses this to show exactly one screen
-     * and to re-render when a `Router.navigate` swaps the visible route — the
+     * and to re-render when a `RouterNav.navigate` swaps the visible route — the
      * host side already drives the same query through the frozen adapter's
      * `setChildren`, but the Compose projection must consult it too, otherwise
      * every screen stacks in a column and tapping navigate does nothing.

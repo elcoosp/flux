@@ -97,7 +97,7 @@ public final class CapabilityRegistry: @unchecked Sendable {
     /// (1,1) preserves the oracle-parity echo of its first argument into signal
     /// 99 so `flux-vm-ref`'s `call_cap_basic` vector stays green. `startPreview`/
     /// `stopPreview` manage a preview flag (signal 96) and are no-ops for capture
-    /// in headless builds. `Router.navigate` (3,1) records the target string id
+    /// in headless builds. `RouterNav.navigate` (3,1) records the target string id
     /// in signal 97 (reconciler-driven). `Clipboard`/`Geolocation` expose their
     /// synchronous result through dedicated cells (94/93 and 92); the dev/test
     /// bodies use deterministic in-memory echoes since the MLP dev host has no
@@ -172,7 +172,7 @@ public final class CapabilityRegistry: @unchecked Sendable {
                 return 95
             }),
             (3, 1, { _, _, arg, signals in
-                // Router.navigate(target): record the target string id in signal 97;
+                // RouterNav.navigate(target): record the target string id in signal 97;
                 // the reconciler consumes it. Returns signal 97's id.
                 signals.write(97, arg)
                 return 97

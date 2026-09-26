@@ -293,10 +293,10 @@ class RuntimeFixesTest {
         val registry = CapabilityRegistry.DEV
         val signals = InMemorySignals()
         val out = registry.lookup(3u, 1u.toUShort())!!.call(FluxValue.StrVal(42u), signals)
-        // ADR-0045: `call` returns the result-cell signal id (Router.navigate records the
+        // ADR-0045: `call` returns the result-cell signal id (RouterNav.navigate records the
         // target in signal 97), not `NullVal`.
-        assertEquals(97u, out, "Router.navigate returns its result-cell id")
-        assertEquals(FluxValue.StrVal(42u), signals.read(97u), "Router.navigate records target in signal 97")
+        assertEquals(97u, out, "RouterNav.navigate returns its result-cell id")
+        assertEquals(FluxValue.StrVal(42u), signals.read(97u), "RouterNav.navigate records target in signal 97")
     }
 
     @Test
@@ -752,7 +752,7 @@ class RuntimeFixesTest {
             0x00, // HALT
         )
 
-// ── G7: Router.navigate signal (97) swaps the visible Screen ───────────────
+// ── G7: RouterNav.navigate signal (97) swaps the visible Screen ───────────────
 
 @Test
 fun `router navigates to the screen matching signal 97`() =
@@ -817,7 +817,7 @@ fun `router navigates to the screen matching signal 97`() =
         assertEquals(1, routerView.children().size, "router should show exactly one screen")
         assertEquals(2u, routerView.children().first().nodeId, "default visible screen should be home")
 
-        // Router.navigate("settings") writes the route record to signal 97.
+        // RouterNav.navigate("settings") writes the route record to signal 97.
         signals.write(
             97u,
             FluxValue.RecordVal(listOf(FluxValue.Field(0u, FluxValue.StrVal(settingsId)))),
@@ -834,7 +834,7 @@ fun `router navigates to the screen matching signal 97`() =
  * Pins the exact query the Android Compose renderer ([dev.flux.app.ShadowTreeRenderer])
  * now depends on: `ShadowTree.activeChildOf` must return the *settings* screen
  * once signal 97 carries the settings route. Without this, the renderer would
- * stack every screen in a column and `Router.navigate` would do nothing on
+ * stack every screen in a column and `RouterNav.navigate` would do nothing on
  * device (the reported "navigation does nothing" bug). Mirrors the host-side G7
  * assertion but at the renderer-consumed API.
  */
@@ -878,7 +878,7 @@ fun `activeChildOf returns the settings screen once signal 97 is set`() =
         // Default (signal 97 unset) → first screen (home, id 2).
         assertEquals(2u, tree.activeChildOf(router)?.id, "default visible screen should be home")
 
-        // Router.navigate("settings") writes the route record to signal 97.
+        // RouterNav.navigate("settings") writes the route record to signal 97.
         signals.write(97u, FluxValue.RecordVal(listOf(FluxValue.Field(0u, FluxValue.StrVal(settingsId)))))
         signals.flush()
         tree.reconcileDirty(router.id, setOf(97u))
@@ -888,8 +888,8 @@ fun `activeChildOf returns the settings screen once signal 97 is set`() =
     }
 
 /**
- * Reproduces the REAL tap path: the `Router.navigate` capability is invoked with
- * the VM's `args` register, which for `Router.navigate("settings")` holds a RAW
+ * Reproduces the REAL tap path: the `RouterNav.navigate` capability is invoked with
+ * the VM's `args` register, which for `RouterNav.navigate("settings")` holds a RAW
  * `StrVal(settingsId)` (the compiler emits `LOAD_STR_CONST` + `CALL_CAP`, not a
  * wrapped record). The reader in [ShadowTree.activeChildOf] must accept that
  * shape — if it only unwraps a `RecordVal` it returns null and the router keeps
@@ -938,7 +938,7 @@ fun `router swaps to settings when navigate is called with a raw string arg`() =
         // Exactly what the VM does on a real tap of "Go to Settings".
         val registry = CapabilityRegistry.DEV
         val cellId = registry.lookup(3u, 1u.toUShort())!!.call(FluxValue.StrVal(settingsId), signals)
-        assertEquals(97u, cellId, "Router.navigate returns the signal-97 result-cell id")
+        assertEquals(97u, cellId, "RouterNav.navigate returns the signal-97 result-cell id")
         signals.flush()
         tree.reconcileDirty(router.id, setOf(97u))
 
@@ -949,7 +949,7 @@ fun `router swaps to settings when navigate is called with a raw string arg`() =
  * Reproduces the REAL app wiring: the host builds the executor with the
  * PRIMARY constructor (no explicit `capabilities` arg), exactly as
  * [dev.flux.app.FluxSession] does. Before the fix the primary constructor
- * defaulted to [CapabilityRegistry.default], which has NO `Router.navigate`
+ * defaulted to [CapabilityRegistry.default], which has NO `RouterNav.navigate`
  * (cap 3,1) — so a real button tap ran `CALL_CAP(3,1)`, faulted as
  * TYPE_MISMATCH, wrote nothing to signal 97, and the router stayed on Home
  * (the reported "go to settings does not change the view" bug). This test
@@ -1029,7 +1029,7 @@ fun `primary-ctor executor dispatches Router navigate and swaps the screen`() =
  * to prop index 0, NOT `FNV-1a("route")`. The host reconciler's `routeOf` reads
  * the `route` prop at `ROUTE_PROP_INDEX` (FNV-1a), finds nothing, and navigation
  * silently never swaps (ADR-0045). This test pins the trap on-device: with the
- * route carried at positional index 0, a real `Router.navigate` tap must NOT
+ * route carried at positional index 0, a real `RouterNav.navigate` tap must NOT
  * swap the visible screen — it stays on the first child (home, id 2). If this
  * ever starts swapping, the compiler began lowering positional args to the named
  * prop (closing the blind spot — the intended fix). The correct author fix is the
@@ -1201,7 +1201,7 @@ fun `granted permission resolves CALL_CAP normally`() =
         val allowAll =
             PermissionChecker { _ -> true }
 
-        // Router.navigate (3,1) requires PermissionKind.None -> always granted.
+        // RouterNav.navigate (3,1) requires PermissionKind.None -> always granted.
         val bytecode =
             byteArrayOf(
                 0x90.toByte(), // CALL_CAP

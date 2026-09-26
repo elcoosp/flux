@@ -505,8 +505,8 @@ final class CapabilityRoundTripTests: XCTestCase {
     func testRouterNavigateRecordsTarget() async throws {
         var signals: any SignalStore = InMemorySignals()
         let out = try CapabilityRegistry.dev.lookup(3, 1)!(3, 1, .str(42), &signals)
-        XCTAssertEqual(out, 97, "Router.navigate returns its result-cell id")
-        XCTAssertEqual(signals.read(97), .str(42), "Router.navigate records target string id in signal 97")
+        XCTAssertEqual(out, 97, "RouterNav.navigate returns its result-cell id")
+        XCTAssertEqual(signals.read(97), .str(42), "RouterNav.navigate records target string id in signal 97")
     }
 
     @MainActor

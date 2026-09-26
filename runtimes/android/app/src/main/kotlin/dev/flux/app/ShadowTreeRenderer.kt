@@ -115,7 +115,7 @@ public fun FluxTreeView(
 /**
  * Renders the active `Screen` of a `Router` node. Reads [routerVersion] (a value
  * that changes on every applied frame / dispatch) so Compose re-runs this
- * composable when `Router.navigate` changes signal 97 and the host picks a
+ * composable when `RouterNav.navigate` changes signal 97 and the host picks a
  * different active child — without it the router node's props stay equal and the
  * screen would never swap (the reported "navigation does nothing" bug).
  */

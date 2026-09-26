@@ -73,7 +73,7 @@ public fun requiredPermission(capId: UInt, methodId: UInt): PermissionKind? {
     return when (capId.toUInt()) {
         1u -> PermissionKind.Camera // Camera.takePicture / startPreview / stopPreview
         2u -> PermissionKind.FileSystem // Storage is a sandboxed file write
-        3u -> PermissionKind.None // Router.navigate — in-process state swap
+        3u -> PermissionKind.None // RouterNav.navigate — in-process state swap
         4u -> PermissionKind.Clipboard // Clipboard.setString / getString
         5u -> PermissionKind.Location // Geolocation.getCurrentPosition
         6u -> PermissionKind.Notification // Push.registerForNotifications / scheduleNotification

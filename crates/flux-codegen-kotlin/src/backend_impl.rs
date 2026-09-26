@@ -73,7 +73,7 @@ impl Backend for Kotlin {
     }
 
     fn router_open(start_destination: &str) -> String {
-        // Declare a navController variable so that `Router.navigate(target)`
+        // Declare a navController variable so that `RouterNav.navigate(target)`
         // (rendered by router_navigate_expr) can call navController.navigate.
         format!(
             "val navController = rememberNavController()\n    NavHost(\n        navController = navController,\n        startDestination = {}\n    ) {{",

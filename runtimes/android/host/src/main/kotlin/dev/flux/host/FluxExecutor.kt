@@ -173,7 +173,7 @@ public class FluxExecutor(
      * (dev echoes) so headless unit tests need no emulator. */
     private val nativeHost: NativeCapabilityHost = DevNativeCapabilityHost(),
     /** The `(capId, methodId) → impl` table for `CALL_CAP`. Built from the dev
-     * capability set (which includes `Router.navigate` (3,1)) so the live host can
+     * capability set (which includes `RouterNav.navigate` (3,1)) so the live host can
      * drive real navigation; the unit-test oracle uses [CapabilityRegistry.default]
      * or a custom registry instead. The [nativeHost] is threaded in so the FLUX-045
      * concrete caps (6..=11) perform real OS calls when a real host is supplied. */

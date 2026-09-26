@@ -27,7 +27,10 @@ mod tests {
             Some(("Camera", "takePicture"))
         );
         assert_eq!(CapabilityIdl::names_for(2, 2), Some(("Storage", "getItem")));
-        assert_eq!(CapabilityIdl::names_for(3, 1), Some(("Router", "navigate")));
+        assert_eq!(
+            CapabilityIdl::names_for(3, 1),
+            Some(("RouterNav", "navigate"))
+        );
         assert_eq!(CapabilityIdl::names_for(9, 9), None);
     }
 
@@ -36,7 +39,7 @@ mod tests {
         let advertised = hello_capabilities();
         assert!(is_satisfied(&advertised, "Camera", "takePicture"));
         assert!(is_satisfied(&advertised, "Storage", "getItem"));
-        assert!(is_satisfied(&advertised, "Router", "navigate"));
+        assert!(is_satisfied(&advertised, "RouterNav", "navigate"));
         assert!(is_satisfied(&advertised, "Camera", "stopPreview"));
         // A method the host does not advertise must fail.
         let empty: Vec<(String, u32, Vec<String>)> = Vec::new();

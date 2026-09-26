@@ -30,10 +30,10 @@ compo TodoApp
                     tasks.clear()
                     Storage.removeItem(key: "todos")
                 }
-                Button text: "About", onPress: || { Router.navigate("about") }
+                Button text: "About", onPress: || { RouterNav.navigate("about") }
         Screen route: "about"
             Column gap: 12.0
                 Text text: "About"
                 Text text: "A real Flux app"
-                Button text: "Back", onPress: || { Router.navigate("tasks") }
+                Button text: "Back", onPress: || { RouterNav.navigate("tasks") }
 

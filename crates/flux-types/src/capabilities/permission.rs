@@ -145,7 +145,7 @@ pub fn required_permission(cap_id: u32, method_id: u16) -> Option<PermissionKind
         (1, _) => Some(PermissionKind::Camera),
         // Storage: every method needs the storage grant.
         (2, _) => Some(PermissionKind::Storage),
-        // Router: navigation is always permitted.
+        // RouterNav: navigation is always permitted.
         (3, _) => Some(PermissionKind::None),
         // Clipboard: every method needs the pasteboard grant.
         (4, _) => Some(PermissionKind::Clipboard),

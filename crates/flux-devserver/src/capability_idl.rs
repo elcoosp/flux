@@ -105,7 +105,10 @@ mod tests {
             Some(("Camera", "takePicture"))
         );
         assert_eq!(CapabilityIdl::names_for(2, 2), Some(("Storage", "getItem")));
-        assert_eq!(CapabilityIdl::names_for(3, 1), Some(("Router", "navigate")));
+        assert_eq!(
+            CapabilityIdl::names_for(3, 1),
+            Some(("RouterNav", "navigate"))
+        );
         assert_eq!(CapabilityIdl::names_for(99, 99), None);
         // FLUX-045 extended the manifest to 11; FLUX-047 (Http/Persist) and
         // FLUX-048 (WebView/NativeModule) extended it further to 15.
@@ -117,8 +120,7 @@ mod tests {
         let advertised = hello_capabilities();
         assert!(is_satisfied(&advertised, "Camera", "takePicture"));
         assert!(is_satisfied(&advertised, "Storage", "getItem"));
-        assert!(is_satisfied(&advertised, "Router", "navigate"));
-        // stopPreview IS advertised, so this should be satisfied.
+        assert!(is_satisfied(&advertised, "RouterNav", "navigate"));
         assert!(is_satisfied(&advertised, "Camera", "stopPreview"));
         // An empty advertised set satisfies nothing.
         let empty: Vec<(String, u32, Vec<String>)> = Vec::new();

@@ -148,6 +148,11 @@ pub(crate) fn prelude(supply: &mut Supply) -> Env {
         "Button",
         "Image",
         "Router",
+        // `RouterNav` is the navigation capability alias (cap 3, §3.4); it is a
+        // capability name, not a component, but the type checker must resolve it
+        // as an identifier so `RouterNav.navigate(...)` type-checks before the
+        // lowerer lowers it to `CALL_CAP(3, 1)` (ADR-0027).
+        "RouterNav",
         "Screen",
         "ForEach",
         "CupertinoButton",

@@ -15,18 +15,18 @@ use flux_parser::{BinOp, Expr, ExprKind, StrPart};
 
 use crate::backend::Backend;
 
-/// Returns `true` when `callee` is the `Router.navigate` call form.
+/// Returns `true` when `callee` is the `RouterNav.navigate` call form.
 ///
-/// `Router.navigate(...)` parses as `Field { base: Ident("Router"), field: "navigate" }`
+/// `RouterNav.navigate(...)` parses as `Field { base: Ident("RouterNav"), field: "navigate" }`
 /// — not as a single `Ident` with a dotted name — so we check the field-access shape.
 fn is_router_navigate(callee: &Expr) -> bool {
     match &callee.kind {
         ExprKind::Field { base, field, .. } => {
-            matches!(&base.kind, ExprKind::Ident(i) if i.name == "Router")
+            matches!(&base.kind, ExprKind::Ident(i) if i.name == "RouterNav")
                 && field.name == "navigate"
         }
         // Also accept a dotted-ident form that some parser paths may produce.
-        ExprKind::Ident(ident) => ident.name == "Router.navigate",
+        ExprKind::Ident(ident) => ident.name == "RouterNav.navigate",
         _ => false,
     }
 }
@@ -129,7 +129,7 @@ fn render_stmt<B: Backend>(stmt: &Expr) -> String {
             B::render_await(&rendered)
         }
         ExprKind::Call { callee, args, .. } => {
-            // `Router.navigate("settings")` must become a native navigation
+            // `RouterNav.navigate("settings")` must become a native navigation
             // push in the release path. The dev VM writes the target to signal
             // 97 (routerActiveChildId); the release path pushes it via the
             // backend's navigation API.

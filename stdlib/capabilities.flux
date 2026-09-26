@@ -11,7 +11,7 @@
 // is declared in prelude.flux and is in scope via the implicit prelude.
 //
 // IDs are stable and match the native `CapabilityRegistry` tables (cap 1 =
-// Camera, cap 2 = Storage, cap 3 = Router, cap 4 = Clipboard, cap 5 =
+// Camera, cap 2 = Storage, cap 3 = RouterNav, cap 4 = Clipboard, cap 5 =
 // Geolocation). Sync vs async is a binding detail declared by `fn` vs
 // `async fn` in this IDL (NOT a method-name suffix): sync methods return
 // immediately; async methods (most platform calls — camera, permissions,
@@ -36,7 +36,7 @@ capability Storage {
   fn devReferenceAsync() -> Data
 }
 
-capability Router {
+capability RouterNav {
   // requires: .none — navigation is always permitted; no OS grant gates it.
   fn navigate(target: String) -> Unit
 }

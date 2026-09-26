@@ -46,8 +46,8 @@ final class CapabilityRoundTripTests: XCTestCase {
     func testRouterNavigateRecordsTarget() throws {
         var signals: any SignalStore = InMemorySignals()
         let out = try CapabilityRegistry.dev.lookup(3, 1)!(3, 1, .str(42), &signals)
-        XCTAssertEqual(out, 97, "Router.navigate returns its result-cell id")
-        XCTAssertEqual(signals.read(97), .str(42), "Router.navigate records target string id in signal 97")
+        XCTAssertEqual(out, 97, "RouterNav.navigate returns its result-cell id")
+        XCTAssertEqual(signals.read(97), .str(42), "RouterNav.navigate records target string id in signal 97")
     }
 
     func testCameraTakeEchoesForOracleParity() throws {
@@ -200,7 +200,7 @@ final class CapabilityRoundTripTests: XCTestCase {
     /// A granted permission resolves the call normally (no gate fault).
     func testGrantedPermissionResolvesCallCapNormally() throws {
         var signals: any SignalStore = InMemorySignals()
-        // Router.navigate (3,1) requires PermissionKind.none -> always granted.
+        // RouterNav.navigate (3,1) requires PermissionKind.none -> always granted.
         let bytecode: [UInt8] = [
             0x90,
             1,

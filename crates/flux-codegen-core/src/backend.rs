@@ -117,7 +117,7 @@ pub trait Backend {
     #[must_use]
     fn screen_close() -> String;
 
-    /// Native emission for `Router.navigate("target")`: pushes the target route.
+    /// Native emission for `RouterNav.navigate("target")`: pushes the target route.
     /// Swift: `route.append("target")` (NavigationPath push); Kotlin:
     /// `navController.navigate("target")`.
     #[must_use]

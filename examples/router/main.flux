@@ -1,6 +1,6 @@
 // main.flux — Flux router example (standalone vertical slice).
 //
-// Demonstrates a capability-driven navigation stack: `Router.navigate(target)`
+// Demonstrates a capability-driven navigation stack: `RouterNav.navigate(target)`
 // writes its argument record to signal 97 (ADR-0045), and both host reconcilers
 // (iOS / Android) present only the child `Screen` whose `route` prop equals the
 // active route. Each `Screen` is addressed by its `route` prop (Appendix F.7),
@@ -19,11 +19,11 @@ compo App
                 Column gap: 16.0
                     Text text: "Home"
                     Button text: "Go to Settings", onPress: || {
-                        Router.navigate("settings")
+                        RouterNav.navigate("settings")
                     }
             Screen route: "settings"
                 Column gap: 16.0
                     Text text: "Settings"
                     Button text: "Go to Home", onPress: || {
-                        Router.navigate("home")
+                        RouterNav.navigate("home")
                     }

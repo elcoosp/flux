@@ -73,7 +73,7 @@ private val idlCapabilities: List<Triple<String, UInt, List<Pair<String, UInt>>>
         "removeItem" to 3u,
         "devReferenceAsync" to 99u,
     )),
-    Triple("Router", 3u, listOf(
+    Triple("RouterNav", 3u, listOf(
         "navigate" to 1u,
     )),
     Triple("Clipboard", 4u, listOf(

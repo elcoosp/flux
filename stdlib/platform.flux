@@ -7,7 +7,7 @@
 // These are declarations of values provided by the runtime / prelude:
 //   platform()      String        current platform tag ("ios" | "android" | "web")
 //
-// Navigation is no longer a hand-written `fn` here — it is the `Router.navigate`
+// Navigation is no longer a hand-written `fn` here — it is the `RouterNav.navigate`
 // capability (see stdlib/capabilities.flux). Both host reconcilers present only
 // the child `Screen` whose `route` prop equals the active navigation target
 // (ADR-0045).

@@ -53,7 +53,7 @@ impl CapabilityIdl {
 /// The MLP capability set (mirrors `stdlib/capabilities.flux`).
 ///
 /// IDs are stable and match the native `CapabilityRegistry` tables (cap 1 =
-/// Camera, cap 2 = Storage, cap 3 = Router, cap 4 = Clipboard, cap 5 =
+/// Camera, cap 2 = Storage, cap 3 = RouterNav, cap 4 = Clipboard, cap 5 =
 /// Geolocation). Sync vs async is a binding detail: sync methods return
 /// immediately; async methods (most platform calls — camera, permissions,
 /// network) resolve through the VM's await machinery (ADR-0044 / ADR-0045) and
@@ -104,7 +104,7 @@ pub const CAPABILITY_IDL: &[CapabilityIdl] = &[
         ],
     },
     CapabilityIdl {
-        name: "Router",
+        name: "RouterNav",
         id: 3,
         methods: &[MethodIdl {
             name: "navigate",

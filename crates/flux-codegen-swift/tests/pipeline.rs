@@ -366,7 +366,7 @@ fn t_403_7_route_state_without_router_is_regular() {
     );
 }
 
-/// FLUX-079: Router.navigate("settings") must become a native NavigationPath push
+/// FLUX-079: RouterNav.navigate("settings") must become a native NavigationPath push
 /// so SwiftUI NavigationStack responds with proper push/pop semantics.
 #[test]
 fn router_navigate_emits_state_assignment() {
@@ -375,11 +375,11 @@ fn router_navigate_emits_state_assignment() {
   Router {
     Screen("home") {
       Text("Home")
-      Button(onPress: fn() { Router.navigate("settings") }) { Text("Go to Settings") }
+      Button(onPress: fn() { RouterNav.navigate("settings") }) { Text("Go to Settings") }
     }
     Screen("settings") {
       Text("Settings")
-      Button(onPress: fn() { Router.navigate("home") }) { Text("Go to Home") }
+      Button(onPress: fn() { RouterNav.navigate("home") }) { Text("Go to Home") }
     }
   }
 
@@ -400,13 +400,13 @@ fn router_navigate_emits_state_assignment() {
         out.contains(".navigationDestination(for: String.self)"),
         "missing navigationDestination modifier:\n{out}"
     );
-    // Verify Router.navigate turns into route.append (NavigationPath push)
+    // Verify RouterNav.navigate turns into route.append (NavigationPath push)
     assert!(
         out.contains("route.append(\"settings\")"),
-        "Router.navigate('settings') not emitted as route.append:\n{out}"
+        "RouterNav.navigate('settings') not emitted as route.append:\n{out}"
     );
     assert!(
         out.contains("route.append(\"home\")"),
-        "Router.navigate('home') not emitted as route.append:\n{out}"
+        "RouterNav.navigate('home') not emitted as route.append:\n{out}"
     );
 }

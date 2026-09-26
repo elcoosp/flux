@@ -285,7 +285,7 @@ mod tests {
     fn capability_keys_cover_idl() {
         // Frozen against flux-types/.../capabilities.rs CAPABILITY_IDL.
         let keys = capability_keys();
-        assert!(keys.contains(&(3, 1, "Router.navigate".to_string())));
+        assert!(keys.contains(&(3, 1, "RouterNav.navigate".to_string())));
         assert!(keys.contains(&(1, 1, "Camera.takePicture".to_string())));
         assert!(keys.contains(&(14, 1, "Http.fetch".to_string())));
         assert!(keys.contains(&(15, 4, "Persist.delete".to_string())));

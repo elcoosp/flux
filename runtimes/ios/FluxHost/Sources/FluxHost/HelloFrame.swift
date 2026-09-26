@@ -39,7 +39,7 @@ private static let idlCapabilities: [(String, UInt32, [(String, UInt16)])] = [
         ("removeItem", 3),
         ("devReferenceAsync", 99),
     ]),
-    ("Router", 3, [
+    ("RouterNav", 3, [
         ("navigate", 1),
     ]),
     ("Clipboard", 4, [

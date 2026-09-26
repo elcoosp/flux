@@ -70,7 +70,7 @@ public func requiredPermission(capID: UInt32, methodID: UInt16) -> PermissionKin
     switch capID {
     case 1: .camera // Camera.takePicture / startPreview / stopPreview
     case 2: .fileSystem // Storage reads/writes the sandboxed file system
-    case 3: PermissionKind.none // Router.navigate — in-process state swap
+    case 3: PermissionKind.none // RouterNav.navigate — in-process state swap
     case 4: .clipboard // Clipboard.setString / getString
     case 5: .location // Geolocation.getCurrentPosition
     case 6: .notification // Push.registerForNotifications / scheduleNotification

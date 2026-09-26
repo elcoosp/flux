@@ -114,7 +114,7 @@ public class CapabilityRegistry(
          * `Camera.take` (1,1) preserves the oracle-parity echo of its first
          * argument into signal 99 so `flux-vm-ref`'s `call_cap_basic` vector
          * stays green. `startPreview`/`stopPreview` manage a preview flag
-         * (signal 96) and are capture no-ops in headless builds. `Router.navigate`
+         * (signal 96) and are capture no-ops in headless builds. `RouterNav.navigate`
          * (3,1) records the target string id in signal 97 (reconciler-driven).
          * `Clipboard`/`Geolocation` expose their synchronous result through
          * dedicated cells (94/93 and 92); the dev/test bodies use deterministic
@@ -211,7 +211,7 @@ public class CapabilityRegistry(
                         signals.write(95u, FluxValue.NullVal)
                         95u
                     }
-                    // Router.navigate(target) (3,1): record target in signal 97; return its id.
+                    // RouterNav.navigate(target) (3,1): record target in signal 97; return its id.
                     put(3u, 1u.toUShort()) { args, signals ->
                         signals.write(97u, args)
                         97u

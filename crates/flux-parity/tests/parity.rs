@@ -196,12 +196,15 @@ fn router_example_emits_route_prop_and_navigate_call() {
             assert_eq!(
                 (cap_id, method_id),
                 (3, 1),
-                "Router.navigate → CALL_CAP(3,1)"
+                "RouterNav.navigate → CALL_CAP(3,1)"
             );
             navigate_calls += 1;
         }
     }
-    assert_eq!(navigate_calls, 2, "both buttons must call Router.navigate");
+    assert_eq!(
+        navigate_calls, 2,
+        "both buttons must call RouterNav.navigate"
+    );
 }
 
 /// LANE-B (device-only blind spot): a POSITIONAL `Screen("home")` arg is the
@@ -231,7 +234,7 @@ fn positional_screen_does_not_emit_route_prop_at_fnv_index() {
       Column(gap: 16) {
         Text("Home")
         Button(text: "Go to Settings", onPress: {
-          Router.navigate("settings")
+          RouterNav.navigate("settings")
         })
       }
     }
@@ -239,7 +242,7 @@ fn positional_screen_does_not_emit_route_prop_at_fnv_index() {
       Column(gap: 16) {
         Text("Settings")
         Button(text: "Go to Home", onPress: {
-          Router.navigate("home")
+          RouterNav.navigate("home")
         })
       }
     }

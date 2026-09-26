@@ -320,7 +320,7 @@ struct ShadowTreeReconciler {
         let metaDeps = signalMeta[nodeId]?.deps ?? []
         var deps = Set(metaDeps).union(effectiveProps.compactMap { $0.value.asInt }.compactMap { UInt32(exactly: $0) })
         // A `Router` node must re-reconcile whenever its navigation target
-        // changes, so it subscribes to the `Router.navigate` signal (97, ADR-0045).
+        // changes, so it subscribes to the `RouterNav.navigate` signal (97, ADR-0045).
         // The server lowers a router as a *component* with `componentId="Router"`
         // (the same way Android does — `adapter?.kind == "router"`), so we detect
         // it by the resolved adapter name, not the wire `NodeKind`, which would
@@ -870,7 +870,7 @@ struct ShadowTreeReconciler {
         return UInt16(truncatingIfNeeded: h)
     }()
 
-    /// The signal id `Router.navigate` writes its target to (ADR-0045).
+    /// The signal id `RouterNav.navigate` writes its target to (ADR-0045).
     private static let navigationRouteSignalId: UInt32 = 97
 
     /// For a `Router` node, returns the id of the single `Screen` child whose
@@ -886,8 +886,8 @@ struct ShadowTreeReconciler {
         var activeRoute: String?
         if let runtime = executorRef as? FluxExecutor,
            let record = runtime.graph.read(Self.navigationRouteSignalId) {
-            // `Router.navigate(target)` writes the VM's CALL_CAP `args` register to
-            // signal 97. The iOS compiler lowers `Router.navigate("x")` to
+            // `RouterNav.navigate(target)` writes the VM's CALL_CAP `args` register to
+            // signal 97. The iOS compiler lowers `RouterNav.navigate("x")` to
             // `LOAD_STR_CONST` + `CALL_CAP`, so `args` is a RAW `.str(targetId)`
             // (not a wrapped record). Accept both a raw `.str` and a `.record`
             // whose first field is a `.str`, so navigation swaps the visible screen
@@ -903,7 +903,7 @@ struct ShadowTreeReconciler {
             default:
                 routeId = nil
             }
-            // The route string id written by `Router.navigate` resolves through the
+            // The route string id written by `RouterNav.navigate` resolves through the
             // reconciler's frame-seeded string table (the same table the screen's
             // route prop is resolved from, below), so navigation swaps the visible
             // screen on a real tap. If it is nil the signal is unset/malformed and we

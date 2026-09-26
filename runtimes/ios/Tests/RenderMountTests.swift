@@ -114,7 +114,7 @@ final class RenderMountTests: XCTestCase {
 
     /// Builds a router-shaped full `FluxFrame`: a `Router` with two `Screen`
     /// children (`home` and `settings`), each carrying a `route` prop. When
-    /// [initialRoute] is non-nil, signal 97 (the `Router.navigate` target,
+    /// [initialRoute] is non-nil, signal 97 (the `RouterNav.navigate` target,
     /// ADR-0045) is pre-seeded so the router presents that screen from the start.
     @MainActor
     private func routerExecutor(initialRoute: String? = nil) -> FluxHost.FluxExecutor {
@@ -171,7 +171,7 @@ final class RenderMountTests: XCTestCase {
 
     /// ADR-0045: a `Router` presents only the active-route `Screen`. With signal
     /// 97 unset it shows the first screen (`home`); pre-seeding signal 97 with the
-    /// `Router.navigate` target record makes it present the matching `settings`
+    /// `RouterNav.navigate` target record makes it present the matching `settings`
     /// screen instead (the same signal the live `navigate` handler writes).
     @MainActor
     func testRouterPresentsActiveRouteFromSignal97() async {
@@ -202,7 +202,7 @@ final class RenderMountTests: XCTestCase {
             "seeding signal 97 with a different route must swap the visible screen")
     }
 
-    /// ADR-0045 / parity with Android: a real `Router.navigate` tap goes through
+    /// ADR-0045 / parity with Android: a real `RouterNav.navigate` tap goes through
     /// `CALL_CAP(3,1)`, which writes the target `RecordVal` to signal 97. The
     /// renderer must swap to the matching Screen. This test runs a REAL navigate
     /// closure through the VM (the same bytecode the compiler emits) and then
@@ -300,7 +300,7 @@ final class RenderMountTests: XCTestCase {
     /// finds nothing, and navigation silently never swaps (the documented
     /// "go to settings does nothing" trap, ADR-0045). This test pins the trap
     /// on-device: with the route carried at positional index 0, a real
-    /// `Router.navigate` tap must NOT swap the visible screen — it stays on the
+    /// `RouterNav.navigate` tap must NOT swap the visible screen — it stays on the
     /// first child (home). If this ever starts swapping, the compiler began
     /// lowering positional args to the named prop (closing the blind spot — the
     /// intended fix). The correct author fix is the NAMED `Screen(route:)` form.
