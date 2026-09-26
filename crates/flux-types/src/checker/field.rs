@@ -93,6 +93,30 @@ impl Checker {
             | TcType::Fn(_, _)
             | TcType::Option(_)
             | TcType::Map(_, _) => Ok(self.fresh_ty()),
+            TcType::List(inner) => match field.name.as_str() {
+                // Built-in list methods (FLUX-072). The lowering layer
+                // (flux-ir::lower::bytecode::ListMethod + compile_list_method)
+                // emits the matching VM opcodes; here we only need to accept
+                // the method names and return a callable type so apply_callee
+                // can type-check the arguments.
+                "append" => Ok(TcType::Fn(vec![(**inner).clone()], Box::new(TcType::Unit))),
+                "insert" => Ok(TcType::Fn(
+                    vec![TcType::Int, (**inner).clone()],
+                    Box::new(TcType::Unit),
+                )),
+                "remove" => Ok(TcType::Fn(vec![(**inner).clone()], Box::new(TcType::Bool))),
+                "removeAt" => Ok(TcType::Fn(vec![TcType::Int], Box::new(TcType::Unit))),
+                "clear" => Ok(TcType::Fn(Vec::new(), Box::new(TcType::Unit))),
+                "isEmpty" => Ok(TcType::Fn(Vec::new(), Box::new(TcType::Bool))),
+                "length" => Ok(TcType::Fn(Vec::new(), Box::new(TcType::Int))),
+                _ => Err(TypeError::new(
+                    format!("no list method `{}` on `List[{}]`", field.name, inner),
+                    field.span,
+                )
+                .with_hint(format!(
+                    "list methods: append, insert, remove, removeAt, clear, isEmpty, length"
+                ))),
+            },
             other => Err(TypeError::new(
                 format!("cannot access field `{}` on `{other}`", field.name),
                 field.span,
