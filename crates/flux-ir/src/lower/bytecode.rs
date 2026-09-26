@@ -1812,7 +1812,7 @@ mod tests {
     use flux_parser::{BinOp, Block, BlockItem, Expr, ExprKind, Ident, StateDecl};
     use flux_syntax::opcode::raw;
     use flux_syntax::{SignalId, Span, StringTable, Value};
-    use flux_vm_ref::{run, InMemorySignals, SignalStore, VmError};
+    use flux_vm_ref::{InMemorySignals, SignalStore, VmError, run};
     use std::collections::HashMap;
 
     /// Builds a handler body with `n` sequential `sN = sN + 1` state declarations
