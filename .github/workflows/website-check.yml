@@ -54,7 +54,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Parity unit tests (FLUX-030/092)
+      - name: Parity unit tests (FLUX-030 parity gate)
         # Exercises findMissingTranslations AND the real CLI exit-code gate
         # against drifted vs synced fixture trees.
         run: pnpm run test:i18n
