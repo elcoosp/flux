@@ -17,8 +17,8 @@
 
 #![no_main]
 
-use libfuzzer_sys::fuzz_target;
 use flux_ir_serde::Frame;
+use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
     // Each decoder must be total on arbitrary bytes: no panic, ever.

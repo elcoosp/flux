@@ -34,6 +34,6 @@
 mod backend_impl;
 mod codegen;
 
+pub use backend_impl::Kotlin;
 pub use codegen::codegen;
 pub use flux_codegen_core::CodegenError;
-pub use backend_impl::Kotlin;

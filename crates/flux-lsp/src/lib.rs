@@ -131,9 +131,13 @@ impl FluxLsp {
         // Fold the incremental content changes into the cached document.
         let mut docs = match self.documents.lock() {
             Ok(guard) => guard,
-            Err(_) => return ControlFlow::Break(Err(
-                async_lsp::ResponseError::new(async_lsp::ErrorCode::INTERNAL_ERROR, "state mutex poisoned").into(),
-            )),
+            Err(_) => {
+                return ControlFlow::Break(Err(async_lsp::ResponseError::new(
+                    async_lsp::ErrorCode::INTERNAL_ERROR,
+                    "state mutex poisoned",
+                )
+                .into()));
+            }
         };
         let text = docs.entry(uri.clone()).or_default();
         for change in params.content_changes {
@@ -158,9 +162,13 @@ impl FluxLsp {
         // Record this version and schedule a debounced publish tied to it.
         let mut versions = match self.versions.lock() {
             Ok(guard) => guard,
-            Err(_) => return ControlFlow::Break(Err(
-                async_lsp::ResponseError::new(async_lsp::ErrorCode::INTERNAL_ERROR, "state mutex poisoned").into(),
-            )),
+            Err(_) => {
+                return ControlFlow::Break(Err(async_lsp::ResponseError::new(
+                    async_lsp::ErrorCode::INTERNAL_ERROR,
+                    "state mutex poisoned",
+                )
+                .into()));
+            }
         };
         let counter = versions
             .entry(uri.clone())
@@ -175,10 +183,11 @@ impl FluxLsp {
             let text = match self.documents.lock() {
                 Ok(docs) => docs.get(&uri).cloned().unwrap_or_default(),
                 Err(_) => {
-                    return ControlFlow::Break(Err(
-                        async_lsp::ResponseError::new(async_lsp::ErrorCode::INTERNAL_ERROR, "state mutex poisoned")
-                            .into(),
-                    ));
+                    return ControlFlow::Break(Err(async_lsp::ResponseError::new(
+                        async_lsp::ErrorCode::INTERNAL_ERROR,
+                        "state mutex poisoned",
+                    )
+                    .into()));
                 }
             };
             tokio::spawn(async move {
@@ -386,9 +395,13 @@ impl LanguageServer for FluxLsp {
         } = params;
         let mut docs = match self.documents.lock() {
             Ok(guard) => guard,
-            Err(_) => return ControlFlow::Break(Err(
-                async_lsp::ResponseError::new(async_lsp::ErrorCode::INTERNAL_ERROR, "state mutex poisoned").into(),
-            )),
+            Err(_) => {
+                return ControlFlow::Break(Err(async_lsp::ResponseError::new(
+                    async_lsp::ErrorCode::INTERNAL_ERROR,
+                    "state mutex poisoned",
+                )
+                .into()));
+            }
         };
         docs.insert(uri, text);
         ControlFlow::Continue(())
