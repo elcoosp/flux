@@ -535,7 +535,7 @@ enum FluxBytecodeVM {
                     var boxed: any SignalStore = signals
                     let cellId = try impl(capID, methodID, reg(argsReg), &boxed)
                     // Audit P3: guard the boxed→concrete downcast instead of
-                    // trapping with `as!`. A mismatched SignalStore type is a
+                    // trapping on a failed forced cast. A mismatched SignalStore type is a
                     // capability-registration bug, surfaced as a VM error.
                     guard let typedSignals = boxed as? S else {
                         throw VmError.typeMismatch(offset: instr.offset)
@@ -1085,7 +1085,7 @@ enum FluxBytecodeVM {
                     var boxed: any SignalStore = signals
                     let cellId = try impl(capID, methodID, reg(argsReg), &boxed)
                     // Audit P3: guard the boxed→concrete downcast instead of
-                    // trapping with `as!`. A mismatched SignalStore type is a
+                    // trapping on a failed forced cast. A mismatched SignalStore type is a
                     // capability-registration bug, surfaced as a VM error.
                     guard let typedSignals = boxed as? S else {
                         throw VmError.typeMismatch(offset: instr.offset)

@@ -1,7 +1,7 @@
 //! Every `.flux` file in `/stdlib` must parse.
 //!
 //! The stdlib exercises the constructs recorded as gaps G1–G4 in
-//! `/docs/adr/stdlib-grammar-gaps.md`; parsing all twelve files is the
+//! `/docs/adr/stdlib-grammar-gaps.md`; parsing all stdlib modules is the
 //! parser-side evidence those gaps are closed.
 
 use std::fs;

@@ -46,7 +46,7 @@ pub(crate) fn probe_tool(label: &str, tool: &str, args: &[&str]) -> Check {
 pub(crate) fn stdlib_parse_check() -> Check {
     // The parse-check script lives at `<repo>/stdlib/parse-check.sh`. Resolve it
     // relative to the workspace by trying the canonical location from this crate.
-    let candidates = ["stdlib/parse-check.sh", "../stdlib/parse-check.sh"];
+    let candidates = ["scripts/parse-check.sh", "stdlib/parse-check.sh"];
     for script in candidates {
         if std::path::Path::new(script).exists() {
             // Judge by exit status only — the script's own cargo build progress

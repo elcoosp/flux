@@ -95,14 +95,14 @@ collect_files() {
   if [ "$MODE" = "all" ]; then
     git -C "$REPO_ROOT" ls-files \
       | grep -E '\.(rs|swift|kt|kts)$' \
-      | grep -vE '(^|/)(build|target|Generated|\.build|platforms)/' \
+      | grep -vE '(^|/)(build|target|Generated|\.build|platforms|fuzz)/' \
       | grep -vE '(^|/)(Tests?|tests?|androidTest)/' \
       | grep -vE 'Tests?/'
     return
   fi
   git -C "$REPO_ROOT" diff --name-only "$MERGE_BASE" "$HEAD_REF" \
     | grep -E '\.(rs|swift|kt|kts)$' \
-    | grep -vE '(^|/)(build|target|Generated|\.build|platforms)/' \
+    | grep -vE '(^|/)(build|target|Generated|\.build|platforms|fuzz)/' \
     | grep -vE '(^|/)(Tests?|tests?|androidTest)/' \
     | grep -vE 'Tests?/'
 }

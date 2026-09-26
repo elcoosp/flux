@@ -81,9 +81,13 @@ def parse_stdlib(stdlib_dir: Path) -> dict[str, set[str]]:
 # Components whose props are read by the native reconciler via FNV-1a
 # hashing rather than by name in an adapter file.  The script cannot
 # detect these reads statically; they are known-correct by design.
+# Also includes props read by the release codegen (e.g. initialRouteName
+# drives startDestination in flux-codegen-swift/kotlin) which the kit
+# scanners cannot see.
 FNV_READ_PROPS: set[tuple[str, str]] = {
     ("Screen", "route"),   # FLUX-071: reconciler swaps the screen by route hash
     ("Text", "size"),      # Swift reads size via Font record field 1 (§3.2)
+    ("Router", "initialRouteName"),  # codegen reads for startDestination (T-403.7)
 }
 
 # Props declared in stdlib but not yet implemented in either kit's adapter.

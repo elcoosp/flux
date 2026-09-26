@@ -2255,7 +2255,7 @@ mod tests {
             span(),
             &mut |_s| StringTable::new().intern(_s),
         )
-        .expect("RouterNav.navigate lowers to CALL_CAP");
+        .unwrap_or_else(|_| unreachable!("RouterNav.navigate lowers to CALL_CAP"));
         assert!(
             bytecode.contains(&raw::CALL_CAP),
             "RouterNav.navigate must lower to CALL_CAP: {bytecode:?}"
