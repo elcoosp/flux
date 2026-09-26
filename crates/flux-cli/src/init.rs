@@ -18,7 +18,7 @@ const CONFIG_FILE: &str = "flux.toml";
 
 /// A sample entry component that exercises the prelude (no type-checker
 /// dependency on the stdlib source): a `Column` of a `Text` and a `Button`.
-const SAMPLE_ENTRY: &str = "\
+pub(crate) const SAMPLE_ENTRY: &str = "\
 // main.flux — Flux app entry point.
 //
 // `Hello` is the root component; `flux dev` serves it over WebSocket and
@@ -29,7 +29,7 @@ compo Hello
 
     Column(gap: 8.0) {
         Text(text: \"tapped ${count} times\")
-        Button(text: \"Increment\", onClick: fn() { count = count + 1 })
+        Button(text: \"Increment\", onPress: fn() { count = count + 1 })
     }
 ";
 

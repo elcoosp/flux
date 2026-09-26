@@ -81,6 +81,28 @@ pub(crate) fn run_with(
     std::fs::create_dir_all(&out_dir)
         .with_context(|| format!("creating generated sources dir {}", out_dir.display()))?;
 
+    // Audit T-404: determine the entry component name across all sources
+    // so we can identify which file gets the @main / MainActivity wrapper
+    // and reserve MainActivity.kt / <Root>App.swift for it. Non-entry
+    // sources get their own {stem}.kt / {stem}.swift file instead of
+    // silently overwriting each other.
+    let entry_comp_name: Option<String> = {
+        let mut found: Vec<String> = Vec::new();
+        for (_, _, ast) in &compiled {
+            let bridge = flux_codegen_core::Bridge::build(ast);
+            let mut comps: Vec<_> = bridge.components().collect();
+            comps.sort_by_key(|(_, comp)| comp.span.start);
+            for (_, comp) in &comps {
+                found.push(comp.name.name.clone());
+            }
+        }
+        found
+            .iter()
+            .find(|name| *name == "App")
+            .cloned()
+            .or_else(|| found.first().cloned())
+    };
+
     for (path, ir, ast) in &compiled {
         let component_code = match platform {
             Platform::Ios => flux_codegen_swift::codegen(ir, ast),
@@ -106,44 +128,58 @@ pub(crate) fn run_with(
                 .unwrap_or_else(|| stem_owned.clone())
         };
 
-        // Emit a self-contained app file: prelude import + @main wrapper +
-        // component, all in one file. For Swift, two files in the same module
-        // cannot BOTH have top-level declarations — an import in one file makes
-        // `@main` illegal in another. So we strip the prelude from the
-        // component body and emit it ONCE at the top of the combined file.
-        let app_code = match platform {
-            Platform::Ios => {
-                let prelude = "import SwiftUI\n";
-                let body = if component_code.starts_with(prelude) {
-                    component_code[prelude.len()..].trim_start().to_owned()
-                } else {
-                    component_code.clone()
-                };
-                format!(
-                    "{prelude}\n@main\nstruct {root_comp_name}App: SwiftUI.App {{\n    var body: some Scene {{\n        WindowGroup {{\n            {root_comp_name}()\n        }}\n    }}\n}}\n\n{body}"
-                )
-            }
-            Platform::Android => {
-                // Strip the package decl + imports from the component body
-                // (the entry point owns them) so a single-file app compiles.
-                let body = component_code
-                    .lines()
-                    .skip_while(|l| {
-                        l.starts_with("package ") || l.starts_with("import ") || l.is_empty()
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                format!(
-                    "// Generated entry point\npackage dev.flux.app\n\nimport android.os.Bundle\nimport androidx.activity.ComponentActivity\nimport androidx.activity.compose.setContent\nimport androidx.compose.material3.MaterialTheme\n\nclass MainActivity : ComponentActivity() {{\n    override fun onCreate(savedInstanceState: Bundle?) {{\n        super.onCreate(savedInstanceState)\n        setContent {{\n            MaterialTheme {{\n                {root_comp_name}()\n            }}\n        }}\n    }}\n}}\n\n{body}"
-                )
-            }
-        };
-        let file_name = match platform {
-            Platform::Ios => format!("{root_comp_name}App.{}", platform.source_extension()),
-            Platform::Android => "MainActivity.kt".to_owned(),
+        let is_entry = Some(&root_comp_name) == entry_comp_name.as_ref();
+
+        // Entry file gets the full app wrapper (@main / MainActivity); non-entry
+        // files emit the raw component code under their own stem so multiple
+        // sources don't overwrite each other (Audit T-404).
+        let (code, file_name) = if is_entry {
+            // Emit a self-contained app file: prelude import + @main wrapper +
+            // component, all in one file. For Swift, two files in the same
+            // module cannot BOTH have top-level declarations — an import in one
+            // file makes `@main` illegal in another. So we strip the prelude
+            // from the component body and emit it ONCE at the top of the
+            // combined file.
+            let app_code = match platform {
+                Platform::Ios => {
+                    let prelude = "import SwiftUI\n";
+                    let body = if component_code.starts_with(prelude) {
+                        component_code[prelude.len()..].trim_start().to_owned()
+                    } else {
+                        component_code.clone()
+                    };
+                    format!(
+                        "{prelude}\n@main\nstruct {root_comp_name}App: SwiftUI.App {{\n    var body: some Scene {{\n        WindowGroup {{\n            {root_comp_name}()\n        }}\n    }}\n}}\n\n{body}"
+                    )
+                }
+                Platform::Android => {
+                    // Strip the package decl + imports from the component body
+                    // (the entry point owns them) so a single-file app compiles.
+                    let body = component_code
+                        .lines()
+                        .skip_while(|l| {
+                            l.starts_with("package ") || l.starts_with("import ") || l.is_empty()
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    format!(
+                        "// Generated entry point\npackage dev.flux.app\n\nimport android.os.Bundle\nimport androidx.activity.ComponentActivity\nimport androidx.activity.compose.setContent\nimport androidx.compose.material3.MaterialTheme\n\nclass MainActivity : ComponentActivity() {{\n    override fun onCreate(savedInstanceState: Bundle?) {{\n        super.onCreate(savedInstanceState)\n        setContent {{\n            MaterialTheme {{\n                {root_comp_name}()\n            }}\n        }}\n    }}\n}}\n\n{body}"
+                    )
+                }
+            };
+            let name = match platform {
+                Platform::Ios => format!("{root_comp_name}App.{}", platform.source_extension()),
+                Platform::Android => "MainActivity.kt".to_owned(),
+            };
+            (app_code, name)
+        } else {
+            // Non-entry: emit the raw component code under the source stem so
+            // each .flux file gets its own output file.
+            let name = format!("{stem}.{}", platform.source_extension());
+            (component_code, name)
         };
         let out = out_dir.join(&file_name);
-        std::fs::write(&out, app_code)
+        std::fs::write(&out, code)
             .with_context(|| format!("writing generated source {}", out.display()))?;
         tracing::info!(source = %path.display(), target = %out.display(), "codegen");
     }
@@ -596,6 +632,121 @@ mod tests {
         });
         let result = run_with(Platform::Ios, &tmp, &*resolver);
         assert!(result.is_ok(), "passing toolchain must succeed: {result:?}");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// Audit T-404 item 1: a two-file project must produce two distinct output
+    /// files (entry → `MainActivity.kt`, non-entry → `{stem}.kt`), not both
+    /// writing to `MainActivity.kt` and clobbering each other.
+    #[test]
+    fn two_file_project_produces_distinct_kt_files() {
+        let tmp = std::env::temp_dir().join(format!(
+            "flux-build-twofile-{}-{}",
+            std::process::id(),
+            "android"
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        std::fs::write(
+            tmp.join("main.flux"),
+            "compo App\n  state count: Int = 0\n\n  Column {\n    Text(text: \"count: ${count}\")\n    Button(text: \"Increment\", onPress: fn() { count = count + 1 })\n  }\n",
+        ).unwrap();
+        std::fs::write(
+            tmp.join("counter.flux"),
+            "compo Counter\n  state value: Int = 0\n\n  Text(text: \"counter: ${value}\")\n",
+        )
+        .unwrap();
+
+        let resolver: Box<CommandResolver> = Box::new(|_, _| None);
+        let result = run_with(Platform::Android, &tmp, &*resolver);
+        assert!(result.is_ok(), "build must succeed: {result:?}");
+
+        let gen_dir = tmp.join("platforms").join("android").join("Generated");
+        let main_kt = gen_dir.join("MainActivity.kt");
+        let counter_kt = gen_dir.join("counter.kt");
+
+        assert!(main_kt.exists(), "entry file MainActivity.kt must exist");
+        assert!(counter_kt.exists(), "non-entry file counter.kt must exist");
+
+        let main_src = std::fs::read_to_string(&main_kt).unwrap();
+        let counter_src = std::fs::read_to_string(&counter_kt).unwrap();
+
+        // Entry file has the MainActivity wrapper + root component call.
+        assert!(
+            main_src.contains("class MainActivity"),
+            "entry file must contain MainActivity wrapper"
+        );
+        assert!(
+            main_src.contains("App()"),
+            "entry file must reference root component"
+        );
+
+        // Non-entry file has the raw component, no MainActivity wrapper.
+        assert!(
+            !counter_src.contains("class MainActivity"),
+            "non-entry must not contain MainActivity wrapper"
+        );
+        assert!(
+            counter_src.contains("Counter"),
+            "non-entry must contain Counter component"
+        );
+
+        // The onPress handler body survives codegen. The binary expression
+        // may render as `(count) + 1` or `(count + 1)` depending on the backend's
+        // render_binary format; accept either shape.
+        assert!(
+            main_src.contains("count = count + 1")
+                || main_src.contains("count = (count + 1)")
+                || main_src.contains("count = (count) + 1"),
+            "onPress handler body must survive in generated code, got:\n{main_src}"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// Audit T-404 item 4: the scaffolded `init` template uses `onPress:`
+    /// (canonical verb), and the handler body survives lowering + codegen.
+    #[test]
+    fn scaffold_on_press_handler_survives_lowering() {
+        let tmp = std::env::temp_dir().join(format!(
+            "flux-build-scaffold-{}-{}",
+            std::process::id(),
+            "android"
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        // Use the real scaffold template — not a hand-rolled copy — so the
+        // test fails if someone regresses the verb back to onClick.
+        std::fs::write(tmp.join("main.flux"), crate::init::SAMPLE_ENTRY).unwrap();
+
+        let resolver: Box<CommandResolver> = Box::new(|_, _| None);
+        let result = run_with(Platform::Android, &tmp, &*resolver);
+        assert!(result.is_ok(), "scaffolded app must build: {result:?}");
+
+        let generated = tmp
+            .join("platforms")
+            .join("android")
+            .join("Generated")
+            .join("MainActivity.kt");
+        assert!(generated.exists(), "MainActivity.kt must be emitted");
+
+        let src = std::fs::read_to_string(&generated).unwrap();
+        // The scaffold uses `onPress:` — the canonical verb. Verify the handler
+        // body rendered from it, not silently dropped. The binary expression may
+        // render with or without wrapping parentheses depending on backend.
+        assert!(
+            src.contains("count = count + 1")
+                || src.contains("count = (count + 1)")
+                || src.contains("count = (count) + 1"),
+            "scaffold onPress handler body must survive codegen, got:\n{src}"
+        );
+        assert!(
+            src.contains("Increment"),
+            "scaffold button label must survive codegen"
+        );
+
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }
