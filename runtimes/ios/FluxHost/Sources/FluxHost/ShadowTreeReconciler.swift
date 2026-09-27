@@ -604,16 +604,32 @@ struct ShadowTreeReconciler {
             // `ForEach` (itemSlot != nil) the same re-run re-expands the rows from
             // the live list signal — without this the rows never appear after an
             // `append`/`remove`/clear and the list stays blank (FLUX-072 / ADR-0050).
-            let views: [AnyObject]
-            if node.kind == .router || componentNames[node.componentId] == "Router" || signalMeta[nodeId]?.itemSlot != nil {
-                views = collectChildViews(of: node, nodes: nodes, report: &report)
-                #if DEBUG
-                NSLog("[FluxRT] reconcileDirty router/foreach: collected \(views.count) views for node \(nodeId)")
-                #endif
-            } else {
-                views = childViews
+            // Re-parent children only when the child set actually changed
+            // (a child built/detached this pass) OR when the node is a
+            // router/ForEach whose active child / row set is dynamic and must
+            // be re-derived from the live signal graph.
+            //
+            // For a plain container (Column/Row/Screen), a prop-only update on a
+            // leaf already updated that leaf's view in place via `adapter.update`;
+            // the parent's child list is unchanged, so calling `setChildren` would
+            // invoke an O(n) identity-reconciliation pass over every child on every
+            // dirty leaf — the perf-killing bug behind FLUX-066: 24 re-attach
+            // checks per single-signal write on the simulator.
+            let isDynamic = node.kind == .router
+                || componentNames[node.componentId] == "Router"
+                || signalMeta[nodeId]?.itemSlot != nil
+            let structuralChange = !report.built.isEmpty || !report.detached.isEmpty
+            if isDynamic || structuralChange {
+                let views = isDynamic
+                    ? collectChildViews(of: node, nodes: nodes, report: &report)
+                    : childViews
+                if isDynamic {
+                    #if DEBUG
+                    NSLog("[FluxRT] reconcileDirty router/foreach: collected \(views.count) views for node \(nodeId)")
+                    #endif
+                }
+                owner.adapter.setChildren(views, on: owner.view)
             }
-            owner.adapter.setChildren(views, on: owner.view)
         } else if isDirty {
             // A dirty node that was never built (shouldn't happen on dispatch, but
             // be safe): fall back to a full reconcile of this subtree.
