@@ -236,6 +236,35 @@ impl Backend for Swift {
         out
     }
 
+    fn form_control(
+        spec: &PrimitiveSpec,
+        value: &str,
+        on_change: &str,
+    ) -> Option<String> {
+        // SwiftUI form controls read/write a `Binding`; the emitter's generic
+        // `{native}({value})` fallback produces `Toggle(v)` / `Slider(v)` /
+        // `TextEditor(v)`, all of which are compile errors (SwiftUI expects a
+        // `Binding`, not a value). Build the Binding from the declared state
+        // expression and the Flux handler body (used as the setter). An empty
+        // handler degrades to `.constant(value)` so the shape still compiles.
+        let binding = if on_change.is_empty() {
+            format!(".constant({value})")
+        } else {
+            format!("Binding(get: {{ {value} }}, set: {{ newValue in {on_change} }})")
+        };
+        match spec.flux_name {
+            "Switch" | "Checkbox" => {
+                Some(format!("Toggle(isOn: {binding}) {{ EmptyView() }}"))
+            }
+            "Slider" => Some(format!("Slider(value: {binding}, in: 0...1)")),
+            "TextArea" => Some(format!("TextEditor(text: {binding})")),
+            // Picker / DatePicker need collection/date state we do not
+            // reconstruct; fall back to the legacy call so a future hook can
+            // shape them without changing the emitter again.
+            _ => None,
+        }
+    }
+
     fn animation_spec(curve: &str) -> String {
         // FLUX-042: map the Flux curve name onto a SwiftUI `Animation` value.
         // Named curves reduce to the standard `Animation.*` spellings; unknown
