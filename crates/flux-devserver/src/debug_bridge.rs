@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use flux_ir::LoweredIr;
 use flux_ir_serde::{
     DebugCommand, EnrichedTelemetryEvent, EnrichedTelemetryFrame, HostAnnounceFrame,
-    TelemetryEvent, TelemetryFrame,
+    TelemetryEvent,
 };
 use flux_syntax::{NodeId, Span};
 use futures_util::{SinkExt, StreamExt};
@@ -386,6 +386,7 @@ pub async fn serve_devtools(
 
 #[cfg(test)]
 mod tests {
+    use flux_ir_serde::TelemetryFrame;
     use super::*;
     use flux_ir_serde::PROTOCOL_VERSION;
 
