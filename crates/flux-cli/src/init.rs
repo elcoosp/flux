@@ -80,7 +80,11 @@ pub(crate) fn run(name: &str) -> anyhow::Result<()> {
     fs::create_dir_all(root).with_context(|| format!("creating project directory {name}"))?;
     write_file(root, ENTRY_FILE, SAMPLE_ENTRY)?;
     write_file(root, IGNORE_FILE, SAMPLE_IGNORE)?;
-    write_file(root, CONFIG_FILE, SAMPLE_CONFIG)?;
+    // Audit fix: `SAMPLE_CONFIG` hardcodes `name = "myapp"`. Interpolate the
+    // user-supplied project name so `flux init blog-app` scaffolds a project
+    // whose `[project] name` actually is `blog-app`.
+    let config = SAMPLE_CONFIG.replace("myapp", name);
+    write_file(root, CONFIG_FILE, &config)?;
 
     tracing::info!(project = name, "scaffolded new Flux project");
     println!("created flux project `{name}`");
