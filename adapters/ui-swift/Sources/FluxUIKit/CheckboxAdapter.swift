@@ -44,11 +44,19 @@ public final class CheckboxAdapter: FluxAdapter {
 
     public func bindHandler(_ handlerId: FluxHandlerId, to view: UIButton, nodeId: FluxNodeId) {
         let target = HandlerTarget(executor: executor, handlerId: handlerId, nodeId: nodeId) { .bool(view.isSelected) }
+        // Audit fix: remove any previously-registered UIAction on this view
+        // before adding a new one. The dev runtime re-binds handlers on
+        // hot-swap and on prop change; without this each rebind accumulates
+        // another action and a single user tap dispatches N times.
+        view.removeAllActions()
         view.addAction(UIAction { _ in target.fire() }, for: .touchUpInside)
     }
 
     public func destroy(_ view: UIButton) {
-        view.removeTarget(nil, action: nil, for: .allEvents)
+        // Audit fix: `removeTarget(_:action:for:)` removes target/action pairs,
+        // NOT `UIAction` registrations (those need `removeAllActions()`). The
+        // previous call left stale actions alive and firing on recycled views.
+        view.removeAllActions()
     }
 
     /// Renders the checkbox glyph from the current selected state.
