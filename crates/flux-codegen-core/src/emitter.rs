@@ -506,6 +506,34 @@ impl<'a, B: Backend> Emitter<'a, B> {
                     self.line(indent, &B::toggle_close());
                 } else if spec.flux_name == "Spacer" {
                     self.line(indent, &B::spacer());
+                } else if spec.handler_prop.is_some() {
+                    // Form-family primitive (Switch, Checkbox, Slider,
+                    // Picker, DatePicker, TextArea): the bare `{native}({value})`
+                    // shape is a compile error in every real target language
+                    // (Compose requires named `checked=` / `onCheckedChange=`
+                    // args; SwiftUI requires a `Binding`). Route through the
+                    // backend's `form_control` hook so each platform emits its
+                    // real control shape, and pass the rendered handler body
+                    // (extracted from the arg named by `spec.handler_prop`)
+                    // so user-supplied callbacks are not silently dropped.
+                    let value = primary
+                        .map(render_inline)
+                        .unwrap_or_else(|| "\"\"".to_owned());
+                    let on_change = spec
+                        .handler_prop
+                        .and_then(|prop| {
+                            args.iter().find_map(|a| match a {
+                                Arg::Named { name, value } if name.name == prop => {
+                                    render_handler_body::<B>(value)
+                                }
+                                _ => None,
+                            })
+                        })
+                        .unwrap_or_default();
+                    match B::form_control(spec, &value, &on_change) {
+                        Some(shaped) => self.line(indent, &shaped),
+                        None => self.line(indent, &format!("{native}({value})")),
+                    }
                 } else {
                     let value = primary
                         .map(render_inline)
