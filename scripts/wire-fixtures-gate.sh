@@ -72,10 +72,18 @@ fi
 # ---------------------------------------------------------------------------
 if command -v xcodebuild >/dev/null 2>&1; then
     echo "--- Swift (FluxApp WireFixtureDecodeTests) ---"
-    if (cd "$REPO/runtimes/ios" && xcodebuild test \
+    # Audit fix: the destination was a hardcoded simulator UDID pinned to one
+    # author's machine. On any other developer's Mac the gate reported FAIL
+    # instead of SKIP. Discover a booted simulator at runtime; if none is
+    # booted, skip the Swift leg (matching the `xcodebuild not installed`
+    # policy above).
+    BOOTED_SIM="$(xcrun simctl list devices booted 2>/dev/null | grep -oE '[0-9A-Fa-f-]{36}' | head -1 || true)"
+    if [ -z "$BOOTED_SIM" ]; then
+        echo "SKIP: no booted iOS simulator; Swift decoder not run"
+    elif (cd "$REPO/runtimes/ios" && xcodebuild test \
         -project FluxApp.xcodeproj \
         -scheme FluxApp \
-        -destination 'platform=iOS Simulator,id=27088715-6C8B-436A-AC66-B2DA978A2944' \
+        -destination "platform=iOS Simulator,id=$BOOTED_SIM" \
         -only-testing:FluxAppTests/WireFixtureDecodeTests \
         2>&1 | tail -5); then
         echo "[ok] Swift fixture test"
