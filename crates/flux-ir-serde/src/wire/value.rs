@@ -73,7 +73,26 @@ const TAG_HANDLER: u8 = 0x05;
 const TAG_LIST: u8 = 0x06;
 const TAG_RECORD: u8 = 0x07;
 
+/// Maximum nesting depth accepted for a `Value` before decode fails closed.
+///
+/// A ~200 KB hostile frame can otherwise drive `decode_value` recursion to the
+/// process stack limit (Rust stack overflow is not catchable) and abort the
+/// whole dev server. Mirrors the parser's `MAX_PARSE_DEPTH` policy of bounding
+/// input-driven recursion.
+pub(crate) const MAX_VALUE_DEPTH: usize = 128;
+
 pub(crate) fn decode_value(r: &mut Reader<'_>) -> Result<Value, WireError> {
+    decode_value_at(r, 0)
+}
+
+fn decode_value_at(r: &mut Reader<'_>, depth: usize) -> Result<Value, WireError> {
+    if depth > MAX_VALUE_DEPTH {
+        return Err(WireError::InvalidTag {
+            tag: 0,
+            context: "value.depth",
+            at: r.pos(),
+        });
+    }
     let tag = r.u8("value.tag")?;
     match tag {
         TAG_NULL => Ok(Value::Null),
@@ -87,7 +106,7 @@ pub(crate) fn decode_value(r: &mut Reader<'_>) -> Result<Value, WireError> {
             r.ensure_capacity(count as usize, "value.list")?;
             let mut items = Vec::with_capacity(count as usize);
             for _ in 0..count {
-                items.push(decode_value(r)?);
+                items.push(decode_value_at(r, depth + 1)?);
             }
             Ok(Value::List(items))
         }
@@ -97,7 +116,7 @@ pub(crate) fn decode_value(r: &mut Reader<'_>) -> Result<Value, WireError> {
             let mut fields = Vec::with_capacity(count as usize);
             for _ in 0..count {
                 let index = r.u16("value.record.index")?;
-                let val = decode_value(r)?;
+                let val = decode_value_at(r, depth + 1)?;
                 fields.push((index, val));
             }
             Ok(Value::Record(fields))
