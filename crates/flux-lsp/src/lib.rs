@@ -729,7 +729,7 @@ mod tests {
     // `LanguageServer` trait path.
     #[tokio::test]
     async fn definition_resolves_usage_to_declaration_span() {
-        use async_lsp::lsp_types::{Position, TextDocumentPositionParams, DidCloseTextDocumentParams};
+        use async_lsp::lsp_types::{Position, TextDocumentPositionParams};
 
         let mut server = FluxLsp::new();
         let uri: Url = "file:///counter.flux".parse().expect("uri");
