@@ -12,26 +12,76 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// A non-negative latency in milliseconds.
+/// A non-negative, finite latency in milliseconds.
 ///
 /// Wrapped so the percentile math and JSON shape stay in one place and so a
-/// negative or `NaN` value can never silently enter a record.
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[serde(transparent)]
+/// negative, `NaN` or `±inf` value cannot silently enter a record. The
+/// `Serialize`/`Deserialize` impls are hand-written rather than derived so a
+/// hostile or buggy JSON payload cannot smuggle one in past the constructor
+/// (the previous `#[derive(Deserialize)]` bypassed every check).
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub struct LatencyMs(f64);
 
+/// Error returned by [`LatencyMs::try_from_raw`] when `value` is not a
+/// non-negative finite number.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LatencyError;
+
+impl fmt::Display for LatencyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("latency must be a non-negative, finite number")
+    }
+}
+
+impl std::error::Error for LatencyError {}
+
 impl LatencyMs {
-    /// The raw value; panics only on `NaN` (a record must never carry one).
+    /// The raw value, panicking only on a value that is not a non-negative
+    /// finite number. Prefer [`LatencyMs::try_from_raw`] in any code path
+    /// that consumes untrusted input (JSON, wire, or fixtures); the panic
+    /// form is retained for the harness's own measurement loop, where a bad
+    /// value is a programming error we want to catch immediately.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `value` is `NaN`, infinite, or negative.
     #[must_use]
     pub fn from_raw(value: f64) -> Self {
-        assert!(!value.is_nan(), "LatencyMs must not be NaN");
-        Self(value)
+        Self::try_from_raw(value).expect("LatencyMs::from_raw called with invalid value")
+    }
+
+    /// Validating constructor: returns an error instead of panicking on
+    /// `NaN`, `±inf`, or a negative value.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LatencyError`] when `value` is not a non-negative finite
+    /// number.
+    pub fn try_from_raw(value: f64) -> Result<Self, LatencyError> {
+        if value.is_finite() && value >= 0.0 {
+            Ok(Self(value))
+        } else {
+            Err(LatencyError)
+        }
     }
 
     /// The raw milliseconds.
     #[must_use]
     pub fn as_f64(self) -> f64 {
         self.0
+    }
+}
+
+impl Serialize for LatencyMs {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_f64(self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for LatencyMs {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let v = f64::deserialize(deserializer)?;
+        LatencyMs::try_from_raw(v).map_err(serde::de::Error::custom)
     }
 }
 
