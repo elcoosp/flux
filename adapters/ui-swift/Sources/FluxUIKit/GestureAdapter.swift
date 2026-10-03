@@ -35,18 +35,24 @@ public final class GestureAdapter: FluxAdapter {
     }
 
     public func update(_ view: UIView, from old: Props, to new: Props) {
-        // Audit D15: missing/unknown kind surfaces to overlay — no default recognizer.
+        // Audit fix: on a missing/unknown `kind`, DETACH any recognizer instead
+        // of attaching a placeholder. The previous code fell through
+        // `makeRecognizer`'s `default:` arm to a real `UILongPressGestureRecognizer`
+        // and bound it — an invalid node still responded to touches, and the
+        // existing recognizer was replaced (not removed), so its stale target
+        // survived on the recycled view.
         guard let kind = new.getString(named: "kind"), !kind.isEmpty else {
             view.gestureEnvironment?.error = "missing gesture kind"
-            attachRecognizer(kind: "error", to: view)
+            detachRecognizer(from: view)
             return
         }
         guard ["longPress", "longpress", "swipe", "drag", "pinch"].contains(kind) else {
             view.gestureEnvironment?.error = "unknown gesture kind: \(kind)"
-            attachRecognizer(kind: "error", to: view)
+            detachRecognizer(from: view)
             return
         }
         attachRecognizer(kind: kind, to: view)
+        view.gestureEnvironment?.error = nil
         view.gestureEnvironment?.threshold = Double(new.getFloat(named: "threshold") ?? 0.0)
     }
 
@@ -68,6 +74,19 @@ public final class GestureAdapter: FluxAdapter {
         self.recognizer = nil
         view.gestureEnvironment = nil
         view.subviews.forEach { $0.removeFromSuperview() }
+    }
+
+    /// Removes any currently-attached recognizer from the view, clearing the
+    /// adapter's reference so a subsequent `bindHandler` cannot target a
+    /// recognizer that is no longer installed. Used by the error paths in
+    /// `update` (missing/unknown `kind`) — the audit D15 contract is "no
+    /// default recognizer on error", and a detach is the only faithful way to
+    /// realize that.
+    private func detachRecognizer(from view: UIView) {
+        if let existing = recognizer {
+            view.removeGestureRecognizer(existing)
+            self.recognizer = nil
+        }
     }
 
     /// Attaches (or re-attaches) the recognizer matching `kind`, preserving the
