@@ -38,9 +38,28 @@ public final class PickerAdapter: FluxAdapter {
     }
 
     public func update(_ view: UIPickerView, from old: Props, to new: Props) {
-        source?.items = new.getList(named: "items")?.compactMap { if case .str(let s) = $0 { s } else { nil } } ?? []
-        // Audit D14: absent prop retains previous value (no reset).
-        if let selected = new.getInt(named: "value"), view.selectedRow(inComponent: 0) != Int(selected) {
+        // Audit fix: the previous `?? []` wiped the data source whenever a
+        // patch omitted `items` — directly contradicting the "absent prop
+        // retains previous value" (D14) contract three lines below. Only
+        // re-assign + reload when the prop is actually present, and only when
+        // its value changed (avoid a needless wheel reload on every no-op).
+        if let items = new.getList(named: "items") {
+            let strings = items.compactMap { if case .str(let s) = $0 { s } else { nil } }
+            if source?.items != strings {
+                source?.items = strings
+                // `reloadAllComponents` is mandatory after mutating the data
+                // source; without it the wheel keeps showing the previous rows
+                // and `selectRow` may target a nonexistent index.
+                view.reloadAllComponents()
+            }
+        }
+        // Clamp the selection to the live row count so `selectRow` never
+        // targets a nonexistent row (silent no-op + stale wheel content).
+        let rowCount = max(source?.items.count ?? 0, 1)
+        if let selected = new.getInt(named: "value"),
+           Int(selected) < rowCount,
+           view.selectedRow(inComponent: 0) != Int(selected)
+        {
             view.selectRow(Int(selected), inComponent: 0, animated: false)
         }
         view.isUserInteractionEnabled = new.getBool(named: "enabled") ?? true
