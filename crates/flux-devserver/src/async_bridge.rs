@@ -121,10 +121,17 @@ impl AsyncBridge {
         self.settle_inner(cell, value, false)
     }
 
-    /// Discards any `early` values left over from this session so they cannot
-    /// leak into a future session that reuses the cell id space.
-    pub fn clear_early(&mut self) {
+    /// Discards every session-scoped entry (`early` AND `parked`) so stale
+    /// state cannot leak into a future session that reuses the cell id space.
+    ///
+    /// Audit fix: `parked` was previously retained for the process lifetime —
+    /// (a) unbounded growth when a handler suspended and never settled, and
+    /// (b) cross-session corruption when a new session settled cell N and the
+    /// old session's `Parked { handler_id, resume_ip }` matched it, emitting a
+    /// `Resume` frame addressing the previous session's handler.
+    pub fn clear_session(&mut self) {
         self.early.clear();
+        self.parked.clear();
     }
 
     fn settle_inner(&mut self, cell: SignalId, value: Value, is_error: bool) -> Option<Vec<u8>> {
@@ -256,7 +263,7 @@ mod tests {
         assert!(bridge.settle(5, Value::Int(42)).is_none());
         assert_eq!(bridge.parked_len(), 0);
         // The stale `early` value is discarded on session end.
-        bridge.clear_early();
+        bridge.clear_session();
         // A new session reporting the suspension must NOT resume from the
         // stale value.
         assert!(bridge.park(AwaitSuspendFrame::new(9, 5, 0)).is_none());
