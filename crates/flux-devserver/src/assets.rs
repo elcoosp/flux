@@ -70,6 +70,27 @@ async fn serve_asset(
             .into_response();
     };
 
+    // Audit fix: cap the file size a single asset request will read into
+    // memory. Without a bound, a very large file anywhere under the project
+    // root (a downloaded video, an accidentally-checked-in artifact, or a
+    // symlink target that resolved inside the root) would be read whole on
+    // every request and stored in the response body — a per-request memory
+    // amplification with no upper bound. 32 MB is comfortable for a dev
+    // session's images, fonts and JSON fixtures, and any larger file is
+    // returned as 413 with a clear message instead of being pulled into RAM.
+    const MAX_ASSET_BYTES: u64 = 32 * 1024 * 1024;
+    if metadata.len() > MAX_ASSET_BYTES {
+        return (
+            StatusCode::PAYLOAD_TOO_LARGE,
+            format!(
+                "asset `{path}` is {} bytes, exceeds the {MAX_ASSET_BYTES}-byte dev-server cap — \
+                 hint: keep large artifacts out of the project root, or serve them elsewhere",
+                metadata.len()
+            ),
+        )
+            .into_response();
+    }
+
     let etag = compute_etag(&metadata);
 
     if let Some(if_none_match) = request_headers.get(header::IF_NONE_MATCH) {
