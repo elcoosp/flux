@@ -435,17 +435,52 @@ impl LanguageServer for FluxLsp {
         let DidOpenTextDocumentParams {
             text_document: TextDocumentItem { uri, text, .. },
         } = params;
-        let mut docs = match self.documents.lock() {
-            Ok(guard) => guard,
-            Err(_) => {
-                return ControlFlow::Break(Err(async_lsp::ResponseError::new(
-                    async_lsp::ErrorCode::INTERNAL_ERROR,
-                    "state mutex poisoned",
-                )
-                .into()));
-            }
-        };
-        docs.insert(uri, text);
+
+        // Cache the document first; publishing runs on a fresh analysis pass
+        // over the same text, and needs to see the same shape did_change does
+        // (so `diagnostics_with_types` and `did_change` cannot diverge).
+        {
+            let mut docs = match self.documents.lock() {
+                Ok(guard) => guard,
+                Err(_) => {
+                    return ControlFlow::Break(Err(async_lsp::ResponseError::new(
+                        async_lsp::ErrorCode::INTERNAL_ERROR,
+                        "state mutex poisoned",
+                    )
+                    .into()));
+                }
+            };
+            docs.insert(uri.clone(), text.clone());
+        }
+
+        // Audit fix: did_open previously only inserted into the cache, so a
+        // freshly opened file showed no squiggles until the first keystroke.
+        // The acceptance test at `tests/publish_diagnostics.rs` passed only
+        // because it drove a hand-written `TestServer` that re-implemented
+        // the publishing the real server lacked. Now the real server
+        // publishes diagnostics for an opened document, matching the
+        // `did_change` path.
+        if let Some(client) = self.client.clone() {
+            let uri_for_publish = uri;
+            let text_for_analysis = text;
+            tokio::spawn(async move {
+                let path = std::path::PathBuf::from(uri_for_publish.path());
+                let server = FluxLsp::new();
+                let diags = server.diagnostics_with_types(&path, &text_for_analysis, true);
+                let lsp_diags: Vec<Diagnostic> = diags
+                    .iter()
+                    .map(|d| FluxLsp::to_lsp_diagnostic_with_text(&text_for_analysis, d))
+                    .collect();
+                let _ = client.notify::<lsp_types::notification::PublishDiagnostics>(
+                    PublishDiagnosticsParams {
+                        uri: uri_for_publish,
+                        diagnostics: lsp_diags,
+                        version: None,
+                    },
+                );
+            });
+        }
+
         ControlFlow::Continue(())
     }
 
