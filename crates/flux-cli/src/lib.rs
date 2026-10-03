@@ -110,10 +110,11 @@ pub enum Command {
         /// The `.flux` source file to analyze.
         file: PathBuf,
 
-        /// Also run the type-checker (default). When false, only parse
-        /// diagnostics are emitted (the fast path for large files).
-        #[arg(long, default_value_t = true)]
-        types: bool,
+        /// Disable the type-checker (parse diagnostics only — fast path for
+        /// large files). Negatable so `--no-types` is the only way to turn
+        /// typing off; omitting the flag keeps the checker on.
+        #[arg(long = "no-types", action = clap::ArgAction::SetTrue)]
+        no_types: bool,
     },
 
     /// Format one or more `.flux` files to canonical style (FLUX-078).
@@ -195,7 +196,7 @@ pub async fn run(command: Command) -> anyhow::Result<()> {
             token,
         } => dev::run(&root, &ws_host, ws_port, http_port, token).await,
         Command::Build { platform, root } => build::run(platform, &root),
-        Command::Lsp { file, types } => lsp::run(&file, types),
+        Command::Lsp { file, no_types } => lsp::run(&file, !no_types),
         Command::Fmt { paths, check } => fmt::run(&paths, check),
         Command::Doc => doc::run(),
         Command::Doctor { strict } => doctor::run(strict),
