@@ -30,8 +30,24 @@ use crate::server::Shared;
 /// compile time; this config is what actually turns it on at runtime. Clients
 /// that do not offer the extension complete the handshake and receive
 /// uncompressed frames, so enabling compression is backward-compatible.
+/// WebSocket configuration for accepted host connections.
+///
+/// Explicit message/frame limits (audit fix): the previous version returned
+/// `WebSocketConfig::default()` while its doc comment promised specific
+/// behavior ("compression negotiated when the feature is enabled"). The
+/// default limits are backend-chosen and do not necessarily match the wire
+/// frame cap the rest of the pipeline enforces; a hostile or buggy client
+/// could otherwise push a message much larger than `MAX_FRAME_BYTES` into
+/// the session task before the codec got a chance to reject it.
+///
+/// The values below are the largest Init/Delta frame the devserver emits plus
+/// generous headroom for capability payloads and interned strings. Permessage
+/// deflate is negotiated automatically by tungstenite when both peers offer
+/// the extension; it is not configured here.
 pub(crate) fn websocket_config() -> WebSocketConfig {
     WebSocketConfig::default()
+        .max_message_size(Some(16 * 1024 * 1024))
+        .max_frame_size(Some(16 * 1024 * 1024))
 }
 
 /// Drives one host connection: `Hello` handshake, `Init` reply, then frame fan-out.
