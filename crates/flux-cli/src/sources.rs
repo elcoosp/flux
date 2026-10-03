@@ -28,7 +28,18 @@ pub(crate) fn gather(root: &Path) -> anyhow::Result<Vec<(PathBuf, String)>> {
     Ok(out)
 }
 
+/// Directories that never contain user `.flux` sources and are walked past
+/// regardless of a project's layout. Prevents `flux build` / `flux doc` from
+/// recursing into VCS internals, build output, or package-manager trees.
+const SKIP_DIRS: &[&str] = &[".git", "target", "node_modules", "platforms", ".build"];
+
 /// Walks `dir`, appending every `.flux` file's path and contents to `out`.
+///
+/// Audit fix: skip directories reached through a symlink and the standard
+/// noise dirs. A symlink loop (a directory symlinked to one of its ancestors)
+/// previously made this recursive walk hit the process stack limit and abort
+/// `flux build` / `flux doc`; walking `.git` / `target` / `node_modules` also
+/// burned time and could surface unrelated `.flux` files from dependencies.
 fn collect_into(dir: &Path, out: &mut Vec<(PathBuf, String)>) -> std::io::Result<()> {
     if !dir.is_dir() {
         return Ok(());
@@ -36,7 +47,19 @@ fn collect_into(dir: &Path, out: &mut Vec<(PathBuf, String)>) -> std::io::Result
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
+        // `path.is_symlink()` checks the entry itself; use it to prevent
+        // following a directory symlink into a loop.
+        if path.is_symlink() {
+            continue;
+        }
         if path.is_dir() {
+            let skip = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| SKIP_DIRS.contains(&n));
+            if skip {
+                continue;
+            }
             collect_into(&path, out)?;
         } else if path.extension().and_then(|e| e.to_str()) == Some("flux") {
             match fs::read_to_string(&path) {
