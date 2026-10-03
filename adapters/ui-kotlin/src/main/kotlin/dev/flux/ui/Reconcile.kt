@@ -28,8 +28,19 @@ public fun reconcileChildren(
     targetIds: KList<UInt>,
     lookup: (UInt) -> FluxNativeView?,
 ) {
-    val existing = view.children().associateBy { it.nodeId }
-    val targetViews = targetIds.mapNotNull { id -> existing[id] ?: lookup(id) }
+    // Audit fix: `targetIds.mapNotNull { existing[id] ?: lookup(id) }` silently
+    // dropped any id whose view could not be resolved, so the final child list
+    // no longer matched the server's targetIds order/count — silent corruption
+    // for the container adapters that rely on this helper (Gesture, overlays,
+    // Router). Also detects duplicate ids (a `targetIds` list containing the
+    // same id twice added the same view twice).
+    require(targetIds.toSet().size == targetIds.size) {
+        "duplicate child ids in reconcile: $targetIds"
+    }
+    val byId = view.children().associateBy { it.nodeId }
+    val targetViews = targetIds.map { id ->
+        byId[id] ?: lookup(id) ?: error("no view for child id $id in $targetIds")
+    }
 
     // Rebuild the child list from reused instances. Existing views keep their
     // identity (state preserved); orphans drop out; brand-new views come from
