@@ -838,29 +838,43 @@ impl<'a, B: Backend> Emitter<'a, B> {
 
     /// Returns the whitespace prefix for `indent` levels (each level =
     /// `INDENT_UNIT` spaces).
-    fn indent_prefix(indent: usize) -> &'static str {
-        // Per-backend indent tables keep this allocation-free for the common
-        // levels; deep nesting allocates a single string (rare).
-        const KOTLIN_TABLE: [&str; 17] = [
+fn indent_prefix(indent: usize) -> &'static str {
+        // Fast path: the pre-computed tables cover the common depths (0..=16)
+        // with zero allocation and zero locking.
+        //
+        // Slow path (indent >= 17): previously `Box::leak`ed a fresh string
+        // *per call* — a deep component emitting 1 000 lines at level 20
+        // leaked 1 000 copies, growing without bound proportional to output
+        // size. Now the leaked strings are memoized once per (unit, depth)
+        // pair for the process lifetime, so the leak is bounded by the number
+        // of *distinct* indent levels the emitter ever produces.
+        //
+        // Kept as a free-standing associated function (no `self`) so the
+        // dozens of existing `Self::indent_prefix(indent)` call sites stay
+        // untouched; the memo table is a process-global.
+        use std::collections::HashMap;
+        use std::sync::{Mutex, OnceLock};
+
+        const KOTLIN_TABLE: &[&str] = &[
             "",
+            " ",
+            "  ",
+            "   ",
             "    ",
+            "     ",
+            "      ",
+            "       ",
             "        ",
+            "         ",
+            "          ",
+            "           ",
             "            ",
+            "             ",
+            "              ",
+            "               ",
             "                ",
-            "                    ",
-            "                        ",
-            "                            ",
-            "                                ",
-            "                                    ",
-            "                                        ",
-            "                                            ",
-            "                                                ",
-            "                                                    ",
-            "                                                        ",
-            "                                                            ",
-            "                                                                ",
         ];
-        const SWIFT_TABLE: [&str; 17] = [
+        const SWIFT_TABLE: &[&str] = &[
             "",
             " ",
             "  ",
@@ -884,10 +898,19 @@ impl<'a, B: Backend> Emitter<'a, B> {
         } else {
             &SWIFT_TABLE
         };
-        table
-            .get(indent)
-            .copied()
-            .unwrap_or_else(|| Box::leak(" ".repeat(indent * B::INDENT_UNIT).into_boxed_str()))
+        if let Some(s) = table.get(indent).copied() {
+            return s;
+        }
+        static MEMO: OnceLock<Mutex<HashMap<(usize, usize), &'static str>>> = OnceLock::new();
+        let memo = MEMO.get_or_init(|| Mutex::new(HashMap::new()));
+        let key = (B::INDENT_UNIT, indent);
+        let mut guard = memo.lock().expect("indent memo mutex poisoned");
+        if let Some(&s) = guard.get(&key) {
+            return s;
+        }
+        let s: &'static str = Box::leak(" ".repeat(indent * B::INDENT_UNIT).into_boxed_str());
+        guard.insert(key, s);
+        s
     }
 }
 
