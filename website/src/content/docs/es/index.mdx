@@ -20,8 +20,10 @@ import FrameInspector from '../../../components/FrameInspector.astro';
 import ViewNodeTree from '../../../components/ViewNodeTree.astro';
 import StatusBadge from '../../../components/StatusBadge.astro';
 import { getTranslation } from '../../../components/i18n-helper';
+import { getTracePlayerStrings } from '../../components/i18n-helper';
 
 export const i18n = getTranslation('es');
+export const tracePlayerI18n = getTracePlayerStrings('es');
 export const counterHex = (await import('../../../assets/traces/counter-init.hex?raw')).default;
 export const counterSrc = `compo Counter
   $count: Int = 0
@@ -58,7 +60,7 @@ export const counterTree = (await import('../../../assets/traces/counter-init-tr
 
 <DispatchTracePlayer
   client:visible
-  i18n={i18n}
+  i18n={tracePlayerI18n}
   source={counterSrc}
   hex={counterHex}
 />
