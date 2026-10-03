@@ -25,7 +25,13 @@ final class TextInputAdapterTests: XCTestCase {
         let field = adapter.create()
         adapter.bindHandler(4, to: field, nodeId: 9)
         field.text = "abc"
-        (field.delegate as? TextInputAdapter.Delegate)?.textFieldDidChangeSelection(field)
+        // Simulate the real UIKit user-edit signal (fires on every keystroke);
+        // the adapter registers an `.editingChanged` action that dispatches the
+        // field's current text as the `onChangeText` payload. This replaces the
+        // old test's call into a delegate callback removed by Audit D19 — the
+        // suite previously couldn't compile, which is exactly why the dead
+        // controlled-input loop went unnoticed on iOS.
+        field.sendActions(for: .editingChanged)
         XCTAssertEqual(executor.dispatched.first?.handlerId, 4)
         XCTAssertEqual(executor.dispatched.first?.payload, .str("abc"))
     }
