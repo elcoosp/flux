@@ -202,16 +202,31 @@ public final class SafeAreaAdapter: FluxAdapter {
     public func setChildren(_ children: [AnyObject], on view: UIView) {
         let views = children.compactMap { $0 as? UIView }
         view.subviews.forEach { $0.removeFromSuperview() }
-        for v in views {
-            view.addSubview(v)
-            v.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                v.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
-                v.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
-                v.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
-                v.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
-            ])
+        // Multiple children pinned to the same safe-area anchors would overdraw
+        // each other; host them in a vertical stack when there is more than one.
+        // Single-child keeps the previous pinned shape.
+        let hosted: UIView?
+        if views.count == 1 {
+            hosted = views[0]
+        } else if views.count > 1 {
+            let stack = UIStackView(arrangedSubviews: views)
+            stack.axis = .vertical
+            stack.alignment = .fill
+            stack.distribution = .fill
+            stack.translatesAutoresizingMaskIntoConstraints = false
+            hosted = stack
+        } else {
+            hosted = nil
         }
+        guard let hosted = hosted else { return }
+        hosted.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(hosted)
+        NSLayoutConstraint.activate([
+            hosted.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
+            hosted.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
+            hosted.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            hosted.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
+        ])
     }
 
     public func bindHandler(_ handlerId: FluxHandlerId, to view: UIView, nodeId: FluxNodeId) {}
