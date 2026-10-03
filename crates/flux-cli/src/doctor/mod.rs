@@ -155,9 +155,13 @@ pub(crate) fn run(strict: bool) -> Result<()> {
         if !drifts.is_empty() {
             println!("dependency drift:");
             for d in &drifts {
+                // Canonical shape: "name approved <req> resolved <ver> — warning".
+                // The previous message printed `d.approved` twice (the second
+                // time as the trailing `(approved …)`), which read as a bug
+                // because the same string appeared in two positions.
                 println!(
-                    "  - {} {} resolved {} — {} (approved {})",
-                    d.name, d.approved, d.resolved, d.warning, d.approved
+                    "  - {} approved {} resolved {} — {}",
+                    d.name, d.approved, d.resolved, d.warning,
                 );
             }
         }
