@@ -39,7 +39,7 @@ function canonicalLine(obj: Record<string, unknown>): string {
   const parts = keys.map((k) => {
     const v = obj[k];
     if (v === null) return `"${k}":null`;
-    return `"${k}":${typeof v === 'string' ? JSON.stringify(v) : String(v)}`;
+    return `"${k}":${JSON.stringify(v)}`;
   });
   return `{${parts.join(',')}}`;
 }
