@@ -355,4 +355,31 @@ pub trait Backend {
     fn named_arg(name: &str, value: &str) -> String {
         format!("{name}: {value}")
     }
+
+    /// Renders a form-family primitive (`Switch`, `Toggle`, `Checkbox`,
+    /// `Slider`, `Picker`, `DatePicker`, `TextArea`) with its real platform
+    /// shape. The shared emitter's generic `{native}({value})` fallback is
+    /// **not valid** Kotlin (Compose controls require named `checked=` /
+    /// `onCheckedChange=` args) or SwiftUI (which requires a `Binding`), so
+    /// every form primitive compiled to broken native code before this hook
+    /// existed.
+    ///
+    /// The default returns `None` — the emitter falls back to the legacy bare
+    /// call shape, which is what third-party / unsupported backends will
+    /// continue to see. Backends whose language has a real form primitive
+    /// (`Kotlin`, `Swift`) override this per family member.
+    ///
+    /// `value` is the rendered primary-prop expression (e.g. `count`), and
+    /// `on_change` is the rendered handler body statements (empty when no
+    /// handler was supplied — the backend must emit a valid no-op in that
+    /// case rather than a syntax hole).
+    #[must_use]
+    fn form_control(
+        spec: &PrimitiveSpec,
+        value: &str,
+        on_change: &str,
+    ) -> Option<String> {
+        let _ = (spec, value, on_change);
+        None
+    }
 }
