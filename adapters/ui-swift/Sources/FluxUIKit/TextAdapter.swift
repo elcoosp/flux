@@ -50,12 +50,15 @@ public final class TextAdapter: FluxAdapter {
     public func destroy(_ view: UILabel) {}
 
     private func applyFont(to view: UILabel, props: Props) {
-        // `Font` is a positional record: `Font(family, size, weight, style)` —
-        // size is field 1. Read the `font` prop by name (FNV-derived index) and
-        // the size by its positional record field (AGENTS.md §3.2).
-        if let font = props.getRecord(named: "font") {
-            let size = font.getFloat(1) ?? 14
-            view.font = UIFont.systemFont(ofSize: CGFloat(size))
+        // `Font` is decoded from the canonical positional record via the
+        // shared `FluxFount(record:)` (FontField.size = slot 0, weight = 1).
+        // The previous code read slot 1 for the size, which is the *weight*
+        // field — so every iOS `Text` silently rendered at 14pt regardless of
+        // the value the server sent. Routing through `FluxFount` keeps the
+        // iOS decoder in lockstep with the Kotlin `Props.getFont` accessor
+        // (Props.kt), which also reads size from slot 0.
+        if let font = props.getRecord(named: "font").flatMap(FluxFount.init(record:)) {
+            view.font = font.uiFont
         } else if view.font == nil {
             view.font = UIFont.systemFont(ofSize: 14)
         }
