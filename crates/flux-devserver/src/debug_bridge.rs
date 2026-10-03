@@ -343,19 +343,40 @@ pub async fn serve_devtools(
             // §4.2 carries only IDs and spans); this path forwards raw events
             // to the router for enrichment, never persisting client request
             // metadata.
+            // SECURITY (audit §6.1): DevTools clients may only send
+            // `DebugCommand`s. The previous loop re-broadcast any inbound
+            // `TelemetryFrame` to every other DevTools client as if the host
+            // had emitted it — any client that could reach the (default
+            // unauthenticated) DevTools port could inject fake VM steps, view
+            // mutations and perf records into someone else's session.
+            //
+            // The trust model: telemetry flows host → server → DevTools;
+            // commands flow DevTools → server → host. Reject anything that is
+            // not a DebugCommand and never touch `route_telemetry` here.
             let router_in = router.clone();
             tokio::spawn(async move {
                 while let Some(msg) = reader.next().await {
                     let Ok(msg) = msg else { continue };
-                    let Some(frame) = TelemetryFrame::from_bytes(match &msg {
+                    let bytes = match &msg {
                         tokio_tungstenite::tungstenite::Message::Binary(b) => b,
                         _ => continue,
-                    }) else {
-                        tracing::debug!("serve_devtools: inbound frame failed to decode");
-                        continue;
                     };
-                    for event in frame.events {
-                        router_in.lock().route_telemetry(&event);
+                    match flux_ir_serde::DebugCommandFrame::from_bytes(bytes) {
+                        Some(frame) => {
+                            // `DebugCommandFrame` wraps a `DebugCommand` plus
+                            // an echo `command_id`. `route_command` takes the
+                            // inner command; the id is a client-side receipt
+                            // handle the host reconstructs when it replies.
+                            if !router_in.lock().route_command(frame.command) {
+                                tracing::debug!("devtools: host gone; command dropped");
+                            }
+                        }
+                        None => {
+                            tracing::debug!(
+                                len = bytes.len(),
+                                "devtools: non-command frame dropped (spoofing defense)"
+                            );
+                        }
                     }
                 }
             });
