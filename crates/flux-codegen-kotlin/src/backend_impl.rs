@@ -56,10 +56,14 @@ impl Backend for Kotlin {
     }
 
     fn container_spacing_axis(gap: &str, axis: &str) -> String {
-        // Audit T-403.3: emit arrangement matching the parent container axis.
+        // Audit T-403.3 + fix: Compose `Row` has `horizontalArrangement` and
+        // `verticalAlignment`; `horizontalAlignment` is a `Column` parameter
+        // and does not exist on `Row`, so the old code emitted a compile
+        // error for every `Row(gap: …)`. The column form was correct; the
+        // row form was wrong.
         if axis == "horizontal" {
             format!(
-                "(horizontalAlignment = Alignment.CenterHorizontally, horizontalArrangement = Arrangement.spacedBy({gap}.dp))"
+                "(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy({gap}.dp))"
             )
         } else {
             format!(
@@ -240,6 +244,12 @@ impl Backend for Kotlin {
             }
         }
         out
+    }
+
+    fn named_arg(name: &str, value: &str) -> String {
+        // Kotlin named arguments require `=`; `:` is a syntax error at a call
+        // site. Swift's default (in the trait) is `name: value`.
+        format!("{name} = {value}")
     }
 
     fn animation_spec(curve: &str) -> String {
