@@ -25,13 +25,23 @@ pub(crate) fn position_to_offset(text: &str, line: u32, character: u32) -> Optio
             if col >= character {
                 return Some(idx as u32);
             }
+            if ch == '\n' {
+                // Audit fix: the position is past the end of a *non-last*
+                // line. Clamp to this line's newline offset (end of the
+                // target line), not to end-of-file — the previous fall-through
+                // to the trailing `text.len()` branch returned EOF for any
+                // over-long column on a middle line, corrupting
+                // `apply_range_edit` (a valid incremental edit's replacement
+                // was spliced at the wrong offset).
+                return Some(idx as u32);
+            }
         }
         if ch == '\n' {
             current_line += 1;
             line_start = (idx + 1) as u32;
         }
     }
-    // Past the final newline: if we reached/just-passed `line`, clamp to end.
+    // Past the final newline: `line` is valid, clamp to EOF.
     if current_line >= line {
         return Some(text.len() as u32);
     }
