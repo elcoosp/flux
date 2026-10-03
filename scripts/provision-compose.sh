@@ -17,9 +17,16 @@ KOTLIN_VER="2.4.10"
 GOOGLE="https://dl.google.com/dl/android/maven2"
 MAVEN="https://repo1.maven.org/maven2"
 WORK="$HOME/compose_prov"
+# Audit fix: wipe the cached jars/aars on every run. The directory was
+# previously reused forever, so after a BOM/Kotlin bump the classpath could
+# hold two versions of the same Compose artifact — a silent source of
+# "type mismatch" style failures that would have been an actual correctness
+# bug for the compile-check gate. `-f` because `rm -rf` on a nonexistent
+# path is not an error; we want provisioning to be safely re-runnable.
+rm -rf "$WORK/aars" "$WORK/jars"
 mkdir -p "$WORK/aars" "$WORK/jars"
 
-curl -fsSL "$GOOGLE/androidx/compose/compose-bom/$BOM_VER/compose-bom-$BOM_VER.pom" -o "$WORK/bom.pom"
+curl -fsSL --max-time 60 --retry 2 "$GOOGLE/androidx/compose/compose-bom/$BOM_VER/compose-bom-$BOM_VER.pom" -o "$WORK/bom.pom"
 
 # Resolve BOM <properties> (e.g. ${navigationCompose.version}) to concrete versions.
 declare -A props
@@ -42,11 +49,11 @@ perl -0777 -ne 'while(/<dependency>(.*?)<\/dependency>/sg){print "$1\x00"}' "$WO
         case "$a" in *-linuxx64stubs|*-linuxarm64stubs|*-macos*stubs|*-mingwx64stubs|*-jsstubs|*-jvmstubs) continue ;; esac
         [ -z "$v" ] && continue
         path="${g//.//}/$a/$v"
-        if curl -fsSL "$GOOGLE/$path/$a-$v.aar" -o "$WORK/aars/$a-$v.aar" 2>/dev/null \
+        if curl -fsSL --max-time 60 --retry 2 "$GOOGLE/$path/$a-$v.aar" -o "$WORK/aars/$a-$v.aar" 2>/dev/null \
            && unzip -o -q "$WORK/aars/$a-$v.aar" classes.jar -d "$WORK/aars" 2>/dev/null \
            && [ -f "$WORK/aars/classes.jar" ]; then
             mv "$WORK/aars/classes.jar" "$WORK/jars/$a-$v.jar"
-        elif curl -fsSL "$GOOGLE/$path/$a-$v.jar" -o "$WORK/jars/$a-$v.jar" 2>/dev/null; then
+        elif curl -fsSL --max-time 60 --retry 2 "$GOOGLE/$path/$a-$v.jar" -o "$WORK/jars/$a-$v.jar" 2>/dev/null; then
             :
         else
             echo "skip $g:$a:$v (no AAR/JAR on Google Maven)" >&2
@@ -54,12 +61,12 @@ perl -0777 -ne 'while(/<dependency>(.*?)<\/dependency>/sg){print "$1\x00"}' "$WO
     done
 
 # Compose compiler plugin + kotlin-compiler-embeddable from Maven Central.
-curl -fsSL "$MAVEN/org/jetbrains/kotlin/kotlin-compose-compiler-plugin-embeddable/$KOTLIN_VER/kotlin-compose-compiler-plugin-embeddable-$KOTLIN_VER.jar" -o "$WORK/jars/compose-compiler.jar"
-curl -fsSL "$MAVEN/org/jetbrains/kotlin/kotlin-compiler-embeddable/$KOTLIN_VER/kotlin-compiler-embeddable-$KOTLIN_VER.jar" -o "$WORK/jars/kotlin-compiler-embeddable.jar"
+curl -fsSL --max-time 60 --retry 2 "$MAVEN/org/jetbrains/kotlin/kotlin-compose-compiler-plugin-embeddable/$KOTLIN_VER/kotlin-compose-compiler-plugin-embeddable-$KOTLIN_VER.jar" -o "$WORK/jars/compose-compiler.jar"
+curl -fsSL --max-time 60 --retry 2 "$MAVEN/org/jetbrains/kotlin/kotlin-compiler-embeddable/$KOTLIN_VER/kotlin-compiler-embeddable-$KOTLIN_VER.jar" -o "$WORK/jars/kotlin-compiler-embeddable.jar"
 
 # navigation-compose not in the BOM's managed androidx.* entries.
 NAV_COMPOSE_VER="2.9.8"
-if curl -fsSL "$GOOGLE/androidx/navigation/navigation-compose/$NAV_COMPOSE_VER/navigation-compose-$NAV_COMPOSE_VER.aar" -o "$WORK/aars/navigation-compose-$NAV_COMPOSE_VER.aar" 2>/dev/null \
+if curl -fsSL --max-time 60 --retry 2 "$GOOGLE/androidx/navigation/navigation-compose/$NAV_COMPOSE_VER/navigation-compose-$NAV_COMPOSE_VER.aar" -o "$WORK/aars/navigation-compose-$NAV_COMPOSE_VER.aar" 2>/dev/null \
    && unzip -o -q "$WORK/aars/navigation-compose-$NAV_COMPOSE_VER.aar" classes.jar -d "$WORK/aars" 2>/dev/null \
    && [ -f "$WORK/aars/classes.jar" ]; then
     mv "$WORK/aars/classes.jar" "$WORK/jars/navigation-compose-$NAV_COMPOSE_VER.jar"
