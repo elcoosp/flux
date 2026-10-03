@@ -395,7 +395,20 @@ impl DevToolsState {
             let mut live = self.live.write();
             *live = reconstruct_state(&live, std::slice::from_ref(&event));
         }
-        self.timeline.write().push(event.clone());
+        // Audit fix: push may evict the oldest event once at capacity, shifting
+        // every retained event down by one position. The stored scrub_index is
+        // positional, so it must be decremented to keep pointing at the same
+        // logical event — otherwise a user paused at index i drifts toward the
+        // live edge as telemetry continues to arrive.
+        {
+            let mut tl = self.timeline.write();
+            let was_at_capacity = tl.len() >= tl.capacity();
+            tl.push(event.clone());
+            if was_at_capacity {
+                let mut scrub = self.scrub_index.write();
+                *scrub = scrub.map(|i| i.saturating_sub(1));
+            }
+        }
 
         // Feed the network inspector (FLUX-060) from the HTTP capability telemetry.
         match &event {
