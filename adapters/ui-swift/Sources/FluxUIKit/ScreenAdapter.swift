@@ -27,24 +27,36 @@ public final class ScreenAdapter: FluxAdapter {
 
     public func setChildren(_ children: [AnyObject], on view: UIViewController) {
         let views = children.compactMap { $0 as? UIView }
-        // Host the screen's content as the single root subview.
         view.view.subviews.forEach { $0.removeFromSuperview() }
-        for child in views {
-            child.translatesAutoresizingMaskIntoConstraints = false
-            view.view.addSubview(child)
-            // Fill width, hug height, low-priority bottom (see ContainerAdapter):
-            // keeps the screen's content top-anchored instead of stretching
-            // full-height and pushing its children to the bottom.
-            child.setContentHuggingPriority(.required, for: .vertical)
-            let bottom = child.bottomAnchor.constraint(equalTo: view.view.bottomAnchor)
-            bottom.priority = .defaultLow
-            NSLayoutConstraint.activate([
-                child.leadingAnchor.constraint(equalTo: view.view.leadingAnchor),
-                child.trailingAnchor.constraint(equalTo: view.view.trailingAnchor),
-                child.topAnchor.constraint(equalTo: view.view.topAnchor),
-                bottom,
-            ])
+        // A `Screen` contractually hosts a single content subtree. The old
+        // loop pinned every child to the same four edges, so multiple children
+        // overdrew each other with no warning. Preserve the pinned single-child
+        // shape (which the ScreenAdapter relies on for top-hugging), and fall
+        // back to a vertical stack when the runtime delivers more than one.
+        let hosted: UIView?
+        if views.count == 1 {
+            hosted = views[0]
+        } else if views.count > 1 {
+            let stack = UIStackView(arrangedSubviews: views)
+            stack.axis = .vertical
+            stack.alignment = .fill
+            stack.distribution = .fill
+            stack.translatesAutoresizingMaskIntoConstraints = false
+            hosted = stack
+        } else {
+            hosted = nil
         }
+        guard let hosted = hosted else { return }
+        view.view.addSubview(hosted)
+        hosted.setContentHuggingPriority(.required, for: .vertical)
+        let bottom = hosted.bottomAnchor.constraint(equalTo: view.view.bottomAnchor)
+        bottom.priority = .defaultLow
+        NSLayoutConstraint.activate([
+            hosted.leadingAnchor.constraint(equalTo: view.view.leadingAnchor),
+            hosted.trailingAnchor.constraint(equalTo: view.view.trailingAnchor),
+            hosted.topAnchor.constraint(equalTo: view.view.topAnchor),
+            bottom,
+        ])
     }
 
     public func bindHandler(_ handlerId: FluxHandlerId, to view: UIViewController, nodeId: FluxNodeId) {}
