@@ -57,10 +57,22 @@ public final class TextInputAdapter: FluxAdapter {
     public func setChildren(_ children: [AnyObject], on view: UITextField) {}
 
     public func bindHandler(_ handlerId: FluxHandlerId, to view: UITextField, nodeId: FluxNodeId) {
+        // Keep the delegate bookkeeping (retained for future focus/return
+        // callbacks); the actual text-change relay is an `addAction` target
+        // so `onChangeText` fires on every user edit. This is the same
+        // HandlerTarget + addAction pattern the sibling adapters
+        // (Button/Switch/Toggle/Slider/DatePicker) use.
         (view.delegate as? Delegate)?.bind(handlerId: handlerId, nodeId: nodeId)
+        let target = HandlerTarget(executor: executor, handlerId: handlerId, nodeId: nodeId) {
+            .str(view.text ?? "")
+        }
+        view.addAction(UIAction { _ in target.fire() }, for: .editingChanged)
     }
 
     public func destroy(_ view: UITextField) {
+        // Remove every UIAction this adapter registered (the .editingChanged
+        // relay) so a stale handler can never fire on a recycled field.
+        view.removeAllActions()
         view.delegate = nil
         objc_setAssociatedObject(view, &Self.associationKey, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
     }
