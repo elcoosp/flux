@@ -31,28 +31,36 @@ public final class ContainerAdapter: FluxAdapter {
 
     public func setChildren(_ children: [AnyObject], on view: UIView) {
         let views = children.compactMap { $0 as? UIView }
-        // Rebuild the child list from scratch: remove every current subview, then
-        // add the resolved children in order, pinned to the container edges.
+        // Rebuild the child list from scratch. Multiple children pinned to the
+        // same four edges would overdraw each other (the old behavior); host
+        // two or more in a vertical UIStackView instead, and preserve the
+        // pinned top-hugging single-child shape that ContainerAdapter relies on.
         view.subviews.forEach { $0.removeFromSuperview() }
-        for v in views {
-            view.addSubview(v)
-            // Fill WIDTH (mirrors Android's `fillMaxWidth`) but HUG the content
-            // HEIGHT so the child stays top-anchored instead of being stretched to
-            // the container's full height. The bottom edge is pinned at LOW
-            // priority: the high-priority top pin + the child's required vertical
-            // hugging keep the child packed at the top. Pinning bottom at required
-            // would fight the hug and UIKit would resolve the ambiguity by pushing
-            // the content to the bottom (the "big gap, content at the bottom" bug).
-            v.setContentHuggingPriority(.required, for: .vertical)
-            let bottom = v.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-            bottom.priority = .defaultLow
-            NSLayoutConstraint.activate([
-                v.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-                v.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-                v.topAnchor.constraint(equalTo: view.topAnchor),
-                bottom,
-            ])
+        let hosted: UIView?
+        if views.count == 1 {
+            hosted = views[0]
+        } else if views.count > 1 {
+            let stack = UIStackView(arrangedSubviews: views)
+            stack.axis = .vertical
+            stack.alignment = .fill
+            stack.distribution = .fill
+            stack.translatesAutoresizingMaskIntoConstraints = false
+            hosted = stack
+        } else {
+            hosted = nil
         }
+        guard let hosted = hosted else { return }
+        view.addSubview(hosted)
+        // Fill WIDTH but HUG the content HEIGHT (see comment above the pin).
+        hosted.setContentHuggingPriority(.required, for: .vertical)
+        let bottom = hosted.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        bottom.priority = .defaultLow
+        NSLayoutConstraint.activate([
+            hosted.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            hosted.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            hosted.topAnchor.constraint(equalTo: view.topAnchor),
+            bottom,
+        ])
     }
 
     public func bindHandler(_ handlerId: FluxHandlerId, to view: UIView, nodeId: FluxNodeId) {}
