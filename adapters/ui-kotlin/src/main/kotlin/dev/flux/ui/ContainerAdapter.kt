@@ -39,10 +39,14 @@ public class ContainerAdapter private constructor() : FluxAdapter<FluxNativeView
         childIds: KList<UInt>,
         children: KList<FluxNativeView>,
     ) {
-        view.clearChildren()
-        for (child in children) {
-            view.addChild(child)
-        }
+        // Audit fix: the previous version ignored `childIds` and appended
+        // `children` in arrival order — wrong order whenever the runtime
+        // shipped children out of visual order, and diverging from every
+        // other adapter (`ColumnAdapter`/`RowAdapter`/`RouterAdapter`) and
+        // from the Swift `ContainerAdapter`. Resolve by id through the
+        // shared reconciler so the child list always matches `childIds`.
+        val byId = children.associateBy { it.nodeId }
+        reconcileChildren(view, childIds) { byId[it] }
     }
 
     override fun bindHandler(
