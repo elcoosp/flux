@@ -21,6 +21,10 @@ flux-codegen-core.workspace = true
 flux-ir.workspace = true
 flux-parser.workspace = true
 flux-types.workspace = true
+# Used by `flux fmt` for stable, reproducible file ids (fnv1a32) — see
+# `file_id_for` in src/fmt.rs. `flux-parser` does not re-export fnv1a32, so
+# the CLI pulls in the syntax crate directly.
+flux-syntax.workspace = true
 clap.workspace = true
 anyhow.workspace = true
 tokio.workspace = true
