@@ -51,8 +51,21 @@ public data class Props(
     /**
      * Handler id at [index]. Returns `0` when the prop is absent or not a
      * handler reference — `0` is the reserved "no handler" id in the IR.
+     *
+     * Prefer [getHandlerOrNull] in new code: the sentinel loses the
+     * distinction between "no handler" and "handler id 0" (Swift uses `nil`),
+     * and callers that want to skip binding on absence must test for it.
      */
-    public fun getHandler(index: UShort): UInt = (get(index) as? FluxValue.HandlerRef)?.handlerId ?: 0u
+    public fun getHandler(index: UShort): UInt = getHandlerOrNull(index) ?: 0u
+
+    /**
+     * Handler id at [index], or `null` when the prop is absent or not a
+     * handler reference. The nullable form preserves the difference between
+     * "no handler" and "handler id 0" and matches the Swift
+     * `getHandlerOrNull(): UInt?` contract.
+     */
+    public fun getHandlerOrNull(index: UShort): UInt? =
+        (get(index) as? FluxValue.HandlerRef)?.handlerId
 
     // Audit D5: the server lowers Color/Font records POSITIONALLY (fields
     // 0..3 / 0..2). The previous FNV-name lookups never matched, so colors
