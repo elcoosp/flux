@@ -43,13 +43,27 @@ public final class CheckboxAdapter: FluxAdapter {
     public func setChildren(_ children: [AnyObject], on view: UIButton) {}
 
     public func bindHandler(_ handlerId: FluxHandlerId, to view: UIButton, nodeId: FluxNodeId) {
-        let target = HandlerTarget(executor: executor, handlerId: handlerId, nodeId: nodeId) { .bool(view.isSelected) }
+        // Audit fix: UIKit does NOT auto-toggle `isSelected` on
+        // `touchUpInside`, so the old payload closure read the PRE-tap
+        // boolean — every handler saw a stale value. The action below toggles
+        // first (matching every sibling form adapter's contract) and only
+        // then fires, so this payload reads the post-tap state.
+        let target = HandlerTarget(executor: executor, handlerId: handlerId, nodeId: nodeId) { [weak view] in
+            .bool(view?.isSelected ?? false)
+        }
         // Audit fix: remove any previously-registered UIAction on this view
         // before adding a new one. The dev runtime re-binds handlers on
         // hot-swap and on prop change; without this each rebind accumulates
         // another action and a single user tap dispatches N times.
         view.removeAllActions()
-        view.addAction(UIAction { _ in target.fire() }, for: .touchUpInside)
+        view.addAction(UIAction { [weak view, weak self] _ in
+            guard let view else { return }
+            // Toggle the selected state, refresh the glyph, THEN fire — so the
+            // payload closure above observes the new boolean.
+            view.isSelected.toggle()
+            self?.applyGlyph(view)
+            target.fire()
+        }, for: .touchUpInside)
     }
 
     public func destroy(_ view: UIButton) {
