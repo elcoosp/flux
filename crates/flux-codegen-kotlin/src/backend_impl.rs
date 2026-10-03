@@ -452,6 +452,37 @@ impl Backend for Kotlin {
         }
         em.line(indent, "}");
     }
+
+    fn form_control(
+        spec: &PrimitiveSpec,
+        value: &str,
+        on_change: &str,
+    ) -> Option<String> {
+        // Compose form controls take named arguments; the emitter's generic
+        // `{native}({value})` fallback is a Kotlin compile error for every
+        // one of these primitives. An empty handler becomes a no-op lambda
+        // (`{}`) so the shape always compiles.
+        let handler = if on_change.is_empty() { "{}" } else { on_change };
+        match spec.flux_name {
+            "Switch" => Some(format!(
+                "Switch(checked = {value}, onCheckedChange = {{ {handler} }})"
+            )),
+            "Checkbox" => Some(format!(
+                "Checkbox(checked = {value}, onCheckedChange = {{ {handler} }})"
+            )),
+            "Slider" => Some(format!(
+                "Slider(value = {value}, onValueChange = {{ {handler} }})"
+            )),
+            "TextArea" => Some(format!(
+                "OutlinedTextField(value = {value}, onValueChange = {{ {handler} }}, singleLine = false)"
+            )),
+            // `Picker` / `DatePicker` need option lists and date state we do
+            // not reconstruct here; fall back to the legacy bare call so a
+            // future hook can supply the real shape without a second
+            // branching path in the emitter.
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]
