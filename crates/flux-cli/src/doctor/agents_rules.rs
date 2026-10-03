@@ -114,6 +114,14 @@ fn scan_rust(rel: &str, lines: &[&str], is_test_file: bool, out: &mut Vec<Agents
     let mut fn_start: Option<u32> = None;
     let mut in_test_mod: Option<usize> = None; // depth at which a `mod tests` opened
 
+    // Audit fix: track the brace `depth` at which the current function
+    // started, not a fixed depth of 0. Almost every real function lives
+    // inside an `impl`/`trait`/`mod` (depth >= 1) or an inline `mod tests`
+    // (depth >= 1), so the previous `depth == 0` gate never fired for the
+    // exact code shape this doctor scans. Store `fn_base` alongside
+    // `fn_start` and close on `depth == fn_base`.
+    let mut fn_base: Option<usize> = None;
+
     for (i, raw) in lines.iter().enumerate() {
         let line_no = (i + 1) as u32;
         let line = raw.trim();
@@ -123,8 +131,9 @@ fn scan_rust(rel: &str, lines: &[&str], is_test_file: bool, out: &mut Vec<Agents
             in_test_mod = Some(depth);
         }
 
-        if is_fn_start(line) && depth == 0 {
+        if is_fn_start(line) && fn_start.is_none() {
             fn_start = Some(line_no);
+            fn_base = Some(depth);
         }
 
         for c in raw.chars() {
@@ -137,16 +146,19 @@ fn scan_rust(rel: &str, lines: &[&str], is_test_file: bool, out: &mut Vec<Agents
                         in_test_mod = None;
                     }
                 }
-                if fn_start.is_some() && depth == 0 {
-                    let len = line_no - fn_start.unwrap() + 1;
-                    if len > 40 {
-                        out.push(AgentsFinding {
-                            path: rel.to_owned(),
-                            line: fn_start.unwrap(),
-                            message: format!("function is {len} lines (exceeds 40)"),
-                        });
+                if let (Some(fs), Some(fb)) = (fn_start, fn_base) {
+                    if depth == fb {
+                        let len = line_no - fs + 1;
+                        if len > 40 {
+                            out.push(AgentsFinding {
+                                path: rel.to_owned(),
+                                line: fs,
+                                message: format!("function is {len} lines (exceeds 40)"),
+                            });
+                        }
+                        fn_start = None;
+                        fn_base = None;
                     }
-                    fn_start = None;
                 }
             }
         }
@@ -163,29 +175,38 @@ fn scan_rust(rel: &str, lines: &[&str], is_test_file: bool, out: &mut Vec<Agents
 
 /// Scans a Swift/Kotlin source file: function length + `try!`/`as!`/`!!`.
 fn scan_swift_kotlin(rel: &str, lines: &[&str], is_test_file: bool, out: &mut Vec<AgentsFinding>) {
+    // Audit fix: same as scan_rust — track the base depth of the current
+    // function so long methods inside `class` / `extension` / `object`
+    // bodies are flagged (the previous `depth == 0` gate never fired for
+    // those shapes).
     let mut depth: usize = 0;
     let mut fn_start: Option<u32> = None;
+    let mut fn_base: Option<usize> = None;
     for (i, raw) in lines.iter().enumerate() {
         let line_no = (i + 1) as u32;
         let line = raw.trim();
-        if is_swift_kotlin_fn_start(line) && depth == 0 {
+        if is_swift_kotlin_fn_start(line) && fn_start.is_none() {
             fn_start = Some(line_no);
+            fn_base = Some(depth);
         }
         for c in raw.chars() {
             if c == '{' {
                 depth += 1;
             } else if c == '}' {
                 depth = depth.saturating_sub(1);
-                if fn_start.is_some() && depth == 0 {
-                    let len = line_no - fn_start.unwrap() + 1;
-                    if len > 40 {
-                        out.push(AgentsFinding {
-                            path: rel.to_owned(),
-                            line: fn_start.unwrap(),
-                            message: format!("function is {len} lines (exceeds 40)"),
-                        });
+                if let (Some(fs), Some(fb)) = (fn_start, fn_base) {
+                    if depth == fb {
+                        let len = line_no - fs + 1;
+                        if len > 40 {
+                            out.push(AgentsFinding {
+                                path: rel.to_owned(),
+                                line: fs,
+                                message: format!("function is {len} lines (exceeds 40)"),
+                            });
+                        }
+                        fn_start = None;
+                        fn_base = None;
                     }
-                    fn_start = None;
                 }
             }
         }
