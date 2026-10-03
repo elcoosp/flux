@@ -20,6 +20,18 @@ use crate::time_travel::LogLevel;
 /// snapshot straight from the shared state on every render.
 struct LogsDelegate {
     state: Arc<DevToolsState>,
+    /// Snapshot of the filtered log entries, rebuilt once per render in
+    /// `rows_count` and reused by every `render_td` call. The previous
+    /// version re-cloned the whole `Vec<LogEntry>` on every cell (3-4 columns
+    /// × N rows = thousands of clones per frame, on the UI thread) and re-read
+    /// the `RwLock` per cell — so cell content could even observe a different
+    /// buffer than `rows_count` if the wire thread pushed mid-frame. This
+    /// caches one coherent snapshot for the whole render pass.
+    ///
+    /// `TableDelegate::rows_count` takes `&self`, but we need to mutate the
+    /// cache there; `RefCell` gives interior mutability (safe because gpui
+    /// renders on a single thread).
+    snapshot: std::cell::RefCell<Vec<crate::time_travel::LogEntry>>,
 }
 
 #[allow(refining_impl_trait, elided_lifetimes_in_paths)]
@@ -29,7 +41,11 @@ impl TableDelegate for LogsDelegate {
     }
 
     fn rows_count(&self, _cx: &App) -> usize {
-        self.state.filtered_log_snapshot().len()
+        // Refresh the snapshot exactly once per frame; every subsequent
+        // `render_td` reads the cached entries — no lock, no per-cell clone.
+        let mut snapshot = self.snapshot.borrow_mut();
+        *snapshot = self.state.filtered_log_snapshot();
+        snapshot.len()
     }
 
     fn column(&self, col_ix: usize, _cx: &App) -> Column {
@@ -47,20 +63,35 @@ impl TableDelegate for LogsDelegate {
         _window: &mut Window,
         cx: &mut Context<TableState<Self>>,
     ) -> impl IntoElement + '_ {
-        let entry = &self.state.filtered_log_snapshot()[row_ix];
+        // Extract the values we need as owned data, then drop the borrow
+        // before returning the element. The `impl IntoElement + '_` return
+        // type ties the element to `&mut self`, not to the borrow guard, so
+        // we must release the RefCell borrow before the return expression
+        // is evaluated.
+        let (level, tag, target, message) = match self.snapshot.borrow().get(row_ix) {
+            Some(e) => (
+                e.level,
+                e.level.tag().to_string(),
+                e.target.clone(),
+                e.message.clone(),
+            ),
+            None => return div().px(px(8.)).into_any_element(),
+        };
         match col_ix {
             0 => {
-                let color = level_color(entry.level, cx);
+                let color = level_color(level, cx);
                 div()
                     .px(px(8.))
                     .text_color(color)
-                    .child(entry.level.tag().to_string())
+                    .child(tag)
+                    .into_any_element()
             }
             1 => div()
                 .px(px(8.))
                 .text_color(cx.theme().muted_foreground)
-                .child(entry.target.clone()),
-            _ => div().px(px(8.)).child(entry.message.clone()),
+                .child(target)
+                .into_any_element(),
+            _ => div().px(px(8.)).child(message).into_any_element(),
         }
     }
 }
@@ -186,6 +217,9 @@ impl Render for LogViewerView {
         if self.table.is_none() {
             let delegate = LogsDelegate {
                 state: self.state.clone(),
+                // Seeded empty; `rows_count` refreshes it on the first render
+                // pass, before any cell is queried.
+                snapshot: std::cell::RefCell::new(Vec::new()),
             };
             self.table = Some(cx.new(|table_cx| TableState::new(delegate, window, table_cx)));
         }
