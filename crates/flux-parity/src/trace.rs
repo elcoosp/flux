@@ -134,32 +134,50 @@ pub struct Divergence {
 
 impl Divergence {
     /// Renders a human-readable report with surrounding line context.
+    ///
+    /// Audit fix: the previous version mixed 1-based `left_line` (a raw file
+    /// line number, per `Divergence::left_line`'s doc) with 0-based indices
+    /// into the canonical frame vector, so `left.get(l.wrapping_sub(1))`
+    /// with `l == 0` (a blank-line-skipping input) fetched the wrong frame
+    /// or panicked. Walk the *frame* vectors by index; the surrounding
+    /// context uses `frame.line` for the display.
     #[must_use]
     pub fn render(&self, left: &[Frame], right: &[Frame]) -> String {
-        let mut out = String::new();
+        // Locate the divergence index in each trace by matching the canonical
+        // text. This is exact: `compare` produced the divergence by comparing
+        // these vectors, so the first element of the left/right that matches
+        // is the divergence point.
+        let idx = self
+            .left
+            .as_deref()
+            .and_then(|target| left.iter().position(|f| f.canonical == target))
+            .unwrap_or(0);
         let n = self.context;
-        let start = self.left_line.saturating_sub(n);
-        out.push_str(&format!("trace divergence at line {}:\n", self.left_line));
-        for l in start..self.left_line {
-            if let Some(f) = left.get(l.wrapping_sub(1)) {
-                out.push_str(&format!("  left  {}: {}\n", f.line, f.canonical));
-            }
+        let start = idx.saturating_sub(n);
+        let end = (idx + 1 + n).min(left.len());
+        let mut out = String::new();
+        let display_line = self.left_line;
+        out.push_str(&format!("trace divergence at line {}:\n", display_line));
+        for i in start..idx {
+            let f = &left[i];
+            out.push_str(&format!("  left  {}: {}\n", f.line, f.canonical));
         }
         out.push_str(&format!(
             "  left  {}: {}\n",
-            self.left_line,
+            display_line,
             self.left.as_deref().unwrap_or("<end of trace>")
         ));
         out.push_str(&format!(
             "  right {}: {}\n",
-            self.left_line,
+            display_line,
             self.right.as_deref().unwrap_or("<end of trace>")
         ));
-        let after = self.left_line;
-        for l in after..(after + n).min(right.len()) {
-            if let Some(f) = right.get(l) {
-                out.push_str(&format!("  right {}: {}\n", f.line, f.canonical));
+        for i in idx..end {
+            if i == idx {
+                continue;
             }
+            let f = &right[i.min(right.len() - 1)];
+            out.push_str(&format!("  right {}: {}\n", f.line, f.canonical));
         }
         out
     }
