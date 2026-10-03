@@ -19,6 +19,9 @@ compo Image(
   source: String,
   width: Option[Float] = None,
   height: Option[Float] = None,
-  resizeMode: Option[String] = None,
+  // Contract header above says `"fill"` is the default; the previous
+  // declaration was `None`, contradicting the header and forcing every
+  // caller to spell out the value the docs promised they could omit.
+  resizeMode: Option[String] = Some("fill"),
 )
   // Adapter leaf — native rendering defined by Appendix F.8.
