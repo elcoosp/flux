@@ -11,8 +11,13 @@
 compo DatePicker(
   value: Int = 0,
   onChange: Handler = fn() {},
-  min: Int = 0,
-  max: Int = 0,
+  // Audit fix: previously `min: Int = 0` / `max: Int = 0` — a default
+  // selectable range of exactly one millisecond (1970-01-01T00:00:00Z), with
+  // an undocumented host special-case that treated 0 as "unbounded".
+  // `Option[Int]` makes the "unbounded" default explicit and removes the
+  // sentinel-value ambiguity.
+  min: Option[Int] = None,
+  max: Option[Int] = None,
   enabled: Bool = true,
 )
   // Adapter leaf — native rendering defined by FLUX-040.
