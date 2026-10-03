@@ -136,6 +136,87 @@ pub struct Pipeline {
     lower_count: u64,
 }
 
+/// Walks a `Patch` stream and collects every `StringId` and `HandlerId` it
+/// actually references. Used by the dispatch-delta path to ship only the
+/// strings/closures the host needs to apply the stream, instead of the whole
+/// program on every tap.
+///
+/// The walk is total over the public `Patch` and `Value` variants; a wildcard
+/// arm future-proofs it against new variants that carry no strings/handlers.
+fn referenced_strings_and_handlers(
+    patches: &[Patch],
+    _string_table: &flux_syntax::StringTable,
+) -> (
+    std::collections::HashSet<flux_syntax::StringId>,
+    std::collections::HashSet<flux_syntax::HandlerId>,
+) {
+    use flux_syntax::{HandlerId, NodeRef, Patch, StringId, Value};
+
+    fn walk_value(
+        v: &Value,
+        strings: &mut std::collections::HashSet<StringId>,
+        handlers: &mut std::collections::HashSet<HandlerId>,
+    ) {
+        match v {
+            Value::Str(id) => {
+                strings.insert(*id);
+            }
+            Value::HandlerRef(h) => {
+                handlers.insert(*h);
+            }
+            Value::List(items) => {
+                for item in items {
+                    walk_value(item, strings, handlers);
+                }
+            }
+            Value::Record(fields) => {
+                for (_, val) in fields {
+                    walk_value(val, strings, handlers);
+                }
+            }
+            Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Null => {}
+            // `Value` is `#[non_exhaustive]`; a wildcard arm future-proofs
+            // this walker against new variants that carry no string/handler
+            // references.
+            _ => {}
+        }
+    }
+
+    fn walk_node(
+        n: &NodeRef,
+        strings: &mut std::collections::HashSet<StringId>,
+        handlers: &mut std::collections::HashSet<HandlerId>,
+    ) {
+        for (_, v) in n.props.fields() {
+            walk_value(v, strings, handlers);
+        }
+        for h in &n.handlers {
+            handlers.insert(*h);
+        }
+    }
+
+    let mut strings = std::collections::HashSet::new();
+    let mut handlers = std::collections::HashSet::new();
+    for p in patches {
+        match p {
+            Patch::Replace { node, .. } | Patch::Insert { node, .. } => {
+                walk_node(node, &mut strings, &mut handlers);
+            }
+            Patch::Update { props_diff, .. } => {
+                for (_, v) in &props_diff.changes {
+                    walk_value(v, &mut strings, &mut handlers);
+                }
+            }
+            Patch::Handler { id, .. } => {
+                handlers.insert(*id);
+            }
+            Patch::Remove { .. } | Patch::Reorder { .. } => {}
+            _ => {}
+        }
+    }
+    (strings, handlers)
+}
+
 impl Pipeline {
     /// Creates an empty pipeline rooted at `root`.
     #[must_use]
@@ -452,7 +533,21 @@ impl Pipeline {
     }
 
     /// Builds a `Delta` frame carrying `patches`, addressed from the report.
+    ///
+    /// Audit fix (perf): the previous version shipped the *entire* arena string
+    /// table plus *every* closure in the program on every dispatch — a single
+    /// button tap cost O(whole program) bytes on the wire and O(whole program)
+    /// host decode time, undermining the "milliseconds hot loop" for any real
+    /// project. Walk the patch stream once and ship only the strings and
+    /// closures it actually references: a typical dispatch delta touches a
+    /// handful of strings (the props it updates) and zero closures (dispatch
+    /// never introduces new handlers). This is the "|dependents[S]|-bounded
+    /// patch" the ADR-0027 promise advertises.
     fn build_dispatch_delta(&mut self, patches: &[Patch]) -> Vec<u8> {
+        let (want_strings, want_handlers) = match self.last_good.as_ref() {
+            Some(last) => referenced_strings_and_handlers(patches, last.arena.string_table()),
+            None => (Default::default(), Default::default()),
+        };
         let strings: Vec<(flux_syntax::StringId, String)> = self
             .last_good
             .as_ref()
@@ -460,14 +555,21 @@ impl Pipeline {
                 last.arena
                     .string_table()
                     .iter()
+                    .filter(|(id, _)| want_strings.contains(id))
                     .map(|(id, text)| (id, text.to_owned()))
                     .collect()
             })
             .unwrap_or_default();
-        let closures = self
+        let closures: Vec<flux_ir::ClosureIR> = self
             .last_good
             .as_ref()
-            .map(|last| last.closures.values().cloned().collect::<Vec<_>>())
+            .map(|last| {
+                last.closures
+                    .iter()
+                    .filter(|(id, _)| want_handlers.contains(id))
+                    .map(|(_, c)| c.clone())
+                    .collect()
+            })
             .unwrap_or_default();
         self.seq = self.seq.wrapping_add(1);
         Frame::delta(
