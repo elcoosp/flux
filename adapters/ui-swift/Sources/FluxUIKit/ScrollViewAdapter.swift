@@ -20,6 +20,14 @@ public final class ScrollViewAdapter: FluxAdapter {
     public typealias View = UIScrollView
     weak var executor: (any FluxExecutor)?
 
+    /// The cross-axis constraint pinning the content host to the scroll view's
+    /// frame — width-pinning for `vertical`, height-pinning for `horizontal`.
+    /// Replaced (not mutated) when the `orientation` prop changes axis.
+    private var crossAxisConstraint: NSLayoutConstraint?
+    /// Current orientation, so `update` only swaps the cross-axis constraint
+    /// when the value actually changes.
+    private var currentOrientation: String = "vertical"
+
     public init(executor: (any FluxExecutor)? = nil) { self.executor = executor }
 
     public func create() -> UIScrollView {
@@ -29,13 +37,20 @@ public final class ScrollViewAdapter: FluxAdapter {
         let content = UIView()
         content.translatesAutoresizingMaskIntoConstraints = false
         scroll.addSubview(content)
+        // Keep the cross-axis constraint so `update` can swap it when the
+        // `orientation` prop switches between vertical and horizontal. The
+        // previous code pinned width unconditionally, so "horizontal" could
+        // never scroll — a real divergence from the Kotlin adapter which
+        // consumes `PROP_ORIENTATION`.
+        let widthConstraint = content.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor)
         NSLayoutConstraint.activate([
             content.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor),
             content.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor),
             content.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor),
             content.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor),
-            content.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor),
+            widthConstraint,
         ])
+        crossAxisConstraint = widthConstraint
         return scroll
     }
 
@@ -45,6 +60,25 @@ public final class ScrollViewAdapter: FluxAdapter {
         // so the host presentation layer (ADR-0048) reads the same scroll-axis
         // data the Compose host does.
         view.fluxRecord(FluxRecordedProp.orientation, orientation)
+        if orientation != currentOrientation {
+            currentOrientation = orientation
+            // Swap the content's cross-axis constraint so the scroll direction
+            // matches `orientation`: width-pinned content scrolls vertically,
+            // height-pinned content scrolls horizontally.
+            crossAxisConstraint?.isActive = false
+            if let content = view.subviews.first {
+                let newConstraint: NSLayoutConstraint = orientation == "horizontal"
+                    ? content.heightAnchor.constraint(equalTo: view.frameLayoutGuide.heightAnchor)
+                    : content.widthAnchor.constraint(equalTo: view.frameLayoutGuide.widthAnchor)
+                newConstraint.isActive = true
+                crossAxisConstraint = newConstraint
+                // If the content host currently holds a UIStackView, flip its
+                // axis to match. Otherwise leave the (single-child) pin alone.
+                if let stack = content.subviews.first as? UIStackView {
+                    stack.axis = orientation == "horizontal" ? .horizontal : .vertical
+                }
+            }
+        }
     }
 
     public func setChildren(_ children: [AnyObject], on view: UIScrollView) {
@@ -54,16 +88,29 @@ public final class ScrollViewAdapter: FluxAdapter {
         // content host itself. Removing all subviews (including content) then
         // adding children to the removed content host blanked the scroll view.
         content.subviews.forEach { $0.removeFromSuperview() }
-        for v in views {
-            v.translatesAutoresizingMaskIntoConstraints = false
-            content.addSubview(v)
-            NSLayoutConstraint.activate([
-                v.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-                v.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-                v.topAnchor.constraint(equalTo: content.topAnchor),
-                v.bottomAnchor.constraint(equalTo: content.bottomAnchor),
-            ])
+        guard !views.isEmpty else { return }
+        // Multiple children pinned to the same four edges would overdraw each
+        // other; the scroll view's content is a single flow along the axis, so
+        // host two or more in a UIStackView oriented to the current scroll
+        // direction. Single-child preserves the previous pinned shape.
+        let hosted: UIView
+        if views.count == 1 {
+            hosted = views[0]
+        } else {
+            let stack = UIStackView(arrangedSubviews: views)
+            stack.axis = currentOrientation == "horizontal" ? .horizontal : .vertical
+            stack.alignment = .fill
+            stack.distribution = .fill
+            hosted = stack
         }
+        hosted.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(hosted)
+        NSLayoutConstraint.activate([
+            hosted.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            hosted.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            hosted.topAnchor.constraint(equalTo: content.topAnchor),
+            hosted.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+        ])
     }
 
     public func bindHandler(_ handlerId: FluxHandlerId, to view: UIScrollView, nodeId: FluxNodeId) {}
