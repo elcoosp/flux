@@ -198,8 +198,10 @@ impl FluxLsp {
                 }
                 let server = FluxLsp::new();
                 let diags = server.diagnostics_with_types(&path, &text, true);
-                let lsp_diags: Vec<Diagnostic> =
-                    diags.iter().map(FluxLsp::to_lsp_diagnostic).collect();
+                let lsp_diags: Vec<Diagnostic> = diags
+                    .iter()
+                    .map(|d| FluxLsp::to_lsp_diagnostic_with_text(&text, d))
+                    .collect();
                 let _ = client.notify::<lsp_types::notification::PublishDiagnostics>(
                     PublishDiagnosticsParams {
                         uri: uri_for_task,
@@ -238,6 +240,44 @@ impl FluxLsp {
 
     /// Maps a [`LspDiagnostic`] (1-based `line`/`character`) into an LSP
     /// [`Diagnostic`] with a [`Range`] (0-based, per the LSP spec).
+    ///
+    /// Audit fix: the diagnostic's `length` field is a **byte length** (the
+    /// parser's span), but it was previously added directly to the
+    /// **character** column to build the end position. That is correct only
+    /// for ASCII sources — any non-ASCII character before the diagnostic
+    /// shifts the underline to the wrong column. Now the caller passes the
+    /// document `text`, and we compute the end from the byte delta in the
+    /// document via the same offset-to-position routine used elsewhere
+    /// (`util::offset_to_position`), so the end is UTF-8-correct.
+    #[must_use]
+    pub fn to_lsp_diagnostic_with_text(text: &str, d: &LspDiagnostic) -> Diagnostic {
+        // Reconstruct the byte offset of the start of the diagnostic from the
+        // 1-based (line, character) pair. Flux source is UTF-8 and the
+        // character column is a 1-based byte column today (see util.rs), so
+        // we can index by bytes directly.
+        let start_byte = match util::position_to_offset(
+            text,
+            d.line.saturating_sub(1),
+            d.character.saturating_sub(1),
+        ) {
+            Some(off) => off as usize,
+            None => 0,
+        };
+        let end_byte = (start_byte + d.length as usize).min(text.len());
+        let start = util::offset_to_position(text, start_byte as u32);
+        let end = util::offset_to_position(text, end_byte as u32);
+        Diagnostic {
+            range: lsp_types::Range { start, end },
+            severity: Some(DiagnosticSeverity::ERROR),
+            source: Some(d.source.clone()),
+            message: d.message.clone(),
+            ..Default::default()
+        }
+    }
+
+    /// Legacy form kept for callers that have no source text available; it
+    /// treats `d.length` as a **character** count, which is exact for ASCII
+    /// and safe-but-approximate otherwise.
     #[must_use]
     pub fn to_lsp_diagnostic(d: &LspDiagnostic) -> Diagnostic {
         let start = lsp_types::Position {
