@@ -496,15 +496,20 @@ impl<'a, B: Backend> Emitter<'a, B> {
                         .map(render_inline)
                         .unwrap_or_else(|| "\"\"".to_owned());
                     self.line(indent, &B::image_expr(&value));
-                } else if spec.flux_name == "Toggle" {
-                    // Audit T-403.1: toggle is backend-specific (Swift Toggle vs Kotlin Switch).
-                    let value = primary
-                        .map(render_inline)
-                        .unwrap_or_else(|| "\"\"".to_owned());
-                    self.line(indent, &B::toggle_open(&value));
-                    self.emit_trailing_or_children(trailing.as_deref(), id, indent + B::CHILD_STEP);
-                    self.line(indent, &B::toggle_close());
                 } else if spec.flux_name == "Spacer" {
+                    // Note: `Toggle` used to have its own dedicated branch
+                    // here that emitted `B::toggle_open(value)` + children +
+                    // `B::toggle_close()`. On Kotlin that produced
+                    // `Switch(checked=…, onCheckedChange={ x = it }) { children }`,
+                    // but Compose's `Switch` has NO trailing content lambda —
+                    // a compile error on every emitted `Toggle`. It also
+                    // emitted the raw `value` expression on the LHS of the
+                    // setter, so `Toggle(value: count + 1)` became
+                    // `count + 1 = it`, invalid syntax. Now `Toggle` routes
+                    // through `Backend::form_control` (it already carries a
+                    // `handler_prop`, so the branch below catches it),
+                    // matching `Switch`/`Checkbox`/`Slider` and removing the
+                    // special case.
                     self.line(indent, &B::spacer());
                 } else if spec.handler_prop.is_some() {
                     // Form-family primitive (Switch, Checkbox, Slider,
@@ -857,22 +862,22 @@ fn indent_prefix(indent: usize) -> &'static str {
 
         const KOTLIN_TABLE: &[&str] = &[
             "",
-            " ",
-            "  ",
-            "   ",
             "    ",
-            "     ",
-            "      ",
-            "       ",
             "        ",
-            "         ",
-            "          ",
-            "           ",
             "            ",
-            "             ",
-            "              ",
-            "               ",
             "                ",
+            "                    ",
+            "                        ",
+            "                            ",
+            "                                ",
+            "                                    ",
+            "                                        ",
+            "                                            ",
+            "                                                ",
+            "                                                    ",
+            "                                                        ",
+            "                                                            ",
+            "                                                                ",
         ];
         const SWIFT_TABLE: &[&str] = &[
             "",
