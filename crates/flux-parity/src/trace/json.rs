@@ -205,41 +205,156 @@ impl<'a> Parser<'a> {
 
     fn parse_string(&mut self) -> Result<String, String> {
         self.expect(b'"')?;
-        let mut s = String::new();
-        loop {
-            let c = self.peek().ok_or("unterminated string")?;
-            match c {
+        // `self.pos` is now at the FIRST CONTENT byte of the string (the
+        // opening `"` was consumed by `expect`). The previous version treated
+        // `start` as the offset of the opening quote and then sliced
+        // `&self.bytes[start + 1..end]`, which dropped one extra byte — the
+        // first character of every parsed string.
+        let start = self.pos;
+        // Fast path: find the extent of the raw byte slice up to the closing
+        // quote (respecting `\\` escapes), then decode as UTF-8 with
+        // `str::from_utf8`. The previous version reinterpreted each *byte*
+        // as a `char` (`self.bytes[pos] as char`), which mangles every
+        // multi-byte UTF-8 character into 2-4 garbage Latin-1 chars. For a
+        // trace containing non-ASCII (a user string, an emoji in a comment),
+        // the entire canonical frame was silently corrupted.
+        let mut escaped = false;
+        let mut end = None;
+        let mut i = self.pos;
+        while i < self.bytes.len() {
+            let b = self.bytes[i];
+            if escaped {
+                escaped = false;
+                i += 1;
+                continue;
+            }
+            match b {
+                b'\\' => {
+                    escaped = true;
+                    i += 1;
+                }
                 b'"' => {
-                    self.pos += 1;
+                    end = Some(i);
                     break;
                 }
-                b'\\' => {
-                    self.pos += 1;
-                    let e = self.peek().ok_or("unterminated escape")?;
-                    match e {
-                        b'"' => s.push('"'),
-                        b'\\' => s.push('\\'),
-                        b'/' => s.push('/'),
-                        b'n' => s.push('\n'),
-                        b't' => s.push('\t'),
-                        b'r' => s.push('\r'),
-                        _ => {
-                            return Err(format!(
-                                "unsupported escape \\{} at {}",
-                                e as char, self.pos
-                            ));
-                        }
-                    }
-                    self.pos += 1;
-                }
                 _ => {
-                    let ch = self.bytes[self.pos] as char;
-                    s.push(ch);
-                    self.pos += 1;
+                    i += 1;
                 }
             }
         }
-        Ok(s)
+        let end = end.ok_or_else(|| format!("unterminated string at {start}"))?;
+
+        // Process escape sequences in a second pass, decoding `\uXXXX` (incl.
+        // surrogate pairs) explicitly and letting every other byte flow into
+        // a UTF-8 decode buffer.
+        let raw = &self.bytes[start..end];
+        let mut out = String::with_capacity(raw.len());
+        let mut buf = [0u8; 4];
+        let mut j = 0usize;
+        while j < raw.len() {
+            let b = raw[j];
+            if b == b'\\' {
+                j += 1;
+                if j >= raw.len() {
+                    return Err(format!("trailing backslash at {}", start + j));
+                }
+                match raw[j] {
+                    b'"' => {
+                        out.push('"');
+                        j += 1;
+                    }
+                    b'\\' => {
+                        out.push('\\');
+                        j += 1;
+                    }
+                    b'/' => {
+                        out.push('/');
+                        j += 1;
+                    }
+                    b'n' => {
+                        out.push('\n');
+                        j += 1;
+                    }
+                    b't' => {
+                        out.push('\t');
+                        j += 1;
+                    }
+                    b'r' => {
+                        out.push('\r');
+                        j += 1;
+                    }
+                    b'u' => {
+                        // \uXXXX — parse 4 hex digits, handle surrogate pairs.
+                        let hex = raw.get(j + 1..j + 5).ok_or_else(|| {
+                            format!("truncated \\u escape at {}", start + j)
+                        })?;
+                        let hi = u16::from_str_radix(
+                            std::str::from_utf8(hex).map_err(|_| "bad hex digits")?,
+                            16,
+                        )
+                        .map_err(|_| "bad hex digits")?;
+                        j += 5;
+                        let code = if (0xD800..=0xDBFF).contains(&hi) {
+                            // High surrogate: must be followed by a low `\uDC00..\uDFFF`.
+                            if raw.get(j) != Some(&b'\\') || raw.get(j + 1) != Some(&b'u') {
+                                return Err(format!("unpaired surrogate at {}", start + j));
+                            }
+                            let hex2 = raw.get(j + 2..j + 6).ok_or_else(|| {
+                                format!("truncated \\u low surrogate at {}", start + j)
+                            })?;
+                            let lo = u16::from_str_radix(
+                                std::str::from_utf8(hex2).map_err(|_| "bad hex digits")?,
+                                16,
+                            )
+                            .map_err(|_| "bad hex digits")?;
+                            j += 6;
+                            let c = char::decode_utf16([hi, lo])
+                                .collect::<Result<String, _>>()
+                                .map_err(|_| "invalid surrogate pair")?;
+                            out.push_str(&c);
+                            continue;
+                        } else {
+                            char::from_u32(u32::from(hi)).ok_or("invalid scalar value")?
+                        };
+                        out.push(code);
+                    }
+                    other => {
+                        return Err(format!(
+                            "unsupported escape \\{} at {}",
+                            other as char, start + j
+                        ));
+                    }
+                }
+            } else {
+                // Copy the next UTF-8 sequence. UTF-8 continuation bytes are
+                // safe to pass through; we read byte-by-byte into `buf` and
+                // then decode the whole multibyte sequence as a char.
+                let width = Self::utf8_width(b);
+                if j + width > raw.len() {
+                    return Err(format!("truncated UTF-8 at {}", start + j));
+                }
+                buf[..width].copy_from_slice(&raw[j..j + width]);
+                let s = std::str::from_utf8(&buf[..width])
+                    .map_err(|_| format!("invalid UTF-8 at {}", start + j))?;
+                out.push_str(s);
+                j += width;
+            }
+        }
+        self.pos = end + 1;
+        Ok(out)
+    }
+
+    /// Expected byte width of a UTF-8 sequence starting with `b`.
+    fn utf8_width(b: u8) -> usize {
+        if b < 0x80 {
+            1
+        } else if b < 0xE0 {
+            2
+        } else if b < 0xF0 {
+            3
+        } else {
+            4
+        }
     }
 
     fn parse_bool(&mut self) -> Result<Json, String> {
