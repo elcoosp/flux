@@ -2153,6 +2153,7 @@ dependencies = [
  "flux-ir-serde",
  "flux-lsp",
  "flux-parser",
+ "flux-syntax",
  "flux-types",
  "futures-util",
  "serde",
