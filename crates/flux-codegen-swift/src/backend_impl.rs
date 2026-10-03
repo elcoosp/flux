@@ -250,13 +250,16 @@ impl Backend for Swift {
             "bouncy" => "Animation.bouncy",
             "smooth" => "Animation.smooth",
             other => {
-                // A custom spec string (e.g. `Animation.spring(response: …)`) is
-                // passed through verbatim; a bare token defaults to `.default`.
-                if other.is_empty() {
-                    "Animation.default"
-                } else {
-                    other
-                }
+                // SECURITY: an unknown curve name is arbitrary user text. If
+                // emitted verbatim it becomes a code-injection point in the
+                // generated Swift (e.g. curve `"foo); evil()("`). Fall back to
+                // `Animation.default` for every unknown curve — the Swift doc
+                // for this function already promised this behavior; the code
+                // did not match. (flux-codegen-swift has no `tracing`
+                // dependency, so the fallback is silent; the compile-parse
+                // test in the pipeline is the visible signal.)
+                let _ = other;
+                "Animation.default"
             }
         };
         format!("withAnimation({spec})")
