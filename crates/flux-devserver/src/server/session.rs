@@ -104,9 +104,10 @@ pub(crate) async fn serve_client(stream: TcpStream, shared: Arc<Shared>) -> Resu
             },
         }
     }
-    // Audit H17: clear stale `early` capability completions on session end so
-    // they cannot leak into a future session that reuses the cell-id space.
-    shared.async_bridge.lock().clear_early();
+    // Audit H17 + fix: clear both `early` completions AND parked suspend
+    // state on session end so neither can leak into a future session that
+    // reuses the cell-id space (or emit a Resume for a dead handler).
+    shared.async_bridge.lock().clear_session();
     Ok(())
 }
 
@@ -218,9 +219,32 @@ async fn handle_hello(bytes: &[u8], shared: &Arc<Shared>) -> Option<Vec<u8>> {
     // unconfigured server (no token) accepts any host, preserving the open
     // localhost dev loop.
     if let Some(expected) = shared.auth_token.as_deref() {
-        match hello.token.as_deref() {
-            Some(presented) if presented == expected => {}
-            _ => {
+        // Audit fix: compare the token in constant time. String equality
+        // short-circuits at the first differing byte, which over a LAN lets
+        // an attacker recover the token prefix byte-by-byte via timing. Since
+        // the token exists *precisely* to protect that LAN exposure, use a
+        // fixed-length XOR-sum over the two byte slices (short-circuits on
+        // *length* only, which is not secret — the token length is fixed by
+        // the CLI parser). No new dependency required.
+        let token_ok = match hello.token.as_deref() {
+            Some(presented) => {
+                let a = presented.as_bytes();
+                let b = expected.as_bytes();
+                if a.len() != b.len() {
+                    false
+                } else {
+                    let mut diff: u8 = 0;
+                    for (x, y) in a.iter().zip(b.iter()) {
+                        diff |= x ^ y;
+                    }
+                    diff == 0
+                }
+            }
+            None => false,
+        };
+        match token_ok {
+            true => {}
+            false => {
                 let diagnostic = Diagnostic::new(
                     "handshake rejected: pairing token missing or incorrect — \
                      start the dev server with the same `--token` you configured \
