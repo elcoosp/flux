@@ -52,11 +52,18 @@ else
   merge_base="$(git rev-parse "${head_ref}~1" 2>/dev/null || echo "$head_ref")"
 fi
 
-changed="$(git diff --name-only "$merge_base" "$head_ref")"
+# Audit fix: the previous loop used `for file in $changed` (unquoted), which
+# word-splits on whitespace and globs on `*`/`?`. A path containing a space
+# became multiple phantom entries, and a protected-dir hit could be missed.
+# Stream the diff NUL-delimited with `read -d ''` so paths survive intact.
+changed_files=()
+while IFS= read -r -d '' file; do
+    changed_files+=("$file")
+done < <(git diff --name-only -z "$merge_base" "$head_ref")
 
 violations=()
 
-for file in $changed; do
+for file in "${changed_files[@]}"; do
   # Frozen manifest check (exact path match).
   for frozen in "${frozen_manifests[@]}"; do
     if [ "$file" = "$frozen" ]; then
