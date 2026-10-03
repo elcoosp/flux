@@ -672,11 +672,15 @@ impl<'a, B: Backend> Emitter<'a, B> {
                 // Audit T-403.7: resolve the route string through the arena's
                 // string table instead of `Value::to_string()` (which does not
                 // exist — interned strings are `StringId`, not `Display`).
+                // Audit fix: route the interned string through the backend's
+                // text escaper before embedding it as a quoted literal. A raw
+                // route containing `"`, `\`, `$` or a newline previously
+                // produced broken (or injectable) Kotlin/Swift.
                 let route = n
                     .props()
                     .get_str(route_idx, &self.lowered.arena.string_table())
                     .unwrap_or("home");
-                format!("\"{}\"", route)
+                format!("\"{}\"", B::escape_text(route))
             }
             None => "\"home\"".to_string(),
         };
@@ -732,8 +736,11 @@ impl<'a, B: Backend> Emitter<'a, B> {
         let rendered: Vec<String> = args
             .iter()
             .map(|arg| match arg {
+                // Backend-specific spelling: Swift `name: value`, Kotlin
+                // `name = value`. A hardcoded `:` produced invalid Kotlin
+                // for every user-component call with named args.
                 Arg::Named { name, value } => {
-                    format!("{}: {}", name.name, render_expr::<B>(value))
+                    B::named_arg(&name.name, &render_expr::<B>(value))
                 }
                 Arg::Positional(value) => render_expr::<B>(value),
                 _ => String::new(),
