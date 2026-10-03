@@ -19,6 +19,11 @@ use crate::time_travel::{NetworkPhase, NetworkRecord};
 /// snapshot straight from the shared state on every render.
 struct NetworkDelegate {
     state: Arc<DevToolsState>,
+    /// Snapshot of the retained network records, rebuilt once per render in
+    /// `rows_count` and reused by every `render_td`. Mirrors the LogsDelegate
+    /// fix: the old version re-cloned the whole buffer per cell and re-read
+    /// the lock per cell. `RefCell` because `rows_count` takes `&self`.
+    snapshot: std::cell::RefCell<Vec<NetworkRecord>>,
 }
 
 #[allow(refining_impl_trait, elided_lifetimes_in_paths)]
@@ -28,7 +33,9 @@ impl TableDelegate for NetworkDelegate {
     }
 
     fn rows_count(&self, _cx: &App) -> usize {
-        self.state.network_snapshot().len()
+        let mut snapshot = self.snapshot.borrow_mut();
+        *snapshot = self.state.network_snapshot();
+        snapshot.len()
     }
 
     fn column(&self, col_ix: usize, _cx: &App) -> Column {
@@ -47,25 +54,35 @@ impl TableDelegate for NetworkDelegate {
         _window: &mut Window,
         cx: &mut Context<TableState<Self>>,
     ) -> impl IntoElement + '_ {
-        let rec = &self.state.network_snapshot()[row_ix];
+                // Extract an owned clone of the record once per cell (the previous
+        // amplification was the full-buffer clone *per cell*). We then drop
+        // the RefCell borrow before the return expression so the `impl
+        // IntoElement + '_` return type — which borrows from `&mut self`, not
+        // from the guard — is satisfied.
+        let rec = match self.snapshot.borrow().get(row_ix) {
+            Some(r) => r.clone(),
+            None => return div().px(px(8.)).into_any_element(),
+        };
         match col_ix {
             0 => div()
                 .px(px(8.))
                 .text_color(cx.theme().foreground)
-                .child(rec.method.clone()),
+                .child(rec.method.clone())
+                .into_any_element(),
             1 => div()
                 .px(px(8.))
                 .text_color(cx.theme().muted_foreground)
-                .child(rec.url.clone()),
+                .child(rec.url.clone())
+                .into_any_element(),
             2 => {
-                let (text, color) = status_cell(rec, cx);
-                div().px(px(8.)).text_color(color).child(text)
+                let (text, color) = status_cell(&rec, cx);
+                div().px(px(8.)).text_color(color).child(text).into_any_element()
             }
             _ => {
                 let latency = rec
                     .latency_ms
                     .map_or_else(|| "…".to_string(), |ms| format!("{ms}ms"));
-                div().px(px(8.)).child(latency)
+                div().px(px(8.)).child(latency).into_any_element()
             }
         }
     }
@@ -125,6 +142,9 @@ impl Render for NetworkInspectorView {
         if self.table.is_none() {
             let delegate = NetworkDelegate {
                 state: self.state.clone(),
+                // Seeded empty; `rows_count` refreshes it on the first render
+                // pass, before any cell is queried.
+                snapshot: std::cell::RefCell::new(Vec::new()),
             };
             self.table = Some(cx.new(|table_cx| TableState::new(delegate, window, table_cx)));
         }
