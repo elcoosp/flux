@@ -86,6 +86,14 @@ pub(crate) fn probe_devices() -> Check {
     if let Ok(out) = Command::new("adb").args(["devices"]).output() {
         if out.status.success() {
             for line in String::from_utf8_lossy(&out.stdout).lines().skip(1) {
+                // Audit fix: `adb devices` can print a daemon-startup banner
+                // line like `* daemon started successfully *` before the
+                // device table. `split_whitespace().next()` on that line
+                // yielded `*` and the doctor reported a phantom
+                // `android:*` device. Skip any line starting with `*`.
+                if line.trim_start().starts_with('*') {
+                    continue;
+                }
                 let serial = line.split_whitespace().next().unwrap_or("");
                 if !serial.is_empty() && !line.contains("List of") {
                     found.push(format!("android:{serial}"));
