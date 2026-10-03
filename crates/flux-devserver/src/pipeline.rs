@@ -709,6 +709,31 @@ impl Pipeline {
     fn module_loader(&self) -> ModuleLoader {
         let root = self.root.clone();
         Arc::new(move |name: &str| {
+            // Audit fix: `Path::join` replaces the base path when its argument
+            // is absolute, so a malicious `use /etc/passwd` could read outside
+            // the project root. Reject any module name that is not a plain
+            // dotted-identifier path segment chain: each segment must be a
+            // non-empty ASCII identifier fragment. This preserves the
+            // documented shape (`use theme`, `use foo.bar`) while forbidding
+            // `..`, `/`, absolute paths, Windows drive prefixes and every
+            // other escape hatchet.
+            fn is_safe_segment(seg: &str) -> bool {
+                !seg.is_empty()
+                    && seg
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+            }
+            let safe = name
+                .split('/')
+                .all(is_safe_segment)
+                && name
+                    .split('.')
+                    .all(|seg| !seg.is_empty() && seg.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+                && !name.contains("..");
+            if !safe {
+                tracing::warn!(name, "rejecting module use with unsafe path segment");
+                return None;
+            }
             let direct = root.join(format!("{name}.flux"));
             if direct.is_file() {
                 return std::fs::read_to_string(&direct).ok();
