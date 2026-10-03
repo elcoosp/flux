@@ -192,10 +192,16 @@ pub(crate) fn compile_and_broadcast(shared: &Arc<Shared>) -> bool {
 
 /// Whether `event` is a content-affecting change (create / modify / remove).
 fn is_source_change(event: &Event) -> bool {
-    matches!(
-        event.kind,
-        EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
-    )
+    // Audit fix: `Access` events (open/close/read) come through as
+    // `EventKind::Access(_)` on inotify — they fire whenever anything opens
+    // or reads the file (`ls`, LSP polls, editor temp reads). A read-only
+    // access must not trigger a recompile, so we filter Access out and only
+    // accept content-affecting kinds.
+    match event.kind {
+        EventKind::Access(_) => false,
+        EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_) => true,
+        _ => false,
+    }
 }
 
 /// Whether `path` is a `.flux` source file.
