@@ -74,7 +74,14 @@ pub(crate) fn root_node(arena: &IRArena) -> NodeRef {
 
 /// Every node in `arena` that no other node lists as a child, in pack order.
 fn root_ids(arena: &IRArena) -> Vec<NodeId> {
-    let mut referenced: Vec<NodeId> = Vec::new();
+    // Audit fix: the previous version scanned a `Vec` with `.contains()` for
+    // every id (O(n^2) on a 10k-node tree, on every (re)connect and every
+    // error->fixed transition). Build the referenced set once in a loop —
+    // the iterator-chain form cannot be collected directly because
+    // `view.children()` returns an owned `Vec` whose `iter()` borrows the
+    // temporary, which does not outlive the closure.
+    let mut referenced: std::collections::HashSet<NodeId> =
+        std::collections::HashSet::new();
     for id in arena.all_ids() {
         if let Some(view) = arena.get(id) {
             referenced.extend(view.children().iter().flat_map(Child::node_ids));
