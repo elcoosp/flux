@@ -67,9 +67,15 @@ fn format_one(path: &Path, check: bool, changed: &mut Vec<PathBuf>) -> anyhow::R
 /// Derives a stable `file_id` from a path so node IDs are reproducible across runs
 /// for the same file (mirrors the dev server's content-addressing intent without
 /// needing the full pipeline).
+///
+/// Audit fix: `DefaultHasher::new()` is explicitly documented as unstable across
+/// Rust releases. The formatter's doc comment promises reproducibility — a
+/// toolchain bump silently rewrote every id `flux fmt` emitted. Use the
+/// workspace-standard FNV-1a (`flux_syntax::fnv1a32`), which is stable and
+/// matches the hashing the rest of the pipeline uses.
 fn file_id_for(path: &Path) -> u32 {
-    use std::hash::Hasher;
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    hasher.write(path.to_string_lossy().as_bytes());
-    (hasher.finish() & 0xFFFF_FFFF) as u32
+    // Fully-qualified `ids::` path — the `ids` module is public and owns the
+    // `fnv1a32` implementation (`flux-syntax/src/ids/fnv.rs`); the crate
+    // root re-export list does not include it.
+    flux_syntax::fnv1a32(path.to_string_lossy().as_bytes())
 }
