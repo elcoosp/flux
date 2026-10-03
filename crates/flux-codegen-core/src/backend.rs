@@ -341,4 +341,18 @@ pub trait Backend {
     /// non-escaping implementation produces non-compiling output (audit H21).
     #[must_use]
     fn escape_text(s: &str) -> String;
+
+    /// Renders a named argument at a user-component call site: `name: value`
+    /// in Swift, `name = value` in Kotlin. Kotlin *requires* `=` for named
+    /// arguments; the shared emitter previously emitted `name: value` for
+    /// both, so every user-component call with named args produced invalid
+    /// Kotlin (see codegen CRITICAL: "named args rendered with `:` in Kotlin").
+    ///
+    /// The default implements the Swift spelling; Kotlin overrides to emit
+    /// `=`. Only user-component call sites use this — built-in primitives
+    /// shape their arguments through dedicated `Backend` hooks.
+    #[must_use]
+    fn named_arg(name: &str, value: &str) -> String {
+        format!("{name}: {value}")
+    }
 }
