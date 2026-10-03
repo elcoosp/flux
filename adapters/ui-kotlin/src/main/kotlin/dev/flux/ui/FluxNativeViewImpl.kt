@@ -39,6 +39,15 @@ public class FluxNativeViewImpl(
         childViews.add(view)
     }
 
+    /// Audit fix: the default `clearChildren()` loops `removeChildAt(childCount()-1)`
+    /// and `childCount()` calls `children()` which returns a full `toList()`
+    /// copy — so clearing n children was O(n^2) item copies. Overriding with
+    /// a single `clear()` makes it O(1) (ArrayList.clear releases the backing
+    /// array in a single pass).
+    override fun clearChildren() {
+        childViews.clear()
+    }
+
     override fun removeChildAt(index: Int): FluxNativeView? {
         if (index < 0 || index >= childViews.size) return null
         return childViews.removeAt(index)
