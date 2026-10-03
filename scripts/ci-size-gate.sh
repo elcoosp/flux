@@ -220,11 +220,11 @@ check_forbidden() {
             [ -z "$m" ] && continue
             warn "$rel" "${m%%:*}" "forbidden in non-test Rust (§2.1): ${m#*:}"
             violations=$((violations+1))
-          done < <(grep -nE '\b(unwrap|expect|panic!)\b' "$f")
+          done < <(grep -nE '\b(unwrap|expect)\s*\(|\bpanic!\s*\(' "$f")
         else
           added="$(git -C "$REPO_ROOT" diff -U0 "$MERGE_BASE" "$HEAD_REF" -- "$f" \
             | grep -E '^\+[^+]' | sed 's/^\+//' \
-            | grep -cE '\b(unwrap|expect|panic!)\b')"
+            | grep -cE '\b(unwrap|expect)\s*\(|\bpanic!\s*\(')"
           if [ "$added" -gt 0 ]; then
             warn "$rel" "new" "forbidden in non-test Rust (§2.1): $added added line(s) with unwrap/expect/panic!"
             violations=$((violations+added))
