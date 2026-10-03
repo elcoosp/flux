@@ -11,7 +11,7 @@ use gpui::{AnyElement, App, Context, IntoElement, Render, Window, div, prelude::
 use gpui_component::progress::Progress;
 use gpui_component::{ActiveTheme as _, badge::Badge};
 
-use crate::row::{empty_row, into_any, kv_row, rows_column};
+use crate::row::{into_any, kv_row, rows_column};
 use crate::state::{DevToolsState, VmState};
 
 /// Renders the live VM register bank and instruction pointer.
@@ -56,18 +56,24 @@ impl VmInspectorView {
             .child(Badge::new().color(color).child(label))
     }
 
-    /// One row: remaining gas as a text value plus a horizontal gauge. The gauge
-    /// fraction is the gas value against the VM's entry budget (`ENTRY_GAS`,
-    /// mirroring the runtime in `flux-vm-ref`/Kotlin), so the bar reads as real
-    /// headroom; the raw count is always shown alongside it.
+    /// One row: remaining gas as a text value plus a horizontal gauge.
+    ///
+    /// Audit fix: the gauge's percentage is computed against the *wire-supplied*
+    /// entry-gas budget ([`VmState::entry_gas`]). The previous implementation
+    /// used a UI-side `const ENTRY_GAS: f32 = 100_000.0` that mirrored the VM's
+    /// budget by hand — a UI change to the constant silently desynced from the
+    /// VM, and any future change to the VM's budget would have left the gauge
+    /// quietly wrong forever. When the wire does not yet carry the budget,
+    /// `entry_gas` is `None`, and the bar renders without a fill and the raw
+    /// count is shown alone (no fabricated percentage).
     fn gas_row(vm: &VmState, cx: &App) -> impl IntoElement {
-        const ENTRY_GAS: f32 = 100_000.0;
-        let (gas_text, pct) = match vm.gas_remaining {
-            Some(g) => (
-                g.to_string(),
-                (g as f32 / ENTRY_GAS * 100.0).clamp(0.0, 100.0),
-            ),
-            None => ("?".to_string(), 0.0),
+        let (gas_text, pct) = match (vm.gas_remaining, vm.entry_gas) {
+            (Some(g), Some(budget)) if budget > 0 => {
+                let pct = (g as f32 / budget as f32 * 100.0).clamp(0.0, 100.0);
+                (g.to_string(), pct)
+            }
+            (Some(g), _) => (g.to_string(), 0.0),
+            (None, _) => ("?".to_string(), 0.0),
         };
         let color = if pct < 20.0 {
             cx.theme().warning
@@ -98,9 +104,9 @@ impl VmInspectorView {
             into_any(Self::gas_row(&vm, cx).into_any_element()),
             into_any(kv_row("IP", offset)),
         ];
-        if vm.registers.is_empty() {
-            rows.push(into_any(empty_row("no registers yet")));
-        }
+        // Audit fix: `registers` is `Box<[Value; 16]>` — a fixed-size array,
+        // never empty — so the previous `registers.is_empty()` branch could
+        // never fire. Enumerate the array directly.
         for (i, val) in vm.registers.iter().enumerate() {
             rows.push(into_any(kv_row(format!("r{i}"), format!("{val:?}"))));
         }
