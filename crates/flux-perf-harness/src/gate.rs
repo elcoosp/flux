@@ -41,8 +41,25 @@ impl Budgets {
     }
 
     /// The p95 ceiling (ms) for `kind`, or `None` if the kind is not budgeted.
+    ///
+    /// Audit fix: this is an exhaustive `match`, not a `.find()`. When a new
+    /// `MetricKind` variant is added, the compiler forces its budget to be
+    /// considered — the previous array-lookup silently returned `None` for
+    /// unknown kinds, which `evaluate` then interpreted as "pass", so any new
+    /// kind was unchecked by the CI gate. This is the exact failure mode
+    /// FLUX-073 already hit once (`SaveToPhoton`).
     #[must_use]
     pub fn ceiling_for(&self, kind: MetricKind) -> Option<f64> {
+        match kind {
+            MetricKind::NodeMutation
+            | MetricKind::DirtyReconcileSize
+            | MetricKind::FullReconcileSize
+            | MetricKind::PatchRoundTrip
+            | MetricKind::VmDispatch
+            | MetricKind::DevColdStart
+            | MetricKind::ReleaseColdStart
+            | MetricKind::SaveToPhoton => {}
+        }
         self.ceilings
             .iter()
             .find(|(k, _)| *k == kind)
@@ -95,9 +112,21 @@ pub fn evaluate(record: &MetricRecord, budgets: &Budgets) -> GateVerdict {
         }
     };
 
-    let observed = record
-        .p95()
-        .map_or(f64::INFINITY, |l: LatencyMs| l.as_f64());
+    // Audit fix: an empty sample set must produce a distinct verdict, not a
+    // confusing "p95 inf exceeds <ceiling>" failure. Zero samples means the
+    // harness itself did not measure anything — the gate must say so
+    // explicitly so a broken driver is not masked as a perf regression.
+    let Some(observed) = record.p95().map(|l: LatencyMs| l.as_f64()) else {
+        return GateVerdict {
+            passed: false,
+            reason: format!(
+                "{:?}/{:?} has no samples (harness produced an empty record)",
+                record.scenario, record.kind
+            ),
+            observed_p95: f64::NAN,
+            ceiling,
+        };
+    };
     let passed = observed <= ceiling;
     GateVerdict {
         passed,
