@@ -24,6 +24,13 @@ pub struct VmState {
     pub registers: Box<[flux_syntax::Value; 16]>,
     /// Remaining gas.
     pub gas_remaining: Option<u32>,
+    /// The handler's entry-gas budget, when the wire carries it. The DevTools
+    /// gauge uses this to show "remaining / budget" as a percentage rather
+    /// than against a hard-coded UI-side constant (which drifted silently
+    /// when the VM's budget changed). `None` when the telemetry event does
+    /// not include the budget — the pane renders the raw count without a
+    /// percentage in that case.
+    pub entry_gas: Option<u32>,
     /// `.flux` source span of the current instruction, if resolvable.
     pub source_span: Option<flux_syntax::Span>,
 }
@@ -146,6 +153,9 @@ impl DeviceSession {
             opcode: self.live.opcode,
             registers: self.live.registers.clone(),
             gas_remaining: self.live.gas_remaining,
+            // The wire telemetry does not currently carry the entry budget;
+            // the gauge degrades to a raw count when this is `None`.
+            entry_gas: None,
             source_span: None,
         }
     }
@@ -527,6 +537,8 @@ impl DevToolsState {
             opcode: live.opcode,
             registers: live.registers.clone(),
             gas_remaining: live.gas_remaining,
+            // Wire telemetry does not yet carry the entry budget.
+            entry_gas: None,
             source_span: None,
         }
     }
