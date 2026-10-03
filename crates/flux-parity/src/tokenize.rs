@@ -33,11 +33,25 @@ fn split_tokens(line: &str) -> Vec<String> {
     let mut chars = line.chars().peekable();
     while let Some(ch) = chars.next() {
         if ch == '"' {
+            // Audit fix: the previous scanner ended the string at the first
+            // `"` with no escape handling. A generated Swift/Kotlin literal
+            // containing `\"` (which happens whenever user text includes a
+            // quote — e.g. `Text("hi \"there\"")`) mis-terminated the token,
+            // and any `{` inside the string leaked as a structural brace.
+            // Track backslash-escapes so the scanner consumes them as part
+            // of the literal.
             buf.push(ch);
+            let mut escaped = false;
             for c in chars.by_ref() {
                 buf.push(c);
-                if c == '"' {
-                    break;
+                if escaped {
+                    escaped = false;
+                    continue;
+                }
+                match c {
+                    '\\' => escaped = true,
+                    '"' => break,
+                    _ => {}
                 }
             }
             continue;
