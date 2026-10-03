@@ -331,6 +331,8 @@ impl FluxLsp {
     }
 }
 
+use async_lsp::lsp_types::DidCloseTextDocumentParams;
+
 impl LanguageServer for FluxLsp {
     type Error = async_lsp::ResponseError;
     type NotifyResult = ControlFlow<async_lsp::Result<()>>;
@@ -409,6 +411,31 @@ impl LanguageServer for FluxLsp {
 
     fn did_change(&mut self, params: DidChangeTextDocumentParams) -> Self::NotifyResult {
         self.did_change(params)
+    }
+
+    fn did_close(&mut self, params: DidCloseTextDocumentParams) -> Self::NotifyResult {
+        // Audit fix: no did_close handler meant closed documents stayed in
+        // `documents`/`versions` forever (unbounded memory growth), and any
+        // in-flight debounced diagnostics task kept publishing against a file
+        // the client had closed. Remove the entry and publish empty
+        // diagnostics per the LSP spec.
+        let uri = params.text_document.uri;
+        if let Ok(mut docs) = self.documents.lock() {
+            docs.remove(&uri);
+        }
+        if let Ok(mut versions) = self.versions.lock() {
+            versions.remove(&uri);
+        }
+        if let Some(client) = self.client.clone() {
+            let _ = client.notify::<lsp_types::notification::PublishDiagnostics>(
+                PublishDiagnosticsParams {
+                    uri,
+                    diagnostics: Vec::new(),
+                    version: None,
+                },
+            );
+        }
+        ControlFlow::Continue(())
     }
 
     fn semantic_tokens_full(
@@ -662,7 +689,7 @@ mod tests {
     // `LanguageServer` trait path.
     #[tokio::test]
     async fn definition_resolves_usage_to_declaration_span() {
-        use async_lsp::lsp_types::{Position, TextDocumentPositionParams};
+        use async_lsp::lsp_types::{Position, TextDocumentPositionParams, DidCloseTextDocumentParams};
 
         let mut server = FluxLsp::new();
         let uri: Url = "file:///counter.flux".parse().expect("uri");
