@@ -122,11 +122,36 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
         patches.push(Patch::Remove { id: *id });
     }
 
-    // Audit C8: Insert carries an absolute index into the new tree; emitting
-    // inserts in hash-set order corrupts the host's child order when more
-    // than one row is added per frame. Sort by (parent, index) — stable and
-    // deterministic — before any Reattach filtering below.
-    inserted.sort_by_key(|id| new_index.get(id).copied());
+    // Audit C8 + CRITICAL fix: Insert carries an absolute index into the new
+    // tree; emitting inserts in hash-set order corrupts the host's child order
+    // when more than one row is added per frame. Sorting by (parent, index)
+    // alone is *not* enough: node ids are content-derived hashes, so a
+    // freshly-inserted child of a freshly-inserted parent has no guarantee of
+    // ordering after its ancestor — the host would receive an insert addressed
+    // to a parent it doesn't yet have, breaking the patch stream. Add a
+    // topological depth key: for each inserted id, count how many of its
+    // ancestors are *also* newly inserted. Shallower nodes sort first, so a
+    // subtree is always emitted root-before-children.
+    let inserted_set: AHashSet<NodeId> = inserted.iter().copied().collect();
+    let depth_of = |mut id: NodeId| -> u32 {
+        let mut d = 0u32;
+        let mut parent = new_index.get(&id).map(|(p, _)| *p);
+        while let Some(p) = parent {
+            if !inserted_set.contains(&p) {
+                break;
+            }
+            d += 1;
+            parent = new_index.get(&p).map(|(pp, _)| *pp);
+        }
+        d
+    };
+    inserted.sort_by_key(|id| {
+        let (parent, index) = new_index
+            .get(id)
+            .copied()
+            .unwrap_or_else(|| (synthetic_root_id(), 0));
+        (depth_of(*id), parent, index)
+    });
 
     for id in &inserted {
         if pairs.iter().any(|(_, new_id)| new_id == id) {
