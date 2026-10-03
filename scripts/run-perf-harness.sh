@@ -67,10 +67,17 @@ fi
 echo "== 2b/3 iOS host render-perf (simulator) =="
 SIM_ID="$(xcrun simctl list devices booted 2>/dev/null | grep -oE '[0-9A-Fa-f-]{36}' | head -1 || true)"
 if [[ -n "${SIM_ID:-}" ]] && command -v xcodebuild >/dev/null 2>&1; then
-  xcodebuild test -scheme FluxApp \
-    -destination "platform=iOS Simulator,id=$SIM_ID" \
-    -only-testing 'FluxAppTests/RenderPerfHarnessTests' 2>&1 \
-    | grep 'RENDER_PERF' >> "$RECORDS_FILE"
+  # Audit fix: `set -euo pipefail` + a pipe into `grep` makes the whole
+  # script abort whenever `xcodebuild` exits non-zero OR when the test
+  # suite succeeds but emits no `RENDER_PERF` line (grep exits 1). The
+  # Android path already had an `|| true` guard; the iOS path did not.
+  # Bound the failure with `{ ...; } || true` so a missed record is a
+  # SKIP, not a hard stop.
+  {
+    xcodebuild test -scheme FluxApp \
+      -destination "platform=iOS Simulator,id=$SIM_ID" \
+      -only-testing 'FluxAppTests/RenderPerfHarnessTests' 2>&1 || true
+  } | grep 'RENDER_PERF' >> "$RECORDS_FILE" || true
   echo "  iOS xcodebuild run complete (record, if any, captured above)"
 else
   echo "  SKIP: no booted iOS simulator in this environment (FLUX-066 needs a sim)"
