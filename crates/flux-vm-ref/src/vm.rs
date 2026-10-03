@@ -472,10 +472,13 @@ fn exec_tail(
     strings: &StringTable,
     registry: &CapabilityRegistry,
 ) -> Result<ControlFlow, VmError> {
+    // Audit fix: an unresolvable `start_offset` (crafted SuspendState, or an
+    // AWAIT as the final instruction) must surface as `InvalidDispatch`, not
+    // silently return `Halt` with partial state.
     let start_index = offsets
         .iter()
         .position(|&o| o == start_offset)
-        .unwrap_or(program.len());
+        .ok_or_else(|| VmError::at(VmErrorKind::InvalidDispatch, start_offset))?;
     let mut ip_index = start_index;
 
     while ip_index < program.len() {
@@ -505,7 +508,10 @@ fn exec_tail(
                 let result_reg = instr.u8(0);
                 let future_reg = instr.u8(1);
                 let cell_id = match regs[usize::from(future_reg)] {
-                    Value::Int(n) if n >= 0 => n as SignalId,
+                    // Audit fix: reject an out-of-range i64 payload instead of
+                    // silently truncating to the low 32 bits and awaiting a
+                    // *different* cell than the handler meant.
+                    Value::Int(n) if n >= 0 && n <= i64::from(u32::MAX) => n as SignalId,
                     _ => return Err(VmError::at(VmErrorKind::TypeMismatch, instr.offset)),
                 };
                 let st = signals.cell_state(cell_id);
@@ -579,7 +585,11 @@ fn exec_tail(
             Opcode::NegI64 => {
                 let dst = instr.u8(0);
                 let v = expect_int(reg!(instr.u8(1)), instr.offset)?;
-                regs[usize::from(dst)] = Value::Int(-v);
+                // Audit fix: `i64::MIN.wrapping_neg()` is `i64::MIN` under
+                // two's-complement, matching the wrapping_add/sub/mul policy
+                // used by the arithmetic ops above. Plain `-v` panics in
+                // debug builds on a crafted `LOAD_INT_CONST i64::MIN`.
+                regs[usize::from(dst)] = Value::Int(v.wrapping_neg());
             }
             Opcode::EqF64 | Opcode::LtF64 | Opcode::GtF64 => {
                 let dst = instr.u8(0);
