@@ -48,6 +48,21 @@ impl Budgets {
             .find(|(k, _)| *k == kind)
             .map(|(_, v)| *v)
     }
+
+    /// Returns a copy of these budgets with `kind`'s ceiling replaced by
+    /// `ceiling`. Used by callers that need a tree-size-aware ceiling for a
+    /// single kind — e.g. the loopback save→photon E2E, where a 1000-node
+    /// tree legitimately takes longer to compile+diff+ship than the 50-node
+    /// calibration the base ceiling was tuned for.
+    #[must_use]
+    pub fn with_ceiling(mut self, kind: MetricKind, ceiling: f64) -> Self {
+        for (k, v) in &mut self.ceilings {
+            if *k == kind {
+                *v = ceiling;
+            }
+        }
+        self
+    }
 }
 
 /// The outcome of evaluating one record against the budgets.
