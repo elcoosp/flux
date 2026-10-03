@@ -27,7 +27,7 @@ fn stale_early_value_does_not_leak_across_sessions() {
     );
 
     // Session 1 "disconnects":
-    bridge.clear_early();
+    bridge.clear_session();
 
     // --- Session 2 ---
     // A different handler parks on the same cell id (42). If the stale `early`
@@ -61,7 +61,7 @@ fn parked_handler_from_session_one_is_orphaned_not_resumed_in_session_two() {
     assert_eq!(bridge.parked_len(), 1);
 
     // Session 1 disconnects.
-    bridge.clear_early();
+    bridge.clear_session();
 
     // Session 2: a DIFFERENT handler (11) parks on the SAME cell (5).
     // The old parked entry for cell 5 is overwritten — not resumed — because
