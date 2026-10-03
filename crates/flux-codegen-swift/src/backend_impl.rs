@@ -253,7 +253,14 @@ impl Backend for Swift {
             format!("Binding(get: {{ {value} }}, set: {{ newValue in {on_change} }})")
         };
         match spec.flux_name {
-            "Switch" | "Checkbox" => {
+            // `Switch`, `Checkbox` and `Toggle` all map to a SwiftUI
+            // `Toggle(isOn:)`. `Toggle` used to have a dedicated emitter
+            // branch that emitted `Toggle(isOn: Binding(get:set:)) { children }`
+            // — SwiftUI's `Toggle` takes an optional *label* closure, so
+            // emitting `{ children }` wrapped user content as the label
+            // instead of the (empty) body. Routing through `form_control`
+            // gives all three the correct `{ EmptyView() }` shape.
+            "Switch" | "Checkbox" | "Toggle" => {
                 Some(format!("Toggle(isOn: {binding}) {{ EmptyView() }}"))
             }
             "Slider" => Some(format!("Slider(value: {binding}, in: 0...1)")),
