@@ -31,7 +31,11 @@ public class WebViewAdapter private constructor() : FluxAdapter<FluxNativeView> 
         view: FluxNativeView,
         props: Props,
     ) {
-        val src = props.getString(PropsIndex.propIndexForName("src"))
+        // Audit fix: hoist the FNV-derived prop index. `propIndexForName("src")`
+        // hashed the string on every `update` — every adapter-visible keystroke
+        // re-hashed the same constant. The index is deterministic (FNV-1a of
+        // the ASCII bytes), so compute it once per class load.
+        val src = props.getString(WEBVIEW_SRC)
         if (src.isNullOrEmpty()) {
             // A missing/empty `src` clears the source so the host hides the view.
             if (view.getProperty(PROP_SRC) != null) view.setProperty(PROP_SRC, null)
@@ -74,5 +78,9 @@ public class WebViewAdapter private constructor() : FluxAdapter<FluxNativeView> 
 
         const val PROP_SRC = "webSrc"
         const val PROP_HAS_SRC = "hasWebSrc"
+
+        /// FNV-1a-derived prop index for the "src" prop, computed once at
+        /// class load instead of per update (audit §11).
+        val WEBVIEW_SRC: UShort = PropsIndex.propIndexForName("src")
     }
 }
