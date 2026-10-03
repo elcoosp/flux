@@ -467,6 +467,14 @@ impl Backend for Kotlin {
             "Switch" => Some(format!(
                 "Switch(checked = {value}, onCheckedChange = {{ {handler} }})"
             )),
+            // FLUX-077 `Toggle` shares the Compose `Switch` shape (the Kotlin
+            // kit's ToggleAdapter also maps to a `UISwitch`/`Switch` control).
+            // Routing through `form_control` removes the previous dedicated
+            // emitter branch that emitted an invalid trailing content lambda
+            // and used the raw `value` expression as the setter's LHS.
+            "Toggle" => Some(format!(
+                "Switch(checked = {value}, onCheckedChange = {{ {handler} }})"
+            )),
             "Checkbox" => Some(format!(
                 "Checkbox(checked = {value}, onCheckedChange = {{ {handler} }})"
             )),
