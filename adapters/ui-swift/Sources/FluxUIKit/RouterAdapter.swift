@@ -39,8 +39,47 @@ public final class RouterHostView: UIView {
     /// attach it; the nav controller's view is added as a plain pinned subview,
     /// which displays the navigation bar and active screen in the dev renderer.
     func embedNavController() {
-        guard nav.parent == nil else { return }
-        addSubview(nav.view)
+        // Audit fix: establish real view-controller containment (addChild /
+        // didMove) so viewWillAppear, rotation and status-bar propagation reach
+        // the host hierarchy. The previous version only added the nav's view
+        // as a plain subview; `nav.parent` was therefore always nil (the guard
+        // was ineffective) and `destroy`'s `removeFromParent()` was a no-op.
+        //
+        // A RouterHostView is a plain `UIView`, so it cannot call `addChild`
+        // on itself — walk the responder chain to find the nearest
+        // UIViewController (the ScreenAdapter's VC, typically) and attach
+        // there.
+        if nav.parent != nil {
+            if nav.view.superview !== self {
+                addSubview(nav.view)
+                installNavConstraints()
+            }
+            return
+        }
+        var responder: UIResponder? = self
+        while let current = responder {
+            if let vc = current as? UIViewController, vc !== nav {
+                vc.addChild(nav)
+                addSubview(nav.view)
+                installNavConstraints()
+                nav.didMove(toParent: vc)
+                return
+            }
+            responder = current.next
+        }
+        // Fallback: no VC ancestor (host hierarchy not mounted yet). Attach
+        // the view so the renderer can still show it; containment will be
+        // established on the next `embedNavController` call.
+        if nav.view.superview !== self {
+            addSubview(nav.view)
+            installNavConstraints()
+        }
+    }
+
+    /// Pins `nav.view` to fill this host view. Idempotent: called every time
+    /// the nav view is (re-)added, but the nav view can only have one set of
+    /// anchors active, so UIKit treats a re-activation as a no-op.
+    private func installNavConstraints() {
         nav.view.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             nav.view.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -64,10 +103,17 @@ public final class RouterAdapter: FluxAdapter {
     public func update(_ view: RouterHostView, from old: Props, to new: Props) {}
 
     public func setChildren(_ children: [AnyObject], on view: RouterHostView) {
-        guard let screens = children as? [UIViewController] else {
-            // Screens are always UIViewController; a non-VC child is a runtime bug.
-            return
-        }
+        // Audit fix: the previous `guard let screens = children as? [UIViewController]`
+        // silently dropped the *entire* navigation update if any one child was
+        // not a `UIViewController` — one bad element blanked the router with no
+        // diagnostic. Collect the valid VCs, assert on any bad element, and
+        // proceed with what we have.
+        let screens: [UIViewController] = children.compactMap { $0 as? UIViewController }
+        assert(
+            screens.count == children.count,
+            "Router received a non-UIViewController child: \(children.map { type(of: $0) })"
+        )
+        if screens.isEmpty { return }
         // A `Router` presents exactly ONE screen (the active route); the
         // reconciler already filtered `children` down to that single screen, so
         // the whole nav stack is always replaced, never pushed. Pushing would
