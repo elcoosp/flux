@@ -169,25 +169,33 @@ fn write_closures(w: &mut Writer, closures: &[ClosureIR]) {
     }
     // Concatenate every closure's bytecode into one blob and record each
     // closure's offset within it, so the `ClosureRef` indices stay stable.
+    //
+    // Audit §3.3: use a `HashMap` for O(1) lookup instead of the previous
+    // `Vec::iter().find(...)` O(n²) scan (with 1000+ closures that scan ran
+    // millions of comparisons per frame on the hot-reload path). Also detect
+    // duplicate handler ids: the old `find` returned the *first* entry, so two
+    // closures sharing an id silently shipped the first one's bytecode for
+    // both. The encode path's documented policy is panic-on-corruption
+    // (audit H14), so fail loud here rather than emit wrong bytes.
     let mut blob: Vec<u8> = Vec::new();
-    let mut offsets: Vec<(HandlerId, u32, u16)> = Vec::with_capacity(closures.len());
+    let mut by_id: std::collections::HashMap<HandlerId, (u32, u16)> =
+        std::collections::HashMap::with_capacity(closures.len());
     for closure in closures {
         let offset = blob.len() as u32;
         blob.extend_from_slice(&closure.bytecode);
-        offsets.push((
-            closure.id,
-            offset,
-            u16::try_from(closure.bytecode.len()).expect("bytecode len exceeds u16 (audit H14)"),
-        ));
+        let len = u16::try_from(closure.bytecode.len())
+            .expect("bytecode len exceeds u16 (audit H14)");
+        if by_id.insert(closure.id, (offset, len)).is_some() {
+            panic!(
+                "duplicate handler id {:#x} in closure stream (audit §3.3)",
+                closure.id
+            );
+        }
     }
     encode_bytecode_blob(w, &blob);
     w.u16_len(closures.len(), "frame.closures");
     for closure in closures {
-        let (_, offset, len) = offsets
-            .iter()
-            .find(|(id, _, _)| *id == closure.id)
-            .copied()
-            .expect("closure id present in offsets");
+        let (offset, len) = by_id[&closure.id];
         let closure_ref = flux_syntax::ClosureRef {
             hash: crate::hash_closure(&closure.bytecode, &closure.captured_signals),
             bytecode_offset: offset,
@@ -635,11 +643,19 @@ fn decode_closures(r: &mut Reader<'_>) -> Result<Vec<ClosureIR>, WireError> {
     // never indexes out of bounds on a crafted closure.
     validate_bytecode(&blob)?;
     let handler_count = r.u16("closures.count")? as usize;
-    // Defense in depth: a malformed frame could claim far more handler
-    // definitions than the blob can contain. We already validate the blob
-    // below, but reject a clearly-impossible count up front so the allocation
-    // (and the subsequent per-handler scan) cannot be driven unbounded.
-    if handler_count > blob.len().saturating_add(1) {
+    // Audit §3.2: bound the count by the *minimum encoded size* of one
+    // HandlerDef on the wire, not by `blob.len()`. Every HandlerDef occupies
+    // at least 20 bytes (id 4 + hash 8 + offset 4 + len 2 + captures count 2
+    // + span 12 + excerpt-len 2 = 34, rounded down to a conservative 20).
+    // The previous `blob.len().saturating_add(1)` guard permitted
+    // `Vec::with_capacity(handler_count)` of ~120-byte `ClosureIR`s to be
+    // driven by a 1 MB frame's blob length — a ~100× transient memory
+    // amplification that a repeated malformed frame turns into a memory-
+    // pressure DoS. With this bound, a 1 MB frame can claim at most ~50k
+    // handlers (~6 MB transient, comparable to the frame itself).
+    const MIN_HANDLER_DEF_BYTES: usize = 20;
+    let max_possible = r.remaining() / MIN_HANDLER_DEF_BYTES + 1;
+    if handler_count > max_possible {
         return Err(WireError::MalformedBytecode {
             context: "closures.count",
             detail: "truncated-operands",
