@@ -101,14 +101,29 @@ impl ViewNode {
 /// Swift `VStack` and Kotlin `Column` compare equal.
 #[must_use]
 pub fn normalize_view_name(name: &str) -> String {
+    // Audit fix (theme #1: two sources of truth): this table used to be a
+    // strict subset of the parity crate's — the release walker dropped
+    // children of `Grid`/`SafeArea`/`Modal`/`Sheet`/`Dialog` and never
+    // reduced `TextField`→`TextInput`, `Switch`→`Toggle`, etc. This is
+    // now the canonical superset; `flux_parity::reduce` re-exports it.
     match name {
         "VStack" => "Column",
         "HStack" => "Row",
         "CupertinoButton" | "MaterialButton" => "Button",
-        // FLUX-042: both backends emit `withAnimation(...)` for `Animate`.
-        "withAnimation" => "Animate",
-        // FLUX-043: native theme extension surface names reduce to `Theme`.
+        "TextField" => "TextInput",
+        "ModalBottomSheet" => "Sheet",
+        "AlertDialog" => "Dialog",
+        "Alert" => "Dialog",
+        "Dialog" => "Modal",
+        "FullScreenCover" => "Modal",
+        "Sheet" => "Sheet",
+        "withAnimation" | "AnimatedContent" => "Animate",
         "MaterialTheme" | "FluxTheme" => "Theme",
+        "ZStack" => "Stack",
+        "Box" => "Stack",
+        "LazyVerticalGrid" => "Grid",
+        "Scaffold" => "SafeArea",
+        "Switch" => "Toggle",
         other => other,
     }
     .to_owned()
@@ -117,9 +132,25 @@ pub fn normalize_view_name(name: &str) -> String {
 /// Returns `true` for layout adapters that carry real structural children.
 #[must_use]
 pub fn is_container(name: &str) -> bool {
+    // Audit fix (theme #1): extended to match the parity crate's container
+    // set. Missing `Grid`/`SafeArea`/`Modal`/`Sheet`/`Dialog` in the release
+    // walker caused it to *drop* their children silently, diverging from
+    // what the dev path showed.
     matches!(
         name,
-        "Column" | "Row" | "VStack" | "HStack" | "ZStack" | "Stack" | "Provider" | "ScrollView"
+        "Column"
+            | "Row"
+            | "VStack"
+            | "HStack"
+            | "ZStack"
+            | "Stack"
+            | "Grid"
+            | "SafeArea"
+            | "Provider"
+            | "Modal"
+            | "Sheet"
+            | "Dialog"
+            | "ScrollView"
     )
 }
 
