@@ -102,6 +102,7 @@ pub fn compile_handler(
     scope: &SignalScope,
     constructors: &HashSet<String>,
     metadata: &IrMetadata<'_>,
+    prop_indices: &mut std::collections::HashMap<u16, String>,
     span: Span,
     str_interner: StringInterner<'_>,
 ) -> Result<(Vec<u8>, Vec<SignalId>), HandlerCompileError> {
@@ -111,6 +112,7 @@ pub fn compile_handler(
         scope,
         constructors,
         metadata,
+        prop_indices,
         span,
         str_interner,
     )
@@ -126,10 +128,11 @@ pub fn compile_handler_with_params(
     scope: &SignalScope,
     constructors: &HashSet<String>,
     metadata: &IrMetadata<'_>,
+    prop_indices: &mut std::collections::HashMap<u16, String>,
     span: Span,
     str_interner: StringInterner<'_>,
 ) -> Result<(Vec<u8>, Vec<SignalId>), HandlerCompileError> {
-    let mut emitter = Emitter::new(scope, constructors, metadata, str_interner);
+    let mut emitter = Emitter::new(prop_indices, scope, constructors, metadata, str_interner);
     // A handler's first declared parameter is the event payload, delivered by
     // the host as `r0` (Appendix E: r0 is the entry payload; both native
     // `TextInput`/`Button` adapters dispatch `FluxEvent(payload)` into r0). Bind
@@ -207,7 +210,15 @@ pub(crate) fn compile_prop_thunk(
     scope: &SignalScope,
     str_interner: StringInterner<'_>,
 ) -> PropThunk {
-    let mut emitter = Emitter::for_thunk(scope, metadata, str_interner);
+    // Scaffold: the thunk path did not previously carry a `prop_indices`
+    // registry; a fresh local preserves the old behavior (no collision check
+    // for thunks). `Lowerer`-driven handler compilation goes through
+    // `compile_handler_with_params`, which shares the registry, so
+    // collisions in handler reads/writes/records are caught. A follow-up can
+    // thread the real map here too.
+    let mut local_prop_indices = std::collections::HashMap::new();
+    let mut emitter =
+        Emitter::for_thunk(&mut local_prop_indices, scope, metadata, str_interner);
     let count = props.len() as u16;
     emitter.emit_alloc_record(1, count);
     let mut layout = Vec::with_capacity(props.len());
@@ -445,6 +456,16 @@ struct Emitter<'a> {
     constructors: &'a HashSet<String>,
     /// IrMetadata: bundles field_indices (FLUX-072) and expr_types (T-103).
     metadata: &'a IrMetadata<'a>,
+    /// Shared prop-name → PropIdx registry owned by the enclosing `Lowerer`.
+    ///
+    /// Audit fix (theme #2 / audit P2.9): every `prop_index_for_name` call
+    /// inside handler bytecode (`GET_FIELD`, `SET_FIELD`, record construction,
+    /// optional-field reads) now goes through a shared registry so two
+    /// distinct field names that collide on the same 16-bit FNV slot surface
+    /// as a `HandlerCompileError` instead of silently aliasing each other —
+    /// the same protection `Lowerer::intern_prop_index` already provides for
+    /// node props.
+    prop_indices: &'a mut std::collections::HashMap<u16, String>,
     /// Locally-bound `let` names → register. Checked before the signal scope so
     /// `let x = …; … x …` reads the binding rather than a (non-existent) signal.
     locals: std::collections::HashMap<String, u8>,
@@ -467,7 +488,31 @@ struct Emitter<'a> {
 }
 
 impl<'a> Emitter<'a> {
+    /// Interns a prop/field name → u16 PropIdx, erroring on FNV-1a slot
+    /// collisions. Mirrors `Lowerer::intern_prop_index` but lives on the
+    /// handler compiler: the map is shared (`&mut HashMap<u16, String>`) so
+    /// names interned here collide-check against names interned by the
+    /// enclosing `Lowerer` and vice versa (audit P2.9 / theme #2).
+    fn intern_prop_index(&mut self, name: &str) -> Result<u16, HandlerCompileError> {
+        let idx = prop_index_for_name(name);
+        let key = u16::from(idx);
+        if let Some(existing) = self.prop_indices.get(&key) {
+            if existing != name {
+                return Err(HandlerCompileError::new(
+                    format!(
+                        "prop name collision on FNV slot {key:#06x}: '{existing}' vs '{name}' \
+                         — extend PropIdx or rename (audit P2.9)"
+                    ),
+                    self.current_span,
+                ));
+            }
+        } else {
+            self.prop_indices.insert(key, name.to_owned());
+        }
+        Ok(key)
+    }
     fn new(
+        prop_indices: &'a mut std::collections::HashMap<u16, String>,
         scope: &'a SignalScope,
         constructors: &'a HashSet<String>,
         metadata: &'a IrMetadata<'a>,
@@ -485,6 +530,7 @@ impl<'a> Emitter<'a> {
             watermark: 0,
             current_span: Span::new(0, 0, 0),
             str_interner,
+            prop_indices,
         }
     }
 
@@ -503,6 +549,7 @@ impl<'a> Emitter<'a> {
     /// [`emit_alloc_record`]. Prop thunks never emit capability calls, so they
     /// receive an empty constructor set and no locals.
     fn for_thunk(
+        prop_indices: &'a mut std::collections::HashMap<u16, String>,
         scope: &'a SignalScope,
         metadata: &'a IrMetadata<'a>,
         str_interner: StringInterner<'a>,
@@ -518,6 +565,7 @@ impl<'a> Emitter<'a> {
             watermark: 0,
             current_span: Span::new(0, 0, 0),
             str_interner,
+            prop_indices,
         }
     }
 
@@ -760,7 +808,7 @@ impl<'a> Emitter<'a> {
     ) -> Result<(), HandlerCompileError> {
         // Fields are keyed by their canonical `PropIdx`, not a type-checker
         // positional slot — records are stored canonical-keyed (Appendix C).
-        let idx = prop_index_for_name(field);
+        let idx = self.intern_prop_index(field)?;
 
         // The record lives in a signal (e.g. `current.done` where `current` is a
         // state signal) or a local register (e.g. a `let task = …` binding).
@@ -1338,7 +1386,7 @@ impl<'a> Emitter<'a> {
                 // write side emits and what records are keyed by (Appendix C,
                 // FLUX-072 #4). Records are NOT stored positionally, so we must
                 // not use the type checker's positional `field_indices` here.
-                let idx = prop_index_for_name(&field.name);
+                let idx = self.intern_prop_index(&field.name)?;
                 self.code.push(raw::GET_FIELD);
                 self.code.push(r);
                 self.code.extend_from_slice(&idx.to_le_bytes());
@@ -1367,7 +1415,7 @@ impl<'a> Emitter<'a> {
                 self.emit_alloc_record(dst, count);
                 for (name, value) in fields.iter() {
                     let v = self.compile_value(value)?;
-                    let idx: u16 = prop_index_for_name(&name.name);
+                    let idx: u16 = self.intern_prop_index(&name.name)?;
                     self.emit_set_field(dst, idx, v);
                 }
                 Ok(dst)
@@ -1534,7 +1582,7 @@ impl<'a> Emitter<'a> {
                 // Same index space as every other field access (audit C3):
                 // `?.` previously hashed the field name with blake3 via
                 // method_id_for, reading a slot nothing ever wrote.
-                let idx = prop_index_for_name(&field.name);
+                let idx = self.intern_prop_index(&field.name)?;
                 self.code.extend_from_slice(&idx.to_le_bytes());
                 self.code.push(base_reg);
                 self.patch_jump(join_label);
@@ -1707,7 +1755,7 @@ impl<'a> Emitter<'a> {
                     for (arg, reg) in args.iter().zip(arg_regs.iter()) {
                         let idx: u16 = match arg {
                             flux_parser::Arg::Named { name, .. } => {
-                                let idx = prop_index_for_name(&name.name);
+                                let idx = self.intern_prop_index(&name.name)?;
                                 if idx == 0 {
                                     return Err(HandlerCompileError::new(
                                         "record field hashes to the reserved tag slot 0 — \
@@ -1978,6 +2026,7 @@ mod tests {
                 field_indices: &std::collections::HashMap::new(),
                 expr_types: &std::collections::HashMap::new(),
             },
+            &mut std::collections::HashMap::new(),
             span(),
             &mut |_s| StringTable::new().intern(_s),
         )
@@ -2079,6 +2128,7 @@ mod tests {
                 field_indices: &std::collections::HashMap::new(),
                 expr_types: &std::collections::HashMap::new(),
             },
+            &mut std::collections::HashMap::new(),
             span(),
             &mut |_s| StringTable::new().intern(_s),
         )
@@ -2254,6 +2304,7 @@ mod tests {
                 field_indices: &std::collections::HashMap::new(),
                 expr_types: &std::collections::HashMap::new(),
             },
+            &mut std::collections::HashMap::new(),
             span(),
             &mut |_s| StringTable::new().intern(_s),
         )
@@ -2321,6 +2372,7 @@ mod tests {
                 field_indices: &std::collections::HashMap::new(),
                 expr_types: &std::collections::HashMap::new(),
             },
+            &mut std::collections::HashMap::new(),
             span(),
             &mut |_s| StringTable::new().intern(_s),
         )
@@ -2360,6 +2412,7 @@ mod tests {
                 field_indices: &HashMap::new(),
                 expr_types: &HashMap::new(),
             },
+            &mut std::collections::HashMap::new(),
             span(),
             &mut |_s| StringTable::new().intern(_s),
         );
@@ -2424,6 +2477,7 @@ mod tests {
                 field_indices: &HashMap::new(),
                 expr_types: &HashMap::new(),
             },
+            &mut std::collections::HashMap::new(),
             span(),
             &mut |_s| StringTable::new().intern(_s),
         );
@@ -2472,6 +2526,7 @@ mod tests {
                 field_indices: &std::collections::HashMap::new(),
                 expr_types: &expr_types,
             },
+            &mut std::collections::HashMap::new(),
             span(),
             &mut |_s| StringTable::new().intern(_s),
         )
@@ -2520,6 +2575,7 @@ mod tests {
                 field_indices: &std::collections::HashMap::new(),
                 expr_types: &expr_types,
             },
+            &mut std::collections::HashMap::new(),
             span(),
             &mut |_s| StringTable::new().intern(_s),
         )
@@ -2572,6 +2628,7 @@ mod tests {
                 field_indices: &std::collections::HashMap::new(),
                 expr_types: &expr_types,
             },
+            &mut std::collections::HashMap::new(),
             span(),
             &mut |_s| StringTable::new().intern(_s),
         )
@@ -2616,6 +2673,7 @@ mod tests {
                 field_indices: &std::collections::HashMap::new(),
                 expr_types: &std::collections::HashMap::new(),
             },
+            &mut std::collections::HashMap::new(),
             span(),
             &mut |_s| StringTable::new().intern(_s),
         )
