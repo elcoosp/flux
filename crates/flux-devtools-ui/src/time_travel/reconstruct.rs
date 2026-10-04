@@ -32,7 +32,12 @@ pub struct ViewFrame {
     pub frame: Option<Rect>,
     /// Resolved component name (e.g. `Column`, `Button`), if the host reported
     /// one. `None` for nodes whose name the host did not transmit.
-    pub component_name: Option<String>,
+    ///
+    /// Stored as `Arc<str>` so cloning a `ViewFrame` (which the component-tree
+    /// view does three times per render) is a refcount bump, not a heap
+    /// allocation + byte copy. The audit flagged the per-render clone churn
+    /// here; this halves it (the remaining `Option<Rect>` is `Copy`).
+    pub component_name: Option<std::sync::Arc<str>>,
 }
 
 /// Reconstructed DevTools state for a single timeline position.
@@ -158,7 +163,7 @@ pub fn apply_event(state: &mut ReconstructedState, event: &EnrichedTelemetryEven
                         node_id: *node_id,
                         parent_id: *parent_id,
                         frame: *frame,
-                        component_name: Some(component_name.clone()),
+                        component_name: Some(std::sync::Arc::from(component_name.as_str())),
                     };
                     if let Some(existing) = state
                         .view_frames
