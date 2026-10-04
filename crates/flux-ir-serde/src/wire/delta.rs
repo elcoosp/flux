@@ -22,7 +22,9 @@ impl StateDelta {
         w.u16_len(delta.cells.len(), "delta.cells");
         for (signal, value) in &delta.cells {
             w.u32(*signal);
-            encode_value(w, value);
+            // Scaffold: same pattern as `encode_props` — see comment there.
+            encode_value(w, value)
+                .expect("state_delta: value exceeds wire length limits");
         }
     }
 
