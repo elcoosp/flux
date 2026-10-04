@@ -170,6 +170,9 @@ impl DeviceSession {
 /// the worst-case replay ~5-10 ms even for large states.
 const CHECKPOINT_INTERVAL: u64 = 256;
 
+/// DevTools' shared state: the retained timeline, the legacy single-host
+/// mirror, per-host sessions, and the new checkpoints used to bound
+/// `state_at` replays.
 #[allow(missing_debug_implementations)]
 pub struct DevToolsState {
     /// Retained telemetry history (ADR-0042). Kept as the active session's mirror
@@ -923,6 +926,52 @@ mod tests {
         let state = DevToolsState::new();
         state.handle_telemetry(event);
         assert_eq!(state.perf_record_count(), 1);
+    }
+
+    /// Audit regression (checkpointing): a deep scrub to index `i` must return
+    /// the same reconstructed state as a from-scratch replay of the first
+    /// `i + 1` events. Exercises the checkpoint-eviction path with more events
+    /// than `CHECKPOINT_INTERVAL` and probes several target indexes: an early
+    /// one before the first checkpoint, one exactly at a checkpoint boundary,
+    /// and one deep enough that a stale checkpoint would give the wrong answer.
+    #[test]
+    fn checkpoint_correctness() {
+        let state = DevToolsState::new();
+        let n = (CHECKPOINT_INTERVAL as usize) * 3 + 7;
+        for i in 0..n {
+            state.handle_telemetry(step((i as u32) * 4));
+        }
+
+        // Push enough events that the state's own `apply_event` fold reaches
+        // each target, then compare against `state_at`.
+        for &target in &[
+            0usize,                             // before first checkpoint
+            CHECKPOINT_INTERVAL as usize - 1,   // last event before first cp
+            CHECKPOINT_INTERVAL as usize,       // right after first cp
+            CHECKPOINT_INTERVAL as usize * 2,   // second cp
+            n - 1,                              // deep — would fail if any cp stale
+        ] {
+            // From-scratch replay.
+            let mut expected = ReconstructedState::base();
+            {
+                let tl = state.timeline.read();
+                for i in 0..=target {
+                    let e = tl.snapshot_at(i).expect("event exists");
+                    crate::time_travel::apply_event(&mut expected, e);
+                }
+            }
+            let got = state.state_at(target).expect("target in range");
+            assert_eq!(
+                got.bytecode_offset, expected.bytecode_offset,
+                "bytecode_offset mismatch at {target}"
+            );
+            assert_eq!(got.gas_remaining, expected.gas_remaining,
+                       "gas mismatch at {target}");
+            assert_eq!(got.signals, expected.signals,
+                       "signals mismatch at {target}");
+            assert_eq!(got.view_frames.len(), expected.view_frames.len(),
+                       "view frame count mismatch at {target}");
+        }
     }
 
     #[test]
