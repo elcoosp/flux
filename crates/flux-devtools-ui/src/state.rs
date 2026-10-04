@@ -128,17 +128,6 @@ impl DeviceSession {
         self.timeline.push(event.clone());
     }
 
-    /// Reconstructs the full state at timeline `index` by replaying from base.
-    #[must_use]
-    pub fn state_at(&self, index: usize) -> Option<ReconstructedState> {
-        let mut state = ReconstructedState::base();
-        for i in 0..=index {
-            let event = self.timeline.snapshot_at(i)?;
-            state = reconstruct_state(&state, std::slice::from_ref(event));
-        }
-        Some(state)
-    }
-
     /// Number of retained timeline events for this host.
     #[must_use]
     pub fn timeline_len(&self) -> usize {
@@ -178,8 +167,7 @@ pub struct DevToolsState {
     pub timeline: RwLock<TimelineBuffer>,
     /// Reconstructed state at the live (newest) timeline index.
     pub live: RwLock<ReconstructedState>,
-    /// Whether the host VM is paused.
-    pub is_paused: RwLock<bool>,
+
     /// Retained structured log stream for the log viewer (FLUX-060). Bounded; the
     /// oldest record is evicted once at capacity, mirroring the timeline buffer.
     pub logs: RwLock<LogBuffer>,
@@ -270,7 +258,7 @@ impl DevToolsState {
         Self {
             timeline: RwLock::new(TimelineBuffer::new(crate::time_travel::DEFAULT_CAPACITY)),
             live: RwLock::new(ReconstructedState::base()),
-            is_paused: RwLock::new(false),
+
             logs: RwLock::new(LogBuffer::new(512)),
             net: RwLock::new(NetworkLog::new(512)),
             host: RwLock::new(None),
@@ -359,18 +347,6 @@ impl DevToolsState {
             .read()
             .clone()
             .unwrap_or_else(HostKey::anonymous)
-    }
-
-    /// The keys of all known host sessions (FLUX-061 multi-device).
-    #[must_use]
-    pub fn session_keys(&self) -> Vec<HostKey> {
-        self.sessions.read().keys().cloned().collect()
-    }
-
-    /// Number of distinct host sessions currently held (FLUX-061).
-    #[must_use]
-    pub fn session_count(&self) -> usize {
-        self.sessions.read().len()
     }
 
     /// A snapshot of one host session's reconstructed state (FLUX-061), if the
@@ -859,18 +835,11 @@ mod tests {
         });
         state.handle_telemetry(step(20));
 
-        assert_eq!(state.session_count(), 2);
-        let keys = state.session_keys();
-        assert!(keys.contains(&HostKey::from_host(&HostInfo {
-            platform: "ios".into(),
-            device: "iPhone17,1".into(),
-            capabilities: Vec::new(),
-        })));
-        assert!(keys.contains(&HostKey::from_host(&HostInfo {
-            platform: "android".into(),
-            device: "Pixel 8".into(),
-            capabilities: Vec::new(),
-        })));
+        // Audit: the previous `session_count()` / `session_keys()` accessors
+        // were dead wiring (only used by this test). The following
+        // `session_state(&…)` lookups already prove both sessions were
+        // created with their own timelines, so the removed assertions were
+        // redundant.
 
         let ios_key = HostKey::from_host(&HostInfo {
             platform: "ios".into(),
