@@ -38,8 +38,14 @@ pub(crate) fn component_id(span: Span) -> NodeId {
 pub struct Bridge {
     /// Expression-origin nodes (primitives, `if`/`when`, `ForEach`, `match`).
     pub(crate) exprs: std::collections::HashMap<NodeId, Expr>,
-    /// Component declarations.
-    pub(crate) components: std::collections::HashMap<NodeId, ComponentDecl>,
+    /// Component declarations, in **deterministic ascending `NodeId` order**.
+    ///
+    /// Audit fix: this was a `HashMap`, whose iteration order is arbitrary
+    /// and varies run-to-run. `Bridge::components()` documents "insertion
+    /// order", and every caller (build.rs, parity, tests) expects a stable
+    /// sequence across runs so snapshots are reproducible. `BTreeMap` gives
+    /// the deterministic order the doc promised without changing the API.
+    pub(crate) components: std::collections::BTreeMap<NodeId, ComponentDecl>,
     /// Algebraic data type declarations (sum types), in source order.
     pub(crate) types: Vec<TypeDecl>,
     /// Record (product type) declarations, in source order.
