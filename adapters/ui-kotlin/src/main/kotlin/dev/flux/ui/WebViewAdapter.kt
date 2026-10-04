@@ -59,6 +59,7 @@ public class WebViewAdapter private constructor() : FluxAdapter<FluxNativeView> 
         view: FluxNativeView,
         props: Props,
         executor: WeakReference<FluxExecutor>,
+        nodeId: UInt,
     ) {
         // WebHost has no handlers in the MLP.
     }
