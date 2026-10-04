@@ -43,10 +43,15 @@ public class SwitchAdapter private constructor() : FluxAdapter<FluxNativeView> {
         view: FluxNativeView,
         props: Props,
         executor: WeakReference<FluxExecutor>,
+        nodeId: UInt,
     ) {
         val handlerId = props.getHandler(PropsIndex.SWITCH_ON_CHANGE)
         view.setProperty(PROP_HANDLER, handlerId)
         view.setProperty(PROP_EXECUTOR, executor)
+        // Store the node identity so a host that constructs a HandlerEvent
+        // from the view's properties can stamp the correct nodeId (audit
+        // fix; matches Swift HandlerTarget.nodeId).
+        view.setProperty(FluxNativeView.PROP_NODE_ID, nodeId)
     }
 
     override fun destroy(view: FluxNativeView) {
