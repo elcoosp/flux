@@ -512,12 +512,16 @@ impl DevToolsState {
     /// Returns `None` if `index` is past the retained history.
     #[must_use]
     pub fn state_at(&self, index: usize) -> Option<ReconstructedState> {
+        // Audit fix (perf): replay in place. The previous version called
+        // `reconstruct_state(&state, &[event])` per step, which clones the
+        // whole state at the top of every call — O(n²) on a scrub into a
+        // 10k-event timeline. `apply_event` mutates in place, making a
+        // scrub to index i O(i) allocations (only what the event touches).
         let timeline = self.timeline.read();
-        let base = ReconstructedState::base();
-        let mut state = base;
+        let mut state = ReconstructedState::base();
         for i in 0..=index {
             let event = timeline.snapshot_at(i)?;
-            state = reconstruct_state(&state, std::slice::from_ref(event));
+            crate::time_travel::apply_event(&mut state, event);
         }
         Some(state)
     }
