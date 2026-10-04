@@ -53,6 +53,7 @@ public class ContainerAdapter private constructor() : FluxAdapter<FluxNativeView
         view: FluxNativeView,
         props: Props,
         executor: WeakReference<FluxExecutor>,
+        nodeId: UInt,
     ) {
         // Containers bind no native events.
     }
