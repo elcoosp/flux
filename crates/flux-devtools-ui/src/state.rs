@@ -109,6 +109,13 @@ pub struct DeviceSession {
     pub live: ReconstructedState,
     /// Retained telemetry history for this host (ADR-0042).
     pub timeline: TimelineBuffer,
+    /// Monotonic count of every event this session ingested, including
+    /// evicted ones. Used to map a relative timeline index to the absolute
+    /// index the checkpoint table is keyed on.
+    pub total_events: u64,
+    /// Periodic snapshots of `live`, keyed by the absolute event index they
+    /// were taken after. Bounds `state_at`'s replay to ≤ `CHECKPOINT_INTERVAL`.
+    pub checkpoints: std::collections::VecDeque<(u64, ReconstructedState)>,
 }
 
 impl DeviceSession {
@@ -119,6 +126,8 @@ impl DeviceSession {
             host,
             live: ReconstructedState::base(),
             timeline: TimelineBuffer::new(crate::time_travel::DEFAULT_CAPACITY),
+            total_events: 0,
+            checkpoints: std::collections::VecDeque::new(),
         }
     }
 
@@ -131,6 +140,46 @@ impl DeviceSession {
     pub fn handle_telemetry(&mut self, event: &EnrichedTelemetryEvent) {
         crate::time_travel::apply_event(&mut self.live, event);
         self.timeline.push(event.clone());
+        self.total_events += 1;
+        if self.total_events % CHECKPOINT_INTERVAL == 0 {
+            self.checkpoints
+                .push_back((self.total_events - 1, self.live.clone()));
+            let min_abs = self.total_events.saturating_sub(self.timeline.len() as u64);
+            while let Some(&(abs, _)) = self.checkpoints.front() {
+                if abs < min_abs {
+                    self.checkpoints.pop_front();
+                } else {
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Reconstructs this session's state at timeline `index` via the latest
+    /// checkpoint at or before it plus a bounded replay (≤ CHECKPOINT_INTERVAL).
+    #[must_use]
+    pub fn state_at(&self, index: usize) -> Option<ReconstructedState> {
+        let tl_len = self.timeline.len();
+        if index >= tl_len {
+            return None;
+        }
+        let front_abs = self.total_events.saturating_sub(tl_len as u64);
+        let target_abs = front_abs + index as u64;
+
+        let (start_abs, mut state) = self
+            .checkpoints
+            .iter()
+            .rev()
+            .find(|(abs, _)| *abs <= target_abs)
+            .map(|(abs, s)| (*abs + 1, s.clone()))
+            .unwrap_or_else(|| (front_abs, ReconstructedState::base()));
+
+        let start_rel = (start_abs.saturating_sub(front_abs)) as usize;
+        for i in start_rel..=index {
+            let event = self.timeline.snapshot_at(i)?;
+            crate::time_travel::apply_event(&mut state, event);
+        }
+        Some(state)
     }
 
     /// Number of retained timeline events for this host.
@@ -175,14 +224,6 @@ const CHECKPOINT_INTERVAL: u64 = 256;
 /// `state_at` replays.
 #[allow(missing_debug_implementations)]
 pub struct DevToolsState {
-    /// Retained telemetry history (ADR-0042). Kept as the active session's mirror
-    /// so the legacy single-host [`timeline_len`](Self::timeline_len) /
-    /// [`vm_state`](Self::vm_state) / [`state_at`](Self::state_at) API stays
-    /// stable; per-host history lives in [`sessions`](Self::sessions).
-    pub timeline: RwLock<TimelineBuffer>,
-    /// Reconstructed state at the live (newest) timeline index.
-    pub live: RwLock<ReconstructedState>,
-
     /// Retained structured log stream for the log viewer (FLUX-060). Bounded; the
     /// oldest record is evicted once at capacity, mirroring the timeline buffer.
     pub logs: RwLock<LogBuffer>,
@@ -211,21 +252,12 @@ pub struct DevToolsState {
     /// evict from the front and push to the back, keeping the length constant.
     pub perf_record_generation: RwLock<u64>,
 
-    /// Monotonic count of every telemetry event this state has ever ingested,
-    /// including those already evicted from the bounded timeline. The
-    /// absolute index of the event at timeline position `i` is
-    /// `total_events - timeline.len() + i` — this is how `state_at` maps a
-    /// relative index onto the checkpoint table.
-    pub total_events: RwLock<u64>,
-
-    /// Periodic snapshots of the reconstructed state, keyed by the absolute
-    /// event index they were taken after. Without these, a scrub to index `i`
-    /// replays all `i` events from the base; with a checkpoint every
-    /// [`CHECKPOINT_INTERVAL`] events, the worst-case replay is
-    /// `CHECKPOINT_INTERVAL - 1`. Bounded to the retained timeline window;
-    /// checkpoints older than `total_events - timeline.capacity()` are
-    /// evicted on every push.
-    pub checkpoints: RwLock<std::collections::VecDeque<(u64, ReconstructedState)>>,
+    /// The host the UI is inspecting. `None` falls back to `active` (the
+    /// most-recently-announced host). Set via [`Self::select_host`]; every
+    /// session-scoped accessor (`vm_state` / `state_at` / `timeline_len` /
+    /// `push_view_frame` / `live_snapshot`) dispatches through
+    /// [`Self::effective_host_key`].
+    pub selected_host: RwLock<Option<HostKey>>,
     /// The timeline index the user is currently scrubbing to via the time-travel
     /// slider (`None` = live edge). Shared so other panes can reflect the
     /// scrubbed state (FLUX-062 time-travel UX).
@@ -293,9 +325,6 @@ impl DevToolsState {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            timeline: RwLock::new(TimelineBuffer::new(crate::time_travel::DEFAULT_CAPACITY)),
-            live: RwLock::new(ReconstructedState::base()),
-
             logs: RwLock::new(LogBuffer::new(512)),
             net: RwLock::new(NetworkLog::new(512)),
             host: RwLock::new(None),
@@ -303,8 +332,7 @@ impl DevToolsState {
             active: RwLock::new(None),
             perf_records: RwLock::new(Vec::new()),
             perf_record_generation: RwLock::new(0),
-            total_events: RwLock::new(0),
-            checkpoints: RwLock::new(std::collections::VecDeque::new()),
+            selected_host: RwLock::new(None),
             scrub_index: RwLock::new(None),
             selected_signal: RwLock::new(None),
             pane_hidden: RwLock::new(PaneTargetSet::all_visible()),
@@ -389,6 +417,38 @@ impl DevToolsState {
             .unwrap_or_else(HostKey::anonymous)
     }
 
+    /// The host the views render: explicitly-selected host if the user chose
+    /// one, else the most-recently-announced active host.
+    #[must_use]
+    pub fn effective_host_key(&self) -> HostKey {
+        if let Some(k) = self.selected_host.read().clone() {
+            return k;
+        }
+        self.active_host_key()
+    }
+
+    /// The explicitly-selected host, if any.
+    #[must_use]
+    pub fn selected_host_key(&self) -> Option<HostKey> {
+        self.selected_host.read().clone()
+    }
+
+    /// Explicitly selects which host the views inspect.
+    pub fn select_host(&self, key: HostKey) {
+        *self.selected_host.write() = Some(key);
+    }
+
+    /// Clears the explicit selection; views fall back to the active host.
+    pub fn clear_host_selection(&self) {
+        *self.selected_host.write() = None;
+    }
+
+    /// Every host currently known to the state, in deterministic order.
+    #[must_use]
+    pub fn host_keys(&self) -> Vec<HostKey> {
+        self.sessions.read().keys().cloned().collect()
+    }
+
     /// A snapshot of one host session's reconstructed state (FLUX-061), if the
     /// key is known.
     #[must_use]
@@ -405,7 +465,7 @@ impl DevToolsState {
     /// until then, events route to whatever host announced most recently.
     pub fn handle_telemetry(&self, event: EnrichedTelemetryEvent) {
         let key = self.active_host_key();
-        {
+        let evicted = {
             let mut sessions = self.sessions.write();
             let session = sessions.entry(key.clone()).or_insert_with(|| {
                 DeviceSession::new(HostInfo {
@@ -414,59 +474,16 @@ impl DevToolsState {
                     capabilities: Vec::new(),
                 })
             });
+            let cap = session.timeline.capacity();
+            let before = session.timeline.len();
             session.handle_telemetry(&event);
-        }
-        // Mirror into the legacy single-host fields for backward-compatible
-        // reads. Audit fix (perf): `apply_event` mutates in place; the previous
-        // `reconstruct_state(&live, &[event])` cloned the whole state on every
-        // event even when the consumer only ever reads the latest value.
-        {
-            let mut live = self.live.write();
-            crate::time_travel::apply_event(&mut live, &event);
-        }
-        // Audit fix: push may evict the oldest event once at capacity, shifting
-        // every retained event down by one position. The stored scrub_index is
-        // positional, so it must be decremented to keep pointing at the same
-        // logical event — otherwise a user paused at index i drifts toward the
-        // live edge as telemetry continues to arrive.
-        {
-            let mut tl = self.timeline.write();
-            let was_at_capacity = tl.len() >= tl.capacity();
-            tl.push(event.clone());
-            if was_at_capacity {
-                let mut scrub = self.scrub_index.write();
-                *scrub = scrub.map(|i| i.saturating_sub(1));
-            }
-        }
-
-        // Audit fix (perf): maintain periodic checkpoints so a deep scrub to
-        // index i does not replay every event from the base. We tick
-        // `total_events` here (after the push so its value matches the count
-        // of events ever seen) and, every `CHECKPOINT_INTERVAL` events, take a
-        // snapshot of the current live state. The snapshot is stored keyed by
-        // the *absolute* index of the event just applied — see `state_at`.
-        {
-            let mut total = self.total_events.write();
-            *total += 1;
-            let total_now = *total;
-            if total_now % CHECKPOINT_INTERVAL == 0 {
-                let snapshot = self.live.read().clone();
-                let mut cps = self.checkpoints.write();
-                cps.push_back((total_now - 1, snapshot));
-                // Evict checkpoints that have fallen out of the retained
-                // timeline window. The oldest retained event has absolute
-                // index `total_now - tl_len`; anything before that cannot be
-                // reached by a scrub and only wastes memory.
-                let tl_len = self.timeline.read().len() as u64;
-                let min_abs = total_now.saturating_sub(tl_len);
-                while let Some(&(abs, _)) = cps.front() {
-                    if abs < min_abs {
-                        cps.pop_front();
-                    } else {
-                        break;
-                    }
-                }
-            }
+            let after = session.timeline.len();
+            // Ring eviction iff we were saturated and the length did not grow.
+            before == cap && after == cap
+        };
+        if evicted {
+            let mut scrub = self.scrub_index.write();
+            *scrub = scrub.map(|i| i.saturating_sub(1));
         }
 
         // Feed the network inspector (FLUX-060) from the HTTP capability telemetry.
@@ -557,7 +574,29 @@ impl DevToolsState {
     /// Appends a reconstructed view frame to the live component tree directly
     /// (used by tests and any caller that already holds a [`ViewFrame`]).
     pub fn push_view_frame(&self, frame: ViewFrame) {
-        self.live.write().view_frames.push(frame);
+        let key = self.effective_host_key();
+        let mut sessions = self.sessions.write();
+        let session = sessions.entry(key.clone()).or_insert_with(|| {
+            DeviceSession::new(HostInfo {
+                platform: key.platform.clone(),
+                device: key.device.clone(),
+                capabilities: Vec::new(),
+            })
+        });
+        session.live.view_frames.push(frame);
+    }
+
+    /// A snapshot of the effective session's live reconstructed state. Views
+    /// that need to read `view_frames` / `signal_edges` without holding a
+    /// lock across their render use this instead of touching `sessions`
+    /// directly.
+    #[must_use]
+    pub fn live_snapshot(&self) -> ReconstructedState {
+        let key = self.effective_host_key();
+        let sessions = self.sessions.read();
+        sessions
+            .get(&key)
+            .map_or_else(ReconstructedState::base, |s| s.live.clone())
     }
 
     /// The current host identity, if known.
@@ -572,69 +611,39 @@ impl DevToolsState {
     /// Returns `None` if `index` is past the retained history.
     #[must_use]
     pub fn state_at(&self, index: usize) -> Option<ReconstructedState> {
-        // Audit fix (perf): use checkpoints to bound the replay. Without
-        // them, scrubbing to index i replays all i events from the base — up
-        // to 10k events at the default timeline capacity. With a checkpoint
-        // every `CHECKPOINT_INTERVAL` events, we start from the latest
-        // checkpoint whose absolute index is ≤ the target and replay only the
-        // remaining ≤ `CHECKPOINT_INTERVAL` events.
-        let timeline = self.timeline.read();
-        let tl_len = timeline.len();
-        if index >= tl_len {
-            return None;
-        }
-        let total = *self.total_events.read();
-        // Absolute index of the oldest retained event (rel 0).
-        let front_abs = total.saturating_sub(tl_len as u64);
-        let target_abs = front_abs + index as u64;
-
-        // Find the latest checkpoint with absolute index ≤ target_abs and
-        // strictly below it (a checkpoint at target_abs itself means no
-        // replay at all, but the same code path handles it).
-        let (start_abs, mut state) = {
-            let cps = self.checkpoints.read();
-            let best = cps
-                .iter()
-                .rev()
-                .find(|(abs, _)| *abs <= target_abs)
-                .map(|(abs, s)| (*abs, s.clone()));
-            match best {
-                Some((abs, s)) => (abs + 1, s),
-                None => (front_abs, ReconstructedState::base()),
-            }
-        };
-
-        // Replay from `start_abs` through `target_abs` (both absolute).
-        let start_rel = (start_abs.saturating_sub(front_abs)) as usize;
-        let end_rel = index;
-        if start_rel > end_rel {
-            return Some(state);
-        }
-        for i in start_rel..=end_rel {
-            let event = timeline.snapshot_at(i)?;
-            crate::time_travel::apply_event(&mut state, event);
-        }
-        Some(state)
+        // Dispatch to the effective session; its `state_at` uses the
+        // per-session checkpoints so a deep scrub replays only the tail.
+        let key = self.effective_host_key();
+        let sessions = self.sessions.read();
+        sessions.get(&key).and_then(|s| s.state_at(index))
     }
 
     /// Number of retained timeline events.
     #[must_use]
     pub fn timeline_len(&self) -> usize {
-        self.timeline.read().len()
+        let key = self.effective_host_key();
+        let sessions = self.sessions.read();
+        sessions.get(&key).map_or(0, |s| s.timeline_len())
     }
 
     /// A view of the live VM state (cheap clone for rendering).
     #[must_use]
     pub fn vm_state(&self) -> VmState {
-        let live = self.live.read();
-        VmState {
-            bytecode_offset: live.bytecode_offset,
-            opcode: live.opcode,
-            registers: live.registers.clone(),
-            gas_remaining: live.gas_remaining,
-            // Wire telemetry does not yet carry the entry budget.
-            entry_gas: None,
-            source_span: None,
+        // Dispatch to the effective session. The per-session state is the
+        // single source of truth; `selected_host` (if set) or `active` picks
+        // which session's register bank / IP / gas this returns.
+        let key = self.effective_host_key();
+        let sessions = self.sessions.read();
+        match sessions.get(&key) {
+            Some(s) => s.vm_state(),
+            None => VmState {
+                bytecode_offset: None,
+                opcode: None,
+                registers: Box::new(core::array::from_fn(|_| flux_syntax::Value::Null)),
+                gas_remaining: None,
+                entry_gas: None,
+                source_span: None,
+            },
         }
     }
 
@@ -954,7 +963,11 @@ mod tests {
             // From-scratch replay.
             let mut expected = ReconstructedState::base();
             {
-                let tl = state.timeline.read();
+                // After the per-session refactor, timelines live on the effective
+                // session; grab the anonymous session for this synthetic test.
+                let sessions = state.sessions.read();
+                let tl = sessions.get(&state.effective_host_key()).expect("session");
+                let tl = &tl.timeline;
                 for i in 0..=target {
                     let e = tl.snapshot_at(i).expect("event exists");
                     crate::time_travel::apply_event(&mut expected, e);
