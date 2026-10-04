@@ -228,11 +228,11 @@ async fn on_device_every_view_renders_live_data() {
     let live_state = state
         .session_state(&HostKey::from_host(&host))
         .expect("ios session present");
-    let named: Vec<&String> = live_state
+    let named: Vec<String> = live_state
         .live
         .view_frames
         .iter()
-        .filter_map(|vf| vf.component_name.as_ref())
+        .filter_map(|vf| vf.component_name.as_ref().map(|s| s.to_string()))
         .collect();
     assert!(
         named.iter().any(|n| *n == "Column"),
