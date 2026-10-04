@@ -46,6 +46,7 @@ public class RouterAdapter private constructor() : FluxAdapter<FluxNativeView> {
         view: FluxNativeView,
         props: Props,
         executor: WeakReference<FluxExecutor>,
+        nodeId: UInt,
     ) {
         // The router itself has no bound handlers; navigation is driven by
         // signal graph changes that re-order its child list.
