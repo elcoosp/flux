@@ -6,18 +6,21 @@ use super::WireError;
 use super::cursor::Reader;
 use super::value::{decode_value, encode_value};
 
-pub(crate) fn encode_prop_diff(w: &mut super::cursor::Writer, diff: &PropDiff) {
-    w.u16_len(diff.changes.len(), "prop_diff.changes");
+pub(crate) fn encode_prop_diff(
+    w: &mut super::cursor::Writer,
+    diff: &PropDiff,
+) -> Result<(), WireError> {
+    // Audit H14 cascade: fallible now (see `encode_props`).
+    w.u16_len_checked(diff.changes.len(), "prop_diff.changes")?;
     for (index, value) in &diff.changes {
         w.u16(*index);
-        // Scaffold: see `encode_props` — panics with context pending the
-        // fallible-encoder cascade (audit H14).
-        encode_value(w, value).expect("prop_diff: value exceeds wire length limits");
+        encode_value(w, value)?;
     }
-    w.u16_len(diff.removals.len(), "prop_diff.removals");
+    w.u16_len_checked(diff.removals.len(), "prop_diff.removals")?;
     for index in &diff.removals {
         w.u16(*index);
     }
+    Ok(())
 }
 
 pub(crate) fn decode_prop_diff(r: &mut Reader<'_>) -> Result<PropDiff, WireError> {
