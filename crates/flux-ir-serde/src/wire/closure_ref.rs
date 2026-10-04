@@ -29,7 +29,7 @@ pub(crate) fn encode_closure_ref(w: &mut super::cursor::Writer, closure: &Closur
             w.u32(ex.byte_end);
             w.u16(ex.line);
             w.u16(ex.col);
-            encode_str(w, &ex.snippet);
+            encode_str(w, &ex.snippet).expect("closure_ref.excerpt");
         }
         None => w.u8(0),
     }
