@@ -15,6 +15,7 @@ use flux_codegen_core::primitives::PrimitiveSpec;
 use flux_parser::{Expr, ExprKind, TypeDecl};
 
 /// The Kotlin/Compose backend.
+#[derive(Debug)]
 pub struct Kotlin;
 
 impl Backend for Kotlin {
