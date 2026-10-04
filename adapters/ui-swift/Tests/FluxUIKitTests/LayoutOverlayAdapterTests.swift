@@ -13,10 +13,14 @@ import XCTest
 final class LayoutOverlayAdapterTests: XCTestCase {
     @MainActor func testStackSetsSpacingFromGap() {
         let adapter = StackAdapter()
+        // `StackAdapter.View` is a plain `UIView` (z-overlay container, not a
+        // `UIStackView`) since the "Audit D16: z-overlay, not linear" change.
+        // The gap is recorded on the view for host parity with Android rather
+        // than applied via `UIStackView.spacing` (which does not exist on a
+        // plain `UIView`).
         let stack = adapter.create()
         let props = Props([Props.propIndex(for: "gap"): .float(8)])
         adapter.update(stack, from: Props(), to: props)
-        XCTAssertEqual(stack.spacing, 8)
         // Parity: Android `StackAdapter.PROP_GAP` is recorded on the node.
         XCTAssertEqual(stack.fluxRecordedProps[FluxRecordedProp.gap] as? Double, 8)
     }
@@ -55,13 +59,16 @@ final class LayoutOverlayAdapterTests: XCTestCase {
 
     @MainActor func testStackReconcilesChildrenByIdentity() {
         let adapter = StackAdapter()
+        // `StackAdapter.View` is a plain `UIView`; its reconciler uses
+        // `.subviews` (the `reconcileSubviews` helper), not
+        // `UIStackView.arrangedSubviews`.
         let stack = adapter.create()
         let a = UIView(), b = UIView()
         adapter.setChildren([a, b], on: stack)
-        XCTAssertEqual(stack.arrangedSubviews, [a, b])
+        XCTAssertEqual(stack.subviews, [a, b])
         let c = UIView()
         adapter.setChildren([a, c, b], on: stack)
-        XCTAssertEqual(stack.arrangedSubviews, [a, c, b])
+        XCTAssertEqual(stack.subviews, [a, c, b])
         XCTAssertTrue(a.superview === stack)
     }
 
@@ -141,7 +148,7 @@ final class LayoutOverlayAdapterTests: XCTestCase {
         // (every FLUX-037/038/042/077 kind resolves to a concrete adapter): here
         // we assert each adapter creates the native view the runtime would mount,
         // proving the node resolves to real UI rather than a blank container.
-        XCTAssertTrue(StackAdapter().create() is UIStackView)
+        XCTAssertTrue(StackAdapter().create() is UIView) // z-overlay container, not a UIStackView
         XCTAssertTrue(GridAdapter().create() is UIStackView)
         XCTAssertTrue(SpacerAdapter().create() is UIStackView)
         XCTAssertTrue(SafeAreaAdapter().create() is UIView)
