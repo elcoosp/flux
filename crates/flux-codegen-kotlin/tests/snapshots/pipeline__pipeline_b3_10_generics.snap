@@ -38,7 +38,7 @@ object FluxTheme {
     val textTitle = 28.sp
 }
 
-@Composable fun List(
+@Composable fun List<T>(
      items: List<T>
 ) {
     Column {
