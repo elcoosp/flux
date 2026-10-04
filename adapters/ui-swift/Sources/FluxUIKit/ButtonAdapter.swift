@@ -20,6 +20,13 @@ import UIKit
 /// is held only by the button's action, which cannot resurrect a deallocated
 /// runtime because it keeps the executor `weak`.
 public final class ButtonAdapter: FluxAdapter {
+    /// Stable identifier for the UIAction this adapter registers
+    /// in `bindHandler`. `UIControl` has no `removeAllActions()`;
+    /// the correct pattern is to remove by identifier before
+    /// re-adding, so rebinds replace (not accumulate) the handler.
+    private static let fluxHandlerAction =
+        UIAction.Identifier("flux.handler")
+
     public typealias View = UIButton
     weak var executor: (any FluxExecutor)?
 
@@ -46,14 +53,14 @@ public final class ButtonAdapter: FluxAdapter {
         // before adding a new one. The dev runtime re-binds handlers on
         // hot-swap and on prop change; without this each rebind accumulates
         // another action and a single user tap dispatches N times.
-        view.removeAllActions()
-        view.addAction(UIAction { _ in target.fire() }, for: .touchUpInside)
+        view.removeAction(identifiedBy: Self.fluxHandlerAction, for: .touchUpInside)
+        view.addAction(UIAction(identifier: Self.fluxHandlerAction) { _ in target.fire() }, for: .touchUpInside)
     }
 
     public func destroy(_ view: UIButton) {
         // Audit fix: `removeTarget(_:action:for:)` removes target/action pairs,
         // NOT `UIAction` registrations (those need `removeAllActions()`). The
         // previous call left stale actions alive and firing on recycled views.
-        view.removeAllActions()
+        view.removeAction(identifiedBy: Self.fluxHandlerAction, for: .touchUpInside)
     }
 }
