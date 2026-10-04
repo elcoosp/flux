@@ -50,7 +50,13 @@ final class FormGestureAdapterTests: XCTestCase {
         adapter.bindHandler(5, to: view, nodeId: 1)
         view.sendActions(for: .touchUpInside)
         XCTAssertEqual(executor.dispatched.first?.handlerId, 5)
-        XCTAssertEqual(executor.dispatched.first?.payload, .bool(true))
+        // Audit fix (batch 4): the checkbox toggles `isSelected` FIRST and
+        // then fires, so `onChange` receives the post-tap value. The
+        // pre-fix adapter read `isSelected` before its own toggle and
+        // dispatched the stale value; this test originally pinned the
+        // stale behavior and is now updated to the correct contract.
+        // Starting value was `.bool(true)`; after the tap, `.bool(false)`.
+        XCTAssertEqual(executor.dispatched.first?.payload, .bool(false))
     }
 
     // --- Slider (FLUX-040) ---
