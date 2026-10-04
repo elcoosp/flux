@@ -85,7 +85,7 @@ public final class WebHostView: FluxAdapter {
         func webView(
             _ webView: WKWebView,
             decidePolicyFor navigationAction: WKNavigationAction,
-            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+            decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
         ) {
             let url = navigationAction.request.url
             let scheme = url?.scheme?.lowercased() ?? ""
