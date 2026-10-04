@@ -133,29 +133,37 @@ impl Backend for Swift {
     }
 
     fn text_field(value: &str, on_change: &str, placeholder: &str) -> String {
-        // Audit T-403.6: use mutable binding ($state) instead of .constant()
-        // so the field is editable. Generate a @State private var in the
-        // component body for the bound signal.
+        // Audit fixes:
+        //  * The handler body supplied by the user (`on_change`) was bound to
+        //    `_on_change` and never used — every `TextInput`'s edit handler
+        //    was silently dropped on iOS while Kotlin wired it (a real
+        //    backend divergence). We now emit it as the Binding's setter.
+        //  * The setter was `{ newValue in <value> = newValue }`, which
+        //    produces invalid Swift when `<value>` is anything but a plain
+        //    lvalue (e.g. `"" = newValue`, `count + 1 = newValue`). The
+        //    handler body carries the actual state write (`count = v`), so
+        //    the setter only needs to evaluate the handler — the LHS is
+        //    inside it.
         let value = if value.is_empty() {
             "\"\"".to_owned()
         } else {
             value.to_owned()
-        };
-        let _on_change = if value.is_empty() {
-            "{ _ in }".to_owned()
-        } else {
-            // Audit T-403.6: onEditingChanged is a Bool callback; use onCommit
-            // or generate a proper binding write. For now, use text: $binding.
-            "{ _ in }".to_owned()
         };
         let placeholder = if placeholder.is_empty() {
             "\"\"".to_owned()
         } else {
             placeholder.to_owned()
         };
-        // Audit T-403.6: use a mutable Binding to make the TextField editable.
+        // Getter reads the controlled value; setter runs the user's handler
+        // body (which writes the underlying signal — the controlled value
+        // re-renders from the next state change). When no handler was
+        // supplied, fall back to a no-op setter so the shape always compiles.
         let getter = format!("get: {{ {} }}", value);
-        let setter = format!("set: {{ newValue in {} = newValue }}", value);
+        let setter = if on_change.is_empty() {
+            "set: { _ in }".to_owned()
+        } else {
+            format!("set: {{ _ in {} }}", on_change)
+        };
         format!(
             "TextField({placeholder}, text: Binding({}, {}))",
             getter, setter
