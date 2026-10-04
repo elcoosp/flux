@@ -357,7 +357,7 @@ fn t_403_7_route_state_without_router_is_regular() {
     let src = "compo NoRouter\n  state route: String = \"home\"\n  Text(\"route is {route}\")\n";
     let out = codegen_example("t_403_7_no_router", src);
     assert!(
-        !out.contains("NavigationPath()"),
+        !out.contains(r#"NavigationPath(["home"])"#),
         "a route state in a non-Router component must stay a regular @State var: {out}"
     );
     assert!(
@@ -387,7 +387,7 @@ fn router_navigate_emits_state_assignment() {
     let out = codegen_example("router_navigate", src);
     // Verify route state is declared as NavigationPath for NavigationStack(path:)
     assert!(
-        out.contains("@State private var route = NavigationPath()"),
+        out.contains(r#"@State private var route = NavigationPath(["home"])"#),
         "missing @State route NavigationPath:\n{out}"
     );
     // Verify NavigationStack is bound to route via path
