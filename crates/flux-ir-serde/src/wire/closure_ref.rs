@@ -6,14 +6,20 @@ use super::WireError;
 use super::cursor::Reader;
 use super::span::{decode_span, encode_span, encode_str};
 
-pub(crate) fn encode_closure_ref(w: &mut super::cursor::Writer, closure: &ClosureRef) {
+pub(crate) fn encode_closure_ref(
+    w: &mut super::cursor::Writer,
+    closure: &ClosureRef,
+) -> Result<(), WireError> {
+    // Audit H14 cascade: fallible now. The `captured_signals` count uses the
+    // checked length prefix; the excerpt `encode_str` (already fallible from
+    // the leaf migration) propagates via `?` rather than panicking.
     w.u64(closure.hash);
     w.u32(closure.bytecode_offset);
     w.u16(closure.bytecode_len);
-    w.u16_len(
+    w.u16_len_checked(
         closure.captured_signals.len(),
         "closure_ref.captured_signals",
-    );
+    )?;
     for signal in &closure.captured_signals {
         w.u32(*signal);
     }
@@ -29,10 +35,11 @@ pub(crate) fn encode_closure_ref(w: &mut super::cursor::Writer, closure: &Closur
             w.u32(ex.byte_end);
             w.u16(ex.line);
             w.u16(ex.col);
-            encode_str(w, &ex.snippet).expect("closure_ref.excerpt");
+            encode_str(w, &ex.snippet)?;
         }
         None => w.u8(0),
     }
+    Ok(())
 }
 
 pub(crate) fn decode_closure_ref(r: &mut Reader<'_>) -> Result<ClosureRef, WireError> {
