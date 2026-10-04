@@ -80,5 +80,16 @@ public interface FluxNativeView {
         const val PROP_ACCESSIBILITY_LABEL: String = "accessibilityLabel"
         const val PROP_ACCESSIBILITY_ROLE: String = "accessibilityRole"
         const val PROP_ACCESSIBILITY_FOCUS_ORDER: String = "accessibilityFocusOrder"
+
+        /**
+         * Shared handler-scope prop key. `bindHandler` stores the IR node
+         * identity here so a host that constructs a `HandlerEvent` from the
+         * view's properties can stamp the correct `nodeId` (audit fix; matches
+         * the Swift `HandlerTarget.nodeId` contract).
+         *
+         * The value is a `UInt`; the host reads it back via
+         * `getProperty(FluxNativeView.PROP_NODE_ID) as? UInt`.
+         */
+        const val PROP_NODE_ID: String = "fluxNodeId"
     }
 }
