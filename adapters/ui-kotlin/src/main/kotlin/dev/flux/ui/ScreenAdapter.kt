@@ -42,6 +42,7 @@ public class ScreenAdapter private constructor() : FluxAdapter<FluxNativeView> {
         view: FluxNativeView,
         props: Props,
         executor: WeakReference<FluxExecutor>,
+        nodeId: UInt,
     ) {
         // Screens do not bind their own handlers.
     }
