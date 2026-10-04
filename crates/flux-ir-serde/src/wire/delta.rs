@@ -18,14 +18,20 @@ pub(crate) struct StateDelta {
 
 impl StateDelta {
     #[allow(dead_code)]
-    pub(crate) fn encode(w: &mut super::cursor::Writer, delta: &StateDelta) {
-        w.u16_len(delta.cells.len(), "delta.cells");
+    pub(crate) fn encode(
+        w: &mut super::cursor::Writer,
+        delta: &StateDelta,
+    ) -> Result<(), WireError> {
+        // Audit H14 cascade: fallible now for consistency with the rest of
+        // the wire layer. `StateDelta` has no production callers today
+        // (reserved for the FLAG_HAS_STATE_DELTA section per D.10), so the
+        // `Result` here is future-proofing, not a behavior change.
+        w.u16_len_checked(delta.cells.len(), "delta.cells")?;
         for (signal, value) in &delta.cells {
             w.u32(*signal);
-            // Scaffold: same pattern as `encode_props` — see comment there.
-            encode_value(w, value)
-                .expect("state_delta: value exceeds wire length limits");
+            encode_value(w, value)?;
         }
+        Ok(())
     }
 
     #[allow(dead_code)]
@@ -52,13 +58,19 @@ pub(crate) struct SourceMapDelta {
 
 impl SourceMapDelta {
     #[allow(dead_code)]
-    pub(crate) fn encode(w: &mut super::cursor::Writer, delta: &SourceMapDelta) {
-        w.u16_len(delta.files.len(), "delta.files");
+    pub(crate) fn encode(
+        w: &mut super::cursor::Writer,
+        delta: &SourceMapDelta,
+    ) -> Result<(), WireError> {
+        // Audit H14 cascade: fallible now for consistency. Same rationale as
+        // `StateDelta::encode` above.
+        w.u16_len_checked(delta.files.len(), "delta.files")?;
         for (file_id, path) in &delta.files {
             w.u32(*file_id);
-            w.u16_len(path.len(), "delta.file.path");
+            w.u16_len_checked(path.len(), "delta.file.path")?;
             w.bytes(path.as_bytes());
         }
+        Ok(())
     }
 
     #[allow(dead_code)]
