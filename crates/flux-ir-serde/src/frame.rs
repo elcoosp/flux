@@ -726,13 +726,20 @@ impl InitFrame {
         write_magic_version(&mut w);
         w.u8(self.kind.type_byte());
         w.u32(self.seq);
-        encode_node(&mut w, &self.root);
+        // Scaffold: `encode_into` returns `()`; a value that overflows the
+        // wire's u16 length prefix panics here with context. The full fix is
+        // a fallible `encode_into -> Result<(), WireError>` (audit H14
+        // cascade); this boundary marks the exact upgrade point.
+        encode_node(&mut w, &self.root)
+            .expect("frame.init.root: value exceeds wire length limits");
         // Appendix D §D.12.2: the full tree is `root` followed by every
         // descendant, flat, so the host rebuilds the complete node table from
         // one frame. A `u32` count prefixes the extras.
         w.u32(self.extra_nodes.len() as u32);
         for node in &self.extra_nodes {
-            encode_node(&mut w, node);
+            // Scaffold: same upgrade point as the root call above.
+            encode_node(&mut w, node)
+                .expect("frame.init.extra_node: value exceeds wire length limits");
         }
         w.u16_len(self.state_seed.len(), "frame.state_seed");
         for (sig, val) in &self.state_seed {
@@ -924,7 +931,9 @@ impl DeltaFrame {
         w.u16_len(self.closures.len(), "frame.closures"); // D.1 handler_count (now meaningful)
         w.u16_len(self.strings.len(), "frame.strings");
         for patch in &self.patches {
-            encode_patch(&mut w, patch);
+            // Scaffold: same upgrade point as the Init frame's node encoders.
+            encode_patch(&mut w, patch)
+                .expect("frame.delta.patch: value exceeds wire length limits");
         }
         for (id, text) in &self.strings {
             encode_string_entry(&mut w, *id, text).expect("frame.string");
