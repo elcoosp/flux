@@ -5,10 +5,19 @@ use flux_syntax::StringId;
 use super::core::WireError;
 use super::cursor::{Reader, Writer};
 
-pub(crate) fn encode_string_entry(w: &mut Writer, id: StringId, text: &str) {
+pub(crate) fn encode_string_entry(
+    w: &mut Writer,
+    id: StringId,
+    text: &str,
+) -> Result<(), WireError> {
+    // Audit fix (H14): a single interned string larger than 64 KB (a
+    // scraped blob, a very long asset path) now surfaces as a typed
+    // `WireError::LengthExceedsU16` at this boundary instead of panicking
+    // inside `u16_len`. Callers must propagate the result.
     w.u32(id);
-    w.u16_len(text.len(), "string_entry.text");
+    w.u16_len_checked(text.len(), "string_entry.text")?;
     w.bytes(text.as_bytes());
+    Ok(())
 }
 
 pub(crate) fn decode_string_entry(r: &mut Reader<'_>) -> Result<(StringId, String), WireError> {
