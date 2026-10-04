@@ -45,6 +45,7 @@ public class ModalAdapter private constructor() : FluxAdapter<FluxNativeView> {
         view: FluxNativeView,
         props: Props,
         executor: WeakReference<FluxExecutor>,
+        nodeId: UInt,
     ) {
         // No native event binding yet; the onDismiss callback is invoked by the
         // host presentation layer once ADR-0048 lands.
@@ -88,6 +89,7 @@ public class SheetAdapter private constructor() : FluxAdapter<FluxNativeView> {
         view: FluxNativeView,
         props: Props,
         executor: WeakReference<FluxExecutor>,
+        nodeId: UInt,
     ) {
     }
 
@@ -129,6 +131,7 @@ public class DialogAdapter private constructor() : FluxAdapter<FluxNativeView> {
         view: FluxNativeView,
         props: Props,
         executor: WeakReference<FluxExecutor>,
+        nodeId: UInt,
     ) {
     }
 
@@ -182,6 +185,7 @@ public class AnimateAdapter private constructor() : FluxAdapter<FluxNativeView> 
         view: FluxNativeView,
         props: Props,
         executor: WeakReference<FluxExecutor>,
+        nodeId: UInt,
     ) {
     }
 
