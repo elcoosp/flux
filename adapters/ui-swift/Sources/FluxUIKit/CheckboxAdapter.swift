@@ -19,6 +19,13 @@
 import UIKit
 
 public final class CheckboxAdapter: FluxAdapter {
+    /// Stable identifier for the UIAction this adapter registers
+    /// in `bindHandler`. `UIControl` has no `removeAllActions()`;
+    /// the correct pattern is to remove by identifier before
+    /// re-adding, so rebinds replace (not accumulate) the handler.
+    private static let fluxHandlerAction =
+        UIAction.Identifier("flux.handler")
+
     public typealias View = UIButton
     weak var executor: (any FluxExecutor)?
 
@@ -55,7 +62,7 @@ public final class CheckboxAdapter: FluxAdapter {
         // before adding a new one. The dev runtime re-binds handlers on
         // hot-swap and on prop change; without this each rebind accumulates
         // another action and a single user tap dispatches N times.
-        view.removeAllActions()
+        view.removeAction(identifiedBy: Self.fluxHandlerAction, for: .touchUpInside)
         view.addAction(UIAction { [weak view, weak self] _ in
             guard let view else { return }
             // Toggle the selected state, refresh the glyph, THEN fire — so the
@@ -70,7 +77,7 @@ public final class CheckboxAdapter: FluxAdapter {
         // Audit fix: `removeTarget(_:action:for:)` removes target/action pairs,
         // NOT `UIAction` registrations (those need `removeAllActions()`). The
         // previous call left stale actions alive and firing on recycled views.
-        view.removeAllActions()
+        view.removeAction(identifiedBy: Self.fluxHandlerAction, for: .touchUpInside)
     }
 
     /// Renders the checkbox glyph from the current selected state.
