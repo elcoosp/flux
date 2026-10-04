@@ -783,15 +783,22 @@ impl<'a, B: Backend> Emitter<'a, B> {
     fn render_args(args: &[Arg]) -> String {
         let rendered: Vec<String> = args
             .iter()
-            .map(|arg| match arg {
-                // Backend-specific spelling: Swift `name: value`, Kotlin
-                // `name = value`. A hardcoded `:` produced invalid Kotlin
-                // for every user-component call with named args.
+            // Audit fix: the previous wildcard emitted `String::new()` — an
+            // empty fragment — which joins as `Name(, value)` (invalid in
+            // both target languages). `Arg` is `#[non_exhaustive]`; when a
+            // new variant lands, skipping it (via `filter_map`) is a graceful
+            // degrade: the arg is missing but the call still parses, and a
+            // follow-up adds the real rendering. `debug_assert!` makes the
+            // gap visible in tests.
+            .filter_map(|arg| match arg {
                 Arg::Named { name, value } => {
-                    B::named_arg(&name.name, &render_expr::<B>(value))
+                    Some(B::named_arg(&name.name, &render_expr::<B>(value)))
                 }
-                Arg::Positional(value) => render_expr::<B>(value),
-                _ => String::new(),
+                Arg::Positional(value) => Some(render_expr::<B>(value)),
+                _ => {
+                    debug_assert!(false, "render_args: unhandled Arg variant");
+                    None
+                }
             })
             .collect();
         rendered.join(", ")
