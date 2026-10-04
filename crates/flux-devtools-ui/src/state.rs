@@ -10,7 +10,7 @@ use flux_syntax::SignalId;
 
 use crate::time_travel::{
     LogBuffer, LogEntry, LogLevel, NetworkLog, NetworkRecord, ReconstructedState, TimelineBuffer,
-    ViewFrame, reconstruct_state,
+    ViewFrame,
 };
 
 /// Snapshot of the VM register/instruction view.
