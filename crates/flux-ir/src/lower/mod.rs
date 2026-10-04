@@ -150,7 +150,25 @@ impl LoweredIr {
 /// assert_eq!(lowered.arena.len(), 2);
 /// ```
 pub fn lower(ast: &Ast, typed: &TypedAST) -> Result<LoweredIr, LoweringError> {
+    lower_with_handler_base(ast, typed, 0)
+}
+
+/// Like [`lower`], but seeds the handler-id allocator at `handler_base`.
+///
+/// Audit fix (theme #2): each call to [`lower`] previously restarted handler
+/// ids at 0. Multi-file projects (which `flux build` and the dev server both
+/// compile file-by-file and merge) produced *the same* ids in every file —
+/// handler 1 of `main.flux` and handler 1 of `counter.flux` collided in the
+/// merged closure stream, which `write_closures` correctly rejects as a
+/// duplicate-id panic. The caller now advances `handler_base` by the count of
+/// handlers each file emitted so ids remain globally unique across the merge.
+pub fn lower_with_handler_base(
+    ast: &Ast,
+    typed: &TypedAST,
+    handler_base: u32,
+) -> Result<LoweredIr, LoweringError> {
     let mut lowerer = Lowerer::new(typed);
+    lowerer.handler_counter = flux_syntax::HandlerId::from(handler_base);
     for decl in &ast.decls {
         lowerer.lower_decl(decl)?;
     }
