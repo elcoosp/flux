@@ -74,6 +74,19 @@ pub enum WireError {
         /// The hard ceiling in bytes.
         ceiling: usize,
     },
+
+    /// A length-prefixed collection or string exceeded the `u16` width the
+    /// wire format allocates for it. The pre-fix encoder panicked (audit
+    /// H14); this variant lets the encode path surface the condition as a
+    /// recoverable diagnostic (an `Error` frame) instead of killing the
+    /// pipeline thread.
+    #[error("wire encode: {what} length {n} exceeds u16 prefix width")]
+    LengthExceedsU16 {
+        /// Short field description.
+        what: &'static str,
+        /// The actual count that overflowed the `u16`.
+        n: usize,
+    },
     /// A `Delta` frame's `handler_count` header did not match the number of
     /// `HandlerDef`s decoded from the handler section (T-316.6).
     #[error(
