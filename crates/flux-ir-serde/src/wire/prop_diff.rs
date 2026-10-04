@@ -10,7 +10,9 @@ pub(crate) fn encode_prop_diff(w: &mut super::cursor::Writer, diff: &PropDiff) {
     w.u16_len(diff.changes.len(), "prop_diff.changes");
     for (index, value) in &diff.changes {
         w.u16(*index);
-        encode_value(w, value);
+        // Scaffold: see `encode_props` — panics with context pending the
+        // fallible-encoder cascade (audit H14).
+        encode_value(w, value).expect("prop_diff: value exceeds wire length limits");
     }
     w.u16_len(diff.removals.len(), "prop_diff.removals");
     for index in &diff.removals {
