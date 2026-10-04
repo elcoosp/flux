@@ -54,11 +54,19 @@ public interface FluxAdapter<V : FluxNativeView> {
      * Binds the handler identified in [props] to native events on [view].
      * [executor] is held weakly; adapters must consult it through
      * [WeakReference.get] and no-op when it is `null` (executor disposed).
+     *
+     * [nodeId] is the IR node identity of the view being bound. It is threaded
+     * through so any event the adapter later dispatches carries the node the
+     * interaction actually happened on — the previous signature had no way to
+     * convey this, so every Kotlin [HandlerEvent] defaulted `nodeId = 0u`
+     * while the Swift contract (`bindHandler(_:to:nodeId:)`) stamped the real
+     * node. Same wire protocol, divergent event scope on the two platforms.
      */
     fun bindHandler(
         view: V,
         props: Props,
         executor: WeakReference<FluxExecutor>,
+        nodeId: UInt,
     )
 
     /** Releases native resources owned by [view]. */
