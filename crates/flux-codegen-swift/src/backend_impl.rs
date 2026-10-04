@@ -14,6 +14,7 @@ use flux_codegen_core::primitives::PrimitiveSpec;
 use flux_parser::{Expr, ExprKind, TypeDecl};
 
 /// The SwiftUI backend.
+#[derive(Debug)]
 pub struct Swift;
 
 impl Backend for Swift {
