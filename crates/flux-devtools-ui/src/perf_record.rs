@@ -65,17 +65,15 @@ fn latency_opt(l: Option<LatencyMs>) -> Option<f64> {
 #[must_use]
 pub fn flame_rows(records: &[MetricRecord]) -> Vec<FlameRow> {
     let budgets = Budgets::v1();
-    let mut by_key: Vec<((Scenario, MetricKind), &MetricRecord)> = Vec::new();
+    // Audit fix: the previous dedup loop scanned `by_key` linearly for each
+    // incoming record — O(n²) over the retained record count (up to
+    // `MAX_PERF_RECORDS = 1024`). On the render thread, per frame. Swap to a
+    // `HashMap` keyed on `(scenario, kind)` for O(n) total; the last record
+    // wins, matching the previous "Replace any earlier record" semantics.
+    let mut by_key: std::collections::HashMap<(Scenario, MetricKind), &MetricRecord> =
+        std::collections::HashMap::new();
     for record in records {
-        // Replace any earlier record for the same (scenario, kind) key.
-        if let Some(slot) = by_key
-            .iter_mut()
-            .find(|((sc, kd), _)| *sc == record.scenario && *kd == record.kind)
-        {
-            slot.1 = record;
-        } else {
-            by_key.push(((record.scenario, record.kind), record));
-        }
+        by_key.insert((record.scenario, record.kind), record);
     }
     let mut rows: Vec<FlameRow> = by_key
         .into_iter()
