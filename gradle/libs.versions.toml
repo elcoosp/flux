@@ -38,6 +38,8 @@ androidx-fragment = { group = "androidx.fragment", name = "fragment-ktx", versio
 compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
 compose-ui = { group = "androidx.compose.ui", name = "ui" }
 compose-ui-graphics = { group = "androidx.compose.ui", name = "ui-graphics" }
+# Runtime (pure Kotlin state primitives used by the platform-neutral host).
+compose-runtime = { group = "androidx.compose.runtime", name = "runtime" }
 compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
 compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
 compose-material3 = { group = "androidx.compose.material3", name = "material3" }
