@@ -23,7 +23,7 @@ pub(crate) fn encode_node(
     encode_props(w, &node.props)?;
     w.u16_len_checked(node.children.len(), "node.children")?;
     for child in &node.children {
-        encode_child(w, child);
+        encode_child(w, child)?;
     }
     w.u16_len_checked(node.handlers.len(), "node.handlers")?;
     for handler in &node.handlers {
