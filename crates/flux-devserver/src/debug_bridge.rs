@@ -470,10 +470,21 @@ mod tests {
     // it, and a subscribed DevTools client receives the enriched frame. This is
     // the wire contract the iOS/Android bridges rely on (without needing the
     // gpui desktop UI, which is nightly-gated).
+    /// Production trust model (audit §6.1, batch 8): host telemetry arrives on
+    /// the **patch channel** (`:7331`, `serve_client`), which forwards it into
+    /// the shared `DevToolsRouter`; DevTools clients subscribe to the
+    /// **DevTools endpoint** (`:7333`, `serve_devtools`) and receive the
+    /// enriched broadcast. Before the batch-8 change, this test connected a
+    /// "host" directly to the DevTools endpoint and expected its telemetry to
+    /// be rebroadcast — the exact behavior that was removed because any
+    /// unauthenticated DevTools client could spoof telemetry into another
+    /// session. The test now exercises the correct production contract:
+    /// DevTools subscribes, host telemetry is routed via the router, DevTools
+    /// receives the enriched frame.
     #[tokio::test]
     async fn host_telemetry_reaches_devtools_client() {
         use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-        use tokio_tungstenite::{connect_async, tungstenite::Message};
+        use tokio_tungstenite::connect_async;
 
         // Fixed ephemeral-range port for the test endpoint. A probe/rebind race
         // with `serve_devtools` (which binds the same addr itself) would hang
@@ -485,35 +496,36 @@ mod tests {
         let test_router = std::sync::Arc::new(parking_lot::Mutex::new(DevToolsRouter::new(
             source_map, host_tx,
         )));
-        tokio::spawn(async move { serve_devtools(addr, test_router, None).await });
+        let router_for_spawn = test_router.clone();
+        tokio::spawn(async move { serve_devtools(addr, router_for_spawn, None).await });
         // Give the accept loop a moment to bind.
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
+        // DevTools client subscribes (this is the ONLY thing a DevTools
+        // client is allowed to do from the trust model's perspective).
         let url = format!("ws://{addr}/devtools");
-
-        // DevTools client MUST subscribe before the host sends: the server
-        // broadcasts telemetry live to currently-connected DevTools clients.
-        let devtools_req = url.clone().into_client_request().unwrap();
+        let devtools_req = url.into_client_request().unwrap();
         let (mut devtools_ws, _) = connect_async(devtools_req).await.unwrap();
 
-        // Host client: sends a raw Telemetry frame.
-        let host_req = url.into_client_request().unwrap();
-        let (mut host_ws, _) = connect_async(host_req).await.unwrap();
-        let frame = TelemetryFrame {
-            version: PROTOCOL_VERSION,
-            event_count: 1,
-            events: vec![sample_event()],
-        };
-        host_ws
-            .send(Message::Binary(frame.to_bytes().into()))
-            .await
-            .unwrap();
+        // Simulate the patch channel's action on receiving host telemetry:
+        // `serve_client` calls `router.route_telemetry(&event)` for each event
+        // in the inbound frame. That's the exact call we make here.
+        let _ = test_router.lock().route_telemetry(&sample_event());
 
-        // DevTools client: receives the enriched frame.
-        let msg = devtools_ws.next().await.unwrap().unwrap();
+        // DevTools client: receives the enriched frame (broadcast by the
+        // router to every subscribed client).
+        let msg = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            devtools_ws.next(),
+        )
+        .await
+        .expect("devtools client must receive the broadcast within 2s")
+        .unwrap()
+        .unwrap();
+
         let bytes = match msg {
-            Message::Binary(b) => b,
-            _ => panic!("expected binary telemetry frame"),
+            tokio_tungstenite::tungstenite::Message::Binary(b) => b,
+            other => panic!("expected binary telemetry frame, got {other:?}"),
         };
         let enriched = EnrichedTelemetryFrame::from_bytes(&bytes).expect("decodes enriched frame");
         assert_eq!(enriched.event_count, 1);
