@@ -8,9 +8,14 @@ use super::cursor::{Reader, Writer};
 
 /// Encodes one `HandlerDef` entry (Appendix D §D.8): the `HandlerId` followed
 /// by its `ClosureRef` body.
-pub(crate) fn encode_handler_def(w: &mut Writer, id: HandlerId, closure: &ClosureRef) {
+pub(crate) fn encode_handler_def(
+    w: &mut Writer,
+    id: HandlerId,
+    closure: &ClosureRef,
+) -> Result<(), crate::wire::WireError> {
+    // Audit H14 cascade: fallible now (delegates to `encode_closure_ref`).
     w.u32(id);
-    encode_closure_ref(w, closure);
+    encode_closure_ref(w, closure)
 }
 
 /// Decodes one `HandlerDef` entry (Appendix D §D.8).
