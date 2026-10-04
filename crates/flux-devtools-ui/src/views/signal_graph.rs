@@ -34,7 +34,7 @@ impl SignalGraphView {
 
     /// The current reconstructed signal state.
     fn live(&self) -> ReconstructedState {
-        self.state.live.read().clone()
+        self.state.live_snapshot()
     }
 
     /// Renders the view as a standalone pane.
