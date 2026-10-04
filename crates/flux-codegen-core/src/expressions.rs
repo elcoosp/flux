@@ -75,7 +75,15 @@ pub fn render_string<B: Backend>(parts: &[StrPart]) -> String {
                 body.push_str(&render_expr::<B>(expr));
                 body.push_str(B::interp_close());
             }
-            _ => {}
+            // Audit fix: `StrPart` is `#[non_exhaustive]`. The previous wildcard
+            // silently dropped the part — an empty string appeared where the
+            // user wrote a value, invisible except as a runtime blank. Emit a
+            // visible placeholder and `debug_assert!` so the gap is caught in
+            // tests rather than shipped.
+            _ => {
+                debug_assert!(false, "render_string: unhandled StrPart variant");
+                body.push_str("/* unhandled StrPart */");
+            }
         }
     }
     format!("\"{body}\"")
@@ -99,7 +107,13 @@ fn render_binary<B: Backend>(op: BinOp, lhs: &Expr, rhs: &Expr) -> String {
         BinOp::Ge => ">=",
         BinOp::And => "&&",
         BinOp::Or => "||",
-        _ => "+",
+        // Audit fix: `BinOp` is `#[non_exhaustive]`; the previous `_ => "+"`
+        // silently emitted the wrong operator for any future variant, giving
+        // a wrong program with no diagnostic. Match the sentinel used by
+        // `view_tree::binop_symbol` and `flux_parity::bridge::binop_symbol`
+        // so all three drift-detectors converge: a visibly-broken token that
+        // fails to compile rather than a plausible-but-wrong `+`.
+        _ => "<unknown-binop>",
     };
     format!(
         "({} {} {})",
