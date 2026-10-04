@@ -133,7 +133,7 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
     // ancestors are *also* newly inserted. Shallower nodes sort first, so a
     // subtree is always emitted root-before-children.
     let inserted_set: AHashSet<NodeId> = inserted.iter().copied().collect();
-    let depth_of = |mut id: NodeId| -> u32 {
+    let depth_of = |id: NodeId| -> u32 {
         let mut d = 0u32;
         let mut parent = new_index.get(&id).map(|(p, _)| *p);
         while let Some(p) = parent {
