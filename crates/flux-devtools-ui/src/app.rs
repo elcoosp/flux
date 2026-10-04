@@ -16,7 +16,9 @@ use gpui_component::{
     scroll::ScrollableElement,
     status_bar::StatusBar,
     switch::Switch,
-};
+
+    popover::Popover,
+    button::Button,};
 use gpui_component::{ThemeMode, WindowExt};
 
 use gpui_platform::application;
@@ -338,6 +340,51 @@ impl DevToolsRoot {
     }
 
     /// The current host identity, formatted for display.
+    /// Renders the host picker when more than one host is connected.
+    fn host_picker(
+        &self,
+        cx: &mut Context<'_, Self>,
+    ) -> gpui::AnyElement {
+        let keys = self.state.host_keys();
+        if keys.len() <= 1 {
+            return gpui::div().into_any_element();
+        }
+        let state = self.state.clone();
+        let this = cx.entity();
+        let current_label = self
+            .state
+            .selected_host_key()
+            .map_or_else(|| self.state.effective_host_key().label(), |k| k.label());
+
+        Popover::new("host-picker")
+            .trigger(
+                Button::new("host-picker-trigger")
+                    .label(format!("Host: {current_label}")),
+            )
+            .content(move |_popover_cx, _window, _cx| {
+                let state = state.clone();
+                let this = this.clone();
+                let mut col = gpui::div().flex().flex_col();
+                for k in keys.iter().cloned() {
+                    let k_label = k.label();
+                    let k_clone = k.clone();
+                    let state = state.clone();
+                    let this = this.clone();
+                    let is_selected = state.selected_host_key().as_ref() == Some(&k);
+                    col = col.child(
+                        Button::new(gpui::ElementId::from(format!("host-{}", k_label)))
+                            .label(format!("{} {}", if is_selected { "✓" } else { " " }, k_label))
+                            .on_click(move |_ev, _win, cx| {
+                                state.select_host(k_clone.clone());
+                                this.update(cx, |_, cx| cx.notify());
+                            }),
+                    );
+                }
+                col
+            })
+            .into_any_element()
+    }
+
     fn host_label(&self) -> Option<String> {
         self.state.host_info().map(|h| h.label())
     }
@@ -381,6 +428,9 @@ impl Render for DevToolsRoot {
                 cx,
             );
         }
+
+        // Pre-compute before the Theme borrow takes an immutable &cx.
+        let host_picker_el = self.host_picker(cx);
 
         let colors = cx.global::<Theme>();
         let host_badge = host.as_ref().map(|host| {
@@ -467,6 +517,7 @@ impl Render for DevToolsRoot {
                                     this.child(gpui_component::spinner::Spinner::new())
                                 }),
                         )
+                        .child(host_picker_el)
                         .child(host_badge.unwrap_or_else(|| {
                             gpui::div()
                                 .flex()
