@@ -1040,6 +1040,29 @@ pub fn prop_index_for_name(name: &str) -> flux_syntax::PropIdx {
     flux_syntax::PropIdx::from((hash & 0xFFFF) as u16)
 }
 
+/// Audit fix (theme #2): fail loud when two distinct prop names collide on the
+/// same 16-bit slot. The free function above cannot itself detect this (it sees
+/// one name at a time); callers that build a props table call this helper with
+/// the full name set. Returns the colliding names as `(a, b)` when two distinct
+/// strings map to the same `PropIdx`.
+#[must_use]
+pub fn detect_prop_index_collision(names: &[&str]) -> Option<(String, String)> {
+    use std::collections::HashMap;
+    let mut seen: HashMap<flux_syntax::PropIdx, &str> = HashMap::with_capacity(names.len());
+    for &name in names {
+        let idx = prop_index_for_name(name);
+        match seen.get(&idx) {
+            Some(prev) if *prev != name => {
+                return Some(((*prev).to_owned(), name.to_owned()));
+            }
+            _ => {
+                seen.insert(idx, name);
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1063,6 +1086,32 @@ mod tests {
         // Verify the free function maps both to the same idx.
         assert_eq!(prop_index_for_name("foo"), prop_index_for_name(&collision));
         assert_ne!("foo", collision);
+    }
+
+    /// The collision detector fires when two distinct names hit the same
+    /// FNV-1a slot (audit theme #2).
+    #[test]
+    fn prop_index_collision_detector_fires() {
+        // Brute-force a distinct name that collides with "foo" (same technique
+        // as `prop_index_collision_is_detected`).
+        let foo_idx = prop_index_for_name("foo");
+        let mut collision = None;
+        for i in 0u32..1_000_000 {
+            let candidate = format!("p{i:06x}");
+            if prop_index_for_name(&candidate) == foo_idx && candidate != "foo" {
+                collision = Some(candidate);
+                break;
+            }
+        }
+        let collision = collision.expect("must find a collision within 1M tries");
+        let hit = detect_prop_index_collision(&["foo", "bar", &collision]);
+        assert!(hit.is_some(), "detector must fire on the known collision");
+    }
+
+    /// The collision detector returns `None` for a clean name set.
+    #[test]
+    fn prop_index_collision_detector_clean() {
+        assert!(detect_prop_index_collision(&["alpha", "beta", "gamma"]).is_none());
     }
 
     /// Two inlined bodies of the same component must produce distinct
