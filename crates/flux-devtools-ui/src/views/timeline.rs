@@ -29,6 +29,14 @@ pub struct TimelineView {
     slider: Entity<SliderState>,
     /// Subscription to slider changes so we can write `scrub_index`.
     _sub: Subscription,
+    /// The `timeline_len` value the current slider Entity was built for.
+    /// When this changes in `render_pane`, the slider is rebuilt with the
+    /// new range and re-subscribed. The previous one-shot init in `new()`
+    /// ran at window-open time — *before* any telemetry had arrived — so the
+    /// slider range was permanently `0..=0` and time-travel scrubbing was
+    /// dead on arrival (ADR-0042 headline UX). Rebuilding on length change
+    /// keeps the range live as telemetry flows in.
+    last_len: usize,
 }
 
 impl TimelineView {
@@ -60,6 +68,7 @@ impl TimelineView {
             state,
             slider,
             _sub: sub,
+            last_len: len,
         }
     }
 
@@ -71,6 +80,39 @@ impl TimelineView {
     /// Renders the view as a standalone pane.
     pub fn render_pane(&mut self, cx: &mut Context<'_, Self>) -> impl IntoElement {
         let len = self.timeline_len();
+
+        // Audit fix: rebuild the slider when the timeline length changes so
+        // its `max` tracks the live event count. The previous single-shot
+        // init in `new()` produced a 0..=0 range for the whole session, which
+        // made the time-travel scrubber unusable as soon as the window
+        // opened (before any telemetry had arrived). Rebuilding here also
+        // re-subscribes so the new entity's Change/Release events write
+        // `scrub_index`; the old `_sub` is dropped, so no leaked observers.
+        if len != self.last_len {
+            self.last_len = len;
+            let state_for_sub = self.state.clone();
+            let slider = cx.new(|_| {
+                SliderState::new()
+                    .min(0.0)
+                    .max((len.max(1) - 1) as f32)
+                    .step(1.0)
+                    .default_value((len.max(1) - 1) as f32)
+            });
+            let sub = cx.subscribe(&slider, move |_, _, event: &SliderEvent, cx| {
+                let value = match event {
+                    SliderEvent::Change(v) | SliderEvent::Release(v) => *v,
+                };
+                let idx = match value {
+                    SliderValue::Single(f) => f as usize,
+                    _ => 0,
+                };
+                state_for_sub.set_scrub_index(Some(idx));
+                cx.notify();
+            });
+            self.slider = slider;
+            self._sub = sub;
+        }
+
         let live = len.max(1) - 1;
         let scrub = self.state.scrub_index().unwrap_or(live);
         let at = scrub.min(live);
