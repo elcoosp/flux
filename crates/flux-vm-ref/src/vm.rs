@@ -121,6 +121,13 @@ pub struct InMemorySignals {
     values: std::collections::HashMap<SignalId, Value>,
     states: std::collections::HashMap<SignalId, CellState>,
     next_cell: SignalId,
+    /// Audit fix: the set of signal ids explicitly `write`-ten since the store
+    /// was created. `snapshot()` returns only these, so a conformance harness
+    /// that seeds cells via `from_signals(seeds)` no longer sees those seeds
+    /// echoed into `VmOutcome::signals` — the previous behavior made "the
+    /// handler wrote nothing" indistinguishable from "the handler rewrote
+    /// everything".
+    written: std::collections::HashSet<SignalId>,
 }
 
 impl Default for InMemorySignals {
@@ -131,6 +138,7 @@ impl Default for InMemorySignals {
             // Fresh result cells start well above the low, fixed ids that golden
             // vectors and handlers use (e.g. 99), so `allocate_cell` never collides.
             next_cell: 1_000_000,
+            written: std::collections::HashSet::new(),
         }
     }
 }
@@ -142,10 +150,21 @@ impl SignalStore for InMemorySignals {
     fn write(&mut self, id: SignalId, value: Value) {
         self.values.insert(id, value.clone());
         self.states.insert(id, CellState::Ready(value));
+        // Audit fix: record explicit writes so `snapshot` can filter out
+        // pre-seeded cells.
+        self.written.insert(id);
     }
     fn snapshot(&self) -> Vec<(SignalId, Value)> {
-        let mut out: Vec<(SignalId, Value)> =
-            self.values.iter().map(|(k, v)| (*k, v.clone())).collect();
+        // Audit fix: only report signals that were actually written during
+        // this run. Pre-seeded cells from `from_signals(seeds)` are not
+        // written, so they no longer pollute `VmOutcome::signals` with
+        // values the handler never touched.
+        let mut out: Vec<(SignalId, Value)> = self
+            .values
+            .iter()
+            .filter(|(k, _)| self.written.contains(k))
+            .map(|(k, v)| (*k, v.clone()))
+            .collect();
         out.sort_by_key(|(k, _)| *k);
         out
     }
@@ -183,6 +202,7 @@ impl InMemorySignals {
             .map(|(k, v)| (*k, CellState::Ready(v.clone())))
             .collect();
         Self {
+            written: std::collections::HashSet::new(),
             values,
             states,
             next_cell: 1_000_000,
