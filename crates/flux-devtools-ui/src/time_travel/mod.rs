@@ -9,4 +9,6 @@ mod reconstruct;
 pub use buffer::{DEFAULT_CAPACITY, TimelineBuffer};
 pub use log_buffer::{LogBuffer, LogEntry, LogLevel};
 pub use network_log::{NetworkLog, NetworkPhase, NetworkRecord};
-pub use reconstruct::{ReconstructedState, Registers, ViewFrame, reconstruct_state};
+pub use reconstruct::{
+    ReconstructedState, Registers, ViewFrame, apply_event, reconstruct_state,
+};
