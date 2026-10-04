@@ -20,9 +20,15 @@ pub fn decode_span(r: &mut Reader<'_>) -> Result<Span, WireError> {
 
 /// Writes a length-prefixed UTF-8 string (u16 byte length + bytes), matching the
 /// layout `frame::encode_str` uses for `Error`/`Hello` payloads.
-pub(crate) fn encode_str(w: &mut Writer, s: &str) {
-    w.u16_len(s.len(), "span.len");
+pub(crate) fn encode_str(w: &mut Writer, s: &str) -> Result<(), WireError> {
+    // Audit fix (H14): fallible length prefix so a >64 KB excerpt surfaces
+    // as a recoverable `WireError::LengthExceedsU16` at this encoder's
+    // boundary, not a panic buried inside `u16_len`. Callers propagate the
+    // result; the frame-level composition site `.expect()`s for now, pending
+    // the full cascade.
+    w.u16_len_checked(s.len(), "span.len")?;
     w.bytes(s.as_bytes());
+    Ok(())
 }
 
 /// Reads a length-prefixed UTF-8 string (u16 byte length + bytes).
