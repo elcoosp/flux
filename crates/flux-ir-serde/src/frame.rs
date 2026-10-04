@@ -293,8 +293,17 @@ fn r_ensure_capacity(payload: &[u8], pos: usize, count: usize, _ctx: &'static st
 }
 
 fn encode_str(w: &mut Writer, s: &str) {
-    w.u16_len(s.len(), "frame.string_len");
+    // Panicking convenience wrapper. Prefer `try_encode_str` in any code path
+    // that must not crash on a user-authored payload >64 KB.
+    try_encode_str(w, s).expect("frame.string_len: value exceeds wire length limits");
+}
+
+/// Fallible length-prefixed string encoder. See [`Writer::u16_len_checked`]
+/// for the length-limit contract.
+fn try_encode_str(w: &mut Writer, s: &str) -> Result<(), WireError> {
+    w.u16_len_checked(s.len(), "frame.string_len")?;
     w.bytes(s.as_bytes());
+    Ok(())
 }
 
 fn decode_str(r: &[u8], pos: &mut usize) -> Result<String, WireError> {
@@ -713,12 +722,24 @@ fn decode_closures(r: &mut Reader<'_>) -> Result<Vec<ClosureIR>, WireError> {
 }
 
 impl InitFrame {
+    /// Fallible convenience: encodes to a fresh `Vec<u8>`.
+    ///
+    /// # Errors
+    ///
+    /// See [`Self::try_encode_into`].
+    pub fn try_to_bytes(&self) -> Result<Vec<u8>, WireError> {
+        let mut buf = Vec::new();
+        self.try_encode_into(&mut buf)?;
+        Ok(buf)
+    }
+
     /// Encodes the `Init` frame per Appendix D §D.1 + §D.12.2 + §D.12 handler section.
+    ///
+    /// Panics on encoder overflow. Prefer [`Self::try_to_bytes`] in production.
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut buf = Vec::new();
-        self.encode_into(&mut buf);
-        buf
+        self.try_to_bytes()
+            .expect("frame.init.to_bytes: value exceeds wire length limits")
     }
 
     /// Encodes this frame, appending to `buf` (which is cleared first).
@@ -726,77 +747,72 @@ impl InitFrame {
     /// The dev server emits an `Init` when a host (re)connects; reusing one
     /// scratch buffer avoids a fresh heap allocation per connection (OPT-B),
     /// and keeps `to_bytes` semantically identical for callers/tests.
-    pub fn encode_into(&self, buf: &mut Vec<u8>) {
+    /// Fallible frame encoder. Returns [`WireError::LengthExceedsU16`] when a
+    /// length-prefixed section exceeds the wire format's `u16` width.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WireError::LengthExceedsU16`] on any oversized prop value,
+    /// state seed, source path, interned string, component name, handler
+    /// bytecode blob, closure excerpt, or signal-meta section.
+    pub fn try_encode_into(&self, buf: &mut Vec<u8>) -> Result<(), WireError> {
         let mut w = Writer::from_vec(std::mem::take(buf));
         write_magic_version(&mut w);
         w.u8(self.kind.type_byte());
         w.u32(self.seq);
-        // Scaffold: `encode_into` returns `()`; a value that overflows the
-        // wire's u16 length prefix panics here with context. The full fix is
-        // a fallible `encode_into -> Result<(), WireError>` (audit H14
-        // cascade); this boundary marks the exact upgrade point.
-        encode_node(&mut w, &self.root)
-            .expect("frame.init.root: value exceeds wire length limits");
+        encode_node(&mut w, &self.root)?;
         // Appendix D §D.12.2: the full tree is `root` followed by every
         // descendant, flat, so the host rebuilds the complete node table from
         // one frame. A `u32` count prefixes the extras.
         w.u32(self.extra_nodes.len() as u32);
         for node in &self.extra_nodes {
-            // Scaffold: same upgrade point as the root call above.
-            encode_node(&mut w, node)
-                .expect("frame.init.extra_node: value exceeds wire length limits");
+            encode_node(&mut w, node)?;
         }
-        w.u16_len(self.state_seed.len(), "frame.state_seed");
+        w.u16_len_checked(self.state_seed.len(), "frame.state_seed")?;
         for (sig, val) in &self.state_seed {
             w.u32(*sig);
-            // Scaffold: `InitFrame::encode_into` returns `()`; a value that
-            // overflows the wire's u16 length prefix panics here instead of
-            // silently truncating. The full fix is a fallible
-            // `encode_into -> Result<(), WireError>` (audit H14 cascade).
-            encode_value(&mut w, val)
-                .expect("frame.init.state_seed: value exceeds wire length limits");
+            encode_value(&mut w, val)?;
         }
-        w.u16_len(self.source_map.len(), "frame.source_map");
+        w.u16_len_checked(self.source_map.len(), "frame.source_map")?;
         for (fid, path) in &self.source_map {
             w.u32(*fid);
-            encode_str(&mut w, path);
+            try_encode_str(&mut w, path)?;
         }
         let entries: Vec<(StringId, String)> = self
             .string_table
             .iter()
             .map(|(id, text)| (id, text.to_owned()))
             .collect();
-        // D.12.2: `string_count` is a u32. Only literal strings live here; the
-        // component-name → `ComponentId` map is a SEPARATE section (below) so
-        // the two id spaces never collide on the wire (a literal `StringId` and
-        // a `ComponentId` can share a numeric value, which would corrupt host
-        // adapter resolution if merged).
+        // D.12.2: `string_count` is a u32.
         w.u32(entries.len() as u32);
         for (id, text) in &entries {
-            encode_string_entry(&mut w, *id, text).expect("frame.string");
+            encode_string_entry(&mut w, *id, text)?;
         }
-        // Appendix D §D.9: component-name interning, separate `u16` count then
-        // `(u32 ComponentId, utf8 name)` pairs. The host resolves each node's
-        // adapter from `byComponent[component_id]`.
-        w.u16_len(self.component_names.len(), "frame.component_names");
+        w.u16_len_checked(self.component_names.len(), "frame.component_names")?;
         for (cid, name) in &self.component_names {
             w.u32(*cid);
-            encode_str(&mut w, name);
+            try_encode_str(&mut w, name)?;
         }
-        // D.12 handler section (Gap G1): shared blob, then HandlerDef stream.
-        write_closures(&mut w, &self.closures)
-            .expect("frame.closures: handler bytecode exceeds wire length limits");
-        // ADR-0027 (FA-IRWIRE): trailing `signal_meta` section. A 1-byte
-        // presence marker lets old decoders skip (or stop at) the section.
-        // Gated by whether this frame actually carries metadata.
+        write_closures(&mut w, &self.closures)?;
         if !self.signal_meta.is_empty() {
             w.u8(1);
-            encode_signal_meta_section(&mut w, &self.signal_meta)
-                .expect("frame.signal_meta: value exceeds wire length limits");
+            encode_signal_meta_section(&mut w, &self.signal_meta)?;
         } else {
             w.u8(0);
         }
         *buf = w.into_vec();
+        Ok(())
+    }
+
+    /// Encodes this frame, appending to `buf` (which is cleared first).
+    ///
+    /// Panics on encoder overflow — prefer [`Self::try_encode_into`] in
+    /// production paths. The dev server migrated to the fallible API so a
+    /// user-authored program too large for the wire format surfaces as a
+    /// typed `Error` frame instead of killing the pipeline thread (audit H14).
+    pub fn encode_into(&self, buf: &mut Vec<u8>) {
+        self.try_encode_into(buf)
+            .expect("frame.init.encode: value exceeds wire length limits");
     }
 }
 
@@ -914,12 +930,24 @@ impl Frame {
 }
 
 impl DeltaFrame {
+    /// Fallible convenience: encodes to a fresh `Vec<u8>`.
+    ///
+    /// # Errors
+    ///
+    /// See [`Self::try_encode_into`].
+    pub fn try_to_bytes(&self) -> Result<Vec<u8>, WireError> {
+        let mut buf = Vec::new();
+        self.try_encode_into(&mut buf)?;
+        Ok(buf)
+    }
+
     /// Encodes the `Delta` frame per Appendix D §D.1 + §D.2/§D.9 + §D.12 handler section.
+    ///
+    /// Panics on encoder overflow. Prefer [`Self::try_to_bytes`] in production.
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut buf = Vec::new();
-        self.encode_into(&mut buf);
-        buf
+        self.try_to_bytes()
+            .expect("frame.delta.to_bytes: value exceeds wire length limits")
     }
 
     /// Encodes this frame, appending to `buf` (which is cleared first).
@@ -928,32 +956,45 @@ impl DeltaFrame {
     /// scratch buffer across frames avoids a fresh heap allocation per edit
     /// (OPT-B). `buf` keeps its capacity between calls, so after warm-up the
     /// hot path performs no allocation at all.
-    pub fn encode_into(&self, buf: &mut Vec<u8>) {
+    /// Fallible frame encoder. Returns [`WireError::LengthExceedsU16`] when a
+    /// length-prefixed section exceeds the wire format's `u16` width.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WireError::LengthExceedsU16`] on an oversized patch count,
+    /// closure count, string delta, or signal-meta section — the exact
+    /// "user authored too many of something" case the audit's H14 called out.
+    pub fn try_encode_into(&self, buf: &mut Vec<u8>) -> Result<(), WireError> {
         let mut w = Writer::from_vec(std::mem::take(buf));
         write_magic_version(&mut w);
         w.u8(self.kind.type_byte());
         w.u32(self.seq);
         w.u8(self.flags);
-        w.u16_len(self.patches.len(), "frame.patches");
-        w.u16_len(self.closures.len(), "frame.closures"); // D.1 handler_count (now meaningful)
-        w.u16_len(self.strings.len(), "frame.strings");
+        w.u16_len_checked(self.patches.len(), "frame.patches")?;
+        w.u16_len_checked(self.closures.len(), "frame.closures")?;
+        w.u16_len_checked(self.strings.len(), "frame.strings")?;
         for patch in &self.patches {
-            // Scaffold: same upgrade point as the Init frame's node encoders.
-            encode_patch(&mut w, patch)
-                .expect("frame.delta.patch: value exceeds wire length limits");
+            encode_patch(&mut w, patch)?;
         }
         for (id, text) in &self.strings {
-            encode_string_entry(&mut w, *id, text).expect("frame.string");
+            encode_string_entry(&mut w, *id, text)?;
         }
-        write_closures(&mut w, &self.closures)
-            .expect("frame.closures: handler bytecode exceeds wire length limits");
-        // ADR-0027 (FA-IRWIRE): `signal_meta` section, present only when the
-        // Delta `flags` carry `FLAG_NODE_HAS_SIGNAL_DEPS`.
+        write_closures(&mut w, &self.closures)?;
         if self.flags & FLAG_NODE_HAS_SIGNAL_DEPS != 0 {
-            encode_signal_meta_section(&mut w, &self.signal_meta)
-                .expect("frame.signal_meta: value exceeds wire length limits");
+            encode_signal_meta_section(&mut w, &self.signal_meta)?;
         }
         *buf = w.into_vec();
+        Ok(())
+    }
+
+    /// Encodes this frame, appending to `buf` (which is cleared first).
+    ///
+    /// Panics on encoder overflow — prefer [`Self::try_encode_into`] in
+    /// production paths (see the `InitFrame` counterpart for the H14
+    /// rationale).
+    pub fn encode_into(&self, buf: &mut Vec<u8>) {
+        self.try_encode_into(buf)
+            .expect("frame.delta.encode: value exceeds wire length limits");
     }
 }
 
