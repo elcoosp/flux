@@ -97,6 +97,21 @@ impl HostKey {
             device: String::new(),
         }
     }
+
+    /// Human-readable label for the host-picker UI. Anonymous hosts render as
+    /// `anonymous`; device-only or platform-only hosts degrade gracefully.
+    #[must_use]
+    pub fn label(&self) -> String {
+        if self.platform.is_empty() && self.device.is_empty() {
+            return "anonymous".to_owned();
+        }
+        match (self.device.is_empty(), self.platform.is_empty()) {
+            (false, false) => format!("{} ({})", self.device, self.platform),
+            (false, true) => self.device.clone(),
+            (true, false) => self.platform.clone(),
+            (true, true) => "anonymous".to_owned(),
+        }
+    }
 }
 
 /// One host's reconstructed DevTools session: its own live state plus its own
