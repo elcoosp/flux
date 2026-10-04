@@ -783,7 +783,7 @@ public class ShadowTree(
                 a.setChildren(v, node.children.map { it.id }, node.children.map { it.view })
             }
         }
-        withAdapter(wire.kind, wire.componentId, view) { a, v -> a.bindHandler(v, props, WeakReference(executor)) }
+        withAdapter(wire.kind, wire.componentId, view) { a, v -> a.bindHandler(v, props, WeakReference(executor), wire.id) }
         (executor as? HostExecutor)?.onNodeCreated(wire.id)
         emitTrace(
             TraceEvent.SetChildren(
