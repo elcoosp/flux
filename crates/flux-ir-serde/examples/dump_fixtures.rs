@@ -24,7 +24,7 @@ fn main() {
     // Button node (id=2): Primitive with a text prop (no handlers to keep
     // the fixture self-contained — the existing unsupported-version test
     // uses the same shape).
-    let button = flux_syntax::NodeRef {
+    let _button = flux_syntax::NodeRef {
         id: 2,
         kind: NodeKind::Primitive,
         component_id: 0,
