@@ -5,7 +5,7 @@
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    
     use crate::diff::emit::{closure_ref, emit_handler};
     use flux_syntax::{HandlerId, Patch, SignalId, Span};
 
