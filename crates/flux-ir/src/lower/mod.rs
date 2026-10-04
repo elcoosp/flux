@@ -1125,7 +1125,7 @@ mod tests {
         let typed = flux_types::type_check(&ast).expect("well-typed");
         let lowered = lower(&ast, &typed).expect("lowers");
 
-        let mut ids: Vec<NodeId> = lowered.arena.all_ids().collect();
+        let ids: Vec<NodeId> = lowered.arena.all_ids().collect();
         let mut unique = std::collections::BTreeSet::new();
         for id in &ids {
             assert!(unique.insert(*id), "duplicate NodeId {id:#x} in arena");
