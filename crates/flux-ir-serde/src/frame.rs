@@ -162,10 +162,14 @@ fn write_magic_version(w: &mut Writer) {
 /// Writes the frame-level handler section (Gap G1, Appendix D §D.8 + §D.12):
 /// a shared `bytecode` blob, then a `HandlerDef` stream whose `ClosureRef`s
 /// index that blob by `bytecode_offset`/`bytecode_len`.
-fn write_closures(w: &mut Writer, closures: &[ClosureIR]) {
+fn write_closures(w: &mut Writer, closures: &[ClosureIR]) -> Result<(), WireError> {
+    // Audit H14 cascade: fallible now so an oversized handler closure excerpt
+    // or a >65 535-closure program surfaces as `WireError::LengthExceedsU16`.
+    // Callers in `encode_into` still `.expect()` at the frame boundary
+    // pending the top-level `try_to_bytes` migration.
     if closures.is_empty() {
         encode_bytecode_blob(w, &[]);
-        return;
+        return Ok(());
     }
     // Concatenate every closure's bytecode into one blob and record each
     // closure's offset within it, so the `ClosureRef` indices stay stable.
@@ -210,7 +214,7 @@ fn write_closures(w: &mut Writer, closures: &[ClosureIR]) {
         }
     }
     encode_bytecode_blob(w, &blob);
-    w.u16_len(closures.len(), "frame.closures");
+    w.u16_len_checked(closures.len(), "frame.closures")?;
     for closure in closures {
         let (offset, len) = by_id[&closure.id];
         let closure_ref = flux_syntax::ClosureRef {
@@ -221,8 +225,9 @@ fn write_closures(w: &mut Writer, closures: &[ClosureIR]) {
             span: closure.span,
             excerpt: closure.excerpt.clone(),
         };
-        encode_handler_def(w, closure.id, &closure_ref);
+        encode_handler_def(w, closure.id, &closure_ref)?;
     }
+    Ok(())
 }
 
 /// Validates the magic + version prefix and returns the `frame_type` byte and
@@ -779,13 +784,15 @@ impl InitFrame {
             encode_str(&mut w, name);
         }
         // D.12 handler section (Gap G1): shared blob, then HandlerDef stream.
-        write_closures(&mut w, &self.closures);
+        write_closures(&mut w, &self.closures)
+            .expect("frame.closures: handler bytecode exceeds wire length limits");
         // ADR-0027 (FA-IRWIRE): trailing `signal_meta` section. A 1-byte
         // presence marker lets old decoders skip (or stop at) the section.
         // Gated by whether this frame actually carries metadata.
         if !self.signal_meta.is_empty() {
             w.u8(1);
-            encode_signal_meta_section(&mut w, &self.signal_meta);
+            encode_signal_meta_section(&mut w, &self.signal_meta)
+                .expect("frame.signal_meta: value exceeds wire length limits");
         } else {
             w.u8(0);
         }
@@ -938,11 +945,13 @@ impl DeltaFrame {
         for (id, text) in &self.strings {
             encode_string_entry(&mut w, *id, text).expect("frame.string");
         }
-        write_closures(&mut w, &self.closures);
+        write_closures(&mut w, &self.closures)
+            .expect("frame.closures: handler bytecode exceeds wire length limits");
         // ADR-0027 (FA-IRWIRE): `signal_meta` section, present only when the
         // Delta `flags` carry `FLAG_NODE_HAS_SIGNAL_DEPS`.
         if self.flags & FLAG_NODE_HAS_SIGNAL_DEPS != 0 {
-            encode_signal_meta_section(&mut w, &self.signal_meta);
+            encode_signal_meta_section(&mut w, &self.signal_meta)
+                .expect("frame.signal_meta: value exceeds wire length limits");
         }
         *buf = w.into_vec();
     }
