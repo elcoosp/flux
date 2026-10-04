@@ -142,3 +142,64 @@ fn decode_value_at(r: &mut Reader<'_>, depth: usize) -> Result<Value, WireError>
         }),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Audit H14 regression: a user-authored `List` with more items than a
+    /// `u16` prefix can hold must surface as `WireError::LengthExceedsU16`
+    /// from `encode_value`, not a panic inside `Writer::u16_len`. This test
+    /// pins the fallible-encoder contract: if a future change reverts
+    /// `encode_value` to the panicking path, this test fails (or panics with
+    /// a different message).
+    #[test]
+    fn encode_value_rejects_oversized_list() {
+        let too_many = (u16::MAX as usize) + 1;
+        let items: Vec<Value> = (0..too_many).map(|_| Value::Null).collect();
+        let value = Value::List(items);
+        let mut w = Writer::new();
+        let err = encode_value(&mut w, &value)
+            .expect_err("oversized list must not encode");
+        match err {
+            WireError::LengthExceedsU16 { what, n } => {
+                assert_eq!(what, "value.list");
+                assert_eq!(n, too_many);
+            }
+            other => panic!("expected LengthExceedsU16, got {other:?}"),
+        }
+    }
+
+    /// Audit H14 regression: a `Record` with more fields than a `u16` prefix
+    /// can hold must also surface as a typed error. Mirrors the list test.
+    #[test]
+    fn encode_value_rejects_oversized_record() {
+        let too_many = (u16::MAX as usize) + 1;
+        let fields: Vec<(flux_syntax::PropIdx, Value)> = (0..too_many)
+            .map(|i| (flux_syntax::PropIdx::from(i as u16), Value::Null))
+            .collect();
+        let value = Value::Record(fields);
+        let mut w = Writer::new();
+        let err = encode_value(&mut w, &value)
+            .expect_err("oversized record must not encode");
+        match err {
+            WireError::LengthExceedsU16 { what, n } => {
+                assert_eq!(what, "value.record.fields");
+                assert_eq!(n, too_many);
+            }
+            other => panic!("expected LengthExceedsU16, got {other:?}"),
+        }
+    }
+
+    /// A normal-sized list still round-trips through the fallible encoder.
+    /// Guards against the migration accidentally breaking the happy path.
+    #[test]
+    fn encode_value_round_trips_small_list() {
+        let value = Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)]);
+        let mut w = Writer::new();
+        encode_value(&mut w, &value).expect("small list encodes");
+        // The encoder wrote: tag(1) + len(2) + 3 * (tag(1) + payload(8)) = 30 bytes.
+        assert_eq!(w.buf_len(), 1 + 2 + 3 * 9);
+    }
+}
+
