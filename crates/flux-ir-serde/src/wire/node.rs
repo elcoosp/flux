@@ -8,20 +8,29 @@ use super::cursor::Reader;
 use super::props::{decode_props, encode_props};
 use super::span::{decode_span, encode_span};
 
-pub(crate) fn encode_node(w: &mut super::cursor::Writer, node: &NodeRef) {
+pub(crate) fn encode_node(
+    w: &mut super::cursor::Writer,
+    node: &NodeRef,
+) -> Result<(), WireError> {
+    // Audit H14 cascade: fallible now so a >64 KB prop value or a >65 535
+    // child/handler count surfaces as `WireError::LengthExceedsU16` at this
+    // encoder's boundary. `encode_child` and `encode_span` are still
+    // infallible; they will acquire `?` in a future batch if their
+    // primitives become fallible.
     w.u32(node.id);
     w.u8(node.kind.tag());
     w.u32(node.component_id);
-    encode_props(w, &node.props);
-    w.u16_len(node.children.len(), "node.children");
+    encode_props(w, &node.props)?;
+    w.u16_len_checked(node.children.len(), "node.children")?;
     for child in &node.children {
         encode_child(w, child);
     }
-    w.u16_len(node.handlers.len(), "node.handlers");
+    w.u16_len_checked(node.handlers.len(), "node.handlers")?;
     for handler in &node.handlers {
         w.u32(*handler);
     }
     encode_span(w, &node.span);
+    Ok(())
 }
 
 pub(crate) fn decode_node(r: &mut Reader<'_>) -> Result<NodeRef, WireError> {
