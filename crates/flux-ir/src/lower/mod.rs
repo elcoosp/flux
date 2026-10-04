@@ -916,6 +916,7 @@ impl<'a> Lowerer<'a> {
                         field_indices: &self.typed.field_indices,
                         expr_types: &self.typed.types,
                     },
+                    &mut self.prop_indices,
                     expr.span,
                     &mut intern,
                 )?;
