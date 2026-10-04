@@ -107,7 +107,7 @@ fn binop_symbol(op: BinOp) -> &'static str {
         BinOp::Ge => ">=",
         BinOp::And => "&&",
         BinOp::Or => "||",
-        _ => "+",
+        _ => "<unknown-binop>",  // Mirrors flux-codegen-core; see audit theme #1.
     }
 }
 
