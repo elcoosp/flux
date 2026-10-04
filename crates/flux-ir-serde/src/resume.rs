@@ -138,7 +138,12 @@ impl ResumeFrame {
         w.u32(self.handler_id);
         w.u32(self.cell);
         w.u8(u8::from(self.is_error));
-        encode_value(&mut w, &self.value);
+        // Scaffold: `ResumeFrame::to_bytes` returns `Vec<u8>`; a length
+        // overflow in the delivered value would have to propagate through
+        // the whole `to_bytes -> Result` migration (audit H14). For now the
+        // encode fails loud with context.
+        encode_value(&mut w, &self.value)
+            .expect("resume: value exceeds wire length limits");
         w.into_vec()
     }
 
