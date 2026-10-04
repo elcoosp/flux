@@ -8,16 +8,24 @@ use super::cursor::Reader;
 use super::node::{decode_node, encode_node};
 use super::prop_diff::{decode_prop_diff, encode_prop_diff};
 
-pub(crate) fn encode_patch(w: &mut super::cursor::Writer, patch: &Patch) {
+pub(crate) fn encode_patch(
+    w: &mut super::cursor::Writer,
+    patch: &Patch,
+) -> Result<(), WireError> {
+    // Audit H14 cascade: fallible now so a >64 KB prop value, a >65 535
+    // child/handler count, or a >65 535 reorder key list surfaces as a
+    // typed `WireError::LengthExceedsU16` at this encoder's boundary. The
+    // frame encoders still `.expect()` at their boundary pending the
+    // top-level `try_to_bytes` migration.
     w.u8(patch.tag());
     match patch {
         Patch::Replace { id, node } => {
             w.u32(*id);
-            encode_node(w, node);
+            encode_node(w, node)?;
         }
         Patch::Update { id, props_diff } => {
             w.u32(*id);
-            encode_prop_diff(w, props_diff);
+            encode_prop_diff(w, props_diff)?;
         }
         Patch::Insert {
             parent,
@@ -26,14 +34,14 @@ pub(crate) fn encode_patch(w: &mut super::cursor::Writer, patch: &Patch) {
         } => {
             w.u32(*parent);
             w.u16(*index);
-            encode_node(w, node);
+            encode_node(w, node)?;
         }
         Patch::Remove { id } => {
             w.u32(*id);
         }
         Patch::Reorder { parent, keys } => {
             w.u32(*parent);
-            w.u16_len(keys.len(), "patch.removals.keys");
+            w.u16_len_checked(keys.len(), "patch.removals.keys")?;
             for key in keys {
                 w.u32(*key);
             }
@@ -49,7 +57,7 @@ pub(crate) fn encode_patch(w: &mut super::cursor::Writer, patch: &Patch) {
         } => {
             w.u32(*old_id);
             w.u32(*new_id);
-            encode_node(w, node);
+            encode_node(w, node)?;
         }
         // `Patch` is `#[non_exhaustive]` (flux-syntax): external additions
         // require a `_` arm. All variants produced by the differ are handled
@@ -59,6 +67,7 @@ pub(crate) fn encode_patch(w: &mut super::cursor::Writer, patch: &Patch) {
         // was already written.
         _ => unreachable!("unknown Patch variant — add an encoder arm for it (audit P2.25)"),
     }
+    Ok(())
 }
 
 pub(crate) fn decode_patch(r: &mut Reader<'_>) -> Result<Patch, WireError> {
