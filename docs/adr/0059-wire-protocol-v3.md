@@ -1,4 +1,4 @@
-# ADR-0001 — Wire Protocol v3: u32 Length Prefixes for User-Authored Collections
+# ADR-0059 — Wire Protocol v3: u32 Length Prefixes for User-Authored Collections
 
 - **Status:** Accepted
 - **Date:** 2026-10-04
