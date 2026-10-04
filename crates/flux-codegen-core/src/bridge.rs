@@ -11,7 +11,7 @@
 //! This bridge is shared by both backends (FLUX-047): it owns no language
 //! specifics, only the deterministic ID reconstruction the lowering pass uses.
 
-use flux_parser::ast::{RecordDecl, RecordField};
+use flux_parser::ast::RecordDecl;
 use flux_parser::{Ast, ComponentDecl, Decl, Expr, TypeDecl};
 use flux_syntax::{DeclTag, ExprTag, NodeId, Span};
 
