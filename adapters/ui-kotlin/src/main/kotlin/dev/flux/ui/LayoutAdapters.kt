@@ -41,6 +41,7 @@ public class StackAdapter private constructor() : FluxAdapter<FluxNativeView> {
         view: FluxNativeView,
         props: Props,
         executor: WeakReference<FluxExecutor>,
+        nodeId: UInt,
     ) {
     }
 
@@ -92,6 +93,7 @@ public class GridAdapter private constructor() : FluxAdapter<FluxNativeView> {
         view: FluxNativeView,
         props: Props,
         executor: WeakReference<FluxExecutor>,
+        nodeId: UInt,
     ) {
     }
 
@@ -138,6 +140,7 @@ public class SpacerAdapter private constructor() : FluxAdapter<FluxNativeView> {
         view: FluxNativeView,
         props: Props,
         executor: WeakReference<FluxExecutor>,
+        nodeId: UInt,
     ) {
     }
 
@@ -188,6 +191,7 @@ public class SafeAreaAdapter private constructor() : FluxAdapter<FluxNativeView>
         view: FluxNativeView,
         props: Props,
         executor: WeakReference<FluxExecutor>,
+        nodeId: UInt,
     ) {
     }
 
