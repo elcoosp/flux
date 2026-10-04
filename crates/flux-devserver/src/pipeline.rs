@@ -42,7 +42,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use flux_ir::{IRArena, LoweredIr, lower_with_handler_base};
-use flux_ir_serde::{Frame, InitFrame, NodeSignalMeta};
+use flux_ir_serde::{Frame, InitFrame, NodeSignalMeta, WireError};
 use flux_parser::Ast;
 use flux_perf_harness::{LatencyMs, MetricKind, MetricRecord, MetricSample, Scenario};
 use flux_syntax::{FileId, Patch, SignalId, SourceExcerpt, StringId, Value};
@@ -518,7 +518,24 @@ impl Pipeline {
         match emit_minimal_updates(written, arena, &self.index) {
             Ok(patches) if patches.is_empty() => None,
             Ok(patches) => {
-                let frame = self.build_dispatch_delta(&patches);
+                // Audit H14: on encoder overflow, ship an `Error` frame
+                // addressed to the same seq. The host will log it and skip
+                // the reconcile rather than the server losing the thread.
+                let frame = match self.try_build_dispatch_delta(&patches) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        let diag = Diagnostic::new(
+                            format!(
+                                "dispatch delta exceeds wire length limits: {e} \
+                                 (handler {:?}, {} patch(es))",
+                                report.handler_id,
+                                patches.len()
+                            ),
+                            None,
+                        );
+                        self.error_frame(&diag)
+                    }
+                };
                 tracing::debug!(
                     handler = ?report.handler_id,
                     written = written,
@@ -544,6 +561,15 @@ impl Pipeline {
     /// never introduces new handlers). This is the "|dependents[S]|-bounded
     /// patch" the ADR-0027 promise advertises.
     fn build_dispatch_delta(&mut self, patches: &[Patch]) -> Vec<u8> {
+        self.try_build_dispatch_delta(patches)
+            .expect("build_dispatch_delta: frame exceeds wire length limits")
+    }
+
+    /// Fallible form of [`Self::build_dispatch_delta`] (audit H14). The
+    /// dispatch path is the highest-traffic emitter (one tap = one frame),
+    /// so this is where a fallback to an `Error` frame gives the developer
+    /// an actionable diagnostic instead of losing the pipeline thread.
+    fn try_build_dispatch_delta(&mut self, patches: &[Patch]) -> Result<Vec<u8>, WireError> {
         let (want_strings, want_handlers) = match self.last_good.as_ref() {
             Some(last) => referenced_strings_and_handlers(patches, last.arena.string_table()),
             None => (Default::default(), Default::default()),
@@ -580,7 +606,7 @@ impl Pipeline {
             &closures,
             &[],
         )
-        .to_bytes()
+        .try_to_bytes()
     }
 
     /// Assigns (or reuses) the dense [`FileId`] for `path`.
@@ -654,9 +680,26 @@ impl Pipeline {
         let started = Instant::now();
         let outcome = match self.last_good.as_ref() {
             None => {
-                let frame = self.build_init(&arena, &closures, &state_seed, &component_names);
+                // Audit H14: on encoder overflow, ship an `Error` frame under
+                // the `Init` variant. Hosts dispatch by the wire frame-kind
+                // byte, so they read a valid Error frame either way.
+                let bytes = match self.try_build_init(
+                    &arena,
+                    &closures,
+                    &state_seed,
+                    &component_names,
+                ) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        let diag = Diagnostic::new(
+                            format!("Init frame exceeds wire length limits: {e}"),
+                            None,
+                        );
+                        self.error_frame(&diag)
+                    }
+                };
                 self.timings.serialize = started.elapsed();
-                Compiled::Init(frame)
+                Compiled::Init(bytes)
             }
             Some(previous) => {
                 let diff_started = Instant::now();
@@ -665,9 +708,18 @@ impl Pipeline {
                 if patches.is_empty() {
                     Compiled::Unchanged
                 } else {
-                    let frame = self.build_delta(&arena, &patches, &closures);
+                    let bytes = match self.try_build_delta(&arena, &patches, &closures) {
+                        Ok(b) => b,
+                        Err(e) => {
+                            let diag = Diagnostic::new(
+                                format!("Delta frame exceeds wire length limits: {e}"),
+                                None,
+                            );
+                            self.error_frame(&diag)
+                        }
+                    };
                     self.timings.serialize = started.elapsed();
-                    Compiled::Delta(frame)
+                    Compiled::Delta(bytes)
                 }
             }
         };
@@ -914,6 +966,22 @@ impl Pipeline {
         state_seed: &[(SignalId, Value)],
         component_names: &[(flux_syntax::ComponentId, String)],
     ) -> Vec<u8> {
+        self.try_build_init(arena, closures, state_seed, component_names)
+            .expect("build_init: frame exceeds wire length limits")
+    }
+
+    /// Fallible form of [`Self::build_init`]. Returns
+    /// [`WireError::LengthExceedsU16`] when the tree carries a value too large
+    /// for the wire's `u16` length prefix (audit H14). Callers either fall
+    /// back to an `Error` frame (see `init_frame`) or the panicking wrapper
+    /// `build_init`.
+    fn try_build_init(
+        &mut self,
+        arena: &IRArena,
+        closures: &[flux_ir::ClosureIR],
+        state_seed: &[(SignalId, Value)],
+        component_names: &[(flux_syntax::ComponentId, String)],
+    ) -> Result<Vec<u8>, WireError> {
         let root = root_node(arena);
         let extra_nodes = flatten_extra_nodes(&root, arena);
         tracing::debug!(
@@ -938,10 +1006,10 @@ impl Pipeline {
         self.seq = self.seq.wrapping_add(1);
         frame.seq = self.seq;
         // Reuse the scratch buffer (OPT-B) so the per-connection Init path is
-        // allocation-free after warm-up; a reconnecting host always receives the
-        // full string table (ids are per-compile positional, not content-stable).
-        frame.encode_into(&mut self.scratch);
-        self.scratch.clone()
+        // allocation-free after warm-up. Fallible now (audit H14 cascade);
+        // the caller decides whether to fall back to an Error frame.
+        frame.try_encode_into(&mut self.scratch)?;
+        Ok(self.scratch.clone())
     }
 
     /// Builds the `Delta` frame bytes for `patches` (spec §D.1).
@@ -951,6 +1019,18 @@ impl Pipeline {
         patches: &[Patch],
         closures: &[flux_ir::ClosureIR],
     ) -> Vec<u8> {
+        self.try_build_delta(arena, patches, closures)
+            .expect("build_delta: frame exceeds wire length limits")
+    }
+
+    /// Fallible form of [`Self::build_delta`] (audit H14). See
+    /// [`Self::try_build_init`] for the caller-contract rationale.
+    fn try_build_delta(
+        &mut self,
+        arena: &IRArena,
+        patches: &[Patch],
+        closures: &[flux_ir::ClosureIR],
+    ) -> Result<Vec<u8>, WireError> {
         // The full arena string table is shipped on every Delta. String ids are
         // assigned densely *per compile* (flux_syntax::StringTable interns in
         // first-insertion order, not content-derived), so an edit that shifts
@@ -973,8 +1053,8 @@ impl Pipeline {
         };
         self.seq = self.seq.wrapping_add(1);
         let frame = Frame::delta(self.seq, flags, patches, &strings, closures, &signal_meta);
-        frame.encode_into(&mut self.scratch);
-        self.scratch.clone()
+        frame.try_encode_into(&mut self.scratch)?;
+        Ok(self.scratch.clone())
     }
 
     /// Rebuilds the `Init` frame from the retained good tree, for a
@@ -993,7 +1073,24 @@ impl Pipeline {
                 last.component_names.clone(),
             )
         };
-        Some(self.build_init(&arena, &closures, &state_seed, &component_names))
+        // Audit H14: on an encoder-overflow failure, ship an `Error` frame
+        // instead of killing the pipeline thread. The `Error` frame's own
+        // payload is a bounded short message, so it cannot itself fail to
+        // encode.
+        match self.try_build_init(&arena, &closures, &state_seed, &component_names) {
+            Ok(bytes) => Some(bytes),
+            Err(e) => {
+                let diagnostic = Diagnostic::new(
+                    format!(
+                        "Init frame exceeds wire length limits: {e} — \
+                         the project is too large for a single connection; \
+                         split it into multiple components"
+                    ),
+                    None,
+                );
+                Some(self.error_frame(&diagnostic))
+            }
+        }
     }
 
     /// Builds an `Error` frame from `diagnostic` (spec §D.12.3).
