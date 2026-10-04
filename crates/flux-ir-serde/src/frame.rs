@@ -737,7 +737,12 @@ impl InitFrame {
         w.u16_len(self.state_seed.len(), "frame.state_seed");
         for (sig, val) in &self.state_seed {
             w.u32(*sig);
-            encode_value(&mut w, val);
+            // Scaffold: `InitFrame::encode_into` returns `()`; a value that
+            // overflows the wire's u16 length prefix panics here instead of
+            // silently truncating. The full fix is a fallible
+            // `encode_into -> Result<(), WireError>` (audit H14 cascade).
+            encode_value(&mut w, val)
+                .expect("frame.init.state_seed: value exceeds wire length limits");
         }
         w.u16_len(self.source_map.len(), "frame.source_map");
         for (fid, path) in &self.source_map {
