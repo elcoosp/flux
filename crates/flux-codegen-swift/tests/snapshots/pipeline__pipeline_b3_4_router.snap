@@ -1,6 +1,5 @@
 ---
 source: crates/flux-codegen-swift/tests/pipeline.rs
-assertion_line: 96
 expression: "codegen_example(name, src)"
 ---
 import SwiftUI
@@ -16,7 +15,7 @@ enum FluxTheme {
 }
 
 struct App: View {
-    @State private var route = NavigationPath()
+    @State private var route = NavigationPath(["home"])
     var body: some View {
   NavigationStack(path: $route) {
   }.navigationDestination(for: String.self) { route in
