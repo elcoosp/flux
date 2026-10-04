@@ -358,12 +358,14 @@ fn callee_name(expr: &Expr) -> Option<String> {
 /// Renders an expression to a canonical, backend-agnostic string so Swift
 /// `\(x)` and Kotlin `${x}` compare equal. Mirrors `flux_parity::bridge::canonicalize_expr`.
 fn canonicalize_expr(text: &str) -> String {
-    // Collapse any spelling of the "unsupported expression" placeholder to a
-    // canonical `0` so the dev-path and release-path reduced trees compare
-    // equal under JSON parity (mirrors `flux_parity::bridge::canonicalize_expr`).
-    if text.to_ascii_lowercase().contains("unsupported") {
-        return "0".to_owned();
-    }
+    // Audit fix (cross-cutting theme #1): the previous version checked
+    // `contains("unsupported")` BEFORE the string-literal branch, so a
+    // user-authored literal containing the word "unsupported" (e.g.
+    // `Text("unsupported feature")`) canonicalized to `0` on the codegen
+    // side while parity kept the literal — a false divergence for any app
+    // that mentioned the word. Match `flux_parity::bridge::canonicalize_expr`
+    // exactly: string-literal handling first, key-path normalization second,
+    // placeholder collapse last.
     let t = text.trim();
     if t.starts_with('"') && t.ends_with('"') && t.len() >= 2 {
         // String literal: normalize interpolation delimiters to `{…}`.
@@ -375,8 +377,17 @@ fn canonicalize_expr(text: &str) -> String {
     let t = t
         .replace("\\.self", "key:.self")
         .replace("\\.id", "key:.id");
-    t.replace("{ it }", "key:.self")
-        .replace("{ it.id }", "key:.id")
+    let t = t
+        .replace("{ it }", "key:.self")
+        .replace("{ it.id }", "key:.id");
+    // Collapse any spelling of the "unsupported expression" placeholder to a
+    // canonical `0` so the dev-path and release-path reduced trees compare
+    // equal under JSON parity.
+    let lowered = t.to_ascii_lowercase();
+    if lowered.contains("unsupported") {
+        return "0".to_owned();
+    }
+    t
 }
 
 /// Renders a `ForEach` key extractor to canonical form, matching the dev-path
