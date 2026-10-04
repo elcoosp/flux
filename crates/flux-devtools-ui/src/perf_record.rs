@@ -212,6 +212,7 @@ pub fn render_timeline_body(rows: &[FlameRow], record_count: usize) -> Vec<AnyEl
 
 /// Convenience: build the rows from a record slice and render the pane body.
 #[must_use]
+#[allow(dead_code)] // retained for tests / alternate pane renderers
 pub fn render_pane_rows(records: &[MetricRecord]) -> Vec<AnyElement> {
     let rows = flame_rows(records);
     let count = records.len();
