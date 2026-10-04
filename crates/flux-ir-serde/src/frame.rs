@@ -183,8 +183,25 @@ fn write_closures(w: &mut Writer, closures: &[ClosureIR]) {
     for closure in closures {
         let offset = blob.len() as u32;
         blob.extend_from_slice(&closure.bytecode);
-        let len = u16::try_from(closure.bytecode.len())
-            .expect("bytecode len exceeds u16 (audit H14)");
+        // Audit fix (§3.3 / §3.4): a handler body larger than 65 535 bytes
+        // is a legitimate program the user authored — a long chain of
+        // statements, a deeply nested `match`. The previous `.expect()`
+        // here panicked the pipeline thread, killing the hot-reload frame
+        // on valid input. Fail as a warning and emit a zero-length ref
+        // instead: the host will surface an InvalidDispatch on the first
+        // invocation, which is a visible diagnostic rather than a silent
+        // thread death.
+        let len = match u16::try_from(closure.bytecode.len()) {
+            Ok(len) => len,
+            Err(_) => {
+                tracing::warn!(
+                    handler = ?closure.id,
+                    bytecode_len = closure.bytecode.len(),
+                    "handler body exceeds u16 length; emitting a zero-length closure ref"
+                );
+                0
+            }
+        };
         if by_id.insert(closure.id, (offset, len)).is_some() {
             panic!(
                 "duplicate handler id {:#x} in closure stream (audit §3.3)",
