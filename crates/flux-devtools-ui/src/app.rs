@@ -172,6 +172,17 @@ struct DevToolsRoot {
     net: Entity<NetworkInspectorView>,
 }
 
+
+/// Requests a fresh animation frame on the active window, so a mutation to
+/// the `Arc<DevToolsState>` (which is not a gpui `Entity` and produces no
+/// observer notification) is reflected on the next paint. Call after every
+/// keyboard-action state mutation.
+fn request_repaint(cx: &mut gpui::App) {
+    if let Some(window) = cx.active_window() {
+        let _ = window.update(cx, |_, window, _| window.request_animation_frame());
+    }
+}
+
 impl DevToolsRoot {
     fn new(state: Arc<DevToolsState>, cx: &mut Context<'_, Self>) -> Self {
         // The ingest loop runs on a background tokio runtime (see `run_app`) and
@@ -262,6 +273,12 @@ impl DevToolsRoot {
             let cur = state.scrub_index().unwrap_or(len - 1);
             let next = cur.saturating_sub(1);
             state.set_scrub_index(Some(next));
+            // Audit fix: keyboard actions mutate the Arc<DevToolsState>, which
+            // is not a gpui Entity — nothing notifies observers, so the UI
+            // did not repaint until unrelated telemetry arrived. Request a
+            // fresh frame so the timeline scrubber / VM inspector / signal
+            // view all reflect the new index immediately.
+            request_repaint(cx);
         });
         let root_step_fwd = root.clone();
         App::on_action(cx, move |_: &StepForward, cx: &mut App| {
@@ -273,11 +290,13 @@ impl DevToolsRoot {
             let cur = state.scrub_index().unwrap_or(len - 1);
             let next = (cur + 1).min(len - 1);
             state.set_scrub_index(Some(next));
+            request_repaint(cx);
         });
         let root_jump = root.clone();
         App::on_action(cx, move |_: &JumpToLive, cx: &mut App| {
             let state = root_jump.read(cx).state.clone();
             state.set_scrub_index(None);
+            request_repaint(cx);
         });
         // Focus the component-tree search box.
         App::on_action(cx, move |_: &FocusSearch, cx: &mut App| {
@@ -293,6 +312,7 @@ impl DevToolsRoot {
         App::on_action(cx, move |action: &TogglePane, cx: &mut App| {
             let state = root_toggle.read(cx).state.clone();
             state.toggle_pane(action.target);
+            request_repaint(cx);
         });
         // Inspect a signal from a right-click context menu (roadmap §3).
         let root_inspect = root.clone();
@@ -300,6 +320,7 @@ impl DevToolsRoot {
             let state = root_inspect.read(cx).state.clone();
             let id = action.id;
             state.set_selected_signal(id);
+            request_repaint(cx);
         });
 
         Self {
