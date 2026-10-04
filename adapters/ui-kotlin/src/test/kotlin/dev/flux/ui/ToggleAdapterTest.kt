@@ -52,6 +52,7 @@ class ToggleAdapterTest {
             view,
             propsOf(PropsIndex.TOGGLE_ON_VALUE_CHANGE to FluxValue.HandlerRef(15u)),
             WeakReference(executor),
+            view.nodeId,
         )
 
         // Simulate a user flip: the host view fires the bound handler.
@@ -72,6 +73,7 @@ class ToggleAdapterTest {
             view,
             propsOf(PropsIndex.TOGGLE_ON_VALUE_CHANGE to FluxValue.HandlerRef(7u)),
             WeakReference(executor),
+            view.nodeId,
         )
 
         val handlerId = view.getProperty(ToggleAdapter.PROP_HANDLER) as UInt
@@ -90,6 +92,7 @@ class ToggleAdapterTest {
             view,
             propsOf(PropsIndex.TOGGLE_ON_VALUE_CHANGE to FluxValue.HandlerRef(1u)),
             WeakReference(executor),
+            view.nodeId,
         )
         adapter.destroy(view)
         assertNull(view.getProperty(ToggleAdapter.PROP_EXECUTOR))
