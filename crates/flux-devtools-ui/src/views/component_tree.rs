@@ -131,7 +131,7 @@ impl ComponentTreeView {
 
     /// Reconstructs the nested tree from the flat `view_frames` (parent links).
     fn tree(&self) -> Vec<TreeNode> {
-        let live = self.state.live.read().clone();
+        let live = self.state.live_snapshot();
         let frames = &live.view_frames;
         let mut children: HashMap<u32, Vec<ViewFrame>> = HashMap::new();
         let mut ids = Vec::new();
