@@ -93,7 +93,7 @@ export default defineConfig({
             {
               label: 'Read the ADRs (in-repo)',
               translations: { es: 'Lee los ADR (en el repo)', fr: 'Lire les ADR (dans le repo)' },
-              link: 'https://github.com/elcoosp/flux/tree/main/docs/adr',
+              link: 'https://github.com/elcoosp/flux/tree/main/docs/adr',  // Pinned to the main repository; update the owner/repo here if the project moves.,
             },
           ],
         },
