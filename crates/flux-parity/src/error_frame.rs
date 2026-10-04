@@ -65,6 +65,12 @@ impl From<&WireError> for WireErrorKind {
             WireError::MalformedBytecode { .. } => WireErrorKind::MalformedBytecode,
             WireError::FrameTooLarge { .. } => WireErrorKind::FrameTooLarge,
             WireError::HandlerCountMismatch { .. } => WireErrorKind::HandlerCountMismatch,
+            // The scaffold for the encode-path refactor (audit H14) adds a
+            // typed variant for u16 length overflow. It is an *encode* error;
+            // a decoder never produces it. Map it to a decode-neutral kind
+            // so the parity harness compiles; a future cross-host corpus
+            // should not encounter this on the decode side at all.
+            WireError::LengthExceedsU16 { .. } => WireErrorKind::MalformedBytecode,
         }
     }
 }
