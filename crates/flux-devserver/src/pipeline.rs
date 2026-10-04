@@ -41,7 +41,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Instant;
 
-use flux_ir::{IRArena, LoweredIr, lower};
+use flux_ir::{IRArena, LoweredIr, lower_with_handler_base};
 use flux_ir_serde::{Frame, InitFrame, NodeSignalMeta};
 use flux_parser::Ast;
 use flux_perf_harness::{LatencyMs, MetricKind, MetricRecord, MetricSample, Scenario};
@@ -718,6 +718,11 @@ impl Pipeline {
             std::collections::HashMap::new();
         let mut component_names: Vec<(flux_syntax::ComponentId, String)> = Vec::new();
         let mut monomorphizations: Vec<flux_ir::Monomorphization> = Vec::new();
+        // Running handler-id seed. Advances past every handler id a file
+        // produced so the next file's ids are globally unique within the
+        // merged closure stream (audit theme #2 — cross-file collisions used
+        // to trip `write_closures`'s duplicate-id check).
+        let mut next_handler_base: u32 = 0;
         for (file_id, path, source) in snapshots {
             let display = display_path(&self.root, &path);
             // Incremental lowering (FLUX-074, item B): reuse the previously
@@ -730,7 +735,7 @@ impl Pipeline {
                         (cached_ir.clone(), cached_ast.clone())
                     } else {
                         self.lower_count += 1;
-                        let produced = self.compile_one(&source, file_id, &display)?;
+                        let produced = self.compile_one(&source, file_id, &display, next_handler_base)?;
                         self.file_cache.insert(
                             file_id,
                             (source.clone(), produced.0.clone(), produced.1.clone()),
@@ -739,13 +744,27 @@ impl Pipeline {
                     }
                 } else {
                     self.lower_count += 1;
-                    let produced = self.compile_one(&source, file_id, &display)?;
+                    let produced = self.compile_one(&source, file_id, &display, next_handler_base)?;
                     self.file_cache.insert(
                         file_id,
                         (source.clone(), produced.0.clone(), produced.1.clone()),
                     );
                     produced
                 };
+            // Advance the seed past every handler id this file produced —
+            // both the top-level handlers (`lowered.closures`) and the
+            // per-node prop thunks (`lowered.prop_thunks`) share the same
+            // `HandlerId` space, and the merged closure stream needs unique
+            // ids across all of them.
+            for id in lowered
+                .closures
+                .values()
+                .map(|c| u32::from(c.id))
+                .chain(lowered.prop_thunks.values().map(|c| u32::from(c.id)))
+            {
+                next_handler_base = next_handler_base.max(id.saturating_add(1));
+            }
+
             closures.extend(lowered.closures.values().cloned());
             closures.extend(lowered.prop_thunks.values().cloned());
             prop_thunks.extend(
@@ -857,6 +876,7 @@ impl Pipeline {
         source: &str,
         file_id: FileId,
         display: &str,
+        handler_base: u32,
     ) -> Result<(LoweredIr, Ast), Diagnostic> {
         let started = Instant::now();
         let ast = flux_parser::parse(source, file_id, display)
@@ -870,7 +890,11 @@ impl Pipeline {
         self.timings.type_check = started.elapsed();
 
         let started = Instant::now();
-        let lowered = lower(&ast, &typed).map_err(|e| {
+        // Audit fix (multi-file handler ids): seed the `Lowerer`'s handler
+        // counter at `handler_base` (the sum of every prior file's handler
+        // count). Without this, each file restarted at 0, and the merged
+        // closure stream carried duplicate ids that `write_closures` rejects.
+        let lowered = lower_with_handler_base(&ast, &typed, handler_base).map_err(|e| {
             let flux_ir::LoweringError::Lower { message, span } = e;
             // `LoweringError` lives in `flux-ir`, which depends on `flux-types`, so
             // a `From` into `FluxError` would be a cycle; build the `Compile`
