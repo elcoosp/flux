@@ -144,7 +144,7 @@ impl Backend for SwiftBackend {
         _: &str,
         _: &str,
         _: &HashMap<String, String>,
-        _: bool,
+        _: Option<&str>,
     ) {
     }
     fn emit_sum_type(_: &mut Emitter<'_, Self>, _: &TypeDecl) {}
@@ -292,7 +292,7 @@ impl Backend for KotlinBackend {
         _: &str,
         _: &str,
         _: &HashMap<String, String>,
-        _: bool,
+        _: Option<&str>,
     ) {
     }
     fn emit_sum_type(_: &mut Emitter<'_, Self>, _: &TypeDecl) {}
