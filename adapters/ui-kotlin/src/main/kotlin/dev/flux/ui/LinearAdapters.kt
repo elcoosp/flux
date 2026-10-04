@@ -82,6 +82,7 @@ public open class FluxLinearAdapter(
         view: FluxNativeView,
         props: Props,
         executor: WeakReference<FluxExecutor>,
+        nodeId: UInt,
     ) {
         // Linear containers have no handlers of their own.
     }
