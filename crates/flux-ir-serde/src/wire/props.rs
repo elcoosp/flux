@@ -6,16 +6,20 @@ use super::cursor::Reader;
 use super::value::encode_value;
 use super::{WireError, decode_value};
 
-pub(crate) fn encode_props(w: &mut super::cursor::Writer, props: &Props) {
-    w.u16_len(props.fields().len(), "props.fields");
+pub(crate) fn encode_props(
+    w: &mut super::cursor::Writer,
+    props: &Props,
+) -> Result<(), WireError> {
+    // Audit H14 cascade: fallible now, so a value that overflows the u16
+    // prefix propagates through `encode_node` → `encode_patch` → the frame
+    // encoders rather than panicking mid-write. The caller still `.expect()`s
+    // at the frame boundary pending the top-level `try_to_bytes` migration.
+    w.u16_len_checked(props.fields().len(), "props.fields")?;
     for (index, value) in props.fields() {
         w.u16(*index);
-        // Scaffold: `encode_props` still returns `()`, so a length-overflow
-        // in a nested `Value` panics with a clear context. Migrating
-        // `encode_props` to `Result` is a follow-up that threads `?` up
-        // through `encode_node` → frame encoders (audit H14 cascade).
-        encode_value(w, value).expect("props: value exceeds wire length limits");
+        encode_value(w, value)?;
     }
+    Ok(())
 }
 
 pub(crate) fn decode_props(r: &mut Reader<'_>) -> Result<Props, WireError> {
