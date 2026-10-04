@@ -189,6 +189,12 @@ pub struct DevToolsState {
     /// `PerfRecord` telemetry events, in arrival order. This is the backing
     /// store the timeline/flamegraph view renders. Bounded like the timeline.
     pub perf_records: RwLock<Vec<MetricRecord>>,
+    /// Monotonic counter incremented on every successful `ingest_perf_record`.
+    /// Used by view-layer caches (the TimelineView flamegraph rows) to skip
+    /// recomputation of unchanged data. `perf_records.len()` alone cannot
+    /// serve this purpose: once the bounded buffer saturates, further pushes
+    /// evict from the front and push to the back, keeping the length constant.
+    pub perf_record_generation: RwLock<u64>,
     /// The timeline index the user is currently scrubbing to via the time-travel
     /// slider (`None` = live edge). Shared so other panes can reflect the
     /// scrubbed state (FLUX-062 time-travel UX).
@@ -265,6 +271,7 @@ impl DevToolsState {
             sessions: RwLock::new(BTreeMap::new()),
             active: RwLock::new(None),
             perf_records: RwLock::new(Vec::new()),
+            perf_record_generation: RwLock::new(0),
             scrub_index: RwLock::new(None),
             selected_signal: RwLock::new(None),
             pane_hidden: RwLock::new(PaneTargetSet::all_visible()),
@@ -448,6 +455,8 @@ impl DevToolsState {
                     records.remove(0);
                 }
                 records.push(record);
+                drop(records);
+                *self.perf_record_generation.write() += 1;
                 true
             }
             Err(e) => {
@@ -468,6 +477,15 @@ impl DevToolsState {
     #[must_use]
     pub fn perf_record_count(&self) -> usize {
         self.perf_records.read().len()
+    }
+
+    /// Monotonic generation counter for the retained perf-record buffer.
+    /// View-layer caches compare this against their last-seen value to
+    /// decide whether to recompute; a length-based check would miss the
+    /// "evict-oldest-and-push-new" case once the buffer is at capacity.
+    #[must_use]
+    pub fn perf_record_generation(&self) -> u64 {
+        *self.perf_record_generation.read()
     }
 
     /// Appends a reconstructed view frame to the live component tree directly
