@@ -10,7 +10,11 @@ pub(crate) fn encode_props(w: &mut super::cursor::Writer, props: &Props) {
     w.u16_len(props.fields().len(), "props.fields");
     for (index, value) in props.fields() {
         w.u16(*index);
-        encode_value(w, value);
+        // Scaffold: `encode_props` still returns `()`, so a length-overflow
+        // in a nested `Value` panics with a clear context. Migrating
+        // `encode_props` to `Result` is a follow-up that threads `?` up
+        // through `encode_node` → frame encoders (audit H14 cascade).
+        encode_value(w, value).expect("props: value exceeds wire length limits");
     }
 }
 
