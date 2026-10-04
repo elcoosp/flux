@@ -274,48 +274,11 @@ fn expr_into_if_node(expr: &flux_parser::Expr) -> ViewNode {
 /// so that Swift `VStack` and Kotlin `Column` compare equal.
 #[must_use]
 pub fn normalize_view_name(name: &str) -> String {
-    match name {
-        "VStack" => "Column",
-        "HStack" => "Row",
-        "CupertinoButton" | "MaterialButton" => "Button",
-        "TextField" => "TextInput",
-        // FLUX-038 overlay containers: the codegen emits host-native surface
-        // names; parity reduces them back to the common Flux surface spelling.
-        // Tokens are chosen so no two overlays collide: Modal's Compose view is
-        // `Dialog` (Swift `FullScreenCover`), Dialog's is `AlertDialog` (Swift
-        // `Alert`), Sheet's is `ModalBottomSheet` (Swift `Sheet`). So `Dialog`
-        // belongs to Modal, `Alert`/`AlertDialog` to Dialog, unambiguously.
-        "ModalBottomSheet" => "Sheet",
-        "AlertDialog" => "Dialog",
-        "Alert" => "Dialog",
-        "Dialog" => "Modal",
-        "FullScreenCover" => "Modal",
-        "Sheet" => "Sheet",
-        // FLUX-042: both backends emit an animation wrapper for `Animate`.
-        // Swift emits `withAnimation`; Kotlin emits `AnimatedContent` around
-        // its `animateFloatAsState` state cell. Both reduce to the common
-        // `Animate` surface name. `Animate` is NOT a container — its trailing
-        // block is a leaf-adapter wrapper whose children are consumed but not
-        // recovered as structural children, matching the dev-path reduction.
-        "withAnimation" => "Animate",
-        "AnimatedContent" => "Animate",
-        // FLUX-043: the native theme extension surface names reduce to `Theme`.
-        "MaterialTheme" | "FluxTheme" => "Theme",
-        // FLUX-037: the release backends emit native container names that the
-        // dev-path source does not use. Folding them back to the common Flux
-        // surface spelling keeps dev/release node names equal AND lets
-        // `is_container` recognise them as containers on every path:
-        //   Stack  → SwiftUI `ZStack` / Compose `Box`
-        //   Grid   → Compose `LazyVerticalGrid`
-        //   SafeArea → Compose `Scaffold`
-        "ZStack" => "Stack",
-        "Box" => "Stack",
-        "LazyVerticalGrid" => "Grid",
-        "Scaffold" => "SafeArea",
-        "Switch" => "Toggle",
-        other => other,
-    }
-    .to_owned()
+    // Audit fix (theme #1): single source of truth. Reuse the canonical
+    // table from `flux-codegen-core::view_tree` so the release walker and
+    // the parity reducer cannot drift. Behavior is identical — the
+    // codegen-core table was updated to this crate's superset.
+    flux_codegen_core::view_tree::normalize_view_name(name)
 }
 
 /// Returns `true` for layout adapters that carry real structural children
@@ -328,20 +291,6 @@ pub fn normalize_view_name(name: &str) -> String {
 /// on every path so dev/release parity holds.
 #[must_use]
 pub(crate) fn is_container(name: &str) -> bool {
-    matches!(
-        name,
-        "Column"
-            | "Row"
-            | "VStack"
-            | "HStack"
-            | "ZStack"
-            | "Stack"
-            | "Grid"
-            | "SafeArea"
-            | "Provider"
-            | "Modal"
-            | "Sheet"
-            | "Dialog"
-            | "ScrollView"
-    )
+    // Audit fix (theme #1): single source of truth. See normalize_view_name.
+    flux_codegen_core::view_tree::is_container(name)
 }
