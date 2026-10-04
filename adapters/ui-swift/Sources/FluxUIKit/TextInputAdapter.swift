@@ -24,6 +24,14 @@ import UIKit
 //  there is no retain cycle back to the runtime.
 
 public final class TextInputAdapter: FluxAdapter {
+    /// Stable identifier for the UIAction this adapter registers
+    /// in `bindHandler` (`.editingChanged`). `UIControl` has no
+    /// `removeAllActions()`; `removeAction(identifiedBy:for:)` is
+    /// the correct pattern, so rebinds replace the previous handler
+    /// rather than accumulating.
+    private static let fluxHandlerAction =
+        UIAction.Identifier("flux.handler")
+
     public typealias View = UITextField
     weak var executor: (any FluxExecutor)?
     /// Strongly retains the delegate; `UITextField.delegate` is weak, so without
@@ -66,13 +74,16 @@ public final class TextInputAdapter: FluxAdapter {
         let target = HandlerTarget(executor: executor, handlerId: handlerId, nodeId: nodeId) {
             .str(view.text ?? "")
         }
-        view.addAction(UIAction { _ in target.fire() }, for: .editingChanged)
+        view.addAction(
+            UIAction(identifier: Self.fluxHandlerAction) { _ in target.fire() },
+            for: .editingChanged
+        )
     }
 
     public func destroy(_ view: UITextField) {
         // Remove every UIAction this adapter registered (the .editingChanged
         // relay) so a stale handler can never fire on a recycled field.
-        view.removeAllActions()
+        view.removeAction(identifiedBy: Self.fluxHandlerAction, for: .editingChanged)
         view.delegate = nil
         objc_setAssociatedObject(view, &Self.associationKey, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
     }
