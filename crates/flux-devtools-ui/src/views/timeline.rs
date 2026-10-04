@@ -18,7 +18,7 @@ use gpui_component::slider::{Slider, SliderEvent, SliderState, SliderValue};
 
 use flux_perf_harness::MetricRecord;
 
-use crate::perf_record::render_pane_rows;
+
 use crate::row::{into_any, kv_row, rows_column};
 use crate::state::DevToolsState;
 
@@ -37,6 +37,16 @@ pub struct TimelineView {
     /// dead on arrival (ADR-0042 headline UX). Rebuilding on length change
     /// keeps the range live as telemetry flows in.
     last_len: usize,
+
+    /// Cached flamegraph rows. Rebuilt only when the state's perf-record
+    /// generation changes — the audit flagged that the previous path cloned
+    /// the whole `perf_records` buffer (up to 1024 `MetricRecord`s) and
+    /// re-deduped + re-sorted on every render. With the cache, a repaint
+    /// with no new perf data reuses the previous `Vec<FlameRow>` untouched.
+    cached_flame_rows: Vec<crate::perf_record::FlameRow>,
+    /// Generation this cache was built for; `u64::MAX` means "never built",
+    /// forcing a first-frame compute.
+    cached_generation: u64,
 }
 
 impl TimelineView {
@@ -69,6 +79,8 @@ impl TimelineView {
             slider,
             _sub: sub,
             last_len: len,
+            cached_flame_rows: Vec::new(),
+            cached_generation: u64::MAX,
         }
     }
 
@@ -139,8 +151,23 @@ impl TimelineView {
             )));
         }
 
-        let records: Vec<MetricRecord> = self.state.perf_records();
-        rows.extend(render_pane_rows(&records));
+        // Audit fix (perf): cache the flamegraph rows across frames, keyed on
+        // the state's perf-record generation counter. The previous path cloned
+        // the whole record buffer (up to 1024 `MetricRecord`s) and rebuilt +
+        // sorted the flame rows on every repaint, even when no new perf data
+        // had arrived. The generation counter (bumped only on ingest) lets
+        // this view reuse its cache until telemetry actually changes.
+        let generation = self.state.perf_record_generation();
+        if generation != self.cached_generation {
+            self.cached_generation = generation;
+            let records: Vec<MetricRecord> = self.state.perf_records();
+            self.cached_flame_rows = crate::perf_record::flame_rows(&records);
+        }
+        let record_count = self.state.perf_record_count();
+        rows.extend(crate::perf_record::render_timeline_body(
+            &self.cached_flame_rows,
+            record_count,
+        ));
         // Background color and overflow clipping for clean pane isolation.
         div()
             .flex()
