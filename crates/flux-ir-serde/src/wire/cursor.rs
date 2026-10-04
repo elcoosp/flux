@@ -33,11 +33,41 @@ impl Writer {
 
     /// Checked length-prefix write. A silent `as u16` truncation desyncs
     /// every host decoder (audit H14): panic the encode instead.
+    ///
+    /// Kept for internal encoders whose inputs are bounded by construction
+    /// (spans, closure captures, signal-meta layout — all small-per-node).
+    /// Migrate any encoder that can see user-authored sizes (a 70k-item
+    /// `List` prop, a >65k-entry state seed) to [`Self::u16_len_checked`] as
+    /// that migration lands.
     pub(crate) fn u16_len(&mut self, n: usize, what: &'static str) {
-        let len = u16::try_from(n).unwrap_or_else(|_| {
-            panic!("wire encode: {what} length {n} exceeds u16 prefix width (audit H14)");
-        });
-        self.u16(len);
+        match self.u16_len_checked(n, what) {
+            Ok(()) => {}
+            Err(_) => {
+                panic!("wire encode: {what} length {n} exceeds u16 prefix width (audit H14)");
+            }
+        }
+    }
+
+    /// Fallible length-prefix write. Returns [`WireError::LengthExceedsU16`]
+    /// when `n` does not fit in the wire's `u16` prefix, so the encode path
+    /// can surface the condition as an `Error` frame instead of panicking
+    /// the pipeline thread on a legitimate-but-large program (audit H14).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WireError::LengthExceedsU16`] when `n > u16::MAX`.
+    pub(crate) fn u16_len_checked(
+        &mut self,
+        n: usize,
+        what: &'static str,
+    ) -> Result<(), WireError> {
+        match u16::try_from(n) {
+            Ok(len) => {
+                self.u16(len);
+                Ok(())
+            }
+            Err(_) => Err(WireError::LengthExceedsU16 { what, n }),
+        }
     }
 
     pub(crate) fn u32(&mut self, value: u32) {
