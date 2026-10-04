@@ -301,17 +301,22 @@ pub trait Backend {
         Self: Sized;
 
     /// Emits one state-cell declaration (`var … by remember` / `@State private var`).
+    ///
     /// `subst` maps generic parameters to their concrete arguments.
-    /// `has_router` is true when the enclosing component body contains a
-    /// `Router` primitive — used by Swift to redirect a `route` state into
-    /// `NavigationPath()` only in Router components (T-403.7).
+    ///
+    /// `router_start` is `Some(route)` when the enclosing component body
+    /// contains a `Router` primitive, and the string is the router's start
+    /// destination (its `initialRouteName`, or `"home"` when the prop is
+    /// absent). `None` for components with no Router. Swift uses this to
+    /// redirect a state literally named `route` into a `NavigationPath`
+    /// *seeded* with the start destination (T-403.7); Kotlin ignores it.
     fn emit_state_cell(
         em: &mut Emitter<'_, Self>,
         name: &str,
         ty: &str,
         init: &str,
         subst: &HashMap<String, String>,
-        has_router: bool,
+        router_start: Option<&str>,
     ) where
         Self: Sized;
 
