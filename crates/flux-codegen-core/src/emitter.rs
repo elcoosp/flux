@@ -408,7 +408,7 @@ impl<'a, B: Backend> Emitter<'a, B> {
         // primitive so the Swift backend only redirects a `route` state into
         // `NavigationPath()` for genuine Router components, not any component
         // that happens to have a `route` state variable.
-        let has_router = meta_has_router(meta);
+        let router_start = meta_router_start(meta);
         for state in meta.states() {
             let ty = match &state.ty {
                 Some(t) => native_type::<B>(t, &self.subst),
@@ -416,7 +416,14 @@ impl<'a, B: Backend> Emitter<'a, B> {
             };
             let init = render_expr::<B>(&state.init);
             let subst_ref = self.subst.clone();
-            B::emit_state_cell(self, &state.name.name, &ty, &init, &subst_ref, has_router);
+            B::emit_state_cell(
+                self,
+                &state.name.name,
+                &ty,
+                &init,
+                &subst_ref,
+                router_start.as_deref(),
+            );
         }
     }
 
@@ -944,22 +951,50 @@ fn render_inline(value: String) -> String {
     value
 }
 
-/// T-403.7: scans a component's AST body for a `Router` call expression.
-/// Returns true if the component body contains a `Router { … }` primitive,
-/// so the emitter can pass this to `emit_state_cell` and the Swift backend
-/// can redirect a `route` state into `NavigationPath()` only for genuine
-/// Router components — not any component that happens to have a `route` state.
-fn meta_has_router(meta: &ComponentMeta<'_>) -> bool {
+/// Scans a component's AST body for a `Router` call and returns the route
+/// string to seed its `initialRouteName` with. `None` when the component has
+/// no Router. `Some("home")` when the Router has no `initialRouteName` arg
+/// (matching the shared `emit_router` fallback).
+///
+/// Audit fix: this used to return `bool` and *only* signal "has router",
+/// which drove the Swift `route` state-cell to emit a bare
+/// `NavigationPath()` — the declared start destination was silently dropped,
+/// so the app always landed on an empty stack (a real backend divergence
+/// from Kotlin's `NavHost(startDestination = ...)`). Returning the start
+/// route lets the state cell seed the `NavigationPath([...])`.
+fn meta_router_start(meta: &ComponentMeta<'_>) -> Option<String> {
     for item in &meta.decl.body.items {
         if let flux_parser::BlockItem::Expr(expr) = item {
-            if let ExprKind::Call { callee, .. } = &expr.kind {
+            if let ExprKind::Call { callee, args, .. } = &expr.kind {
                 if let ExprKind::Ident(ident) = &callee.kind {
                     if ident.name == "Router" {
-                        return true;
+                        // Extract `initialRouteName` if present.
+                        for arg in args {
+                            if let flux_parser::Arg::Named { name, value } = arg {
+                                if name.name == "initialRouteName" {
+                                    if let ExprKind::Str(parts) = &value.kind {
+                                        // Concatenate literal text parts; interpolations
+                                        // in `initialRouteName` are unsupported in the
+                                        // MLP and are skipped (the seeded route would
+                                        // need a runtime value).
+                                        let mut text = String::new();
+                                        for part in parts {
+                                            match part {
+                                                flux_parser::StrPart::Text(t) => text.push_str(t),
+                                                flux_parser::StrPart::Interp(_) => {}
+                                                _ => {}
+                                            }
+                                        }
+                                        return Some(text);
+                                    }
+                                }
+                            }
+                        }
+                        return Some("home".to_string());
                     }
                 }
             }
         }
     }
-    false
+    None
 }
