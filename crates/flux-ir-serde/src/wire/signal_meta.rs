@@ -38,20 +38,26 @@ pub struct NodeSignalMeta {
 ///
 /// Layout: `node_id(u32) | deps_count(u16) | deps(u32)* | thunk_present(u8)
 /// | thunk(ClosureRef)? | layout_count(u16) | layout(u16)*`.
-pub(crate) fn encode_signal_meta(w: &mut super::cursor::Writer, meta: &NodeSignalMeta) {
+pub(crate) fn encode_signal_meta(
+    w: &mut super::cursor::Writer,
+    meta: &NodeSignalMeta,
+) -> Result<(), WireError> {
+    // Audit H14 cascade: fallible now. The `deps` / `layout` counts and any
+    // nested thunk excerpt propagate `WireError::LengthExceedsU16` instead of
+    // panicking inside `u16_len`.
     w.u32(meta.node_id);
-    w.u16_len(meta.deps.len(), "signal_meta.deps");
+    w.u16_len_checked(meta.deps.len(), "signal_meta.deps")?;
     for &signal in &meta.deps {
         w.u32(signal);
     }
     match &meta.thunk {
         Some(closure) => {
             w.u8(1);
-            super::closure_ref::encode_closure_ref(w, closure);
+            super::closure_ref::encode_closure_ref(w, closure)?;
         }
         None => w.u8(0),
     }
-    w.u16_len(meta.layout.len(), "signal_meta.layout");
+    w.u16_len_checked(meta.layout.len(), "signal_meta.layout")?;
     for &idx in &meta.layout {
         w.u16(idx);
     }
@@ -62,6 +68,7 @@ pub(crate) fn encode_signal_meta(w: &mut super::cursor::Writer, meta: &NodeSigna
         }
         None => w.u8(0),
     }
+    Ok(())
 }
 
 /// Decodes a `NodeSignalMeta` entry (Appendix D, ADR-0027 section).
@@ -114,11 +121,16 @@ pub(crate) fn decode_signal_meta(r: &mut Reader<'_>) -> Result<NodeSignalMeta, W
 }
 
 /// Encodes a `Vec<NodeSignalMeta>` section: a `u16` count followed by entries.
-pub(crate) fn encode_signal_meta_section(w: &mut super::cursor::Writer, metas: &[NodeSignalMeta]) {
-    w.u16_len(metas.len(), "signal_meta.metas");
+pub(crate) fn encode_signal_meta_section(
+    w: &mut super::cursor::Writer,
+    metas: &[NodeSignalMeta],
+) -> Result<(), WireError> {
+    // Audit H14 cascade: fallible now.
+    w.u16_len_checked(metas.len(), "signal_meta.metas")?;
     for meta in metas {
-        encode_signal_meta(w, meta);
+        encode_signal_meta(w, meta)?;
     }
+    Ok(())
 }
 
 /// Decodes a `Vec<NodeSignalMeta>` section: a `u16` count followed by entries.
