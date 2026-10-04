@@ -163,6 +163,13 @@ impl DeviceSession {
 /// into the [`TimelineBuffer`] for time-travel.
 // `parking_lot::RwLock` is not `Debug`, so the struct cannot derive it; this is
 // intentional (the state is shared via `Arc`/entities, not printed).
+/// Number of events between reconstructed-state checkpoints. A scrub to any
+/// index replays at most this many events from the nearest prior checkpoint,
+/// so `state_at` is O(CHECKPOINT_INTERVAL) instead of O(index). 256 keeps the
+/// checkpoint allocations bounded (~1 checkpoint per 256 events) while making
+/// the worst-case replay ~5-10 ms even for large states.
+const CHECKPOINT_INTERVAL: u64 = 256;
+
 #[allow(missing_debug_implementations)]
 pub struct DevToolsState {
     /// Retained telemetry history (ADR-0042). Kept as the active session's mirror
@@ -200,6 +207,22 @@ pub struct DevToolsState {
     /// serve this purpose: once the bounded buffer saturates, further pushes
     /// evict from the front and push to the back, keeping the length constant.
     pub perf_record_generation: RwLock<u64>,
+
+    /// Monotonic count of every telemetry event this state has ever ingested,
+    /// including those already evicted from the bounded timeline. The
+    /// absolute index of the event at timeline position `i` is
+    /// `total_events - timeline.len() + i` — this is how `state_at` maps a
+    /// relative index onto the checkpoint table.
+    pub total_events: RwLock<u64>,
+
+    /// Periodic snapshots of the reconstructed state, keyed by the absolute
+    /// event index they were taken after. Without these, a scrub to index `i`
+    /// replays all `i` events from the base; with a checkpoint every
+    /// [`CHECKPOINT_INTERVAL`] events, the worst-case replay is
+    /// `CHECKPOINT_INTERVAL - 1`. Bounded to the retained timeline window;
+    /// checkpoints older than `total_events - timeline.capacity()` are
+    /// evicted on every push.
+    pub checkpoints: RwLock<std::collections::VecDeque<(u64, ReconstructedState)>>,
     /// The timeline index the user is currently scrubbing to via the time-travel
     /// slider (`None` = live edge). Shared so other panes can reflect the
     /// scrubbed state (FLUX-062 time-travel UX).
@@ -277,6 +300,8 @@ impl DevToolsState {
             active: RwLock::new(None),
             perf_records: RwLock::new(Vec::new()),
             perf_record_generation: RwLock::new(0),
+            total_events: RwLock::new(0),
+            checkpoints: RwLock::new(std::collections::VecDeque::new()),
             scrub_index: RwLock::new(None),
             selected_signal: RwLock::new(None),
             pane_hidden: RwLock::new(PaneTargetSet::all_visible()),
@@ -411,6 +436,36 @@ impl DevToolsState {
             }
         }
 
+        // Audit fix (perf): maintain periodic checkpoints so a deep scrub to
+        // index i does not replay every event from the base. We tick
+        // `total_events` here (after the push so its value matches the count
+        // of events ever seen) and, every `CHECKPOINT_INTERVAL` events, take a
+        // snapshot of the current live state. The snapshot is stored keyed by
+        // the *absolute* index of the event just applied — see `state_at`.
+        {
+            let mut total = self.total_events.write();
+            *total += 1;
+            let total_now = *total;
+            if total_now % CHECKPOINT_INTERVAL == 0 {
+                let snapshot = self.live.read().clone();
+                let mut cps = self.checkpoints.write();
+                cps.push_back((total_now - 1, snapshot));
+                // Evict checkpoints that have fallen out of the retained
+                // timeline window. The oldest retained event has absolute
+                // index `total_now - tl_len`; anything before that cannot be
+                // reached by a scrub and only wastes memory.
+                let tl_len = self.timeline.read().len() as u64;
+                let min_abs = total_now.saturating_sub(tl_len);
+                while let Some(&(abs, _)) = cps.front() {
+                    if abs < min_abs {
+                        cps.pop_front();
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+
         // Feed the network inspector (FLUX-060) from the HTTP capability telemetry.
         match &event {
             EnrichedTelemetryEvent::NetworkRequest {
@@ -514,14 +569,45 @@ impl DevToolsState {
     /// Returns `None` if `index` is past the retained history.
     #[must_use]
     pub fn state_at(&self, index: usize) -> Option<ReconstructedState> {
-        // Audit fix (perf): replay in place. The previous version called
-        // `reconstruct_state(&state, &[event])` per step, which clones the
-        // whole state at the top of every call — O(n²) on a scrub into a
-        // 10k-event timeline. `apply_event` mutates in place, making a
-        // scrub to index i O(i) allocations (only what the event touches).
+        // Audit fix (perf): use checkpoints to bound the replay. Without
+        // them, scrubbing to index i replays all i events from the base — up
+        // to 10k events at the default timeline capacity. With a checkpoint
+        // every `CHECKPOINT_INTERVAL` events, we start from the latest
+        // checkpoint whose absolute index is ≤ the target and replay only the
+        // remaining ≤ `CHECKPOINT_INTERVAL` events.
         let timeline = self.timeline.read();
-        let mut state = ReconstructedState::base();
-        for i in 0..=index {
+        let tl_len = timeline.len();
+        if index >= tl_len {
+            return None;
+        }
+        let total = *self.total_events.read();
+        // Absolute index of the oldest retained event (rel 0).
+        let front_abs = total.saturating_sub(tl_len as u64);
+        let target_abs = front_abs + index as u64;
+
+        // Find the latest checkpoint with absolute index ≤ target_abs and
+        // strictly below it (a checkpoint at target_abs itself means no
+        // replay at all, but the same code path handles it).
+        let (start_abs, mut state) = {
+            let cps = self.checkpoints.read();
+            let best = cps
+                .iter()
+                .rev()
+                .find(|(abs, _)| *abs <= target_abs)
+                .map(|(abs, s)| (*abs, s.clone()));
+            match best {
+                Some((abs, s)) => (abs + 1, s),
+                None => (front_abs, ReconstructedState::base()),
+            }
+        };
+
+        // Replay from `start_abs` through `target_abs` (both absolute).
+        let start_rel = (start_abs.saturating_sub(front_abs)) as usize;
+        let end_rel = index;
+        if start_rel > end_rel {
+            return Some(state);
+        }
+        for i in start_rel..=end_rel {
             let event = timeline.snapshot_at(i)?;
             crate::time_travel::apply_event(&mut state, event);
         }
