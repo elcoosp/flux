@@ -16,7 +16,10 @@ final class TextAdapterTests: XCTestCase {
         let props = Props([
             Props.propIndex(for: "text"): .str("Hi"),
             Props.propIndex(for: "color"): .record(Props([0: .float(1), 1: .float(0), 2: .float(0)])), // red
-            Props.propIndex(for: "font"): .record(Props([1: .float(18)])), // Font(family, size, ...): size is field 1
+            // Font record is positional with size at slot 0 (canonical
+            // `FontField.size`); the earlier test used slot 1, matching the
+            // pre-fix adapter bug that read `size` from the *weight* slot.
+            Props.propIndex(for: "font"): .record(Props([0: .float(18)])),
         ])
         adapter.update(label, from: Props(), to: props)
         XCTAssertEqual(label.text, "Hi")
