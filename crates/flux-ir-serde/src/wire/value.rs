@@ -5,7 +5,15 @@ use flux_syntax::Value;
 use super::core::WireError;
 use super::cursor::{Reader, Writer};
 
-pub(crate) fn encode_value(w: &mut Writer, value: &Value) {
+pub(crate) fn encode_value(w: &mut Writer, value: &Value) -> Result<(), WireError> {
+    // Audit fix (H14): the list/record length prefixes are the encoder's
+    // first touchpoint with user-authored sizes. A 70 000-item `List` prop
+    // is legal Flux that previously panicked the pipeline thread inside
+    // `u16_len`; now it surfaces as a typed
+    // `WireError::LengthExceedsU16` at this boundary. Callers in the frame
+    // composition path still `.expect(...)` as scaffolding until the
+    // frame-level API is made fallible; recursive calls within this function
+    // use `?` so a nested oversized collection propagates cleanly.
     w.u8(value.tag());
     match value {
         Value::Null => {}
@@ -20,16 +28,16 @@ pub(crate) fn encode_value(w: &mut Writer, value: &Value) {
         Value::Bool(b) => w.u8(u8::from(*b)),
         Value::Str(id) | Value::HandlerRef(id) => w.u32(*id),
         Value::List(items) => {
-            w.u16_len(items.len(), "value.list");
+            w.u16_len_checked(items.len(), "value.list")?;
             for item in items {
-                encode_value(w, item);
+                encode_value(w, item)?;
             }
         }
         Value::Record(fields) => {
-            w.u16_len(fields.len(), "value.record.fields");
+            w.u16_len_checked(fields.len(), "value.record.fields")?;
             for (index, val) in fields {
                 w.u16(*index);
-                encode_value(w, val);
+                encode_value(w, val)?;
             }
         }
         // `Value` is `#[non_exhaustive]` (flux-syntax): all variants from the
@@ -39,6 +47,7 @@ pub(crate) fn encode_value(w: &mut Writer, value: &Value) {
         // downstream frame.
         _ => unreachable!("unknown Value variant — add an encoder arm for it (audit P2.25)"),
     }
+    Ok(())
 }
 
 /// Encodes a [`Value`] into a standalone Appendix D §D.5 blob (no frame header).
@@ -50,7 +59,12 @@ pub(crate) fn encode_value(w: &mut Writer, value: &Value) {
 #[must_use]
 pub fn encode_value_blob(value: &Value) -> Vec<u8> {
     let mut w = Writer::new();
-    encode_value(&mut w, value);
+    // Scaffold: `encode_value_blob` is used by the parity persistence tests
+    // and a handful of fixtures — no caller has a way to surface a typed
+    // encode error yet. Panic with the specific variant's message; once the
+    // full to_bytes chain is fallible (audit H14 cascade), this becomes
+    // `-> Result<Vec<u8>, WireError>`.
+    encode_value(&mut w, value).expect("encode_value_blob: value exceeds wire length limits");
     w.into_vec()
 }
 
