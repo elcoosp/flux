@@ -14,7 +14,7 @@ enum FluxTheme {
     static let textTitle: CGFloat = 28
 }
 
-struct List: View {
+struct List<T>: View {
     let items: [T]
     var body: some View {
   VStack {
