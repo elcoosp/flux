@@ -373,17 +373,32 @@ impl Backend for Swift {
         ty: &str,
         init: &str,
         _subst: &HashMap<String, String>,
-        has_router: bool,
+        router_start: Option<&str>,
     ) {
-        // T-403.7: only redirect `route` state to NavigationPath() when the
+        // T-403.7: only redirect `route` state to a `NavigationPath` when the
         // enclosing component actually contains a Router primitive. A component
         // that merely has a state called `route` (but no Router) must emit a
-        // regular @State var with its declared type.
-        if has_router && name == "route" {
-            em.append_line("    @State private var route = NavigationPath()");
-        } else {
-            em.append_line(&format!("    @State private var {name}: {ty} = {init}"));
+        // regular `@State var` with its declared type.
+        //
+        // Audit fix: when a start destination is supplied, seed the
+        // `NavigationPath` with it. The previous code emitted a bare
+        // `NavigationPath()` regardless of `start_destination`, so a Router
+        // with `initialRouteName: "settings"` still opened on an empty stack
+        // — a real divergence from Kotlin's `NavHost(startDestination = …)`.
+        if name == "route" {
+            if let Some(start) = router_start {
+                let escaped = Self::escape_text(start);
+                if escaped.is_empty() {
+                    em.append_line("    @State private var route = NavigationPath()");
+                } else {
+                    em.append_line(&format!(
+                        "    @State private var route = NavigationPath([\"{escaped}\"])"
+                    ));
+                }
+                return;
+            }
         }
+        em.append_line(&format!("    @State private var {name}: {ty} = {init}"));
     }
 
     fn emit_sum_type(em: &mut Emitter<'_, Self>, sum: &TypeDecl) {
