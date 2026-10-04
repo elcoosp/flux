@@ -49,6 +49,7 @@ public class ScrollViewAdapter private constructor() : FluxAdapter<FluxNativeVie
         view: FluxNativeView,
         props: Props,
         executor: WeakReference<FluxExecutor>,
+        nodeId: UInt,
     ) {
     }
 
