@@ -123,8 +123,13 @@ impl DeviceSession {
     }
 
     /// Ingests one enriched telemetry event into this session.
+    ///
+    /// Audit fix (perf): `reconstruct_state(&self.live, &[event])` cloned the
+    /// entire `ReconstructedState` on every event — O(n) allocations per
+    /// event, per session, on the ingest path. `apply_event` mutates in place,
+    /// so an event costs O(fields it touches) instead of O(whole state).
     pub fn handle_telemetry(&mut self, event: &EnrichedTelemetryEvent) {
-        self.live = reconstruct_state(&self.live, std::slice::from_ref(event));
+        crate::time_travel::apply_event(&mut self.live, event);
         self.timeline.push(event.clone());
     }
 
@@ -383,10 +388,13 @@ impl DevToolsState {
             });
             session.handle_telemetry(&event);
         }
-        // Mirror into the legacy single-host fields for backward-compatible reads.
+        // Mirror into the legacy single-host fields for backward-compatible
+        // reads. Audit fix (perf): `apply_event` mutates in place; the previous
+        // `reconstruct_state(&live, &[event])` cloned the whole state on every
+        // event even when the consumer only ever reads the latest value.
         {
             let mut live = self.live.write();
-            *live = reconstruct_state(&live, std::slice::from_ref(&event));
+            crate::time_travel::apply_event(&mut live, &event);
         }
         // Audit fix: push may evict the oldest event once at capacity, shifting
         // every retained event down by one position. The stored scrub_index is
