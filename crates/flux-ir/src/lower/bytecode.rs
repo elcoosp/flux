@@ -414,6 +414,7 @@ impl ListMethod {
 /// so the two sides agree on the tag. It must not consult `CAPABILITY_IDL`,
 /// because a struct/record field access is not a capability method call.
 #[must_use]
+#[allow(dead_code)] // retained for capability-lowering tests / future CALL_CAP work
 pub(crate) fn method_id_for(cap: &str, method: &str) -> u16 {
     let key = format!("{cap}.{method}");
     let hash = blake3::hash(key.as_bytes());
@@ -941,6 +942,7 @@ impl<'a> Emitter<'a> {
     /// the relative i32 offset (from the *next* instruction) that the arm's
     /// `MATCH_TAG` should jump to when its tag matches. The caller is responsible
     /// for emitting the arm body and backpatching.
+    #[allow(dead_code)] // retained as a building block for future match-lowering work
     fn emit_match_arm_tag(&mut self, scrutinee_reg: u8, tag: u32) -> (usize, usize, usize) {
         let index = self.code.len();
         // MATCH_TAG: op(u8) + reg(u8) + tag(u32 LE) + i32 target(4) = 10 bytes.
@@ -1166,7 +1168,7 @@ impl<'a> Emitter<'a> {
                 self.code.push(raw::MATCH_TAG);
                 self.code.push(scrutinee_reg);
                 self.code.extend_from_slice(&tag.to_le_bytes());
-                let tag_target_offset = self.code.len();
+                let _tag_target_offset = self.code.len();
                 self.code.extend_from_slice(&[0u8; 4]); // patched to L_body
                 // Load the literal value.
                 let lit_reg = self.emit_load_literal(value)?;
