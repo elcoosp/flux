@@ -78,21 +78,59 @@ pub struct ReferenceDecoder;
 impl ReferenceDecoder {
     /// Decodes `bytes` through the real Rust frame decoders, reporting the
     /// canonical [`Rejection`].
+    ///
+    /// Audit fix (§8 / error_frame): the previous version only tried
+    /// `from_error_bytes` and `from_hello_bytes`, so a **valid** `Delta`,
+    /// `Init`, `Heartbeat`, `InternString` or `StringInterned` frame fell
+    /// through to `Rejected(InvalidTag)` while `HostDecoder` (which dispatches
+    /// on the frame-kind byte) reported `Accepted(<that kind>)`. The parity
+    /// contract only held because `default_corpus` happened to contain just
+    /// Error/Hello frames — any future corpus entry with a different kind
+    /// would have produced a false divergence.
+    ///
+    /// Now this mirrors the same kind dispatch a real host does: read the
+    /// frame-kind byte and call the matching `Frame::from_*_bytes` decoder.
+    /// Header faults (bad magic, wrong version, unknown kind) collapse to
+    /// `InvalidTag` on both sides — which is what the two `Result` and
+    /// `Option` return types unify to here.
     #[must_use]
     pub fn decode(bytes: &[u8]) -> Rejection {
-        // The real `Error` frame decoder fails closed on a header fault
-        // (version/magic/kind/truncation) *before* any field decode — exactly
-        // the contract FLUX-083 pins. On success it reports the accepted kind.
-        if let Ok(frame) = Frame::from_error_bytes(bytes) {
-            return Rejection::Accepted(frame.kind);
+        // Fail-closed on a truncated header, matching `HostDecoder`.
+        if bytes.len() < 6 {
+            return Rejection::Rejected(WireErrorKind::Truncated);
         }
-        // A header that is well-formed but simply a `Hello` frame is not a
-        // reject: recognize it so valid `Hello` frames are `Accepted`.
-        if let Some(hello) = Frame::from_hello_bytes(bytes) {
-            return Rejection::Accepted(hello.kind);
+        let kind_byte = bytes[5];
+        match kind_byte {
+            flux_ir_serde::FRAME_HELLO => match Frame::from_hello_bytes(bytes) {
+                Some(f) => Rejection::Accepted(f.kind),
+                None => Rejection::Rejected(WireErrorKind::InvalidTag),
+            },
+            flux_ir_serde::FRAME_INIT => match Frame::from_init_bytes(bytes) {
+                Ok(_) => Rejection::Accepted(FrameKind::Init),
+                Err(e) => Rejection::Rejected(WireErrorKind::from(&e)),
+            },
+            flux_ir_serde::FRAME_ERROR => match Frame::from_error_bytes(bytes) {
+                Ok(f) => Rejection::Accepted(f.kind),
+                Err(e) => Rejection::Rejected(WireErrorKind::from(&e)),
+            },
+            flux_ir_serde::FRAME_DELTA => match Frame::from_delta_bytes(bytes) {
+                Ok(_) => Rejection::Accepted(FrameKind::Delta),
+                Err(e) => Rejection::Rejected(WireErrorKind::from(&e)),
+            },
+            flux_ir_serde::FRAME_HEARTBEAT => match Frame::from_heartbeat_bytes(bytes) {
+                Some(f) => Rejection::Accepted(f.kind),
+                None => Rejection::Rejected(WireErrorKind::InvalidTag),
+            },
+            flux_ir_serde::FRAME_INTERN_STRING => match Frame::from_intern_string_bytes(bytes) {
+                Some(f) => Rejection::Accepted(f.kind),
+                None => Rejection::Rejected(WireErrorKind::InvalidTag),
+            },
+            flux_ir_serde::FRAME_STRING_INTERNED => match Frame::from_string_interned_bytes(bytes) {
+                Some(f) => Rejection::Accepted(f.kind),
+                None => Rejection::Rejected(WireErrorKind::InvalidTag),
+            },
+            _ => Rejection::Rejected(WireErrorKind::InvalidTag),
         }
-        let err = Frame::from_error_bytes(bytes).unwrap_err();
-        Rejection::Rejected(WireErrorKind::from(&err))
     }
 }
 
@@ -166,6 +204,8 @@ pub fn default_corpus() -> Vec<CorpusFrame> {
     // fail-closed (FLUX-083) before any field decode.
     let truncated = valid_error[..4].to_vec();
 
+    let valid_heartbeat = Frame::heartbeat(1).to_bytes();
+
     vec![
         CorpusFrame {
             label: "valid_error",
@@ -174,6 +214,10 @@ pub fn default_corpus() -> Vec<CorpusFrame> {
         CorpusFrame {
             label: "valid_hello",
             bytes: valid_hello,
+        },
+        CorpusFrame {
+            label: "valid_heartbeat",
+            bytes: valid_heartbeat,
         },
         CorpusFrame {
             label: "bad_version",
