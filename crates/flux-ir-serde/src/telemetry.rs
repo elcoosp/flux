@@ -214,7 +214,10 @@ impl TelemetryEvent {
                 w.u32(*bytecode_offset);
                 w.u8(*opcode);
                 for reg in registers.iter() {
-                    encode_value(w, reg);
+                    // Scaffold: event encoder returns `()`; length overflow
+                    // in a register value panics with context (audit H14).
+                    encode_value(w, reg)
+                        .expect("vm_step.register: value exceeds wire length limits");
                 }
                 w.u32(*gas_remaining);
             }
@@ -226,8 +229,10 @@ impl TelemetryEvent {
             } => {
                 w.u8(EVENT_SIGNAL_WRITE);
                 w.u32(*signal_id);
-                encode_value(w, old_value);
-                encode_value(w, new_value);
+                encode_value(w, old_value)
+                    .expect("signal_write.old: value exceeds wire length limits");
+                encode_value(w, new_value)
+                    .expect("signal_write.new: value exceeds wire length limits");
                 w.u16_len(triggered_effect_ids.len(), "telemetry.triggered_effect_ids");
                 for id in triggered_effect_ids {
                     w.u32(*id);
@@ -932,7 +937,10 @@ impl EnrichedTelemetryEvent {
                 w.u32(*bytecode_offset);
                 w.u8(*opcode);
                 for reg in registers.iter() {
-                    encode_value(w, reg);
+                    // Scaffold: event encoder returns `()`; length overflow
+                    // in a register value panics with context (audit H14).
+                    encode_value(w, reg)
+                        .expect("vm_step.register: value exceeds wire length limits");
                 }
                 w.u32(*gas_remaining);
                 encode_optional_span(w, *source_span);
@@ -946,8 +954,10 @@ impl EnrichedTelemetryEvent {
             } => {
                 w.u8(EVENT_SIGNAL_WRITE);
                 w.u32(*signal_id);
-                encode_value(w, old_value);
-                encode_value(w, new_value);
+                encode_value(w, old_value)
+                    .expect("signal_write.old: value exceeds wire length limits");
+                encode_value(w, new_value)
+                    .expect("signal_write.new: value exceeds wire length limits");
                 w.u16_len(triggered_effect_ids.len(), "telemetry.triggered_effect_ids");
                 for id in triggered_effect_ids {
                     w.u32(*id);
