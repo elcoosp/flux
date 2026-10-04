@@ -756,7 +756,7 @@ impl InitFrame {
         // adapter resolution if merged).
         w.u32(entries.len() as u32);
         for (id, text) in &entries {
-            encode_string_entry(&mut w, *id, text);
+            encode_string_entry(&mut w, *id, text).expect("frame.string");
         }
         // Appendix D §D.9: component-name interning, separate `u16` count then
         // `(u32 ComponentId, utf8 name)` pairs. The host resolves each node's
@@ -922,7 +922,7 @@ impl DeltaFrame {
             encode_patch(&mut w, patch);
         }
         for (id, text) in &self.strings {
-            encode_string_entry(&mut w, *id, text);
+            encode_string_entry(&mut w, *id, text).expect("frame.string");
         }
         write_closures(&mut w, &self.closures);
         // ADR-0027 (FA-IRWIRE): `signal_meta` section, present only when the
