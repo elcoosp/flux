@@ -94,6 +94,20 @@ pub fn reconstruct_state(
 ) -> ReconstructedState {
     let mut state = base.clone();
     for event in events {
+        apply_event(&mut state, event);
+    }
+    state
+}
+
+/// Applies one telemetry event to `state` **in place**.
+///
+/// Audit fix (perf): extracted from `reconstruct_state`, which used to start
+/// with `base.clone()` on every call. That made `state_at(i)` O(n²) — a
+/// scrub to index i re-cloned the whole reconstructed state i times. This
+/// function performs no allocation beyond what the mutated fields require,
+/// so a linear replay over N events touches the state once per event.
+pub fn apply_event(state: &mut ReconstructedState, event: &EnrichedTelemetryEvent) {
+    {
         match event {
             EnrichedTelemetryEvent::VmStep {
                 bytecode_offset,
@@ -167,7 +181,6 @@ pub fn reconstruct_state(
             _ => {}
         }
     }
-    state
 }
 
 /// Inserts or updates `value` for `key` in `vec`, preserving order.
