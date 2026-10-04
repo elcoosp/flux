@@ -206,11 +206,9 @@ impl ComponentTreeView {
         } else {
             "▾"
         };
-        let name = node
-            .frame
-            .component_name
-            .clone()
-            .unwrap_or_else(|| "(unnamed)".to_string());
+        // Arc<str>::as_deref() yields Option<&str> with no clone; the format!
+        // below accepts &str directly.
+        let name = node.frame.component_name.as_deref().unwrap_or("(unnamed)");
         let geo = match &node.frame.frame {
             Some(rect) => format!(" [{:.2}×{:.2}]", rect.width, rect.height,),
             None => " [pending]".to_string(),
@@ -372,13 +370,13 @@ mod tests {
                 width: 10.0,
                 height: 20.0,
             }),
-            component_name: Some("Column".to_string()),
+            component_name: Some(std::sync::Arc::from("Column")),
         }
     }
 
     fn frame_named(node_id: u32, parent_id: u32, name: &str) -> ViewFrame {
         let mut f = frame(node_id, parent_id);
-        f.component_name = Some(name.to_string());
+        f.component_name = Some(std::sync::Arc::from(name));
         f
     }
 
