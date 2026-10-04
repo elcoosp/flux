@@ -59,8 +59,7 @@ pub struct ReconstructedState {
     /// signal-graph view renders these so a developer can see reactivity the way
     /// the VM actually works.
     pub signal_edges: Vec<(SignalId, Vec<EffectId>)>,
-    /// Whether the VM is currently paused.
-    pub paused: bool,
+
 }
 
 impl ReconstructedState {
@@ -75,7 +74,7 @@ impl ReconstructedState {
             signals: Vec::new(),
             view_frames: Vec::new(),
             signal_edges: Vec::new(),
-            paused: false,
+
         }
     }
 }
@@ -175,7 +174,7 @@ pub fn apply_event(state: &mut ReconstructedState, event: &EnrichedTelemetryEven
             EnrichedTelemetryEvent::HandlerInvocation { is_start: true, .. } => {
                 // A running handler implies the VM is mid-execution; a finished
                 // handler with no pending start leaves pause state unchanged.
-                state.paused = false;
+                // (audit: no-op assignment removed; `paused` field deleted)
             }
             // Future (non-exhaustive) variants: ignored for reconstruction.
             _ => {}
