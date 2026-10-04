@@ -5,7 +5,11 @@ use flux_syntax::Child;
 use super::core::WireError;
 use super::cursor::{Reader, Writer};
 
-pub(crate) fn encode_child(w: &mut Writer, child: &Child) {
+pub(crate) fn encode_child(w: &mut Writer, child: &Child) -> Result<(), WireError> {
+    // Audit H14 cascade: fallible now so a `Splice` with more than 65 535
+    // items surfaces as a typed `WireError::LengthExceedsU16` instead of
+    // panicking inside `u16_len`. `Child::Node` is fixed-width and cannot
+    // overflow.
     match child {
         Child::Node(id) => {
             w.u8(0x01);
@@ -13,7 +17,7 @@ pub(crate) fn encode_child(w: &mut Writer, child: &Child) {
         }
         Child::Splice { items } => {
             w.u8(0x02);
-            w.u16_len(items.len(), "child.splice.items");
+            w.u16_len_checked(items.len(), "child.splice.items")?;
             for (key, id) in items {
                 w.u64(*key);
                 w.u32(*id);
@@ -25,6 +29,7 @@ pub(crate) fn encode_child(w: &mut Writer, child: &Child) {
         // prefix is already written, so skipping desyncs the reader.
         _ => unreachable!("unknown Child variant — add an encoder arm for it (audit P2.25)"),
     }
+    Ok(())
 }
 
 pub(crate) fn decode_child(r: &mut Reader<'_>) -> Result<Child, WireError> {
