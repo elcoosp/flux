@@ -73,6 +73,30 @@ public final class WebHostView: FluxAdapter {
         // Load failures are silent (placeholder stays); no crash path.
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {}
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {}
+
+        /// Audit fix (FLUX-048/ADR-0057): the navigation policy was
+        /// unenforced — the sandbox `WKWebView` would follow ANY navigation
+        /// it was asked to, including `custom-scheme://…` deep links the
+        /// page itself initiates and (in the same process) any http(s)
+        /// origin the page wants to reach. Enforce the documented contract:
+        /// only `http` and `https` are allowed. Every other scheme is
+        /// cancelled with a warning. (The host-side `src` prop already
+        /// requires http(s); this closes the *in-page* navigation hole.)
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationAction: WKNavigationAction,
+            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+        ) {
+            let url = navigationAction.request.url
+            let scheme = url?.scheme?.lowercased() ?? ""
+            let allowed = (scheme == "http" || scheme == "https" || scheme == "about")
+            if !allowed {
+                print("[FluxUIKit] WebHost blocked non-http(s) navigation: \(url?.absoluteString ?? "<nil>")")
+                decisionHandler(.cancel)
+                return
+            }
+            decisionHandler(.allow)
+        }
     }
 
     private lazy var delegate: Delegate = Delegate(owner: self)
