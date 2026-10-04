@@ -48,7 +48,7 @@ pub(crate) fn encode_patch(
         }
         Patch::Handler { id, closure } => {
             w.u32(*id);
-            super::closure_ref::encode_closure_ref(w, closure);
+            super::closure_ref::encode_closure_ref(w, closure)?;
         }
         Patch::Reattach {
             old_id,
