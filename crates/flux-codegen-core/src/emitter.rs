@@ -144,7 +144,15 @@ impl<'a, B: Backend> Emitter<'a, B> {
                 .cloned()
                 .collect();
             if monos.is_empty() {
-                Self::emit_one_component(self, name, "", &meta);
+                // Audit fix: pass the actual `generics` string, not `""`.
+                // The comment above this branch says the fallback emits the
+                // component "parametrically so the generated source still
+                // compiles", but passing `""` dropped the `<T>` clause while
+                // prop/state types still rendered `T` — producing
+                // `@Composable fun Counter(initial: T)` with `T` out of scope
+                // (non-compiling) or `struct Counter: View { let initial: T }`
+                // in Swift. The declared generic parameters are now emitted.
+                Self::emit_one_component(self, name, &generics, &meta);
             } else {
                 for mono in &monos {
                     // Build the parameter→argument substitution for this
@@ -833,16 +841,23 @@ impl<'a, B: Backend> Emitter<'a, B> {
 
     /// Finds the canonical Button handler prop. Per F1 (appendix-f-parity),
     /// `onPress` is canonical; `onTap` and `onClick` are accepted aliases.
+    ///
+    /// Audit fix: scan canonical names in **priority order** (`onPress`,
+    /// then `onTap`, then `onClick`). The previous version returned whichever
+    /// alias appeared first in source order, so `Button(onTap: A, onPress: B)`
+    /// emitted A's body even though `onPress` is documented canonical.
     fn collect_handler(args: &[Arg]) -> String {
-        for arg in args {
-            let Arg::Named { name, value } = arg else {
-                continue;
-            };
-            if !matches!(name.name.as_str(), "onPress" | "onTap" | "onClick") {
-                continue;
-            }
-            if let Some(body) = render_handler_body::<B>(value) {
-                return body;
+        for canonical in ["onPress", "onTap", "onClick"] {
+            for arg in args {
+                let Arg::Named { name, value } = arg else {
+                    continue;
+                };
+                if name.name != canonical {
+                    continue;
+                }
+                if let Some(body) = render_handler_body::<B>(value) {
+                    return body;
+                }
             }
         }
         String::new()
