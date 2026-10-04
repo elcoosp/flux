@@ -28,6 +28,13 @@ import UIKit
 /// Declarative adapter (unified tier; AGENTS.md §3.5) mapping a Flux `Toggle`
 /// node to a `UISwitch`.
 public final class ToggleAdapter: FluxAdapter {
+    /// Stable identifier for the UIAction this adapter registers
+    /// in `bindHandler`. `UIControl` has no `removeAllActions()`;
+    /// the correct pattern is to remove by identifier before
+    /// re-adding, so rebinds replace (not accumulate) the handler.
+    private static let fluxHandlerAction =
+        UIAction.Identifier("flux.handler")
+
     public typealias View = UISwitch
     weak var executor: (any FluxExecutor)?
 
@@ -51,14 +58,14 @@ public final class ToggleAdapter: FluxAdapter {
         // before adding a new one. The dev runtime re-binds handlers on
         // hot-swap and on prop change; without this each rebind accumulates
         // another action and a single user tap dispatches N times.
-        view.removeAllActions()
-        view.addAction(UIAction { _ in target.fire() }, for: .valueChanged)
+        view.removeAction(identifiedBy: Self.fluxHandlerAction, for: .valueChanged)
+        view.addAction(UIAction(identifier: Self.fluxHandlerAction) { _ in target.fire() }, for: .valueChanged)
     }
 
     public func destroy(_ view: UISwitch) {
         // Audit fix: `removeTarget(_:action:for:)` removes target/action pairs,
         // NOT `UIAction` registrations (those need `removeAllActions()`). The
         // previous call left stale actions alive and firing on recycled views.
-        view.removeAllActions()
+        view.removeAction(identifiedBy: Self.fluxHandlerAction, for: .valueChanged)
     }
 }
