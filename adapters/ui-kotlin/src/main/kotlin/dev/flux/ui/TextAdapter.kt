@@ -66,6 +66,7 @@ public class TextAdapter private constructor() : FluxAdapter<FluxNativeView> {
         view: FluxNativeView,
         props: Props,
         executor: WeakReference<FluxExecutor>,
+        nodeId: UInt,
     ) {
         // Text has no interactive handlers.
     }
