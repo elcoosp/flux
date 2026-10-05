@@ -493,6 +493,7 @@ impl TelemetryFrame {
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut w = Writer::new();
+        w.set_version(self.version);
         w.u32(MAGIC);
         w.u8(self.version);
         w.u8(FRAME_TELEMETRY);
@@ -542,6 +543,7 @@ impl EnrichedTelemetryFrame {
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut w = Writer::new();
+        w.set_version(self.version);
         w.u32(MAGIC);
         w.u8(self.version);
         w.u8(FRAME_TELEMETRY);
@@ -607,6 +609,7 @@ impl HostAnnounceFrame {
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut w = Writer::new();
+        w.set_version(self.version);
         w.u32(MAGIC);
         w.u8(self.version);
         w.u8(FRAME_HOST_ANNOUNCE);
@@ -774,6 +777,7 @@ impl DebugCommandFrame {
         let payload = scratch.into_vec();
 
         let mut w = Writer::new();
+        w.set_version(self.version);
         w.u32(MAGIC);
         w.u8(self.version);
         w.u8(FRAME_DEBUG_COMMAND);
