@@ -966,12 +966,12 @@ impl<'a> Emitter<'a> {
         match else_branch {
             Some(else_branch) => {
                 let join_label = self.jump_placeholder(raw::JUMP, 0);
-                self.patch_jump(else_label);
+                self.patch_jump(else_label)?;
                 self.compile_else_expr(else_branch)?;
-                self.patch_jump(join_label);
+                self.patch_jump(join_label)?;
             }
             None => {
-                self.patch_jump(else_label);
+                self.patch_jump(else_label)?;
             }
         }
         Ok(())
@@ -1118,9 +1118,9 @@ impl<'a> Emitter<'a> {
             let fall = self.jump_placeholder(raw::JUMP, 0);
             // The previous arm's fall-through lands on this test.
             if let Some(prev) = pending_fall.take() {
-                self.patch_jump(prev);
+                self.patch_jump(prev)?;
             }
-            self.patch_jump(guard);
+            self.patch_jump(guard)?;
             self.compile_block_or_expr(&arm.body)?;
             // After the body, skip the remaining arms.
             skip_labels.push(self.jump_placeholder(raw::JUMP, 0));
@@ -1133,7 +1133,7 @@ impl<'a> Emitter<'a> {
         }
         // Every `JUMP L_end` (and the last arm's fall-through) resolves to here.
         for skip in skip_labels {
-            self.patch_jump(skip);
+            self.patch_jump(skip)?;
         }
         Ok(())
     }
@@ -1317,13 +1317,35 @@ impl<'a> Emitter<'a> {
     /// the VM decoder's `jump_target` (which adds `instr.offset + instr_len` to
     /// the stored offset). A forward jump to later code is positive; a backward
     /// jump to earlier code is negative.
-    fn patch_jump(&mut self, (index, target_byte_offset, len): (usize, usize, usize)) {
+    ///
+    /// Errors if the relative offset does not fit in the wire's signed `i32`
+    /// operand (audit H14 / Tier-2). The previous `as i32` cast silently
+    /// truncated on a >2 GiB handler body, so the VM's `JUMP` landed at a
+    /// wrong byte offset; the conversion is now checked and the developer
+    /// gets a compile error instead. Unreachable in practice — a single
+    /// handler exceeding 2 GiB of bytecode is a program-shape error, not a
+    /// realistic size — but the encode is now total.
+    fn patch_jump(
+        &mut self,
+        (index, target_byte_offset, len): (usize, usize, usize),
+    ) -> Result<(), HandlerCompileError> {
         // The VM anchors the relative offset at the next instruction's byte
         // offset (`index + instr_len`).
         let next_offset = index + len;
-        let target = (self.code.len() as i64 - next_offset as i64) as i32;
+        let delta = self.code.len() as i64 - next_offset as i64;
+        let target = i32::try_from(delta).map_err(|_| {
+            HandlerCompileError::new(
+                format!(
+                    "handler body exceeds the i32 jump-offset operand \
+                     (relative offset {delta} bytes; max {} bytes)",
+                    i32::MAX
+                ),
+                Span::new(0, 0, 0),
+            )
+        })?;
         let bytes = target.to_le_bytes();
         self.code[target_byte_offset..target_byte_offset + 4].copy_from_slice(&bytes);
+        Ok(())
     }
 
     /// Compiles `expr` into a register, returning the register holding its
@@ -1583,7 +1605,7 @@ impl<'a> Emitter<'a> {
                 self.code.push(out);
                 let join_label = self.jump_placeholder(raw::JUMP, 0);
                 // Else-branch (base present): out = base.field.
-                self.patch_jump(else_label);
+                self.patch_jump(else_label)?;
                 self.code.push(raw::GET_FIELD);
                 self.code.push(out);
                 // Same index space as every other field access (audit C3):
@@ -1592,7 +1614,7 @@ impl<'a> Emitter<'a> {
                 let idx = self.intern_prop_index(&field.name)?;
                 self.code.extend_from_slice(&idx.to_le_bytes());
                 self.code.push(base_reg);
-                self.patch_jump(join_label);
+                self.patch_jump(join_label)?;
                 Ok(out)
             }
             other => Err(HandlerCompileError::new(
