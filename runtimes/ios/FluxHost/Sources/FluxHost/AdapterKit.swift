@@ -384,6 +384,20 @@ public struct AdapterRegistry {
         self.table = table
     }
 
+    /// The component name `componentId` resolves to when this registry can
+    /// build an adapter for it. Returns `nil` when the id is not interned or
+    /// names no registered primitive.
+    ///
+    /// Exposes the resolution step independently of adapter construction:
+    /// `make(for:)` returns a type-erased `AnyFluxAdapter` whose concrete kind
+    /// is not recoverable, so tests and diagnostics resolve the name here.
+    /// `kind(for:)` and `make(for:)` agree on every id — see the
+    /// `AdapterRegistryTests` consistency checks.
+    func kind(for componentId: UInt32) -> String? {
+        guard let name = table.lookup(componentId), byName[name] != nil else { return nil }
+        return name
+    }
+
     /// Produces a fresh adapter for `componentId`, wired to `executor`, or
     /// `nil` if the id is unbound.
     ///
