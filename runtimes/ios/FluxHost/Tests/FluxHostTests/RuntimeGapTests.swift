@@ -43,9 +43,9 @@ private func gapNode(
         kind: .primitive,
         componentId: componentId,
         props: props,
-        childCount: UInt16(children.count),
+        childCount: UInt32(children.count),
         children: children,
-        handlerCount: UInt16(handlers.count),
+        handlerCount: UInt32(handlers.count),
         handlers: handlers,
         span: FluxSpan(fileId: 0, start: 0, end: 0),
         mountHandler: mountHandler,
@@ -575,12 +575,12 @@ final class CapabilityRoundTripTests: XCTestCase {
     /// with `WireError.unsupportedVersion` — never mis-decoded into a tree.
     /// (Drives the real `FrameDeserializer`.)
     func testRejectsProtocolVersionMismatchFailClosed() {
-        // magic(4) | version(1)=0x03 (unsupported) | kind(1)=0x02 (Init) | seq(4)=0
+        // magic(4) | version(1)=0x04 (unsupported; protocolVersion is 3) | kind(1)=0x02 (Init) | seq(4)=0
         // plus a minimal-but-valid-looking tail. The version gate fires before
         // any tree decoding, so the rest of the buffer need not be well-formed.
         var bytes: [UInt8] = []
         bytes += [0x58, 0x55, 0x5C, 0x46] // FLUX magic (LE)
-        bytes += [0x03] // unsupported version (protocolVersion is 2)
+        bytes += [0x04] // unsupported version (protocolVersion is 3)
         bytes += [0x02] // frame kind = Init
         bytes += [0x00, 0x00, 0x00, 0x00] // seq = 0
         bytes += [0x00, 0x00, 0x00, 0x00] // root node id
