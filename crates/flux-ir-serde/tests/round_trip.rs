@@ -812,7 +812,7 @@ fn unsupported_version_frame() -> Vec<u8> {
     // Tag with an UNSUPPORTED protocol version (3). No host decoder accepts
     // v3 (Rust/Swift support {2}; Kotlin supports {1,2}), so all three must
     // reject this frame fail-closed — the cross-language invariant FLUX-083.
-    bytes[4] = 3;
+    bytes[4] = flux_ir_serde::PROTOCOL_VERSION + 1;
     bytes
 }
 
@@ -824,7 +824,8 @@ fn unsupported_protocol_version_rejected() {
     // stay in lockstep against this shared fixture.
     let bytes = unsupported_version_frame();
     assert_eq!(
-        bytes[4], 3,
+        bytes[4],
+        flux_ir_serde::PROTOCOL_VERSION + 1,
         "fixture must carry an unsupported version byte"
     );
 
@@ -863,7 +864,8 @@ fn unsupported_protocol_version_fixture_matches_and_is_rejected() {
         "committed fixture must match the generated v3 frame",
     );
     assert_eq!(
-        committed[4], 3,
+        committed[4],
+        flux_ir_serde::PROTOCOL_VERSION + 1,
         "committed fixture must carry an unsupported version"
     );
     Frame::from_init_bytes(&committed).expect_err("committed fixture must be rejected fail-closed");
