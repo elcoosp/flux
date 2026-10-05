@@ -186,6 +186,19 @@ fn write_closures(w: &mut Writer, closures: &[ClosureIR]) -> Result<(), WireErro
         encode_bytecode_blob(w, &[]);
         return Ok(());
     }
+    // Sort by `HandlerId` so the emitted blob and handler-def stream are
+    // byte-deterministic. Callers accumulate `closures` from
+    // `HashMap::values()` iteration in the pipeline (`pipeline.rs`), whose
+    // order is randomized per-process by `AHashMap`'s seed — so two runs of
+    // the fixture generator produced byte-different handler sections. Sorting
+    // here is a single canonicalization point that covers every caller
+    // (Init, Delta, dispatch deltas, codegen), rather than requiring the
+    // pipeline to sort at each accumulation site. The wire contract only
+    // requires each `handler_def` to reference an offset inside the blob; the
+    // blob itself is an unordered concatenation, so reordering it changes no
+    // semantics.
+    let mut closures: Vec<&ClosureIR> = closures.iter().collect();
+    closures.sort_by_key(|c| c.id);
     // Concatenate every closure's bytecode into one blob and record each
     // closure's offset within it, so the `ClosureRef` indices stay stable.
     //
@@ -199,7 +212,7 @@ fn write_closures(w: &mut Writer, closures: &[ClosureIR]) -> Result<(), WireErro
     let mut blob: Vec<u8> = Vec::new();
     let mut by_id: std::collections::HashMap<HandlerId, (u32, u16)> =
         std::collections::HashMap::with_capacity(closures.len());
-    for closure in closures {
+    for closure in &closures {
         let offset = blob.len() as u32;
         blob.extend_from_slice(&closure.bytecode);
         // Audit fix (§3.3 / §3.4): a handler body larger than 65 535 bytes
@@ -230,7 +243,7 @@ fn write_closures(w: &mut Writer, closures: &[ClosureIR]) -> Result<(), WireErro
     }
     encode_bytecode_blob(w, &blob);
     w.count_prefix(closures.len(), "frame.closures")?;
-    for closure in closures {
+    for closure in &closures {
         let (offset, len) = by_id[&closure.id];
         let closure_ref = flux_syntax::ClosureRef {
             hash: crate::hash_closure(&closure.bytecode, &closure.captured_signals),
