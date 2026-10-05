@@ -26,7 +26,7 @@ impl StateDelta {
         // the wire layer. `StateDelta` has no production callers today
         // (reserved for the FLAG_HAS_STATE_DELTA section per D.10), so the
         // `Result` here is future-proofing, not a behavior change.
-        w.u16_len_checked(delta.cells.len(), "delta.cells")?;
+        w.count_prefix(delta.cells.len(), "delta.cells")?;
         for (signal, value) in &delta.cells {
             w.u32(*signal);
             encode_value(w, value)?;
@@ -36,7 +36,7 @@ impl StateDelta {
 
     #[allow(dead_code)]
     pub(crate) fn decode(r: &mut Reader<'_>) -> Result<StateDelta, WireError> {
-        let count = r.u16("state.count")?;
+        let count = r.count("state.count")?;
         r.ensure_capacity(count as usize, "state.cells")?;
         let mut cells = Vec::with_capacity(count as usize);
         for _ in 0..count {
@@ -64,10 +64,10 @@ impl SourceMapDelta {
     ) -> Result<(), WireError> {
         // Audit H14 cascade: fallible now for consistency. Same rationale as
         // `StateDelta::encode` above.
-        w.u16_len_checked(delta.files.len(), "delta.files")?;
+        w.count_prefix(delta.files.len(), "delta.files")?;
         for (file_id, path) in &delta.files {
             w.u32(*file_id);
-            w.u16_len_checked(path.len(), "delta.file.path")?;
+            w.count_prefix(path.len(), "delta.file.path")?;
             w.bytes(path.as_bytes());
         }
         Ok(())
@@ -75,12 +75,12 @@ impl SourceMapDelta {
 
     #[allow(dead_code)]
     pub(crate) fn decode(r: &mut Reader<'_>) -> Result<SourceMapDelta, WireError> {
-        let count = r.u16("srcmap.count")?;
+        let count = r.count("srcmap.count")?;
         r.ensure_capacity(count as usize, "srcmap.files")?;
         let mut files = Vec::with_capacity(count as usize);
         for _ in 0..count {
             let file_id = r.u32("srcmap.file")?;
-            let len = r.u16("srcmap.path_len")? as usize;
+            let len = r.count("srcmap.path_len")? as usize;
             let raw = r.bytes(len, "srcmap.path")?;
             let path = std::str::from_utf8(raw)
                 .map_err(|_| WireError::InvalidUtf8 {
