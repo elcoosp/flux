@@ -185,7 +185,7 @@ fn expect_header<'a>(
         });
     }
     let version = r.u8("frame.version")?;
-    if version != PROTOCOL_VERSION {
+    if version < crate::frame::PROTOCOL_VERSION_MIN || version > PROTOCOL_VERSION {
         return Err(WireError::InvalidTag {
             tag: version,
             context,
