@@ -20,8 +20,9 @@ fn magic_bytes() -> [u8; 4] {
 fn delta_frame_header_matches_d1() {
     let patches = vec![Patch::Remove { id: 7 }];
     let bytes = Frame::delta(0x1234, 0, &patches, &[], &[], &[]).to_bytes();
-    // D.1: magic(4) version(1) frame_type(1)=0x04 seq(4) flags(1) patch_count(2)
-    // handler_count(2) string_count(2).
+    // D.1 + ADR-0059: magic(4) version(1) frame_type(1)=0x04 seq(4) flags(1)
+    // then v3 widened the three counts to u32: patch_count(4) handler_count(4)
+    // string_count(4). Header is now 23 bytes.
     assert_eq!(&bytes[0..4], &magic_bytes());
     assert_eq!(bytes[4], PROTOCOL_VERSION);
     assert_eq!(bytes[5], FRAME_DELTA);
@@ -30,13 +31,22 @@ fn delta_frame_header_matches_d1() {
         0x1234
     );
     assert_eq!(bytes[10], 0); // flags
-    assert_eq!(u16::from_le_bytes([bytes[11], bytes[12]]), 1); // patch_count
-    assert_eq!(u16::from_le_bytes([bytes[13], bytes[14]]), 0); // handler_count
-    assert_eq!(u16::from_le_bytes([bytes[15], bytes[16]]), 0); // string_count
-    // First patch body starts at offset 17: D.2 Remove tag 0x04 then id u32.
-    assert_eq!(bytes[17], 0x04, "Remove tag");
     assert_eq!(
-        u32::from_le_bytes([bytes[18], bytes[19], bytes[20], bytes[21]]),
+        u32::from_le_bytes([bytes[11], bytes[12], bytes[13], bytes[14]]),
+        1
+    ); // patch_count (u32 in v3)
+    assert_eq!(
+        u32::from_le_bytes([bytes[15], bytes[16], bytes[17], bytes[18]]),
+        0
+    ); // handler_count
+    assert_eq!(
+        u32::from_le_bytes([bytes[19], bytes[20], bytes[21], bytes[22]]),
+        0
+    ); // string_count
+    // First patch body starts at offset 23: D.2 Remove tag 0x04 then id u32.
+    assert_eq!(bytes[23], 0x04, "Remove tag");
+    assert_eq!(
+        u32::from_le_bytes([bytes[24], bytes[25], bytes[26], bytes[27]]),
         7
     );
 }
@@ -52,9 +62,10 @@ fn hello_frame_type_byte_is_0x01() {
     assert_eq!(&bytes[0..4], &magic_bytes());
     assert_eq!(bytes[4], PROTOCOL_VERSION);
     assert_eq!(bytes[5], FRAME_HELLO);
-    // D.12.1: after frame_type, platform_len(u16) + platform bytes.
-    let plat_len = u16::from_le_bytes([bytes[6], bytes[7]]) as usize;
-    assert_eq!(&bytes[8..8 + plat_len], b"ios");
+    // D.12.1 + ADR-0059: after frame_type, platform_len(u32) + platform bytes.
+    let plat_len =
+        u32::from_le_bytes([bytes[6], bytes[7], bytes[8], bytes[9]]) as usize;
+    assert_eq!(&bytes[10..10 + plat_len], b"ios");
 }
 
 #[test]
@@ -100,11 +111,11 @@ fn error_frame_type_byte_is_0x03() {
     assert_eq!(&bytes[0..4], &magic_bytes());
     assert_eq!(bytes[4], PROTOCOL_VERSION);
     assert_eq!(bytes[5], FRAME_ERROR);
-    // D.12.3: seq(4) at 6, message_len(u16) at 10.
+    // D.12.3 + ADR-0059: seq(4) at 6, message_len(u32) at 10.
     let seq = u32::from_le_bytes([bytes[6], bytes[7], bytes[8], bytes[9]]);
     assert_eq!(seq, 9);
-    let msg_len = u16::from_le_bytes([bytes[10], bytes[11]]) as usize;
-    assert_eq!(&bytes[12..].split_at(msg_len).0, b"boom");
+    let msg_len = u32::from_le_bytes([bytes[10], bytes[11], bytes[12], bytes[13]]) as usize;
+    assert_eq!(&bytes[14..].split_at(msg_len).0, b"boom");
 }
 
 #[test]
@@ -131,19 +142,19 @@ fn value_int_tag_and_payload_match_d5() {
         props_diff: prop_diff,
     };
     let bytes = Frame::delta(0, 0, &[patch], &[], &[], &[]).to_bytes();
-    // Walk to the value: D.2 Update tag 0x02, id u32, then PropDiff
-    // (change_count u16, [(u16 prop_idx, Value)]).
-    // header(17) + 0x02 + id(4) = 22; change_count u16 at 22; prop_idx u16 at 24;
-    // Value starts at 26.
-    assert_eq!(bytes[17], 0x02); // Update
-    let change_count = u16::from_le_bytes([bytes[22], bytes[23]]);
+    // Walk to the value: ADR-0059 v3 Delta header is 23 bytes (three u32 counts);
+    // D.2 Update tag 0x02 at 23, id u32 at 24..27, then PropDiff
+    // (change_count u32, [(u16 prop_idx, Value)]). change_count at 28..31,
+    // prop_idx u16 at 32..33, Value tag at 34, payload follows.
+    assert_eq!(bytes[23], 0x02); // Update
+    let change_count = u32::from_le_bytes([bytes[28], bytes[29], bytes[30], bytes[31]]);
     assert_eq!(change_count, 1);
-    let prop_idx = u16::from_le_bytes([bytes[24], bytes[25]]);
+    let prop_idx = u16::from_le_bytes([bytes[32], bytes[33]]);
     assert_eq!(prop_idx, 0);
     // D.5: Int tag 0x01, then i64 LE.
-    assert_eq!(bytes[26], 0x01, "Int value tag");
+    assert_eq!(bytes[34], 0x01, "Int value tag");
     let v = i64::from_le_bytes([
-        bytes[27], bytes[28], bytes[29], bytes[30], bytes[31], bytes[32], bytes[33], bytes[34],
+        bytes[35], bytes[36], bytes[37], bytes[38], bytes[39], bytes[40], bytes[41], bytes[42],
     ]);
     assert_eq!(v, 42);
 }
@@ -211,7 +222,7 @@ fn patch_tags_match_d2() {
     ];
     for (patch, tag) in samples {
         let bytes = Frame::delta(0, 0, &[patch], &[], &[], &[]).to_bytes();
-        assert_eq!(bytes[17], tag, "patch tag for {tag:#x}");
+        assert_eq!(bytes[23], tag, "patch tag for {tag:#x}");
     }
 }
 
@@ -231,9 +242,10 @@ fn reattach_patch_layout_matches_d2() {
         &[],
     )
     .to_bytes();
-    assert_eq!(bytes[17], 0x07, "reattach tag");
-    let old_id = u32::from_le_bytes([bytes[18], bytes[19], bytes[20], bytes[21]]);
-    let new_id = u32::from_le_bytes([bytes[22], bytes[23], bytes[24], bytes[25]]);
+    // ADR-0059 v3: Delta header is 23 bytes (three u32 counts).
+    assert_eq!(bytes[23], 0x07, "reattach tag");
+    let old_id = u32::from_le_bytes([bytes[24], bytes[25], bytes[26], bytes[27]]);
+    let new_id = u32::from_le_bytes([bytes[28], bytes[29], bytes[30], bytes[31]]);
     assert_eq!(old_id, 0x1122_3344);
     assert_eq!(new_id, 0x5566_7788);
 }
