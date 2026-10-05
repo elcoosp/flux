@@ -10,6 +10,7 @@ import XCTest
 @testable import FluxHost
 @testable import FluxUIKit
 
+@MainActor
 final class AdapterRegistryTests: XCTestCase {
     /// Seeds a registry whose table resolves the given (id → name) pairs.
     private func makeRegistry(_ entries: [(UInt32, String)]) -> AdapterRegistry {
@@ -27,14 +28,18 @@ final class AdapterRegistryTests: XCTestCase {
             (200, "Button"),
             (300, "Column"),
         ])
-        XCTAssertEqual(registry.make(for: 100, executor: nil)?.kind, "Text")
-        XCTAssertEqual(registry.make(for: 200, executor: nil)?.kind, "Button")
-        XCTAssertEqual(registry.make(for: 300, executor: nil)?.kind, "Column")
+        XCTAssertEqual(registry.kind(for: 100), "Text")
+        XCTAssertEqual(registry.kind(for: 200), "Button")
+        XCTAssertEqual(registry.kind(for: 300), "Column")
+        XCTAssertNotNil(registry.make(for: 100, executor: nil))
+        XCTAssertNotNil(registry.make(for: 200, executor: nil))
+        XCTAssertNotNil(registry.make(for: 300, executor: nil))
     }
 
     /// Returns nil for an unknown component id.
     func testReturnsNilForUnknownComponentId() {
         let registry = makeRegistry([])
+        XCTAssertNil(registry.kind(for: 999))
         XCTAssertNil(registry.make(for: 999, executor: nil))
     }
 
@@ -46,19 +51,21 @@ final class AdapterRegistryTests: XCTestCase {
         let kinds = ["Column", "Text", "Button", "Row", "TextInput", "Screen", "Router"]
         let registry = makeRegistry(Array(zip(ids, kinds)))
         for (id, name) in zip(ids, kinds) {
-            let adapter = registry.make(for: id, executor: nil)
-            XCTAssertNotNil(adapter, "component id \(id) (\(name)) should resolve to an adapter")
+            XCTAssertEqual(registry.kind(for: id), name,
+                "component id \(id) should resolve to \(name)")
+            XCTAssertNotNil(registry.make(for: id, executor: nil),
+                "component id \(id) (\(name)) should build an adapter")
         }
     }
 
     /// Resolving by component id matches resolving by name (same factory path).
     func testComponentIdAndNameResolutionAreConsistent() {
         let registry = makeRegistry([(200, "Text")])
+        XCTAssertEqual(registry.kind(for: 200), "Text")
         let viaId = registry.make(for: 200, executor: nil)
         let viaName = registry.make(named: "Text", executor: nil)
         XCTAssertNotNil(viaId)
         XCTAssertNotNil(viaName)
-        XCTAssertEqual(viaId?.kind, viaName?.kind)
     }
 
     /// Each `make` call produces a fresh adapter instance (FLUX-007: no shared
