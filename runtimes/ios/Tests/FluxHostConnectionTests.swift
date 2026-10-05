@@ -79,7 +79,7 @@ final class FluxHostConnectionTests: XCTestCase {
 private func node(_ id: UInt32, componentId: UInt32, props: [Prop] = [], children: [Child] = []) -> ShadowNode {
     ShadowNode(
         id: id, kind: .primitive, componentId: componentId,
-        props: props, childCount: UInt16(children.count),
+        props: props, childCount: UInt32(children.count),
         children: children, handlerCount: 0, handlers: [],
         span: FluxSpan(fileId: 0, start: 0, end: 0)
     )
