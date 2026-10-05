@@ -263,11 +263,26 @@ impl<'a> Lowerer<'a> {
 
     fn finish(self) -> LoweredIr {
         let arena = self.builder.finish();
-        let component_names = self
+        // Sort by `ComponentId` so the emitted order is deterministic.
+        //
+        // `name_to_component` is an `AHashMap<String, ComponentId>` with a
+        // per-process random seed, so a raw `.iter()` produces a different
+        // order on every run for the same logical content. That flipped the
+        // bytes of downstream fixtures (e.g. the `Column`/`Button` section in
+        // `counter_init_frame.bin`) between two runs of the fixture generator,
+        // making the golden bytes nondeterministic.
+        //
+        // The wire contract only requires uniqueness of `(ComponentId, name)`;
+        // sorting by the id gives a canonical order without touching the
+        // hot-path map. This mirrors the sorted-by-key discipline already
+        // applied to `signal_deps_map` values and the fixture encoder's
+        // `source_map` (FileId-ascending).
+        let mut component_names: Vec<(flux_syntax::ComponentId, String)> = self
             .name_to_component
             .iter()
             .map(|(name, id)| (*id, name.clone()))
             .collect();
+        component_names.sort_by_key(|(id, _)| *id);
         LoweredIr {
             arena,
             closures: self.closures,
