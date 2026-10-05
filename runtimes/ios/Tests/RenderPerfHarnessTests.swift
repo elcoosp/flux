@@ -37,7 +37,7 @@ private func mountNode(
         kind: kind,
         componentId: componentId,
         props: props,
-        childCount: UInt16(children.count),
+        childCount: UInt32(children.count),
         children: children,
         handlerCount: 0,
         handlers: [],
