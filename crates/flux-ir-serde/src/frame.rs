@@ -38,7 +38,17 @@ pub const MAGIC: u32 = 0x465C_5558;
 /// so an old host must fail closed (FLUX-050 / ADR-0056) rather than mis-decode.
 /// All three decoders (Rust round-trip, iOS, Android) are updated in lockstep in
 /// FLUX-075; no v1 host ships to users.
-pub const PROTOCOL_VERSION: u8 = 2;
+pub const PROTOCOL_VERSION: u8 = 3;
+
+/// Minimum protocol version this binary can still decode.
+///
+/// ADR-0059: v3 bumped the wire schema — the 16 user-authored collection
+/// prefixes moved from `u16` to `u32` (Appendix D §D.1–§D.12). The decoder
+/// dispatches on the version byte in the header: v3 uses the wider layout,
+/// v2 reads the narrower form and widens. Anything outside
+/// `[PROTOCOL_VERSION_MIN, PROTOCOL_VERSION]` fails closed with
+/// `WireError::InvalidTag`.
+pub const PROTOCOL_VERSION_MIN: u8 = 2;
 
 /// `frame_type` byte at header offset 5 (Appendix D §D.12).
 pub const FRAME_HELLO: u8 = 0x01;
@@ -154,9 +164,14 @@ pub struct Frame;
 
 // ── shared primitive helpers ────────────────────────────────────────────────
 
-fn write_magic_version(w: &mut Writer) {
+/// Writes the 6-byte frame header prefix `magic(4) | version(1)`. The
+/// `version` is the *source* frame's version when re-encoding a decoded
+/// frame, so a v2 fixture round-trips byte-for-byte instead of being
+/// silently promoted to v3 by the encoder. New frames built via
+/// `Frame::hello(..)` / `Frame::error(..)` etc. carry `PROTOCOL_VERSION`.
+fn write_magic_version(w: &mut Writer, version: u8) {
     w.u32(MAGIC);
-    w.u8(PROTOCOL_VERSION);
+    w.u8(version);
 }
 
 /// Writes the frame-level handler section (Gap G1, Appendix D §D.8 + §D.12):
@@ -255,7 +270,11 @@ fn read_frame_type(bytes: &[u8]) -> Result<(u8, FrameKind, &[u8]), WireError> {
         });
     }
     let version = bytes[4];
-    if version != PROTOCOL_VERSION {
+    // ADR-0059: accept the current version and the one immediately prior.
+    // Anything newer than us is a forward-compat failure (host built for a
+    // future spec); anything older than the minimum is a v1 host, which the
+    // project no longer ships. Both reject fail-closed before field decode.
+    if version < PROTOCOL_VERSION_MIN || version > PROTOCOL_VERSION {
         return Err(WireError::InvalidTag {
             tag: version,
             context: "frame.version",
@@ -465,7 +484,7 @@ impl HelloFrame {
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut w = Writer::new();
-        write_magic_version(&mut w);
+        write_magic_version(&mut w, self.version);
         w.u8(self.kind.type_byte());
         encode_str(&mut w, &self.platform);
         encode_str(&mut w, &self.device);
@@ -568,7 +587,7 @@ impl Frame {
                 at: 5,
             });
         }
-        let mut r = Reader::new(payload);
+        let mut r = Reader::with_version(payload, version);
         let seq = r.u32("init.seq")?;
         let root = decode_node(&mut r)?;
         // Appendix D §D.12.2: `root` is followed by a `u32` count then every
@@ -757,7 +776,7 @@ impl InitFrame {
     /// bytecode blob, closure excerpt, or signal-meta section.
     pub fn try_encode_into(&self, buf: &mut Vec<u8>) -> Result<(), WireError> {
         let mut w = Writer::from_vec(std::mem::take(buf));
-        write_magic_version(&mut w);
+        write_magic_version(&mut w, self.version);
         w.u8(self.kind.type_byte());
         w.u32(self.seq);
         encode_node(&mut w, &self.root)?;
@@ -882,7 +901,7 @@ impl Frame {
         // when the payload is exactly 10 bytes would panic on attacker input
         // (libFuzzer flagged this as an out-of-bounds read → abort). The `Reader`
         // yields `WireError::Truncated` instead, so the decoder stays total.
-        let mut r = Reader::new(payload);
+        let mut r = Reader::with_version(payload, version);
         let seq = r.u32("delta.seq")?;
         let flags = r.u8("delta.flags")?;
         let patch_count = r.u16("delta.patch_count")? as usize;
@@ -966,7 +985,7 @@ impl DeltaFrame {
     /// "user authored too many of something" case the audit's H14 called out.
     pub fn try_encode_into(&self, buf: &mut Vec<u8>) -> Result<(), WireError> {
         let mut w = Writer::from_vec(std::mem::take(buf));
-        write_magic_version(&mut w);
+        write_magic_version(&mut w, self.version);
         w.u8(self.kind.type_byte());
         w.u32(self.seq);
         w.u8(self.flags);
@@ -1047,7 +1066,7 @@ impl Frame {
                 at: 5,
             });
         }
-        let mut r = Reader::new(payload);
+        let mut r = Reader::with_version(payload, version);
         let seq = r.u32("error.seq")?;
         let msg_len = r.u16("error.msg.len")? as usize;
         let raw = r.bytes(msg_len, "error.msg")?;
@@ -1102,7 +1121,7 @@ impl ErrorFrame {
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut w = Writer::new();
-        write_magic_version(&mut w);
+        write_magic_version(&mut w, self.version);
         w.u8(self.kind.type_byte());
         w.u32(self.seq);
         encode_str(&mut w, &self.message);
@@ -1174,7 +1193,7 @@ impl HeartbeatFrame {
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut w = Writer::new();
-        write_magic_version(&mut w);
+        write_magic_version(&mut w, self.version);
         w.u8(self.kind.type_byte());
         w.u32(self.seq);
         w.into_vec()
@@ -1244,7 +1263,7 @@ impl InternStringFrame {
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut w = Writer::new();
-        write_magic_version(&mut w);
+        write_magic_version(&mut w, self.version);
         w.u8(self.kind.type_byte());
         w.u16(self.len);
         w.bytes(&self.bytes);
@@ -1332,7 +1351,7 @@ impl StringInternedFrame {
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut w = Writer::new();
-        write_magic_version(&mut w);
+        write_magic_version(&mut w, self.version);
         w.u8(self.kind.type_byte());
         w.u32(self.id);
         w.into_vec()
