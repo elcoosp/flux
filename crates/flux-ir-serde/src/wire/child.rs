@@ -17,7 +17,7 @@ pub(crate) fn encode_child(w: &mut Writer, child: &Child) -> Result<(), WireErro
         }
         Child::Splice { items } => {
             w.u8(0x02);
-            w.u16_len_checked(items.len(), "child.splice.items")?;
+            w.count_prefix(items.len(), "child.splice.items")?;
             for (key, id) in items {
                 w.u64(*key);
                 w.u32(*id);
@@ -37,7 +37,7 @@ pub(crate) fn decode_child(r: &mut Reader<'_>) -> Result<Child, WireError> {
     match tag {
         0x01 => Ok(Child::Node(r.u32("child.node")?)),
         0x02 => {
-            let count = r.u16("child.splice.count")?;
+            let count = r.count("child.splice.count")?;
             r.ensure_capacity(count as usize, "child.splice")?;
             let mut items = Vec::with_capacity(count as usize);
             for _ in 0..count {
