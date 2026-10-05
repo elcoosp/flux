@@ -121,7 +121,8 @@ fn round_trips_empty_patch_set() {
     // empty buffer: magic(4) + version(1) + frame_type(1) + seq(4) + flags(1)
     // + patch_count(2) + handler_count(2) + string_count(2) = 17 bytes, plus
     // the empty handler section (blob_len u32 = 0) = 21 bytes.
-    assert_eq!(bytes.len(), 21);
+    // v3 (ADR-0059): the Delta header is 6 bytes wider (three u16 counts → u32).
+    assert_eq!(bytes.len(), 27);
     let (patches, closures) = deserialize_patches(&bytes).unwrap();
     assert!(patches.is_empty());
     assert!(closures.is_empty());
