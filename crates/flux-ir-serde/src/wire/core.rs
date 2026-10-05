@@ -87,6 +87,19 @@ pub enum WireError {
         /// The actual count that overflowed the `u16`.
         n: usize,
     },
+
+    /// A length-prefixed collection or string exceeded the `u32` width used
+    /// by protocol v3 for user-authored collections (ADR-0059). In practice
+    /// unreachable on 64-bit platforms (< 4 billion items), but the encode
+    /// path is total: the error is a typed diagnostic rather than an
+    /// `unreachable!()`.
+    #[error("wire encode: {what} length {n} exceeds u32 prefix width")]
+    LengthExceedsU32 {
+        /// Short field description.
+        what: &'static str,
+        /// The actual count that overflowed the `u32`.
+        n: usize,
+    },
     /// A `Delta` frame's `handler_count` header did not match the number of
     /// `HandlerDef`s decoded from the handler section (T-316.6).
     #[error(
