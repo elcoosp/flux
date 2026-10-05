@@ -71,6 +71,10 @@ impl From<&WireError> for WireErrorKind {
             // so the parity harness compiles; a future cross-host corpus
             // should not encounter this on the decode side at all.
             WireError::LengthExceedsU16 { .. } => WireErrorKind::MalformedBytecode,
+            // ADR-0059 v3: the wider u32 length prefix is only overflowable
+            // at ~4 billion items (unreachable in practice); map to the same
+            // decode-neutral kind as its u16 sibling.
+            WireError::LengthExceedsU32 { .. } => WireErrorKind::MalformedBytecode,
         }
     }
 }
