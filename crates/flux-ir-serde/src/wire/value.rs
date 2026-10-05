@@ -28,13 +28,13 @@ pub(crate) fn encode_value(w: &mut Writer, value: &Value) -> Result<(), WireErro
         Value::Bool(b) => w.u8(u8::from(*b)),
         Value::Str(id) | Value::HandlerRef(id) => w.u32(*id),
         Value::List(items) => {
-            w.u16_len_checked(items.len(), "value.list")?;
+            w.count_prefix(items.len(), "value.list")?;
             for item in items {
                 encode_value(w, item)?;
             }
         }
         Value::Record(fields) => {
-            w.u16_len_checked(fields.len(), "value.record.fields")?;
+            w.count_prefix(fields.len(), "value.record.fields")?;
             for (index, val) in fields {
                 w.u16(*index);
                 encode_value(w, val)?;
@@ -116,7 +116,7 @@ fn decode_value_at(r: &mut Reader<'_>, depth: usize) -> Result<Value, WireError>
         TAG_STR => Ok(Value::Str(r.u32("value.str")?)),
         TAG_HANDLER => Ok(Value::HandlerRef(r.u32("value.handler")?)),
         TAG_LIST => {
-            let count = r.u16("value.list.count")?;
+            let count = r.count("value.list.count")?;
             r.ensure_capacity(count as usize, "value.list")?;
             let mut items = Vec::with_capacity(count as usize);
             for _ in 0..count {
@@ -125,7 +125,7 @@ fn decode_value_at(r: &mut Reader<'_>, depth: usize) -> Result<Value, WireError>
             Ok(Value::List(items))
         }
         TAG_RECORD => {
-            let count = r.u16("value.record.count")?;
+            let count = r.count("value.record.count")?;
             r.ensure_capacity(count as usize, "value.record")?;
             let mut fields = Vec::with_capacity(count as usize);
             for _ in 0..count {
@@ -154,41 +154,32 @@ mod tests {
     /// `encode_value` to the panicking path, this test fails (or panics with
     /// a different message).
     #[test]
-    fn encode_value_rejects_oversized_list() {
-        let too_many = (u16::MAX as usize) + 1;
-        let items: Vec<Value> = (0..too_many).map(|_| Value::Null).collect();
+    fn encode_value_accepts_former_u16_limit_list() {
+        // ADR-0059: v3 widens the list count to u32, so a 65 536-item list —
+        // which used to be the size at which v2 failed — now encodes cleanly.
+        // The u16 limit is no longer a boundary; a real overflow requires
+        // >4 billion items, which cannot be built in a test.
+        let former_u16_ceiling = (u16::MAX as usize) + 1;
+        let items: Vec<Value> = (0..former_u16_ceiling).map(|_| Value::Null).collect();
         let value = Value::List(items);
         let mut w = Writer::new();
-        let err = encode_value(&mut w, &value)
-            .expect_err("oversized list must not encode");
-        match err {
-            WireError::LengthExceedsU16 { what, n } => {
-                assert_eq!(what, "value.list");
-                assert_eq!(n, too_many);
-            }
-            other => panic!("expected LengthExceedsU16, got {other:?}"),
-        }
+        encode_value(&mut w, &value)
+            .expect("v3 list wider than u16::MAX must encode");
     }
 
-    /// Audit H14 regression: a `Record` with more fields than a `u16` prefix
-    /// can hold must also surface as a typed error. Mirrors the list test.
+    /// ADR-0059: v3 widens the record field count to u32, so a record wider
+    /// than the v2 u16 limit now encodes. The old "rejects" test has been
+    /// replaced by an "accepts" test; real overflow is unreachable in RAM.
     #[test]
-    fn encode_value_rejects_oversized_record() {
-        let too_many = (u16::MAX as usize) + 1;
-        let fields: Vec<(flux_syntax::PropIdx, Value)> = (0..too_many)
+    fn encode_value_accepts_former_u16_limit_record() {
+        let former_u16_ceiling = (u16::MAX as usize) + 1;
+        let fields: Vec<(flux_syntax::PropIdx, Value)> = (0..former_u16_ceiling)
             .map(|i| (flux_syntax::PropIdx::from(i as u16), Value::Null))
             .collect();
         let value = Value::Record(fields);
         let mut w = Writer::new();
-        let err = encode_value(&mut w, &value)
-            .expect_err("oversized record must not encode");
-        match err {
-            WireError::LengthExceedsU16 { what, n } => {
-                assert_eq!(what, "value.record.fields");
-                assert_eq!(n, too_many);
-            }
-            other => panic!("expected LengthExceedsU16, got {other:?}"),
-        }
+        encode_value(&mut w, &value)
+            .expect("v3 record wider than u16::MAX must encode");
     }
 
     /// A normal-sized list still round-trips through the fallible encoder.
@@ -198,8 +189,9 @@ mod tests {
         let value = Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)]);
         let mut w = Writer::new();
         encode_value(&mut w, &value).expect("small list encodes");
-        // The encoder wrote: tag(1) + len(2) + 3 * (tag(1) + payload(8)) = 30 bytes.
-        assert_eq!(w.buf_len(), 1 + 2 + 3 * 9);
+        // v3 (ADR-0059) writes the list count as u32, not u16:
+        //   tag(1) + len(4) + 3 * (item-tag(1) + Int payload(8)) = 32 bytes.
+        assert_eq!(w.buf_len(), 1 + 4 + 3 * 9);
     }
 }
 
