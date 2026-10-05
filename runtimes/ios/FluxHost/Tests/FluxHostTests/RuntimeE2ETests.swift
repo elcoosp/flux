@@ -23,9 +23,9 @@ private func node(_ id: UInt32, componentId: UInt32, props: [Prop] = [], childre
         kind: .primitive,
         componentId: componentId,
         props: props,
-        childCount: UInt16(children.count),
+        childCount: UInt32(children.count),
         children: children,
-        handlerCount: UInt16(handlers.count),
+        handlerCount: UInt32(handlers.count),
         handlers: handlers,
         span: FluxSpan(fileId: 0, start: 0, end: 0)
     )
