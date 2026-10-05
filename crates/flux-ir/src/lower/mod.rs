@@ -365,7 +365,9 @@ impl<'a> Lowerer<'a> {
                             &deps,
                         ),
                         bytecode_offset: 0,
-                        bytecode_len: self.prop_thunks[&node_id].bytecode.len() as u16,
+                        bytecode_len: narrow_bytecode_len(
+                            self.prop_thunks[&node_id].bytecode.len(),
+                        )?,
                         captured_signals: deps.clone(),
                         span: Span::new(0, 0, 0),
                         excerpt: None,
@@ -1097,6 +1099,31 @@ pub fn detect_prop_index_collision(names: &[&str]) -> Option<(String, String)> {
     None
 }
 
+/// Narrows a bytecode length to the `u16` wire prefix width, erroring on
+/// overflow rather than silently truncating (audit H14 / ADR-0059 class).
+///
+/// A bytecode body larger than `u16::MAX` bytes cannot be represented in a
+/// `ClosureRef::bytecode_len`; the previous `as u16` cast silently corrupted
+/// the reference, so the host sliced the wrong bytes out of the shared blob
+/// or failed dispatch. Any site that narrows a bytecode length (prop-thunk
+/// construction here, handler-patch construction in `flux-differ`) must go
+/// through a checked conversion like this one. ADR-0059 widens user-authored
+/// *collection* counts, not handler bytecode, so a body this large is a
+/// genuine program-shape error the user should see — not a truncation.
+fn narrow_bytecode_len(n: usize) -> Result<u16, LoweringError> {
+    u16::try_from(n).map_err(|_| {
+        LoweringError::new(
+            format!(
+                "bytecode ({n} bytes) exceeds the u16 wire length prefix (max {}); \
+                 split the component or move logic into a handler \
+                 (ADR-0059 widens user-authored collections, not handler bytecode)",
+                u16::MAX,
+            ),
+            Span::new(0, 0, 0),
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1168,5 +1195,33 @@ mod tests {
         // at least: 2 component decls + 1 App component + 2 Row call-sites
         // + 2 inlined Text nodes = 7 distinct ids.
         assert!(ids.len() >= 7, "expected >= 7 nodes, got {}", ids.len());
+    }
+
+    #[test]
+    fn narrow_bytecode_len_accepts_u16_max() {
+        assert_eq!(
+            narrow_bytecode_len(u16::MAX as usize).unwrap(),
+            u16::MAX,
+            "u16::MAX must narrow cleanly"
+        );
+    }
+
+    #[test]
+    fn narrow_bytecode_len_rejects_u16_max_plus_one() {
+        let err = narrow_bytecode_len(u16::MAX as usize + 1)
+            .expect_err("u16::MAX + 1 must be rejected");
+        let rendered = format!("{err:?}");
+        assert!(
+            rendered.contains("exceeds the u16 wire length prefix"),
+            "error must mention the u16 prefix limit, got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn narrow_bytecode_len_rejects_huge() {
+        assert!(
+            narrow_bytecode_len(usize::MAX).is_err(),
+            "usize::MAX must be rejected, not wrap to a small u16"
+        );
     }
 }
