@@ -99,9 +99,9 @@ class FrameDeserializerTest {
                     node(id = 1u, kind = 1u, component = 100u, props = emptyList(), childIds = emptyList())
                 }.build()
         // Flip the version byte (header offset 4) to an unsupported value.
-        // NOTE: v1 (0x01) and v2 (0x02, ADR-0057) are both supported; only an
+        // NOTE: v2 (0x02) and v3 (0x03, ADR-0059) are both supported; only an
         // out-of-range version must be rejected fail-closed.
-        bytes[4] = 3
+        bytes[4] = 4
         val err = runCatching { FrameDeserializer.deserialize(bytes) }
         assertTrue(err.isFailure, "expected WireError for protocol version mismatch")
         val ex = err.exceptionOrNull()
@@ -113,16 +113,16 @@ class FrameDeserializerTest {
     @Test
     fun `rejects the shared FLUX-083 unsupported-version fixture`() {
         // Cross-language lockstep (FLUX-083): the committed fixture
-        // `fixtures/wire/unsupported-version.bin` is a valid v2 Init frame with
-        // version byte 0x03 — unsupported by every host decoder. Kotlin accepts
-        // {1, 2}, so it must reject this fail-closed. The Rust and Swift
-        // decoders carry the same assertion against the same bytes.
+        // `fixtures/wire/unsupported-version.bin` is a valid Init frame with
+        // version byte 0x04 — unsupported by every host decoder. Kotlin accepts
+        // {2, 3} (ADR-0059), so it must reject this fail-closed. The Rust and
+        // Swift decoders carry the same assertion against the same bytes.
         val path = System.getenv("FLUX_WIRE_FIXTURES")
         assumeTrue(path != null, "FLUX_WIRE_FIXTURES not set; fixture runs in wire CI")
         val file = java.io.File(path, "unsupported-version.bin")
         assumeTrue(file.isFile, "unsupported-version.bin fixture absent")
         val bytes = file.readBytes()
-        assertEquals(0x03.toUByte(), bytes[4].toUByte(), "fixture must carry unsupported version 3")
+        assertEquals(0x04.toUByte(), bytes[4].toUByte(), "fixture must carry unsupported version 4")
         val err = runCatching { FrameDeserializer.deserialize(bytes) }
         assertTrue(err.isFailure, "expected WireError for the shared unsupported-version fixture")
         val ex = err.exceptionOrNull()
