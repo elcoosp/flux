@@ -229,7 +229,7 @@ fn write_closures(w: &mut Writer, closures: &[ClosureIR]) -> Result<(), WireErro
         }
     }
     encode_bytecode_blob(w, &blob);
-    w.u16_len_checked(closures.len(), "frame.closures")?;
+    w.count_prefix(closures.len(), "frame.closures")?;
     for closure in closures {
         let (offset, len) = by_id[&closure.id];
         let closure_ref = flux_syntax::ClosureRef {
@@ -320,22 +320,38 @@ fn encode_str(w: &mut Writer, s: &str) {
 /// Fallible length-prefixed string encoder. See [`Writer::u16_len_checked`]
 /// for the length-limit contract.
 fn try_encode_str(w: &mut Writer, s: &str) -> Result<(), WireError> {
-    w.u16_len_checked(s.len(), "frame.string_len")?;
+    w.count_prefix(s.len(), "frame.string_len")?;
     w.bytes(s.as_bytes());
     Ok(())
 }
 
-fn decode_str(r: &[u8], pos: &mut usize) -> Result<String, WireError> {
-    let len = r
-        .get(*pos..*pos + 2)
-        .map(|b| u16::from_le_bytes([b[0], b[1]]) as usize)
-        .ok_or(WireError::Truncated {
+/// Reads a length-prefixed UTF-8 string whose length prefix width depends on
+/// the frame's protocol version (ADR-0059): v3 uses `u32`, v2 uses `u16`.
+///
+/// Also used for the `frame.string_len` prefix inside `HelloFrame` and
+/// `ErrorFrame` payloads.
+fn decode_str(r: &[u8], pos: &mut usize, version: u8) -> Result<String, WireError> {
+    let len = if version >= 3 {
+        // u32 little-endian
+        let b = r.get(*pos..*pos + 4).ok_or(WireError::Truncated {
+            at: *pos,
+            needed: 4,
+            context: "str.len",
+            available: r.len(),
+        })?;
+        *pos += 4;
+        u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize
+    } else {
+        // u16 little-endian
+        let b = r.get(*pos..*pos + 2).ok_or(WireError::Truncated {
             at: *pos,
             needed: 2,
             context: "str.len",
             available: r.len(),
         })?;
-    *pos += 2;
+        *pos += 2;
+        u16::from_le_bytes([b[0], b[1]]) as usize
+    };
     let raw = r.get(*pos..*pos + len).ok_or(WireError::Truncated {
         at: *pos,
         needed: len,
@@ -434,8 +450,8 @@ impl Frame {
             return None;
         }
         let mut pos = 0;
-        let platform = decode_str(payload, &mut pos).ok()?;
-        let device = decode_str(payload, &mut pos).ok()?;
+        let platform = decode_str(payload, &mut pos, version).ok()?;
+        let device = decode_str(payload, &mut pos, version).ok()?;
         let cap_count =
             u16::from_le_bytes([payload.get(pos).copied()?, payload.get(pos + 1).copied()?])
                 as usize;
@@ -443,7 +459,7 @@ impl Frame {
         pos += 2;
         let mut capabilities = Vec::with_capacity(cap_count);
         for _ in 0..cap_count {
-            let name = decode_str(payload, &mut pos).ok()?;
+            let name = decode_str(payload, &mut pos, version).ok()?;
             let ver = read_u32(payload, &mut pos, "hello.cap.ver").ok()?;
             let feat_count =
                 u16::from_le_bytes([payload.get(pos).copied()?, payload.get(pos + 1).copied()?])
@@ -451,7 +467,7 @@ impl Frame {
             pos += 2;
             let mut feats = Vec::with_capacity(feat_count);
             for _ in 0..feat_count {
-                feats.push(decode_str(payload, &mut pos).ok()?);
+                feats.push(decode_str(payload, &mut pos, version).ok()?);
             }
             capabilities.push((name, ver, feats));
         }
@@ -461,7 +477,7 @@ impl Frame {
         // existed. Only the server's configured token policy turns absence into a
         // rejection (Appendix D §D.12.1).
         let token = if pos + 2 <= payload.len() {
-            match decode_str(payload, &mut pos) {
+            match decode_str(payload, &mut pos, version) {
                 Ok(t) if !t.is_empty() => Some(t),
                 _ => None,
             }
@@ -486,7 +502,6 @@ impl HelloFrame {
         let mut w = Writer::new();
         w.set_version(self.version);
         write_magic_version(&mut w, self.version);
-w.set_version(self.version);
         w.u8(self.kind.type_byte());
         encode_str(&mut w, &self.platform);
         encode_str(&mut w, &self.device);
@@ -601,19 +616,19 @@ impl Frame {
         for _ in 0..extra_count {
             extra_nodes.push(decode_node(&mut r)?);
         }
-        let seed_count = r.u16("init.seed")?;
+        let seed_count = r.count("init.seed")?;
         let mut state_seed = Vec::with_capacity(seed_count as usize);
         for _ in 0..seed_count {
             let sig = SignalId::from(r.u32("init.seed.sig")?);
             let val = decode_value(&mut r)?;
             state_seed.push((sig, val));
         }
-        let sm_count = r.u16("init.srcmap")? as usize;
+        let sm_count = r.count("init.srcmap")? as usize;
         r.ensure_capacity(sm_count, "init.srcmap")?;
         let mut source_map = Vec::with_capacity(sm_count);
         for _ in 0..sm_count {
             let fid = FileId::from(r.u32("init.srcmap.file")?);
-            let len = r.u16("init.srcmap.path.len")? as usize;
+            let len = r.count("init.srcmap.path.len")? as usize;
             let raw = r.bytes(len, "init.srcmap.path")?;
             let path = std::str::from_utf8(raw).map(str::to_owned).map_err(|_| {
                 WireError::InvalidUtf8 {
@@ -638,12 +653,12 @@ impl Frame {
         // Appendix D §D.9: component-name interning, separate `u16` count then
         // `(u32 ComponentId, utf8 name)` pairs. Mirrors the encoder exactly so
         // the two id spaces never collide on the wire.
-        let component_count = r.u16("init.component_names.count")? as usize;
+        let component_count = r.count("init.component_names.count")? as usize;
         r.ensure_capacity(component_count, "init.component_names")?;
         let mut component_names = Vec::with_capacity(component_count);
         for _ in 0..component_count {
             let cid: ComponentId = r.u32("init.component_names.cid")?;
-            let name_len = r.u16("init.component_names.name_len")? as usize;
+            let name_len = r.count("init.component_names.name_len")? as usize;
             let name_bytes = r.bytes(name_len, "init.component_names.name")?;
             let name =
                 String::from_utf8(name_bytes.to_vec()).map_err(|_| WireError::InvalidTag {
@@ -694,7 +709,7 @@ fn decode_closures(r: &mut Reader<'_>) -> Result<Vec<ClosureIR>, WireError> {
     // operands, out-of-range jump targets, and unknown opcodes, so the VM
     // never indexes out of bounds on a crafted closure.
     validate_bytecode(&blob)?;
-    let handler_count = r.u16("closures.count")? as usize;
+    let handler_count = r.count("closures.count")? as usize;
     // Audit §3.2: bound the count by the *minimum encoded size* of one
     // HandlerDef on the wire, not by `blob.len()`. Every HandlerDef occupies
     // at least 20 bytes (id 4 + hash 8 + offset 4 + len 2 + captures count 2
@@ -780,7 +795,6 @@ impl InitFrame {
         let mut w = Writer::from_vec(std::mem::take(buf));
         w.set_version(self.version);
         write_magic_version(&mut w, self.version);
-w.set_version(self.version);
         w.u8(self.kind.type_byte());
         w.u32(self.seq);
         encode_node(&mut w, &self.root)?;
@@ -791,12 +805,12 @@ w.set_version(self.version);
         for node in &self.extra_nodes {
             encode_node(&mut w, node)?;
         }
-        w.u16_len_checked(self.state_seed.len(), "frame.state_seed")?;
+        w.count_prefix(self.state_seed.len(), "frame.state_seed")?;
         for (sig, val) in &self.state_seed {
             w.u32(*sig);
             encode_value(&mut w, val)?;
         }
-        w.u16_len_checked(self.source_map.len(), "frame.source_map")?;
+        w.count_prefix(self.source_map.len(), "frame.source_map")?;
         for (fid, path) in &self.source_map {
             w.u32(*fid);
             try_encode_str(&mut w, path)?;
@@ -811,7 +825,7 @@ w.set_version(self.version);
         for (id, text) in &entries {
             encode_string_entry(&mut w, *id, text)?;
         }
-        w.u16_len_checked(self.component_names.len(), "frame.component_names")?;
+        w.count_prefix(self.component_names.len(), "frame.component_names")?;
         for (cid, name) in &self.component_names {
             w.u32(*cid);
             try_encode_str(&mut w, name)?;
@@ -908,9 +922,9 @@ impl Frame {
         let mut r = Reader::with_version(payload, version);
         let seq = r.u32("delta.seq")?;
         let flags = r.u8("delta.flags")?;
-        let patch_count = r.u16("delta.patch_count")? as usize;
-        let handler_count = r.u16("delta.handler_count")? as usize;
-        let str_count = r.u16("delta.string_count")? as usize;
+        let patch_count = r.count("delta.patch_count")? as usize;
+        let handler_count = r.count("delta.handler_count")? as usize;
+        let str_count = r.count("delta.string_count")? as usize;
         let mut patches = Vec::with_capacity(patch_count);
         r.ensure_capacity(patch_count, "delta.patches")?;
         for _ in 0..patch_count {
@@ -994,9 +1008,9 @@ impl DeltaFrame {
         w.u8(self.kind.type_byte());
         w.u32(self.seq);
         w.u8(self.flags);
-        w.u16_len_checked(self.patches.len(), "frame.patches")?;
-        w.u16_len_checked(self.closures.len(), "frame.closures")?;
-        w.u16_len_checked(self.strings.len(), "frame.strings")?;
+        w.count_prefix(self.patches.len(), "frame.patches")?;
+        w.count_prefix(self.closures.len(), "frame.closures")?;
+        w.count_prefix(self.strings.len(), "frame.strings")?;
         for patch in &self.patches {
             encode_patch(&mut w, patch)?;
         }
@@ -1073,7 +1087,7 @@ impl Frame {
         }
         let mut r = Reader::with_version(payload, version);
         let seq = r.u32("error.seq")?;
-        let msg_len = r.u16("error.msg.len")? as usize;
+        let msg_len = r.count("error.msg.len")? as usize;
         let raw = r.bytes(msg_len, "error.msg")?;
         let message =
             std::str::from_utf8(raw)
