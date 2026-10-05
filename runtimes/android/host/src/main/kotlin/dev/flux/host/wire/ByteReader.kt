@@ -69,6 +69,38 @@ public class ByteReader(
     private fun require(n: Int) {
         if (remaining < n) throw WireError("unexpected end of frame: need $n bytes at offset $pos, have $remaining")
     }
+
+    /** Wire protocol version of the frame currently being decoded. Set by
+     * [FrameDeserializer.deserialize] immediately after the version byte is
+     * validated, before any length-prefixed section is read. [count] dispatches
+     * on this value: v2 reads a widened `u16`, v3 reads a raw `u32` (ADR-0059).
+     * The default sentinel `0u` makes a missing [setVersion] surface as a
+     * `WireError` from [count] instead of silently picking the wrong layout. */
+    private var version: UByte = 0u
+
+    /** Records the wire protocol version for subsequent [count] reads. Called
+     * by [FrameDeserializer.deserialize] after the version byte is validated. */
+    internal fun setVersion(v: UByte) {
+        version = v
+    }
+
+    /** Reads a length-prefixed count using the layout selected by [version].
+     * On v2 the count is a little-endian `u16`; on v3 it is a `u32` (ADR-0059).
+     * [context] names the field for diagnostics. A v3 count above
+     * `Int.MAX_VALUE` is rejected fail-closed rather than truncated to a
+     * negative value. */
+    internal fun count(context: String): Int =
+        when (version.toInt()) {
+            2 -> u16()
+            3 -> {
+                val raw = u32()
+                if (raw > Int.MAX_VALUE.toLong()) {
+                    throw WireError("count '$context' exceeds Int.MAX_VALUE: $raw")
+                }
+                raw.toInt()
+            }
+            else -> throw WireError("count('$context') called before setVersion (version=$version)")
+        }
 }
 
 /**
