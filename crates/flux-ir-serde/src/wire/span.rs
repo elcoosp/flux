@@ -33,7 +33,9 @@ pub(crate) fn encode_str(w: &mut Writer, s: &str) -> Result<(), WireError> {
 
 /// Reads a length-prefixed UTF-8 string (u16 byte length + bytes).
 pub(crate) fn decode_str(r: &mut Reader<'_>, ctx: &'static str) -> Result<String, WireError> {
-    let len = r.u16(ctx)? as usize;
+    // ADR-0059: the length prefix width depends on `r`'s protocol version.
+    // `Reader::count` returns u32 either way (u16 for v2 is widened).
+    let len = r.count(ctx)? as usize;
     let raw = r.bytes(len, ctx)?;
     std::str::from_utf8(raw)
         .map(str::to_owned)
