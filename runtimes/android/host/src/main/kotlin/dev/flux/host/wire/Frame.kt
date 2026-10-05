@@ -184,7 +184,7 @@ public data class Patch(
     val index: UShort,
     val node: WireNode?,
     val diff: PropDiff?,
-    val keyCount: UShort,
+    val keyCount: UInt,
     val keys: List<UInt>,
     val closure: ClosureRef?,
     /**
