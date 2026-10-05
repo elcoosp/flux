@@ -1,60 +1,26 @@
-# Wire fixtures (FLUX-083)
+# Wire fixtures (FLUX-083, ADR-0059)
 
-Binary wire frames shared across the three decoders (Rust `flux-ir-serde`,
-Kotlin `FrameDeserializer`, Swift `FrameDeserializer`) so they stay in
-lockstep on the **`PROTOCOL_VERSION` fail-closed** path (FLUX-050 / ADR-0056).
+Binary wire frames shared across the three host decoders (Rust `flux-ir-serde`,
+Kotlin `FrameDeserializer`, Swift `FrameDeserializer`), so they stay in
+lockstep on both the **`PROTOCOL_VERSION` fail-closed** path (FLUX-050 /
+ADR-0056) and the **v2 → v3 decoder fallback** path (ADR-0059).
 
-## `unsupported-version.bin`
+## Fixture set
 
-A valid v2 `Init` (full-tree) frame produced by `Frame::init` in
-`crates/flux-ir-serde`, with the **version byte (header offset 4) set to `0x03`**
-— a protocol version no host decoder supports:
-
-- Rust decoder: accepts `{2}` → rejects.
-- Swift decoder: accepts `{2}` → rejects.
-- Kotlin decoder: accepts `{1, 2}` (its `FrameBuilder` test helper emits v1) → rejects.
-
-Layout (Appendix D §D.1 / §D.12.2):
-
-```
-offset 0..4  magic  0x465C5558 ("FLUX")
-offset 4     version 0x03  ← unsupported, the whole point
-offset 5     kind   0x02    (FRAME_INIT)
-offset 6..   Init payload (root node, descendant count, signal seed,
-              source map, string table, component names, handler section)
-```
-
-Any decoder reaching this file **must** surface a typed `WireError` (Rust
-`WireError::InvalidTag { context: "frame.version" }`, Kotlin `WireError`,
-Swift `WireError.unsupportedVersion`) **before** decoding any field, never a
-partial/best-effort decode. The Rust test
-`unsupported_protocol_version_fixture_matches_and_is_rejected` regenerates
-these exact bytes from its encoder when the file is absent, then asserts the
-committed bytes are byte-identical and rejected — so the fixture can never
-silently drift from the encoder.
-
-### Regenerating
-
-```sh
-cargo test -p flux-ir-serde --test round_trip unsupported_protocol_version
-```
-
-## Three-decoder gate (T-505)
-
-Every committed fixture must decode identically (or fail-closed identically)
-across all three host decoders. The gate script runs each decoder's fixture
-test and exits non-zero on any mismatch:
-
-```sh
-bash scripts/wire-fixtures-gate.sh
-```
-
-| Decoder | Test | Fixture path |
+| File | Protocol | Purpose |
 |---|---|---|
-| Rust `flux-ir-serde` | `fixtures_golden.rs` | `fixtures/wire/*.bin` |
-| Kotlin `FrameDeserializer` | `FrameDeserializerTest` (host) + `WireFixtureContractTest` (app) | `FLUX_WIRE_FIXTURES` env or classpath |
-| Swift `FrameDeserializer` | `WireDecodeTests` | `FLUX_WIRE_FIXTURES` env or `../../fixtures/wire` |
+| `init_v2.bin`             | 2 | Legacy full-tree Init; decoder v2 fallback coverage |
+| `delta_v2.bin`            | 2 | Legacy patch delta; decoder v2 fallback coverage |
+| `init_v3.bin`             | 3 | Current full-tree Init (u32 length prefixes) |
+| `delta_v3.bin`            | 3 | Current patch delta |
+| `unsupported-version.bin` | 4 | Fail-closed version rejection |
 
-A decoder whose toolchain is absent is reported as `SKIP`, not a failure.
-At least one decoder must run; if none can, the script exits 0 with a `SKIP`
-notice.
+The v2 and v3 pairs share **identical structural content** — the only
+differences are the header version byte and the widened `u32` length prefixes
+introduced by ADR-0059. Any unexpected byte divergence between v2 and v3
+pairs indicates encoder drift.
+
+## Regenerating
+
+```sh
+cargo run -p flux-ir-serde --example dump_fixtures
