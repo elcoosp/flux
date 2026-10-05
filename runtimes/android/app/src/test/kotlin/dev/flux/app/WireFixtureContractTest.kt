@@ -4,6 +4,7 @@ import dev.flux.host.wire.FluxFrame
 import dev.flux.host.wire.FrameDeserializer
 import dev.flux.host.wire.WireError
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -21,16 +22,19 @@ class WireFixtureContractTest {
     @Test
     fun `init_v2 decodes root and two children`() {
         val bytes = loadFixture("init_v2.bin")
-        assertEquals(0x02u, bytes[4].toUByte(), "version must be 2 (0x02)")
+        assertEquals(0x02, bytes[4].toInt(), "version must be 2 (0x02)")
         val decoded = FrameDeserializer.deserialize(bytes)
-        val extra = decoded.extraNodes
-        assertEquals(2, extra.size, "init_v2 should have 2 extra nodes (Text + Button)")
+        val root = decoded.root
+        assertNotNull(root, "init_v2 must carry a root node")
+        // The fixture's root references its two child ids (Button/Text); the
+        // child NodeRefs are encoded inline in `children`, not as flat extras.
+        assertEquals(2, root!!.children.size, "init_v2 root should reference 2 child ids")
     }
 
     @Test
     fun `delta_v2 decodes one patch`() {
         val bytes = loadFixture("delta_v2.bin")
-        assertEquals(0x02u, bytes[4].toUByte(), "version must be 2 (0x02)")
+        assertEquals(0x02, bytes[4].toInt(), "version must be 2 (0x02)")
         val decoded = FrameDeserializer.deserialize(bytes)
         assertTrue(decoded.patches.isNotEmpty(), "delta_v2 must carry patches")
     }
@@ -38,16 +42,17 @@ class WireFixtureContractTest {
     @Test
     fun `init_v3 decodes root and two children`() {
         val bytes = loadFixture("init_v3.bin")
-        assertEquals(0x03u, bytes[4].toUByte(), "version must be 3 (0x03)")
+        assertEquals(0x03, bytes[4].toInt(), "version must be 3 (0x03)")
         val decoded = FrameDeserializer.deserialize(bytes)
-        val extra = decoded.extraNodes
-        assertEquals(2, extra.size, "init_v3 should have 2 extra nodes (Text + Button)")
+        val root = decoded.root
+        assertNotNull(root, "init_v3 must carry a root node")
+        assertEquals(2, root!!.children.size, "init_v3 root should reference 2 child ids")
     }
 
     @Test
     fun `delta_v3 decodes one patch`() {
         val bytes = loadFixture("delta_v3.bin")
-        assertEquals(0x03u, bytes[4].toUByte(), "version must be 3 (0x03)")
+        assertEquals(0x03, bytes[4].toInt(), "version must be 3 (0x03)")
         val decoded = FrameDeserializer.deserialize(bytes)
         assertTrue(decoded.patches.isNotEmpty(), "delta_v3 must carry patches")
     }
@@ -55,7 +60,7 @@ class WireFixtureContractTest {
     @Test
     fun `unsupported version fixture is rejected`() {
         val bytes = loadFixture("unsupported-version.bin")
-        assertEquals(0x04u, bytes[4].toUByte(), "fixture must carry unsupported version 4")
+        assertEquals(0x04, bytes[4].toInt(), "fixture must carry unsupported version 4")
         try {
             FrameDeserializer.deserialize(bytes)
             error("unsupported version must be rejected")
