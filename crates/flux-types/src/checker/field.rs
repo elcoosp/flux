@@ -36,7 +36,24 @@ impl Checker {
                     // bytecode emitter can emit GET_FIELD with the slot
                     // the VM expects (records are positional).
                     let fid = compute_node_id(0, ExprTag(10), expr.span, None);
-                    self.field_indices.insert(fid, pos as u16);
+                    // Checked narrowing (audit H14 / Tier-2): a record with
+                    // more than u16::MAX fields would silently truncate the
+                    // positional index, and the bytecode emitter's GET_FIELD
+                    // would read a wrong slot. Absurd in practice (a user
+                    // would never author a 65k-field record), but the encode
+                    // is now total.
+                    let pos_u16 = u16::try_from(pos).map_err(|_| {
+                        TypeError::new(
+                            format!(
+                                "record has {} fields; field index exceeds the u16 \
+                                 wire limit (max {})",
+                                fields.len(),
+                                u16::MAX,
+                            ),
+                            field.span,
+                        )
+                    })?;
+                    self.field_indices.insert(fid, pos_u16);
                     Ok((**ty).clone())
                 } else {
                     Err(
@@ -64,7 +81,20 @@ impl Checker {
                         .find(|(_, (n, _))| n == &field.name)
                     {
                         let fid = compute_node_id(0, ExprTag(10), expr.span, None);
-                        self.field_indices.insert(fid, pos as u16);
+                        // Same checked-narrowing rationale as the structural
+                        // `Record` arm above.
+                        let pos_u16 = u16::try_from(pos).map_err(|_| {
+                            TypeError::new(
+                                format!(
+                                    "record `{name}` has {} fields; field index \
+                                     exceeds the u16 wire limit (max {})",
+                                    fields.len(),
+                                    u16::MAX,
+                                ),
+                                field.span,
+                            )
+                        })?;
+                        self.field_indices.insert(fid, pos_u16);
                         Ok(ty.clone())
                     } else {
                         Err(TypeError::new(
