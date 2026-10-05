@@ -261,14 +261,14 @@ final class WireDecodeTests: XCTestCase {
     /// FLUX-083: a frame tagged with an unsupported protocol version must be
     /// rejected fail-closed with `WireError.unsupportedVersion`, never
     /// mis-decoded. The shared cross-language fixture `unsupported-version.bin`
-    /// (a v2 Init frame with version byte `0x03`) exercises the same path; the
+    /// (a v2 Init frame with version byte `0x04`) exercises the same path; the
     /// Rust and Kotlin decoders carry the matching assertion. Swift accepts
-    /// only `{2}`, so version `0x03` is rejected.
+    /// `[2, 3]` (ADR-0059), so version `0x04` is rejected.
     func testUnsupportedProtocolVersionRejected() {
-        // Header: magic + version(0x03, unsupported) + kind(0x02, Init). The
+        // Header: magic + version(0x04, unsupported) + kind(0x02, Init). The
         // body is irrelevant — the handshake must fail before any field decode.
         let frame = cat([
-            u32(FrameDeserializer.magic), [0x03], [0x02], u32(0), [0x00],
+            u32(FrameDeserializer.magic), [0x04], [0x02], u32(0), [0x00],
         ])
         XCTAssertThrowsError(try FrameDeserializer.decode(frame)) { error in
             guard let we = error as? WireError,
@@ -276,13 +276,13 @@ final class WireDecodeTests: XCTestCase {
                 XCTFail("expected unsupportedVersion, got \(error)"); return
             }
             XCTAssertEqual(offset, 5)
-            XCTAssertEqual(actual, 0x03)
+            XCTAssertEqual(actual, 0x04)
             XCTAssertEqual(expected, FrameDeserializer.protocolVersion)
         }
     }
 
     /// The committed `fixtures/wire/unsupported-version.bin` (FLUX-083) is a v2
-    /// Init frame with version byte `0x03` — rejected by every host decoder.
+    /// Init frame with version byte `0x04` — rejected by every host decoder.
     /// Loads the fixture from `FLUX_WIRE_FIXTURES` (set in project.yml).
     func testSharedUnsupportedVersionFixtureRejected() throws {
         let env = ProcessInfo.processInfo.environment["FLUX_WIRE_FIXTURES"]
@@ -290,7 +290,7 @@ final class WireDecodeTests: XCTestCase {
         let url = URL(fileURLWithPath: env, isDirectory: true)
             .appendingPathComponent("unsupported-version.bin")
         let bytes = try Data(contentsOf: url)
-        XCTAssertEqual(bytes[4], 0x03, "fixture must carry unsupported version 3")
+        XCTAssertEqual(bytes[4], 0x04, "fixture must carry unsupported version 4")
         // A byte array is little-endian; Feed it straight to the decoder.
         let frame = [UInt8](bytes)
         XCTAssertThrowsError(try FrameDeserializer.decode(frame)) { error in
