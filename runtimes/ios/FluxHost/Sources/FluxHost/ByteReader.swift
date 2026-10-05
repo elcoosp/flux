@@ -14,9 +14,10 @@ enum WireError: Error, Equatable, Sendable {
     case unknownTag(offset: Int, tag: UInt8)
     /// A frame did not begin with the `FLUX` magic.
     case badMagic(offset: Int, value: UInt32)
-    /// The protocol version byte did not match the host's implemented version
-    /// (FLUX-050 / ADR-0056). The handshake fails closed: an old host must not
-    /// mis-decode a newer server's frames, nor a new host a older server's.
+    /// The protocol version byte is outside the host's supported range
+    /// `[protocolVersionMin, protocolVersion]` (FLUX-050 / ADR-0056). The
+    /// handshake fails closed: an old host must not mis-decode a newer
+    /// server's frames, nor a new host an older server's.
     case unsupportedVersion(offset: Int, actual: UInt8, expected: UInt8)
     /// The Delta frame's D.1 `handler_count` header does not match the number of
     /// `HandlerDef`s decoded from the D.12 handler section (T-316.6). A mismatch
@@ -29,10 +30,26 @@ struct ByteReader {
     private let data: [UInt8]
     private(set) var offset: Int
 
-    /// Creates a reader over `bytes`, starting at offset 0.
+    /// The protocol version of the frame currently being decoded. Set by
+    /// `FrameDeserializer.decode` immediately after the version byte is read
+    /// and validated, before any length-prefixed section is decoded. `count()`
+    /// dispatches on this value: v2 reads a widened `u16`, v3 reads a `u32`
+    /// (ADR-0059). The default `0` is a sentinel so that a `count()` call
+    /// before `setVersion` fails loudly instead of silently picking the wrong
+    /// layout.
+    private(set) var version: UInt8 = 0
+
+    /// Creates a reader over `bytes`, starting at offset 0. The caller must
+    /// invoke `setVersion` before any `count()` call.
     init(_ bytes: [UInt8]) {
         self.data = bytes
         self.offset = 0
+    }
+
+    /// Records the wire protocol version for subsequent `count()` reads.
+    /// Called by `FrameDeserializer.decode` after the version byte is read.
+    mutating func setVersion(_ v: UInt8) {
+        self.version = v
     }
 
     /// `true` once the cursor has consumed the whole buffer.
@@ -114,6 +131,24 @@ struct ByteReader {
     mutating func utf8(_ count: Int) throws -> String {
         let raw = try bytes(count)
         return String(decoding: raw, as: UTF8.self)
+    }
+
+    /// Reads a length-prefixed count using the layout selected by the current
+    /// protocol version. On v2 the count is a little-endian `UInt16` widened
+    /// to `UInt32`; on v3 it is a raw `UInt32` (ADR-0059). `context` names the
+    /// field for diagnostics.
+    mutating func count(_ context: String) throws -> UInt32 {
+        switch version {
+        case 2:
+            return UInt32(try u16())
+        case 3:
+            return try u32()
+        default:
+            // Unreachable in normal operation: `FrameDeserializer.decode`
+            // validates the version byte and calls `setVersion` before any
+            // count read. This guards against a caller forgetting the set.
+            throw WireError.unsupportedVersion(offset: offset, actual: version, expected: 3)
+        }
     }
 }
 
