@@ -31,7 +31,7 @@ struct FluxSpan: Equatable, Sendable {
 /// the `NodeId`; `Splice` keys are explicit `u64` keys from the IR (Appendix D §D.4).
 enum Child: Equatable, Sendable {
     case node(UInt32)
-    case splice(itemCount: UInt16, items: [(key: UInt64, node: UInt32)])
+    case splice(itemCount: UInt32, items: [(key: UInt64, node: UInt32)])
 
     static func == (lhs: Child, rhs: Child) -> Bool {
         switch (lhs, rhs) {
@@ -56,9 +56,9 @@ struct ShadowNode: Equatable, Sendable {
     let kind: NodeKind
     let componentId: UInt32
     let props: [Prop]
-    let childCount: UInt16
+    let childCount: UInt32
     let children: [Child]
-    let handlerCount: UInt16
+    let handlerCount: UInt32
     let handlers: [UInt32]
     let span: FluxSpan
     /// Handler id bound to this node's `onMount` block (§18.4), evaluated once
@@ -78,9 +78,9 @@ struct ShadowNode: Equatable, Sendable {
         kind: NodeKind,
         componentId: UInt32,
         props: [Prop],
-        childCount: UInt16,
+        childCount: UInt32,
         children: [Child],
-        handlerCount: UInt16,
+        handlerCount: UInt32,
         handlers: [UInt32],
         span: FluxSpan,
         mountHandler: UInt32? = nil,
