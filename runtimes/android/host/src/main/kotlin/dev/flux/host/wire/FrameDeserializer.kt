@@ -33,15 +33,21 @@ public object FrameDeserializer {
      * must never silently mis-decode a newer server's frames, and a new host
      * must never accept an older server's incompatible layout. The mismatch
      * surfaces as a red banner, never a crash. */
-    public const val PROTOCOL_VERSION: UByte = 0x02u
+    public const val PROTOCOL_VERSION: UByte = 0x03u
 
-    /** Protocol versions this host can decode. The wire (Rust `flux-ir-serde`)
-     * always writes the ADR-0057 excerpt flag, and the current encoder emits
-     * protocol version 2, but the `FrameBuilder` test helper and committed
-     * fixtures exercise both v1 and v2, so both are accepted; any other version
-     * is rejected fail-closed (FLUX-050 / ADR-0056). */
-    // Audit D8: v1 removed — keep v2 only (protocol version 0x02)
-    private val SUPPORTED_VERSIONS: Set<UByte> = setOf(0x02u)
+    /** The oldest wire version this host can still decode. The Rust encoder
+     * always writes [PROTOCOL_VERSION] (v3), but hosts accept the preceding
+     * version too via the [ByteReader.count] dispatch, so a v3 dev server can
+     * serve a v2-built host during the transition and a v2 server can still
+     * drive a v3 host (ADR-0059 §"Migration and compatibility"). */
+    public const val PROTOCOL_VERSION_MIN: UByte = 0x02u
+
+    /** Protocol versions this host can decode. ADR-0059 widened 16 length
+     * prefixes from u16 to u32 in v3; v2 is retained for the decoder's
+     * fallback path (the `FrameBuilder` test helper and the committed
+     * v2 wire fixtures exercise it). Any other version is rejected
+     * fail-closed (FLUX-050 / ADR-0056). */
+    private val SUPPORTED_VERSIONS: Set<UByte> = setOf(0x02u, 0x03u)
 
     /** FluxFrame kind constants mirroring crates/flux-ir-serde/src/frame.rs. */
     private const val FRAME_INIT: UByte = 0x02u
@@ -71,6 +77,7 @@ public object FrameDeserializer {
                 String.format("protocol version 0x%02X not supported by host (expected 0x%02X); update the host or the dev server", version.toInt(), PROTOCOL_VERSION.toInt())
             )
         }
+        r.setVersion(version)
         val kind = r.u8().toUByte()
         return when (kind) {
             FRAME_INIT -> decodeInit(r, version)
@@ -94,18 +101,18 @@ public object FrameDeserializer {
         val extraCount = r.u32().toUInt()
         val extraNodes = ArrayList<WireNode>(extraCount.toInt())
         repeat(extraCount.toInt()) { extraNodes.add(decodeNode(r)) }
-        // signal state_seed: u16 count of (u32 signalId, value).
-        val seedCount = r.u16()
+        // signal state_seed: count of (u32 signalId, value).
+        val seedCount = r.count("init.seed")
         val stateDelta = ArrayList<Pair<UInt, WireValue>>(seedCount)
         repeat(seedCount) {
             val id = r.u32().toUInt()
             stateDelta.add(id to decodeValue(r))
         }
-        // source_map: u16 count of (u32 fileId, u16 len + utf8 path).
-        val smCount = r.u16()
+        // source_map: count of (u32 fileId, count + utf8 path).
+        val smCount = r.count("init.srcmap")
         repeat(smCount) {
             r.u32() // fileId
-            val len = r.u16()
+            val len = r.count("init.srcmap.path.len")
             r.utf8(len) // path (consumed; not modeled on the Android FluxFrame)
         }
         // string_count is a u32 (Appendix D §D.12.2). These are LITERAL strings
@@ -119,11 +126,11 @@ public object FrameDeserializer {
         // `componentId` to its adapter name ("Text", "Column", ...). They are
         // NOT string literals and MUST NOT be fed to the string resolver; the
         // registry consumes them via `componentNames`.
-        val componentCount = r.u16()
+        val componentCount = r.count("init.component_names.count")
         val componentNames = ArrayList<StringEntry>(componentCount)
         repeat(componentCount) {
             val cid = r.u32().toUInt()
-            val nameLen = r.u16()
+            val nameLen = r.count("init.component_names.name_len")
             val name = r.utf8(nameLen)
             componentNames.add(StringEntry(cid, name))
         }
@@ -160,9 +167,9 @@ public object FrameDeserializer {
     ): FluxFrame {
         val seq = r.u32().toUInt()
         val flags = r.u8()
-        val patchCount = r.u16()
-        val handlerCount = r.u16()
-        val strCount = r.u16()
+        val patchCount = r.count("delta.patch_count")
+        val handlerCount = r.count("delta.handler_count")
+        val strCount = r.count("delta.string_count")
         val patches = ArrayList<Patch>(patchCount)
         repeat(patchCount) { patches.add(decodePatch(r)) }
         val strings = ArrayList<StringEntry>(strCount)
@@ -203,7 +210,7 @@ public object FrameDeserializer {
      */
     private fun decodeError(r: ByteReader, version: UByte): FluxFrame {
         val seq = r.u32().toUInt()
-        val msgLen = r.u16()
+        val msgLen = r.count("error.msg.len")
         val message = r.utf8(msgLen)
         val hasSpan = r.u8()
         val span: FluxSpan? =
@@ -223,7 +230,7 @@ public object FrameDeserializer {
                     byteEnd = r.u32().toUInt(),
                     line = r.u16().toUShort(),
                     col = r.u16().toUShort(),
-                    snippet = r.utf8(r.u16()),
+                    snippet = r.utf8(r.count("error.excerpt.snippet.len")),
                 )
             } else {
                 null
@@ -287,7 +294,7 @@ public object FrameDeserializer {
         val blob = decodeBytecodeBlob(r)
         if (blob.len == 0) { return blob to emptyList() }
         val defs = ArrayList<HandlerDef>(0)
-        val count = r.u16()
+        val count = r.count("frame.closures")
         repeat(count) { defs.add(decodeHandlerDef(r, version)) }
         return blob to defs
     }
@@ -348,11 +355,11 @@ public object FrameDeserializer {
                     keys = emptyList(),
                     closure = null,
                 )
-            0x05 -> { // Reorder: u32 parent_id, u16 key_count, [u32; key_count]
+            0x05 -> { // Reorder: u32 parent_id, count key_count, [u32; key_count]
                 val parent = r.u32().toUInt()
-                val keyCount = r.u16().toUShort()
-                val keys = ArrayList<UInt>(keyCount.toInt())
-                repeat(keyCount.toInt()) { keys.add(r.u32().toUInt()) }
+                val keyCount = r.count("patch.reorder.keys")
+                val keys = ArrayList<UInt>(keyCount)
+                repeat(keyCount) { keys.add(r.u32().toUInt()) }
                 Patch(
                     tag,
                     id = 0u,
@@ -360,7 +367,7 @@ public object FrameDeserializer {
                     index = 0u,
                     node = null,
                     diff = null,
-                    keyCount = keyCount,
+                    keyCount = keyCount.toUInt(),
                     keys = keys,
                     closure = null,
                 )
@@ -401,13 +408,13 @@ public object FrameDeserializer {
     }
 
     private fun decodePropDiff(r: ByteReader): PropDiff {
-        val changeCount = r.u16()
+        val changeCount = r.count("propdiff.change_count")
         val changes = ArrayList<Pair<UShort, WireValue>>(changeCount)
         repeat(changeCount) {
             val idx = r.u16().toUShort()
             changes.add(idx to decodeValue(r))
         }
-        val removalCount = r.u16()
+        val removalCount = r.count("propdiff.removal_count")
         val removals = ArrayList<UShort>(removalCount)
         repeat(removalCount) { removals.add(r.u16().toUShort()) }
         return PropDiff(changes, removals)
@@ -433,7 +440,7 @@ public object FrameDeserializer {
                     byteEnd = r.u32().toUInt(),
                     line = r.u16().toUShort(),
                     col = r.u16().toUShort(),
-                    snippet = r.utf8(r.u16()),
+                    snippet = r.utf8(r.count("excerpt.snippet.len")),
                 )
             } else {
                 null
@@ -480,7 +487,7 @@ public object FrameDeserializer {
 
     private fun decodeStringEntry(r: ByteReader): StringEntry {
         val id = r.u32().toUInt()
-        val len = r.u16()
+        val len = r.count("string.len")
         val text = r.utf8(len)
         return StringEntry(id, text)
     }
@@ -497,16 +504,16 @@ public object FrameDeserializer {
         // which maps the id to the component name ("Text", "Column", ...).
         val kind = (kindByte and 0x1F).toString()
         val componentId = r.u32().toUInt()
-        val propCount = r.u16()
+        val propCount = r.count("node.props.count")
         val props = ArrayList<Pair<UShort, WireValue>>(propCount)
         repeat(propCount) {
             val idx = r.u16().toUShort()
             props.add(idx to decodeValue(r))
         }
-        val childCount = r.u16()
+        val childCount = r.count("node.child_count")
         val children = ArrayList<WireChild>(childCount)
         repeat(childCount) { children.add(decodeChild(r)) }
-        val handlerCount = r.u16()
+        val handlerCount = r.count("node.handler_count")
         val handlerIds = ArrayList<UInt>(handlerCount)
         repeat(handlerCount) { handlerIds.add(r.u32().toUInt()) }
         val spanFile = r.u32().toUInt()
@@ -519,7 +526,7 @@ public object FrameDeserializer {
         when (val tag = r.u8()) {
             0x01 -> WireChild.Node(r.u32().toUInt())
             0x02 -> {
-                val itemCount = r.u16()
+                val itemCount = r.count("child.splice.count")
                 val items = ArrayList<Pair<ULong, UInt>>(itemCount)
                 repeat(itemCount) {
                     val key = r.u32().toULong() // u64 key (low 32 read)
@@ -540,13 +547,13 @@ public object FrameDeserializer {
             0x04 -> WireValue.StrVal(r.u32().toUInt())
             0x05 -> WireValue.HandlerRefVal(r.u32().toUInt())
             0x06 -> {
-                val count = r.u16()
+                val count = r.count("value.list.count")
                 val items = ArrayList<WireValue>(count)
                 repeat(count) { items.add(decodeValue(r)) }
                 WireValue.ListVal(items)
             }
             0x07 -> {
-                val count = r.u16()
+                val count = r.count("value.record.count")
                 val fields = ArrayList<WireValue.RecordVal.Field>(count)
                 repeat(count) {
                     val idx = r.u16().toUShort()
