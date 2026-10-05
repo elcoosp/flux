@@ -561,8 +561,23 @@ impl Pipeline {
     /// never introduces new handlers). This is the "|dependents[S]|-bounded
     /// patch" the ADR-0027 promise advertises.
     fn build_dispatch_delta(&mut self, patches: &[Patch]) -> Vec<u8> {
-        self.try_build_dispatch_delta(patches)
-            .expect("build_dispatch_delta: frame exceeds wire length limits")
+        match self.try_build_dispatch_delta(patches) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                // Audit H14: ship an `Error` frame instead of panicking the
+                // dispatch path (one tap = one frame; a panic here kills the
+                // pipeline thread on a legitimately large program). Mirrors
+                // `init_frame`'s fallback; the host renders the message as a
+                // red banner while the last good tree stays on screen.
+                let diagnostic = Diagnostic::new(
+                    format!(
+                        "Dispatch frame exceeds wire length limits: {e} —                          the dependent set is too large for a single frame;                          reduce the number of signals a single handler writes"
+                    ),
+                    None,
+                );
+                self.error_frame(&diagnostic)
+            }
+        }
     }
 
     /// Fallible form of [`Self::build_dispatch_delta`] (audit H14). The
@@ -966,8 +981,22 @@ impl Pipeline {
         state_seed: &[(SignalId, Value)],
         component_names: &[(flux_syntax::ComponentId, String)],
     ) -> Vec<u8> {
-        self.try_build_init(arena, closures, state_seed, component_names)
-            .expect("build_init: frame exceeds wire length limits")
+        match self.try_build_init(arena, closures, state_seed, component_names) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                // Audit H14: fall back to an `Error` frame rather than
+                // panicking the pipeline thread on a legitimately large
+                // program. Same fallback `init_frame` already applies on
+                // the reconnect path.
+                let diagnostic = Diagnostic::new(
+                    format!(
+                        "Init frame exceeds wire length limits: {e} —                          the project is too large for a single connection;                          split it into multiple components"
+                    ),
+                    None,
+                );
+                self.error_frame(&diagnostic)
+            }
+        }
     }
 
     /// Fallible form of [`Self::build_init`]. Returns
@@ -1019,8 +1048,21 @@ impl Pipeline {
         patches: &[Patch],
         closures: &[flux_ir::ClosureIR],
     ) -> Vec<u8> {
-        self.try_build_delta(arena, patches, closures)
-            .expect("build_delta: frame exceeds wire length limits")
+        match self.try_build_delta(arena, patches, closures) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                // Audit H14: fall back to an `Error` frame rather than
+                // panicking the pipeline thread on a legitimately large
+                // delta. Same shape as `build_init`'s fallback.
+                let diagnostic = Diagnostic::new(
+                    format!(
+                        "Delta frame exceeds wire length limits: {e} —                          the change set is too large for a single frame;                          edit fewer files at once"
+                    ),
+                    None,
+                );
+                self.error_frame(&diagnostic)
+            }
+        }
     }
 
     /// Fallible form of [`Self::build_delta`] (audit H14). See
