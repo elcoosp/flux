@@ -219,12 +219,15 @@ pub(crate) fn compile_prop_thunk(
     let mut local_prop_indices = std::collections::HashMap::new();
     let mut emitter =
         Emitter::for_thunk(&mut local_prop_indices, scope, metadata, str_interner);
-    let count = props.len() as u16;
+    let count = narrow_count(props.len(), "prop thunk field", Span::new(0, 0, 0))?;
     emitter.emit_alloc_record(1, count);
     let mut layout = Vec::with_capacity(props.len());
     for (position, (prop_idx, expr)) in props.iter().enumerate() {
         let value_reg = emitter.compile_value(expr)?;
-        emitter.emit_set_field(1, position as u16, value_reg);
+        // `position < props.len() <= u16::MAX`, so this cast is provably safe.
+        let field_idx = u16::try_from(position)
+            .expect("position < count <= u16::MAX, so narrowing is infallible");
+        emitter.emit_set_field(1, field_idx, value_reg);
         layout.push(*prop_idx);
     }
     let (code, captured) = emitter.finish()?;
@@ -1396,7 +1399,11 @@ impl<'a> Emitter<'a> {
             // A list literal `[a, b, c]` → ALLOC_LIST + LIST_PUSH per element.
             ExprKind::List(items) => {
                 let dst = self.alloc_reg()?;
-                let cap = items.len().max(1) as u16;
+                let cap = narrow_count(
+                    items.len().max(1),
+                    "list item",
+                    expr.span,
+                )?;
                 self.emit_alloc_list(dst, cap);
                 for item in items {
                     let v = self.compile_value(item)?;
@@ -1411,7 +1418,7 @@ impl<'a> Emitter<'a> {
             // static seed path and the GET_FIELD read side (FLUX-072 #4).
             ExprKind::Record { fields, .. } => {
                 let dst = self.alloc_reg()?;
-                let count = fields.len() as u16;
+                let count = narrow_count(fields.len(), "record field", expr.span)?;
                 self.emit_alloc_record(dst, count);
                 for (name, value) in fields.iter() {
                     let v = self.compile_value(value)?;
@@ -1747,7 +1754,18 @@ impl<'a> Emitter<'a> {
                     // tag slot; reject a payload field whose PropIdx collides
                     // with 0.
                     let dst = self.alloc_reg()?;
-                    self.emit_alloc_record(dst, arg_regs.len() as u16 + 1);
+                    // +1 for the leading variant-tag slot (audit C5).
+                    let record_len = arg_regs
+                        .len()
+                        .checked_add(1)
+                        .ok_or_else(|| {
+                            HandlerCompileError::new(
+                                "call argument count overflowed usize",
+                                expr.span,
+                            )
+                        })?;
+                    let record_count = narrow_count(record_len, "call argument", expr.span)?;
+                    self.emit_alloc_record(dst, record_count);
                     let tag_reg = self.alloc_reg()?;
                     self.emit_load_int_const(tag_reg, variant_tag(&ident.name) as i64);
                     self.emit_set_field(dst, 0, tag_reg);
@@ -1796,9 +1814,13 @@ impl<'a> Emitter<'a> {
         arg_regs: &[u8],
     ) -> Result<u8, HandlerCompileError> {
         let args_reg = self.alloc_reg()?;
-        self.emit_alloc_record(args_reg, arg_regs.len() as u16);
+        let arg_count = narrow_count(arg_regs.len(), "call argument", Span::new(0, 0, 0))?;
+        self.emit_alloc_record(args_reg, arg_count);
         for (idx, reg) in arg_regs.iter().enumerate() {
-            self.emit_set_field(args_reg, idx as u16, *reg);
+            // `idx < arg_regs.len() <= u16::MAX`, so narrowing is infallible.
+            let field_idx = u16::try_from(idx)
+                .expect("idx < arg_count <= u16::MAX, so narrowing is infallible");
+            self.emit_set_field(args_reg, field_idx, *reg);
         }
         let result = self.alloc_reg()?;
         // CALL_CAP result_reg(u8), cap_id(u32), method_id(u16), args_reg(u8)
@@ -1819,6 +1841,32 @@ pub struct HandlerCompileError {
     pub message: String,
     /// Source span of the offending construct.
     pub span: Span,
+}
+
+/// Narrows an emitter-side collection count to the `u16` field the MLP
+/// bytecode envelope uses for `ALLOC_RECORD` / `ALLOC_LIST` / `SET_FIELD`
+/// operands, erroring on overflow instead of silently truncating (audit H14 /
+/// ADR-0059 class).
+///
+/// A record, list, or argument tuple wider than `u16::MAX` entries cannot be
+/// represented in the emitted bytecode's `u16` count field; the previous
+/// `as u16` cast wrapped the count and the VM decoded the wrong number of
+/// slots (or ran off the end of the code stream). The user-visible fix is a
+/// compile error naming the offending construct, not a runtime crash on the
+/// host.
+///
+/// `what` names the construct for the diagnostic (`"record field"`,
+/// `"list item"`, `"call argument"`).
+fn narrow_count(n: usize, what: &'static str, span: Span) -> Result<u16, HandlerCompileError> {
+    u16::try_from(n).map_err(|_| {
+        HandlerCompileError::new(
+            format!(
+                "{what} count {n} exceeds the u16 bytecode operand limit (max {})",
+                u16::MAX
+            ),
+            span,
+        )
+    })
 }
 
 impl HandlerCompileError {
