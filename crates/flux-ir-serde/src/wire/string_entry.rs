@@ -15,14 +15,14 @@ pub(crate) fn encode_string_entry(
     // `WireError::LengthExceedsU16` at this boundary instead of panicking
     // inside `u16_len`. Callers must propagate the result.
     w.u32(id);
-    w.u16_len_checked(text.len(), "string_entry.text")?;
+    w.count_prefix(text.len(), "string_entry.text")?;
     w.bytes(text.as_bytes());
     Ok(())
 }
 
 pub(crate) fn decode_string_entry(r: &mut Reader<'_>) -> Result<(StringId, String), WireError> {
     let id = r.u32("string.id")?;
-    let len = r.u16("string.len")? as usize;
+    let len = r.count("string.len")? as usize;
     let raw = r.bytes(len, "string.bytes")?;
     let text = std::str::from_utf8(raw)
         .map_err(|_| WireError::InvalidUtf8 {
