@@ -21,11 +21,11 @@ pub(crate) fn encode_node(
     w.u8(node.kind.tag());
     w.u32(node.component_id);
     encode_props(w, &node.props)?;
-    w.u16_len_checked(node.children.len(), "node.children")?;
+    w.count_prefix(node.children.len(), "node.children")?;
     for child in &node.children {
         encode_child(w, child)?;
     }
-    w.u16_len_checked(node.handlers.len(), "node.handlers")?;
+    w.count_prefix(node.handlers.len(), "node.handlers")?;
     for handler in &node.handlers {
         w.u32(*handler);
     }
@@ -43,13 +43,13 @@ pub(crate) fn decode_node(r: &mut Reader<'_>) -> Result<NodeRef, WireError> {
     })?;
     let component_id = r.u32("node.component_id")?;
     let props = decode_props(r)?;
-    let child_count = r.u16("node.child_count")?;
+    let child_count = r.count("node.child_count")?;
     r.ensure_capacity(child_count as usize, "node.children")?;
     let mut children = Vec::with_capacity(child_count as usize);
     for _ in 0..child_count {
         children.push(decode_child(r)?);
     }
-    let handler_count = r.u16("node.handler_count")?;
+    let handler_count = r.count("node.handler_count")?;
     r.ensure_capacity(handler_count as usize, "node.handlers")?;
     let mut handlers = Vec::with_capacity(handler_count as usize);
     for _ in 0..handler_count {
