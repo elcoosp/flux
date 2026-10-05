@@ -46,8 +46,10 @@ fn unsupported_version_fixture_is_rejected() {
     let bytes = std::fs::read(&path)
         .unwrap_or_else(|e| panic!("fixture {} missing: {}", path.display(), e));
     assert_eq!(
-        bytes[4], 3,
-        "unsupported-version.bin must carry an unsupported version byte"
+        bytes[4],
+        flux_ir_serde::PROTOCOL_VERSION + 1,
+        "unsupported-version.bin must carry an unsupported version byte \
+         (current + 1)"
     );
     assert!(
         Frame::from_init_bytes(&bytes).is_err(),
