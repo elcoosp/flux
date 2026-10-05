@@ -35,7 +35,14 @@ enum FrameDeserializer {
     /// must never silently mis-decode a newer server's frames, and a new host
     /// must never accept an older server's incompatible layout. The mismatch
     /// surfaces as a red banner, never a crash.
-    static let protocolVersion: UInt8 = 0x02
+    static let protocolVersion: UInt8 = 0x03
+
+    /// The oldest wire version this host can still decode. The Rust encoder
+    /// always writes `PROTOCOL_VERSION` (v3), but hosts accept the preceding
+    /// version too via the `ByteReader::count` dispatch, so a v3 dev server
+    /// can serve a v2-built host during the transition and a v2 server can
+    /// still drive a v3 host (ADR-0059 §"Migration and compatibility").
+    static let protocolVersionMin: UInt8 = 0x02
 
     /// Decodes a frame from raw bytes.
     ///
@@ -61,13 +68,17 @@ enum FrameDeserializer {
             throw WireError.badMagic(offset: 0, value: rawMagic)
         }
         let version = try r.u8()
-        guard version == Self.protocolVersion else {
+        guard version >= Self.protocolVersionMin && version <= Self.protocolVersion else {
             // Fail-closed handshake (FLUX-050 / ADR-0056): refuse to decode a
             // frame whose protocol version the host does not implement. An old
             // host + new server (or vice-versa) must surface an actionable red
-            // banner, not a silent mis-decode / crash.
+            // banner, not a silent mis-decode / crash. ADR-0059 widens the
+            // accepted range to [2, 3]: v2 is still readable via the
+            // `ByteReader::count` version dispatch, so a v2 server can drive
+            // a v3 host during the transition.
             throw WireError.unsupportedVersion(offset: 5, actual: version, expected: Self.protocolVersion)
         }
+        r.setVersion(version)
         let kind = try r.u8()
         switch kind {
         case FrameKind.initByte:
@@ -102,7 +113,7 @@ enum FrameDeserializer {
             }
         }
         // signal `state_seed`: u16 count of (u32 signalId, value).
-        let seedCount = try r.u16()
+        let seedCount = try r.count("init.seed")
         var state: [StateCell] = []
         for _ in 0..<seedCount {
             let signalId = try r.u32()
@@ -110,11 +121,11 @@ enum FrameDeserializer {
             state.append(StateCell(signalId: signalId, value: value))
         }
         // `source_map`: u16 count of (u32 fileId, u16 len + utf8 path).
-        let smCount = try r.u16()
+        let smCount = try r.count("init.srcmap")
         var files: [FileEntry] = []
         for _ in 0..<smCount {
             let fileId = try r.u32()
-            let len = try r.u16()
+            let len = try r.count("init.srcmap.path.len")
             let path = try r.utf8(Int(len))
             files.append(FileEntry(fileId: fileId, path: path))
         }
@@ -126,11 +137,11 @@ enum FrameDeserializer {
             strings.append(try decodeStringEntry(&r))
         }
         // `component_names`: u16 count, then per entry `(u32 cid, u16 name_len, utf8 name)`
-        let compCount = try r.u16()
+        let compCount = try r.count("init.component_names.count")
         var componentNames: [StringEntry] = []
         for _ in 0..<compCount {
             let cid = try r.u32()
-            let nameLen = Int(try r.u16())
+            let nameLen = Int(try r.count("init.component_names.name_len"))
             let name = try r.utf8(nameLen)
             componentNames.append(StringEntry(stringId: cid, value: name))
         }
@@ -166,9 +177,9 @@ enum FrameDeserializer {
         // Payload after the 6-byte header: seq, flags, then three u16 counts.
         let seq = try r.u32()
         let flags = try r.u8()
-        let patchCount = try r.u16()
-        let handlerCount = try r.u16()
-        let strCount = try r.u16()
+        let patchCount = try r.count("delta.patch_count")
+        let handlerCount = try r.count("delta.handler_count")
+        let strCount = try r.count("delta.string_count")
         var patches: [Patch] = []
         patches.reserveCapacity(Int(patchCount))
         for _ in 0..<patchCount {
@@ -222,7 +233,7 @@ enum FrameDeserializer {
     /// assumed `diagnostics: [String]` field does not exist in the encoder.
     private static func decodeError(_ r: inout ByteReader, version: UInt8) throws -> FluxFrame {
         let seq = try r.u32()
-        let msgLen = Int(try r.u16())
+        let msgLen = Int(try r.count("error.msg.len"))
         let message = try r.utf8(msgLen)
         let hasSpan = try r.u8()
         let span: FluxSpan? = (hasSpan != 0) ? try decodeSpan(&r) : nil
@@ -280,13 +291,13 @@ enum FrameDeserializer {
         case 0x04: return .str(try r.u32())
         case 0x05: return .handlerRef(try r.u32())
         case 0x06:
-            let count = try r.u16()
+            let count = try r.count("value.list.count")
             var items = ContiguousArray<FluxValue>()
             items.reserveCapacity(Int(count))
             for _ in 0..<count { items.append(try decodeValue(&r)) }
             return .list(Array(items))
         case 0x07:
-            let count = try r.u16()
+            let count = try r.count("value.record.count")
             var fields = ContiguousArray<(UInt16, FluxValue)>()
             fields.reserveCapacity(Int(count))
             for _ in 0..<count {
@@ -328,7 +339,7 @@ enum FrameDeserializer {
             return nil
         }
         let componentId = try r.u32()
-        let propCount = try r.u16()
+        let propCount = try r.count("node.props.count")
         var props = ContiguousArray<Prop>()
         props.reserveCapacity(Int(propCount))
         for _ in 0..<propCount {
@@ -336,13 +347,13 @@ enum FrameDeserializer {
             let value = try decodeValue(&r)
             props.append(Prop(index: idx, value: value))
         }
-        let childCount = try r.u16()
+        let childCount = try r.count("node.child_count")
         var children = ContiguousArray<Child>()
         children.reserveCapacity(Int(childCount))
         for _ in 0..<childCount {
             children.append(try decodeChild(&r))
         }
-        let handlerCount = try r.u16()
+        let handlerCount = try r.count("node.handler_count")
         var handlers = ContiguousArray<UInt32>()
         handlers.reserveCapacity(Int(handlerCount))
         for _ in 0..<handlerCount {
@@ -366,16 +377,16 @@ enum FrameDeserializer {
     /// Audit D9: best-effort skip of a node body when the kind is unknown.
     private static func skipNodeBody(_ r: inout ByteReader) throws {
         _ = try r.u32() // componentId
-        let propCount = try r.u16()
+        let propCount = try r.count("node.props.count")
         for _ in 0..<propCount {
             _ = try r.u16() // idx
             _ = try decodeValue(&r)
         }
-        let childCount = try r.u16()
+        let childCount = try r.count("node.child_count")
         for _ in 0..<childCount {
             _ = try decodeChild(&r)
         }
-        let handlerCount = try r.u16()
+        let handlerCount = try r.count("node.handler_count")
         for _ in 0..<handlerCount { _ = try r.u32() }
         _ = try decodeSpan(&r)
     }
@@ -387,7 +398,7 @@ enum FrameDeserializer {
         case 0x01:
             return .node(try r.u32())
         case 0x02:
-            let itemCount = try r.u16()
+            let itemCount = try r.count("child.splice.count")
             var items = ContiguousArray<(key: UInt64, node: UInt32)>()
             items.reserveCapacity(Int(itemCount))
             for _ in 0..<itemCount {
@@ -415,7 +426,7 @@ enum FrameDeserializer {
             return .replace(id: id, node: node)
         case 0x02:
             let id = try r.u32()
-            let changeCount = try r.u16()
+            let changeCount = try r.count("propdiff.change_count")
             var changes: [Prop] = []
             changes.reserveCapacity(Int(changeCount))
             for _ in 0..<changeCount {
@@ -423,7 +434,7 @@ enum FrameDeserializer {
                 let value = try decodeValue(&r)
                 changes.append(Prop(index: idx, value: value))
             }
-            let removalCount = try r.u16()
+            let removalCount = try r.count("propdiff.removal_count")
             var removals: [UInt16] = []
             removals.reserveCapacity(Int(removalCount))
             for _ in 0..<removalCount {
@@ -441,7 +452,7 @@ enum FrameDeserializer {
             return .remove(id: try r.u32())
         case 0x05:
             let parentId = try r.u32()
-            let keyCount = try r.u16()
+            let keyCount = try r.count("patch.reorder.keys")
             var keys: [UInt32] = []
             keys.reserveCapacity(Int(keyCount))
             for _ in 0..<keyCount { keys.append(try r.u32()) }
@@ -564,7 +575,7 @@ enum FrameDeserializer {
             // no runnable handlers rather than fabricating bodies.
             return []
         }
-        let count = try r.u16()
+        let count = try r.count("frame.closures")
         var resolved: [HandlerDef] = []
         resolved.reserveCapacity(Int(count))
         for _ in 0..<count {
@@ -584,14 +595,14 @@ enum FrameDeserializer {
 
     static func decodeStringEntry(_ r: inout ByteReader) throws -> StringEntry {
         let stringId = try r.u32()
-        let len = try r.u16()
+        let len = try r.count("string.len")
         let value = try r.utf8(Int(len))
         return StringEntry(stringId: stringId, value: value)
     }
 
     static func decodeFileEntry(_ r: inout ByteReader) throws -> FileEntry {
         let fileId = try r.u32()
-        let len = try r.u16()
+        let len = try r.count("srcmap.path.len")
         let path = try r.utf8(Int(len))
         return FileEntry(fileId: fileId, path: path)
     }
