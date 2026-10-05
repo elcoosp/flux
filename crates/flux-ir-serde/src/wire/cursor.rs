@@ -105,11 +105,53 @@ impl Writer {
 pub(crate) struct Reader<'a> {
     bytes: &'a [u8],
     pos: usize,
+    /// Wire protocol version of the frame this reader is decoding. Used by
+    /// version-conditional length-prefix reads (ADR-0059): v3 uses `u32`
+    /// where v2 used `u16`. Set once at construction from the frame header's
+    /// version byte; every nested `decode_*` shares the same reader, so the
+    /// version threads through the entire decode tree without a per-call arg.
+    version: u8,
 }
 
 impl<'a> Reader<'a> {
+    /// Reader for a frame at the current protocol version. Prefer
+    /// [`Self::with_version`] when the caller has already read the frame
+    /// header's version byte.
     pub(crate) fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes, pos: 0 }
+        Self {
+            bytes,
+            pos: 0,
+            version: crate::frame::PROTOCOL_VERSION,
+        }
+    }
+
+    /// Reader for a frame at the given protocol version (from
+    /// `read_frame_type`). Every length-prefix read in this cursor consults
+    /// `version` to pick u16-vs-u32 semantics.
+    pub(crate) fn with_version(bytes: &'a [u8], version: u8) -> Self {
+        Self {
+            bytes,
+            pos: 0,
+            version,
+        }
+    }
+
+    /// The protocol version this reader is decoding for. Used by
+    /// version-conditional helpers (`u16_or_u32` etc.) elsewhere in the wire
+    /// codec.
+    pub(crate) fn protocol_version(&self) -> u8 {
+        self.version
+    }
+
+    /// Reads a collection length prefix. In v3 the prefix is `u32`; in v2 it
+    /// is `u16` (widened for internal use). Either way the caller gets a
+    /// `usize` and never has to think about the version.
+    pub(crate) fn count(&mut self, context: &'static str) -> Result<u32, WireError> {
+        if self.version >= 3 {
+            self.u32(context)
+        } else {
+            Ok(u32::from(self.u16(context)?))
+        }
     }
 
     /// Current read offset, used by callers to detect end-of-buffer.
