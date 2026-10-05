@@ -484,7 +484,9 @@ impl HelloFrame {
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut w = Writer::new();
+        w.set_version(self.version);
         write_magic_version(&mut w, self.version);
+w.set_version(self.version);
         w.u8(self.kind.type_byte());
         encode_str(&mut w, &self.platform);
         encode_str(&mut w, &self.device);
@@ -776,7 +778,9 @@ impl InitFrame {
     /// bytecode blob, closure excerpt, or signal-meta section.
     pub fn try_encode_into(&self, buf: &mut Vec<u8>) -> Result<(), WireError> {
         let mut w = Writer::from_vec(std::mem::take(buf));
+        w.set_version(self.version);
         write_magic_version(&mut w, self.version);
+w.set_version(self.version);
         w.u8(self.kind.type_byte());
         w.u32(self.seq);
         encode_node(&mut w, &self.root)?;
@@ -985,6 +989,7 @@ impl DeltaFrame {
     /// "user authored too many of something" case the audit's H14 called out.
     pub fn try_encode_into(&self, buf: &mut Vec<u8>) -> Result<(), WireError> {
         let mut w = Writer::from_vec(std::mem::take(buf));
+        w.set_version(self.version);
         write_magic_version(&mut w, self.version);
         w.u8(self.kind.type_byte());
         w.u32(self.seq);
@@ -1121,6 +1126,7 @@ impl ErrorFrame {
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut w = Writer::new();
+        w.set_version(self.version);
         write_magic_version(&mut w, self.version);
         w.u8(self.kind.type_byte());
         w.u32(self.seq);
@@ -1193,6 +1199,7 @@ impl HeartbeatFrame {
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut w = Writer::new();
+        w.set_version(self.version);
         write_magic_version(&mut w, self.version);
         w.u8(self.kind.type_byte());
         w.u32(self.seq);
@@ -1263,6 +1270,7 @@ impl InternStringFrame {
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut w = Writer::new();
+        w.set_version(self.version);
         write_magic_version(&mut w, self.version);
         w.u8(self.kind.type_byte());
         w.u16(self.len);
@@ -1351,6 +1359,7 @@ impl StringInternedFrame {
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut w = Writer::new();
+        w.set_version(self.version);
         write_magic_version(&mut w, self.version);
         w.u8(self.kind.type_byte());
         w.u32(self.id);
