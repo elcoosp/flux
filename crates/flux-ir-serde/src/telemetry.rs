@@ -494,7 +494,7 @@ impl TelemetryFrame {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut w = Writer::new();
         w.u32(MAGIC);
-        w.u8(PROTOCOL_VERSION);
+        w.u8(self.version);
         w.u8(FRAME_TELEMETRY);
         w.u16(self.event_count);
         for event in &self.events {
@@ -513,7 +513,7 @@ impl TelemetryFrame {
             return None;
         }
         let version = r.u8("telemetry.version").ok()?;
-        if version != PROTOCOL_VERSION {
+        if version < crate::frame::PROTOCOL_VERSION_MIN || version > PROTOCOL_VERSION {
             return None;
         }
         let kind = r.u8("telemetry.kind").ok()?;
@@ -543,7 +543,7 @@ impl EnrichedTelemetryFrame {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut w = Writer::new();
         w.u32(MAGIC);
-        w.u8(PROTOCOL_VERSION);
+        w.u8(self.version);
         w.u8(FRAME_TELEMETRY);
         w.u16(self.event_count);
         for event in &self.events {
@@ -561,7 +561,7 @@ impl EnrichedTelemetryFrame {
             return None;
         }
         let version = r.u8("telemetry.version").ok()?;
-        if version != PROTOCOL_VERSION {
+        if version < crate::frame::PROTOCOL_VERSION_MIN || version > PROTOCOL_VERSION {
             return None;
         }
         let kind = r.u8("telemetry.kind").ok()?;
@@ -608,7 +608,7 @@ impl HostAnnounceFrame {
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut w = Writer::new();
         w.u32(MAGIC);
-        w.u8(PROTOCOL_VERSION);
+        w.u8(self.version);
         w.u8(FRAME_HOST_ANNOUNCE);
         encode_str(&mut w, &self.platform);
         encode_str(&mut w, &self.device);
@@ -633,7 +633,7 @@ impl HostAnnounceFrame {
             return None;
         }
         let version = r.u8("host_announce.version").ok()?;
-        if version != PROTOCOL_VERSION {
+        if version < crate::frame::PROTOCOL_VERSION_MIN || version > PROTOCOL_VERSION {
             return None;
         }
         let kind = r.u8("host_announce.kind").ok()?;
@@ -775,7 +775,7 @@ impl DebugCommandFrame {
 
         let mut w = Writer::new();
         w.u32(MAGIC);
-        w.u8(PROTOCOL_VERSION);
+        w.u8(self.version);
         w.u8(FRAME_DEBUG_COMMAND);
         w.u32(self.command_id);
         w.u16_len(payload.len(), "telemetry.payload");
@@ -792,7 +792,7 @@ impl DebugCommandFrame {
             return None;
         }
         let version = r.u8("debugcmd.version").ok()?;
-        if version != PROTOCOL_VERSION {
+        if version < crate::frame::PROTOCOL_VERSION_MIN || version > PROTOCOL_VERSION {
             return None;
         }
         let kind = r.u8("debugcmd.kind").ok()?;
