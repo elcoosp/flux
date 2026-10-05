@@ -5,11 +5,19 @@ use super::WireError;
 /// A grow-only little-endian byte sink.
 pub(crate) struct Writer {
     buf: Vec<u8>,
+    /// Wire protocol version this writer targets (ADR-0059). v3 writes
+    /// user-authored collection counts as `u32`; v2 writes them as `u16`.
+    /// Defaults to [`crate::frame::PROTOCOL_VERSION`] so any encoder that
+    /// does not call [`Self::set_version`] emits the newest layout.
+    version: u8,
 }
 
 impl Writer {
     pub(crate) fn new() -> Self {
-        Self { buf: Vec::new() }
+        Self {
+            buf: Vec::new(),
+            version: crate::frame::PROTOCOL_VERSION,
+        }
     }
 
     /// Builds a `Writer` around a caller-owned buffer, clearing it first.
@@ -20,7 +28,10 @@ impl Writer {
     /// is `clear()`ed (capacity preserved), not dropped.
     pub(crate) fn from_vec(mut buf: Vec<u8>) -> Self {
         buf.clear();
-        Self { buf }
+        Self {
+            buf,
+            version: crate::frame::PROTOCOL_VERSION,
+        }
     }
 
     pub(crate) fn u8(&mut self, value: u8) {
@@ -67,6 +78,58 @@ impl Writer {
                 Ok(())
             }
             Err(_) => Err(WireError::LengthExceedsU16 { what, n }),
+        }
+    }
+
+    /// Overrides the protocol version this writer emits (ADR-0059). Called by
+    /// frame encoders that carry a source version, so re-encoding a v2-decoded
+    /// frame reproduces v2 bytes.
+    pub(crate) fn set_version(&mut self, version: u8) {
+        self.version = version;
+    }
+
+    /// This writer's protocol version.
+    pub(crate) fn version(&self) -> u8 {
+        self.version
+    }
+
+    /// Writes a collection/string length prefix using the width appropriate
+    /// to this writer's protocol version:
+    /// * v3: `u32` (user-authored collections can exceed 65 k, ADR-0059)
+    /// * v2: `u16` (the older narrow form)
+    ///
+    /// Unifies every user-authored-length site behind one call so the encoder
+    /// sites do not branch on version — the dispatch lives here.
+    pub(crate) fn count_prefix(
+        &mut self,
+        n: usize,
+        what: &'static str,
+    ) -> Result<(), WireError> {
+        if self.version >= 3 {
+            self.u32_len_checked(n, what)
+        } else {
+            self.u16_len_checked(n, what)
+        }
+    }
+
+    /// Checked `u32` length-prefix write (v3 collections). Returns
+    /// [`WireError::LengthExceedsU32`] on overflow — unreachable on 64-bit
+    /// platforms but keeps the encode path total.
+    ///
+    /// # Errors
+    ///
+    /// [`WireError::LengthExceedsU32`] if `n > u32::MAX`.
+    pub(crate) fn u32_len_checked(
+        &mut self,
+        n: usize,
+        what: &'static str,
+    ) -> Result<(), WireError> {
+        match u32::try_from(n) {
+            Ok(len) => {
+                self.u32(len);
+                Ok(())
+            }
+            Err(_) => Err(WireError::LengthExceedsU32 { what, n }),
         }
     }
 
