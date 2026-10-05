@@ -41,7 +41,7 @@ pub(crate) fn encode_patch(
         }
         Patch::Reorder { parent, keys } => {
             w.u32(*parent);
-            w.u16_len_checked(keys.len(), "patch.removals.keys")?;
+            w.count_prefix(keys.len(), "patch.removals.keys")?;
             for key in keys {
                 w.u32(*key);
             }
@@ -99,7 +99,7 @@ pub(crate) fn decode_patch(r: &mut Reader<'_>) -> Result<Patch, WireError> {
         }
         0x05 => {
             let parent = r.u32("patch.reorder.parent")?;
-            let key_count = r.u16("patch.reorder.keys")?;
+            let key_count = r.count("patch.reorder.keys")?;
             r.ensure_capacity(key_count as usize, "patch.reorder")?;
             let mut keys = Vec::with_capacity(key_count as usize);
             for _ in 0..key_count {
