@@ -14,7 +14,7 @@ pub(crate) fn encode_props(
     // prefix propagates through `encode_node` → `encode_patch` → the frame
     // encoders rather than panicking mid-write. The caller still `.expect()`s
     // at the frame boundary pending the top-level `try_to_bytes` migration.
-    w.u16_len_checked(props.fields().len(), "props.fields")?;
+    w.count_prefix(props.fields().len(), "props.fields")?;
     for (index, value) in props.fields() {
         w.u16(*index);
         encode_value(w, value)?;
@@ -23,7 +23,7 @@ pub(crate) fn encode_props(
 }
 
 pub(crate) fn decode_props(r: &mut Reader<'_>) -> Result<Props, WireError> {
-    let count = r.u16("props.count")?;
+    let count = r.count("props.count")?;
     r.ensure_capacity(count as usize, "props")?;
     let mut fields = Vec::with_capacity(count as usize);
     for _ in 0..count {
