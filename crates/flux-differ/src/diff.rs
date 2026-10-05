@@ -88,4 +88,29 @@ mod emit_tests {
             "same bytecode but different captured_signals must not be equal"
         );
     }
+    /// ADR-0059 / audit H14: a bytecode body larger than `u16::MAX` must
+    /// produce a zero-length ref (with a warning) rather than silently
+    /// truncating the length prefix. `u16::try_from` is the guard.
+    #[test]
+    fn closure_ref_zero_lengths_oversized_bytecode() {
+        // u16::MAX + 1 bytes — one byte over the wire prefix ceiling.
+        let oversized = vec![0u8; (u16::MAX as usize) + 1];
+        let r = closure_ref(&oversized, vec![], Span::new(0, 0, 0));
+        assert_eq!(
+            r.bytecode_len, 0,
+            "oversized bytecode must produce a zero-length ref, not a truncated u16"
+        );
+    }
+
+    /// Boundary sanity: exactly `u16::MAX` bytes must pass through unmodified.
+    #[test]
+    fn closure_ref_accepts_u16_max_bytecode() {
+        let max = vec![0u8; u16::MAX as usize];
+        let r = closure_ref(&max, vec![], Span::new(0, 0, 0));
+        assert_eq!(
+            r.bytecode_len,
+            u16::MAX,
+            "u16::MAX-byte bytecode must keep its full length"
+        );
+    }
 }
