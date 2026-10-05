@@ -21,7 +21,7 @@ SWIFT_OK=0
 # ---------------------------------------------------------------------------
 # 0. Fixture presence — the three decoder files must exist (T-505 source).
 # ---------------------------------------------------------------------------
-for f in init_v2.bin delta_v2.bin unsupported-version.bin; do
+for f in init_v2.bin delta_v2.bin init_v3.bin delta_v3.bin unsupported-version.bin; do
     if [ ! -f "$FIXTURES/$f" ]; then
         echo "FAIL: fixtures/wire/$f missing" >&2
         EXIT=1
