@@ -904,4 +904,58 @@ mod tests {
             .expect("document cached");
         assert_eq!(cached, "compo Bad\n  Text(text: \"hi\")\n");
     }
+
+    /// Regression: an incremental edit whose range cannot be mapped onto the
+    /// cached document must **not** clobber the buffer with the replacement
+    /// fragment. Before the fix, the `else` arm did `*text = change.text` —
+    /// for an incremental edit that string is only the replacement, so the
+    /// document would silently shrink to a few bytes. This test feeds an
+    /// out-of-range edit and asserts the document is left untouched.
+    #[test]
+    fn did_change_ignores_unmappable_incremental_edit() {
+        use async_lsp::lsp_types::{
+            DidChangeTextDocumentParams, TextDocumentContentChangeEvent,
+            VersionedTextDocumentIdentifier,
+        };
+        let mut server = FluxLsp::new();
+        let uri: Url = "file:///unmappable.flux".parse().expect("uri");
+        let original = "compo Ok\n  Text(text: \"hi\")\n";
+        let _ = server.did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "flux".to_owned(),
+                version: 1,
+                text: original.to_owned(),
+            },
+        });
+        // A range far past the end of the buffer — `apply_range_edit` returns
+        // None, which previously triggered the truncating fallback.
+        let bad_range = async_lsp::lsp_types::Range {
+            start: async_lsp::lsp_types::Position { line: 99, character: 0 },
+            end:   async_lsp::lsp_types::Position { line: 99, character: 5 },
+        };
+        let _ = server.did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: uri.clone(),
+                version: 2,
+            },
+            content_changes: vec![TextDocumentContentChangeEvent {
+                range: Some(bad_range),
+                range_length: None,
+                text: "REPLACEMENT".to_owned(),
+            }],
+        });
+        let cached = server
+            .documents
+            .lock()
+            .expect("documents mutex poisoned")
+            .get(&uri)
+            .cloned()
+            .expect("document cached");
+        assert_eq!(
+            cached, original,
+            "an unmappable incremental edit must leave the document unchanged, \
+             not replace it with the fragment"
+        );
+    }
 }
