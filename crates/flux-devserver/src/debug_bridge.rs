@@ -386,7 +386,6 @@ pub async fn serve_devtools(
 
 #[cfg(test)]
 mod tests {
-    use flux_ir_serde::TelemetryFrame;
     use super::*;
     use flux_ir_serde::PROTOCOL_VERSION;
 
