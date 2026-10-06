@@ -1066,9 +1066,9 @@ struct ShadowTreeReconciler {
     /// the Kotlin host's `ShadowTree.destroySubtree` cleanup.
     ///
     /// `signalMeta` and `componentNames` are frame-level snapshots (replaced
-    /// wholesale on each frame), so they are not touched here. `expandedNodeTable`
-    /// and `thunkBlobs` are also frame-scoped. The three maps cleaned here are
-    /// the per-node ones that accumulate across an editing session.
+    /// wholesale on each frame), so they are not touched here. `thunkBlobs` is
+    /// frame-scoped (filtered per frame). The three maps cleaned here are the
+    /// per-node ones that accumulate across an editing session.
     private mutating func cleanupSideTables(for id: UInt32) {
         signalDeps.removeValue(forKey: id)
         forEachRowContext.removeValue(forKey: id)
