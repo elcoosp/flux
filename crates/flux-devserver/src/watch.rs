@@ -63,8 +63,24 @@ impl Watcher {
     }
 
     /// Stops the watch thread.
+    ///
+    /// Sets the shared flag the loop polls; the thread exits within one
+    /// `debounce` window (it may be blocked on `recv_timeout`).
     pub(crate) fn stop(&self) {
         self.running.store(false, Ordering::Relaxed);
+    }
+}
+
+impl Drop for Watcher {
+    /// Ensures the watch thread is signalled to stop when a `Watcher` is
+    /// dropped without an explicit [`Watcher::stop`] call — the contract the
+    /// type's own doc-comment promised but previously did not deliver.
+    ///
+    /// `RunningServer::drop` already calls `stop()`, so this is defensive:
+    /// it covers a standalone `Watcher` (a test or a future caller) and keeps
+    /// the doc-comment honest.
+    fn drop(&mut self) {
+        self.stop();
     }
 }
 
