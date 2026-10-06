@@ -29,9 +29,18 @@ pub(crate) fn decode_handler_def(
 
 /// Encodes the shared bytecode blob (Appendix D §D.12 handler section): a
 /// `u32` byte length followed by the raw little-endian bytecode.
-pub(crate) fn encode_bytecode_blob(w: &mut Writer, blob: &[u8]) {
-    w.u32(blob.len() as u32);
+pub(crate) fn encode_bytecode_blob(
+    w: &mut Writer,
+    blob: &[u8],
+) -> Result<(), crate::wire::WireError> {
+    // Checked (audit H14): a silent `as u32` truncation here would corrupt
+    // every `ClosureRef`'s `bytecode_offset` — the host would slice the wrong
+    // bytes out of the shared blob. Unreachable on realistic input (a >4 GiB
+    // closure blob needs ~64 k handlers of 64 KiB each), but the encoder stays
+    // total rather than silently wrong.
+    w.u32_len_checked(blob.len(), "handler_section.bytecode_blob")?;
     w.bytes(blob);
+    Ok(())
 }
 
 /// Decodes the shared bytecode blob, returning the raw bytes (Appendix D §D.12).
