@@ -1,9 +1,17 @@
 //! Shared helpers for translating between LSP positions and Flux byte spans.
 //!
-//! Flux source is UTF-8; the LSP column convention is also UTF-8 for the
-//! `flux-lsp` server (the Flux surface grammar is ASCII for identifiers and
-//! keywords, so a UTF-8 column equals the editor's column in practice). All
-//! conversions are pure functions of the document text.
+//! **Encoding contract:** every position this crate produces or consumes uses
+//! **UTF-8 byte** columns, and the server declares `PositionEncodingKind::UTF8`
+//! in its `initialize` response (`lib.rs`). Without that declaration LSP
+//! clients default to UTF-16 code units (per spec) while these helpers count
+//! bytes — every diagnostic, hover, goto-def, completion and semantic token
+//! would shift on any source with a non-ASCII character before the position.
+//! All three subsystems (`util::position_to_offset` /
+//! `util::offset_to_position`, `semantic_tokens::line_col_at`, the LSP
+//! capabilities) share this unit; changing one without the others re-opens the
+//! bug (audit §9).
+//!
+//! All conversions are pure functions of the document text.
 
 use async_lsp::lsp_types::{Position, Range};
 use flux_syntax::Span;
