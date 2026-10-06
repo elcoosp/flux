@@ -273,7 +273,11 @@ struct ShadowTreeReconciler {
         }
         #endif
         // Audit H4: destroy unreachable subtrees and prune stale ForEach row state.
-        // Anything still in `built` that is not reachable from the current tree is stale.
+        // Anything still in `built` that is not reachable from the current tree
+        // is stale. The same reachability set also bounds `nodeTable`: a Delta
+        // seeds `patchNodes = nodeTable` and reassigns `nodeTable = patchNodes`,
+        // so without this prune a long editing session would accumulate every
+        // frame's node ids forever (one entry per node per hot-reload).
         if let rootId = currentRootId {
             var reachable = Set<UInt32>()
             func mark(_ id: UInt32) {
@@ -281,7 +285,12 @@ struct ShadowTreeReconciler {
                 reachable.insert(id)
                 if let node = nodeTable[id] {
                     for child in node.children {
-                        if case let .node(cid) = child { mark(cid) }
+                        switch child {
+                        case let .node(cid):
+                            mark(cid)
+                        case let .splice(_, items):
+                            for item in items { mark(item.node) }
+                        }
                     }
                 }
             }
@@ -290,8 +299,34 @@ struct ShadowTreeReconciler {
                 builtNode.adapter.destroy(builtNode.view)
                 built.removeValue(forKey: id)
             }
+            // Prune `nodeTable` to reachable ids. Keep any ids that are in
+            // `built` (an in-flight reconcile may still reference them) — but
+            // `built` is a subset of reachable after the loop above, so
+            // filtering to `reachable` is correct.
+            nodeTable = nodeTable.filter { reachable.contains($0.key) }
         }
         return report
+    }
+
+    /// Snapshot of every per-node side-table's size, for the invariant test
+    /// that asserts they stay bounded by the current tree size across a long
+    /// editing session. Internal so `@testable import FluxHost` reaches it.
+    /// Current root id, for invariant tests that assert the reconciler's
+    /// authoritative `nodeTable` actually tracks the *current* tree.
+    var debugCurrentRootId: UInt32? { currentRootId }
+
+    /// The set of node ids currently in the authoritative `nodeTable`. Used by
+    /// the invariant test to prove stale ids do not linger.
+    var debugNodeTableKeys: Set<UInt32> { Set(nodeTable.keys) }
+
+    var debugSideTableCounts: [String: Int] {
+        [
+            "built": built.count,
+            "nodeTable": nodeTable.count,
+            "signalDeps": signalDeps.count,
+            "thunkHandlerToNode": thunkHandlerToNode.count,
+            "forEachRowContext": forEachRowContext.count,
+        ]
     }
 
     /// The currently built native view for `nodeId`, if any (for test assertions).
@@ -1106,6 +1141,13 @@ struct ShadowTreeReconciler {
         // `thunkHandlerToNode` is keyed by handler id, not node id; drop every
         // entry that maps back to this node.
         thunkHandlerToNode = thunkHandlerToNode.filter { $0.value != id }
+        // NOTE: `nodeTable` is deliberately NOT pruned here. The `.replace`
+        // path calls `destroySubtree` on the patch's *new* id (the differ emits
+        // `Replace { id: new_id }` for a kind change); removing that id here
+        // would delete the entry the frame-boundary assignment just added,
+        // leaving `nodeTable` and `currentRootId` inconsistent. `nodeTable` is
+        // instead pruned once per frame to what is reachable from
+        // `currentRootId` — see the reachability prune at the end of `apply`.
     }
 
     /// Applies a single patch to the built views.
