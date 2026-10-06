@@ -1667,4 +1667,43 @@ mod tests {
             assert!(!rec.samples.is_empty(), "a record must carry a sample");
         }
     }
+    /// Audit H14: the `Error`-frame fallback (`build_init`/`build_delta`/
+    /// `build_dispatch_delta` and `init_frame` all route through
+    /// `error_frame` when the encoder returns `Err`) must produce a
+    /// *decodable* `Error` frame. This locks the shape of that fallback: a
+    /// wrong version, seq, or header layout here would leave the host with an
+    /// undecodable frame when a program legitimately overflows the wire — the
+    /// exact situation the fallback exists to handle.
+    #[test]
+    fn error_frame_round_trips_as_decodable_error_frame() {
+        let mut pipeline = Pipeline::new("/tmp/project", false);
+        let seq_before = pipeline.seq;
+
+        let bytes = pipeline.error_frame(&Diagnostic::new("payload too large", None));
+
+        // The frame decodes via the client-side helper; a corrupt header would
+        // fail here (the same path a real host takes).
+        let frame = Frame::from_error_bytes(&bytes)
+            .expect("error frame must decode via from_error_bytes");
+
+        assert_eq!(
+            frame.kind,
+            flux_ir_serde::FrameKind::Error,
+            "fallback frame must carry the Error kind byte"
+        );
+        assert_eq!(
+            frame.message, "payload too large",
+            "fallback frame must carry the diagnostic message verbatim"
+        );
+        assert_eq!(
+            frame.seq,
+            seq_before.wrapping_add(1),
+            "error_frame must advance seq by one (same contract as any other frame)"
+        );
+        assert!(frame.span.is_none(), "no span when the diagnostic has none");
+        assert!(
+            frame.excerpt.is_none(),
+            "no excerpt when the diagnostic has no span"
+        );
+    }
 }
