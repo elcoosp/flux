@@ -56,9 +56,6 @@ struct ShadowTreeReconciler {
     /// The most recent full node table, used to resolve a removed node's
     /// `cleanupHandler` (§18.4) at removal time.
     private var nodeTable: [UInt32: ShadowNode] = [:]
-    /// Cloned `ForEach` row `ShadowNode`s (keyed by derived id), populated during
-    /// expansion so `emitSubtree`/`reconcileDirty` see them like any other node.
-    private var expandedNodeTable: [UInt32: ShadowNode] = [:]
     /// Per-node signal dependencies recorded from the node's props (R1). A prop
     /// whose value is `.int(s)` is treated as a read of signal `s`, so a write to
     /// `s` marks the node dirty. Populated during reconcile and consulted by
@@ -546,7 +543,6 @@ struct ShadowTreeReconciler {
             #if DEBUG
             NSLog("[FluxRT] ForEach node \(nodeId): expanded to \(ids.count) rows, \(expanded.count) nodes, \(elements.count) elements")
             #endif
-            expandedNodeTable.merge(expanded) { $1 }
             let mergedNodes = nodes.merging(expanded) { $1 }
             for (rowId, element) in zip(ids, elements) {
                 executor.seedSignal(itemSlot, element)
@@ -848,7 +844,6 @@ struct ShadowTreeReconciler {
                 let (ids, expanded, elements) = expandForEach(nodeId: node.id, templateChildIds: childIds, spliceKeys: spliceKeys, nodes: nodes)
                 expandedChildIds = ids
                 mergedNodes = nodes.merging(expanded) { $1 }
-                expandedNodeTable.merge(expanded) { $1 }
                 for (rowId, element) in zip(ids, elements) {
                     guard activeChildId == nil || rowId == activeChildId else { continue }
                     executor.seedSignal(itemSlot, element)
