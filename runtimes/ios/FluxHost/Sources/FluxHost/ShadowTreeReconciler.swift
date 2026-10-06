@@ -1061,6 +1061,28 @@ struct ShadowTreeReconciler {
         }
     }
 
+    /// Recursively destroys `id` and every descendant reachable through
+    /// `nodeTable`, cleaning their views and side-table entries. Mirrors the
+    /// Kotlin host's `ShadowTree.destroySubtree`. Called from `.remove` and
+    /// `.replace` so a structural edit does not leave orphaned `built` views
+    /// or `signalDeps` / `forEachRowContext` entries for the removed subtree.
+    private mutating func destroySubtree(_ id: UInt32) {
+        if let node = nodeTable[id] {
+            for child in node.children {
+                switch child {
+                case let .node(cid):
+                    destroySubtree(cid)
+                case let .splice(_, items):
+                    for item in items { destroySubtree(item.node) }
+                }
+            }
+        }
+        if let existing = built.removeValue(forKey: id) {
+            existing.adapter.destroy(existing.view)
+        }
+        cleanupSideTables(for: id)
+    }
+
     /// Removes every per-node side-table entry keyed by `id`, so a node that
     /// was destroyed or replaced does not leave stale state behind. Mirrors
     /// the Kotlin host's `ShadowTree.destroySubtree` cleanup.
@@ -1097,21 +1119,15 @@ struct ShadowTreeReconciler {
             if let node = nodeTable[id], let cleanup = node.cleanupHandler {
                 (executorRef as? FluxExecutor)?.runLifecycle(cleanup)
             }
-            if let existing = built.removeValue(forKey: id) {
-                existing.adapter.destroy(existing.view)
-                report.detached.append(id)
-            }
-            // Drop every per-node side-table entry so a long editing session
-            // cannot leak (mirrors the Kotlin host's `destroySubtree`).
-            cleanupSideTables(for: id)
+            // Recursively destroy the whole subtree: a `Remove` removes the node
+            // AND its descendants, so a non-recursive destroy would leak every
+            // child view + side-table entry (Kotlin's `destroySubtree` recurses).
+            if built[id] != nil { report.detached.append(id) }
+            destroySubtree(id)
 
         case let .replace(id, node):
-            if let existing = built.removeValue(forKey: id) {
-                existing.adapter.destroy(existing.view)
-            }
-            // Same per-node cleanup as `.remove`: a `Replace` destroys the
-            // previous instance, so its side-table entries must not linger.
-            cleanupSideTables(for: id)
+            // A `Replace` destroys the previous instance and its descendants.
+            destroySubtree(id)
             reconcile(nodeId: node.id, nodes: nodes, report: &report)
 
         case let .insert(_, _, node):
