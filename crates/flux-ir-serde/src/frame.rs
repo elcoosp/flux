@@ -183,7 +183,7 @@ fn write_closures(w: &mut Writer, closures: &[ClosureIR]) -> Result<(), WireErro
     // Callers in `encode_into` still `.expect()` at the frame boundary
     // pending the top-level `try_to_bytes` migration.
     if closures.is_empty() {
-        encode_bytecode_blob(w, &[]);
+        encode_bytecode_blob(w, &[])?;
         return Ok(());
     }
     // Sort by `HandlerId` so the emitted blob and handler-def stream are
@@ -213,7 +213,13 @@ fn write_closures(w: &mut Writer, closures: &[ClosureIR]) -> Result<(), WireErro
     let mut by_id: std::collections::HashMap<HandlerId, (u32, u16)> =
         std::collections::HashMap::with_capacity(closures.len());
     for closure in &closures {
-        let offset = blob.len() as u32;
+        // Checked (audit H14): a silent truncation would give every
+        // subsequent `ClosureRef` a wrong `bytecode_offset`, desyncing the
+        // host's slice into the shared blob. Absurd on real input; kept total.
+        let offset = u32::try_from(blob.len()).map_err(|_| WireError::LengthExceedsU32 {
+            what: "frame.closure_blob.offset",
+            n: blob.len(),
+        })?;
         blob.extend_from_slice(&closure.bytecode);
         // Audit fix (§3.3 / §3.4): a handler body larger than 65 535 bytes
         // is a legitimate program the user authored — a long chain of
@@ -241,7 +247,7 @@ fn write_closures(w: &mut Writer, closures: &[ClosureIR]) -> Result<(), WireErro
             );
         }
     }
-    encode_bytecode_blob(w, &blob);
+    encode_bytecode_blob(w, &blob)?;
     w.count_prefix(closures.len(), "frame.closures")?;
     for closure in &closures {
         let (offset, len) = by_id[&closure.id];
@@ -814,7 +820,10 @@ impl InitFrame {
         // Appendix D §D.12.2: the full tree is `root` followed by every
         // descendant, flat, so the host rebuilds the complete node table from
         // one frame. A `u32` count prefixes the extras.
-        w.u32(self.extra_nodes.len() as u32);
+        // Checked (audit H14): v3 already widened this prefix; the count
+        // itself is u32 in both v2 and v3, so a silent `as u32` would only
+        // trigger on >4 GiB of descendants — still, keep the encoder total.
+        w.u32_len_checked(self.extra_nodes.len(), "frame.extra_nodes")?;
         for node in &self.extra_nodes {
             encode_node(&mut w, node)?;
         }
@@ -834,7 +843,7 @@ impl InitFrame {
             .map(|(id, text)| (id, text.to_owned()))
             .collect();
         // D.12.2: `string_count` is a u32.
-        w.u32(entries.len() as u32);
+        w.u32_len_checked(entries.len(), "frame.string_count")?;
         for (id, text) in &entries {
             encode_string_entry(&mut w, *id, text)?;
         }
