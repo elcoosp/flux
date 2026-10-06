@@ -259,7 +259,11 @@ impl TelemetryEvent {
                     None => w.u8(0),
                 }
                 let name_bytes = component_name.as_bytes();
-                w.u32(name_bytes.len() as u32);
+                // Checked (audit H14): a silent `as u32` here would truncate
+                // the declared length and desync the decoder's cursor on the
+                // very next field.
+                w.u32_len_checked(name_bytes.len(), "telemetry.component_name")
+                    .expect("component name exceeds u32::MAX bytes");
                 w.bytes(name_bytes);
             }
             TelemetryEvent::HandlerInvocation {
@@ -325,7 +329,10 @@ impl TelemetryEvent {
         }
         let end = w.buf_len();
         // Back-patch the length (body + tag + the length field itself).
-        let len = (end - start - 4) as u32;
+        // Checked (audit H14): a silent truncation here corrupts every
+        // event-length prefix on this frame, desyncing the decoder.
+        let len = u32::try_from(end - start - 4)
+            .expect("telemetry event body exceeds u32::MAX bytes");
         w.patch_u32_at(start, len);
     }
 
@@ -991,7 +998,11 @@ impl EnrichedTelemetryEvent {
                 }
                 encode_optional_span(w, *source_span);
                 let name_bytes = component_name.as_bytes();
-                w.u32(name_bytes.len() as u32);
+                // Checked (audit H14): a silent `as u32` here would truncate
+                // the declared length and desync the decoder's cursor on the
+                // very next field.
+                w.u32_len_checked(name_bytes.len(), "telemetry.component_name")
+                    .expect("component name exceeds u32::MAX bytes");
                 w.bytes(name_bytes);
             }
             EnrichedTelemetryEvent::HandlerInvocation {
@@ -1062,7 +1073,8 @@ impl EnrichedTelemetryEvent {
             }
         }
         let end = w.buf_len();
-        let len = (end - start - 4) as u32;
+        let len = u32::try_from(end - start - 4)
+            .expect("enriched event body exceeds u32::MAX bytes");
         w.patch_u32_at(start, len);
     }
 
