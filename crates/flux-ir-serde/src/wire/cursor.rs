@@ -88,11 +88,6 @@ impl Writer {
         self.version = version;
     }
 
-    /// This writer's protocol version.
-    pub(crate) fn version(&self) -> u8 {
-        self.version
-    }
-
     /// Writes a collection/string length prefix using the width appropriate
     /// to this writer's protocol version:
     /// * v3: `u32` (user-authored collections can exceed 65 k, ADR-0059)
@@ -197,13 +192,6 @@ impl<'a> Reader<'a> {
             pos: 0,
             version,
         }
-    }
-
-    /// The protocol version this reader is decoding for. Used by
-    /// version-conditional helpers (`u16_or_u32` etc.) elsewhere in the wire
-    /// codec.
-    pub(crate) fn protocol_version(&self) -> u8 {
-        self.version
     }
 
     /// Reads a collection length prefix. In v3 the prefix is `u32`; in v2 it
