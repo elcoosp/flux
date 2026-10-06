@@ -225,6 +225,15 @@ public class ShadowTree(
     ): ShadowNode? {
         executorRef = executor
         lastSeq = frame.seq
+        // Frame-scoped derived-id maps: every entry is keyed by a ForEach-row
+        // derived id (never a real server node id), populated during THIS
+        // frame's reconcile. Stale entries from a previous frame are dead
+        // weight (their row ids no longer resolve) and would otherwise grow
+        // unbounded across a long editing session — one entry per (row,
+        // template-node) per ForEach per frame. Cleared here because
+        // `reconcileForEach` re-populates them on demand within this frame.
+        signalMetaOverride.clear()
+        expandedIndex.clear()
         if (frame.strings.isNotEmpty()) {
             // String literals live in a SEPARATE id space from `ComponentId`s
             // (a StringId and a ComponentId can share a numeric value, §D.9).
@@ -299,9 +308,11 @@ public class ShadowTree(
         // ships a `Handler` patch (no structural change) has an empty
         // `signalMeta`, so a straight assignment would wipe the map the Init
         // frame built — and `applyPatch(.handler)` would then never find its
-        // node to re-materialise (FR hot-reload; mirrors the iOS fix). Stale
-        // entries pointing at old (destroyed) ids are harmless: `applyPatch`
-        // checks `nodes[nodeId]` and no-ops when missing.
+        // node to re-materialise (FR hot-reload; mirrors the iOS fix).
+        //
+        // Stale entries are pruned below (once `nodes` is fully repopulated for
+        // this frame) so the map cannot grow across an editing session — one
+        // entry per unique handler id ever seen would otherwise persist forever.
         for ((hid, nid) in map) thunkHandlerToNode[hid] = nid
         if (frame.fullTree && frame.root != null) {
             val index = LinkedHashMap<UInt, WireNode>()
@@ -325,6 +336,7 @@ public class ShadowTree(
             nodes.clear()
             parents.clear()
             collect(built)
+            thunkHandlerToNode.entries.removeIf { it.value !in nodes }
             emitStepEnd()
             return built
         }
@@ -419,6 +431,7 @@ public class ShadowTree(
         val newRoot = build(patchIndex[rootId]!!, patchIndex, executor, depth = 0u)
         root = newRoot
         collect(newRoot)
+        thunkHandlerToNode.entries.removeIf { it.value !in nodes }
     }
 
     private fun collect(node: ShadowNode) {
