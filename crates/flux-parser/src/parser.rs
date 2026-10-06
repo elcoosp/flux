@@ -32,7 +32,7 @@ use crate::lexer::{Token, TokenKind, lex};
 /// what/where/why/how diagnostics required by AGENTS.md §3.7.
 pub(crate) fn parse_source(source: &str, file_id: u32, path: &str) -> Result<Ast, ParseError> {
     let tokens = lex(source, file_id).map_err(|err| lex_error_to_parse(source, err, path))?;
-    if let Some(err) = check_brace_depth(source, file_id, path) {
+    if let Some(err) = check_nesting_depth(source, file_id, path) {
         return Err(err);
     }
     let mut parser = Parser {
@@ -47,17 +47,35 @@ pub(crate) fn parse_source(source: &str, file_id: u32, path: &str) -> Result<Ast
     parser.parse_program()
 }
 
-/// Maximum brace-nesting depth accepted before the source is rejected with an
-/// actionable diagnostic instead of overflowing the call stack.
+/// Maximum bracket-nesting depth (`{}` / `[]` / `()`) accepted before the source
+/// is rejected with an actionable diagnostic instead of overflowing the call
+/// stack.
+///
+/// The value is deliberately small: the recursive-descent path uses ~10 frames
+/// per nesting level, so a limit of a few hundred would still overflow an 8 MiB
+/// thread stack. 16 is generous for real Flux — the surface grammar's deepest
+/// realistic structure is a nested view tree a handful of levels deep — and it
+/// matches the pre-round-11 `{}`-only limit exactly, so no previously-accepted
+/// source regresses.
 const MAX_NESTING_DEPTH: usize = 16;
 
 /// Maximum expression/type/statement recursion depth accepted before the
 /// parser rejects the input with `"expression nesting too deep"` (T-604.2).
 const MAX_PARSE_DEPTH: usize = 512;
 
-/// Rejects source whose `{` brace nesting exceeds [`MAX_NESTING_DEPTH`], so deeply
-/// nested trees fail fast with a hint to extract a component (AGENTS.md §3.7).
-fn check_brace_depth(source: &str, file_id: u32, path: &str) -> Option<ParseError> {
+/// Rejects source whose bracket nesting — `{...}`, `[...]`, or `(...)` — exceeds
+/// [`MAX_NESTING_DEPTH`], so deeply nested input fails fast with an actionable
+/// diagnostic instead of overflowing the parser thread's stack.
+///
+/// Round-11 fix: the previous `check_brace_depth` counted only `{}`. A source
+/// of the form `Text(text: [[[[...]]]])` bypassed the pre-scan entirely, and
+/// the recursive-descent path (`expr → assign → or → and → cmp → add → mul →
+/// unary → postfix → primary → list_lit/paren → expr`, ~10 stack frames per
+/// level) overflowed the 8 MiB test/main-thread stack at ~50–100 nesting
+/// levels — well before the `MAX_PARSE_DEPTH = 512` recursion guard fired.
+/// Counting every bracket opener in the pre-scan closes the DoS at O(n) before
+/// any recursion.
+fn check_nesting_depth(source: &str, file_id: u32, path: &str) -> Option<ParseError> {
     let mut depth = 0usize;
     let mut chars = source.char_indices().peekable();
     while let Some((offset, c)) = chars.next() {
@@ -78,15 +96,17 @@ fn check_brace_depth(source: &str, file_id: u32, path: &str) -> Option<ParseErro
                     }
                 }
             }
-            '{' => {
+            '{' | '[' | '(' => {
                 depth += 1;
                 if depth > MAX_NESTING_DEPTH {
                     return Some(ParseError {
                         message: format!(
-                            "block nesting exceeds the maximum depth of {MAX_NESTING_DEPTH}"
+                            "nesting exceeds the maximum depth of {MAX_NESTING_DEPTH}"
                         ),
                         hint: Some(
-                            "extract the inner view into its own `compo` \u{2014} deeply nested                              trees are also slower to diff and harder to read"
+                            "extract the inner expression or view into its own \
+                             `compo` \u{2014} deeply nested trees are also slower to \
+                             diff and harder to read"
                                 .to_owned(),
                         ),
                         span: Span::new(file_id, offset as u32, offset as u32 + 1),
@@ -96,11 +116,11 @@ fn check_brace_depth(source: &str, file_id: u32, path: &str) -> Option<ParseErro
                     });
                 }
             }
-            '}' => {
-                // Closing brace leaves the current block, so true nesting depth
-                // drops. Without this the counter only ever grew and any file
-                // with more than `MAX_NESTING_DEPTH` braces total (e.g. a real
-                // app with >16 components) was wrongly rejected.
+            '}' | ']' | ')' => {
+                // Closing bracket leaves the current group, so true nesting
+                // depth drops. Without this the counter only ever grew and any
+                // file with more than `MAX_NESTING_DEPTH` openers total (e.g. a
+                // real app with >16 components) was wrongly rejected.
                 depth = depth.saturating_sub(1);
             }
             _ => {}
