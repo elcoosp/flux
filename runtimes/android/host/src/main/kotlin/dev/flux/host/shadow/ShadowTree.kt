@@ -816,6 +816,14 @@ public class ShadowTree(
         nodes.remove(node.id)
         parents.remove(node.id)
         reconciled.remove(node.id)
+        // A destroyed ForEach row (or any derived id) leaves per-node context
+        // in `forEachRowContext` / `signalMetaOverride`; drop it here so a long
+        // editing session cannot accumulate entries for ids that no longer
+        // resolve. `signalMetaOverride` is also frame-cleared at applyFrame
+        // start, but doing it here keeps the tables coherent for the rest of
+        // the current frame.
+        forEachRowContext.remove(node.id)
+        signalMetaOverride.remove(node.id)
         withAdapter(node.kind, node.componentId, node.view) { adapter, view -> adapter.destroy(view) }
     }
 
