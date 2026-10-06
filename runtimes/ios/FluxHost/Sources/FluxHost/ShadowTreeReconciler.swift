@@ -1066,6 +1066,22 @@ struct ShadowTreeReconciler {
         }
     }
 
+    /// Removes every per-node side-table entry keyed by `id`, so a node that
+    /// was destroyed or replaced does not leave stale state behind. Mirrors
+    /// the Kotlin host's `ShadowTree.destroySubtree` cleanup.
+    ///
+    /// `signalMeta` and `componentNames` are frame-level snapshots (replaced
+    /// wholesale on each frame), so they are not touched here. `expandedNodeTable`
+    /// and `thunkBlobs` are also frame-scoped. The three maps cleaned here are
+    /// the per-node ones that accumulate across an editing session.
+    private mutating func cleanupSideTables(for id: UInt32) {
+        signalDeps.removeValue(forKey: id)
+        forEachRowContext.removeValue(forKey: id)
+        // `thunkHandlerToNode` is keyed by handler id, not node id; drop every
+        // entry that maps back to this node.
+        thunkHandlerToNode = thunkHandlerToNode.filter { $0.value != id }
+    }
+
     /// Applies a single patch to the built views.
     private mutating func applyPatch(_ patch: Patch, nodes: [UInt32: ShadowNode], report: inout ReconcileReport) {
         switch patch {
@@ -1090,11 +1106,17 @@ struct ShadowTreeReconciler {
                 existing.adapter.destroy(existing.view)
                 report.detached.append(id)
             }
+            // Drop every per-node side-table entry so a long editing session
+            // cannot leak (mirrors the Kotlin host's `destroySubtree`).
+            cleanupSideTables(for: id)
 
         case let .replace(id, node):
             if let existing = built.removeValue(forKey: id) {
                 existing.adapter.destroy(existing.view)
             }
+            // Same per-node cleanup as `.remove`: a `Replace` destroys the
+            // previous instance, so its side-table entries must not linger.
+            cleanupSideTables(for: id)
             reconcile(nodeId: node.id, nodes: nodes, report: &report)
 
         case let .insert(_, _, node):
