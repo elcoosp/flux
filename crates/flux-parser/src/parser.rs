@@ -1083,40 +1083,70 @@ impl<'s> Parser<'s> {
 
     fn postfix_expr(&mut self) -> Result<Expr, ParseError> {
         let mut expr = self.primary()?;
+        // Round-11 follow-up: this loop is iterative, but the AST it produces
+        // grows one level per postfix operator — so `a.a.a...` × N produces an
+        // N-deep `Expr::Field` chain. Two consequences:
+        //
+        // 1. Each iteration **cloned** the accumulated `expr` (`Box::new(expr
+        //    .clone())`), and cloning a `Box<Expr>` recurses one frame per
+        //    level, so the clone for a 5 000-deep chain overflowed the parse
+        //    thread's stack before the tree was ever complete. Fixed by
+        //    `std::mem::replace` — O(1) instead of O(depth).
+        // 2. The resulting tree is N-deep, and *dropping* it recurses one
+        //    frame per level. Bounding the chain length to `MAX_PARSE_DEPTH`
+        //    (512) keeps the drop depth well within any reasonable stack.
+        let mut chain_len: usize = 0;
         loop {
+            chain_len += 1;
+            if chain_len > MAX_PARSE_DEPTH {
+                return Err(self.error(
+                    self.peek(),
+                    "postfix chain too long",
+                    Some(format!(
+                        "at most {MAX_PARSE_DEPTH} postfix operators (`.`, `?.`, `(`, `{{`) \
+                         may be chained on a single expression"
+                    )),
+                ));
+            }
             match self.peek_kind() {
                 TokenKind::Dot => {
                     self.eat(TokenKind::Dot)?;
                     let field = self.ident()?;
+                    let start = expr.span.start;
+                    let base = std::mem::replace(&mut expr, Expr::placeholder());
                     expr = Expr {
                         kind: ExprKind::Field {
-                            base: Box::new(expr.clone()),
+                            base: Box::new(base),
                             field,
                         },
-                        span: expr.span,
+                        span: Span::new(self.file_id, start, self.last_end()),
                     };
                 }
                 TokenKind::QuestionDot => {
                     self.eat(TokenKind::QuestionDot)?;
                     let field = self.ident()?;
+                    let start = expr.span.start;
+                    let base = std::mem::replace(&mut expr, Expr::placeholder());
                     expr = Expr {
                         kind: ExprKind::OptField {
-                            base: Box::new(expr.clone()),
+                            base: Box::new(base),
                             field,
                         },
-                        span: expr.span,
+                        span: Span::new(self.file_id, start, self.last_end()),
                     };
                 }
                 TokenKind::LParen => {
                     let args = self.call_args()?;
                     let end = self.last_end();
+                    let start = expr.span.start;
+                    let callee = std::mem::replace(&mut expr, Expr::placeholder());
                     expr = Expr {
                         kind: ExprKind::Call {
-                            callee: Box::new(expr.clone()),
+                            callee: Box::new(callee),
                             args,
                             trailing: None,
                         },
-                        span: Span::new(self.file_id, expr.span.start, end),
+                        span: Span::new(self.file_id, start, end),
                     };
                 }
                 TokenKind::LBrace if self.block_postfix => {
@@ -1128,18 +1158,19 @@ impl<'s> Parser<'s> {
                     // attach the block as that call's `trailing` rather than wrapping
                     // the call in a second, callee-of-callee `Call`.
                     let end = block.span.end;
-                    let span = Span::new(self.file_id, expr.span.start, end);
                     if let ExprKind::Call { trailing, .. } = &mut expr.kind {
                         *trailing = Some(Box::new(block));
-                        expr.span = span;
+                        expr.span = Span::new(self.file_id, expr.span.start, end);
                     } else {
+                        let start = expr.span.start;
+                        let callee = std::mem::replace(&mut expr, Expr::placeholder());
                         expr = Expr {
                             kind: ExprKind::Call {
-                                callee: Box::new(expr.clone()),
+                                callee: Box::new(callee),
                                 args: Vec::new(),
                                 trailing: Some(Box::new(block)),
                             },
-                            span,
+                            span: Span::new(self.file_id, start, end),
                         };
                     }
                 }
@@ -1927,6 +1958,19 @@ fn bin(op: BinOp, lhs: Expr, rhs: Expr, file_id: u32) -> Expr {
             rhs: Box::new(rhs),
         },
         span,
+    }
+}
+
+impl Expr {
+    /// A placeholder expression used transiently by `std::mem::replace` in
+    /// `Parser::postfix_expr`, so a postfix operator can take ownership of the
+    /// accumulated `Expr` without cloning it. Never observed: the caller
+    /// immediately overwrites it with the real postfix node.
+    fn placeholder() -> Expr {
+        Expr {
+            kind: ExprKind::Null,
+            span: Span::new(0, 0, 0),
+        }
     }
 }
 
