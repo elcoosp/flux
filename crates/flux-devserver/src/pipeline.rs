@@ -560,30 +560,12 @@ impl Pipeline {
     /// handful of strings (the props it updates) and zero closures (dispatch
     /// never introduces new handlers). This is the "|dependents[S]|-bounded
     /// patch" the ADR-0027 promise advertises.
-    fn build_dispatch_delta(&mut self, patches: &[Patch]) -> Vec<u8> {
-        match self.try_build_dispatch_delta(patches) {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                // Audit H14: ship an `Error` frame instead of panicking the
-                // dispatch path (one tap = one frame; a panic here kills the
-                // pipeline thread on a legitimately large program). Mirrors
-                // `init_frame`'s fallback; the host renders the message as a
-                // red banner while the last good tree stays on screen.
-                let diagnostic = Diagnostic::new(
-                    format!(
-                        "Dispatch frame exceeds wire length limits: {e} —                          the dependent set is too large for a single frame;                          reduce the number of signals a single handler writes"
-                    ),
-                    None,
-                );
-                self.error_frame(&diagnostic)
-            }
-        }
-    }
-
-    /// Fallible form of [`Self::build_dispatch_delta`] (audit H14). The
-    /// dispatch path is the highest-traffic emitter (one tap = one frame),
-    /// so this is where a fallback to an `Error` frame gives the developer
-    /// an actionable diagnostic instead of losing the pipeline thread.
+    /// Builds a `Delta` frame carrying only the strings and closures the
+    /// patch stream references (audit H14). The dispatch path is the
+    /// highest-traffic emitter (one tap = one frame); callers fall back to an
+    /// `Error` frame via [`Self::error_frame`] on overflow, giving the
+    /// developer an actionable diagnostic instead of losing the pipeline
+    /// thread.
     fn try_build_dispatch_delta(&mut self, patches: &[Patch]) -> Result<Vec<u8>, WireError> {
         let (want_strings, want_handlers) = match self.last_good.as_ref() {
             Some(last) => referenced_strings_and_handlers(patches, last.arena.string_table()),
@@ -974,36 +956,11 @@ impl Pipeline {
     }
 
     /// Builds the `Init` frame bytes for `arena` (spec §D.12.2).
-    fn build_init(
-        &mut self,
-        arena: &IRArena,
-        closures: &[flux_ir::ClosureIR],
-        state_seed: &[(SignalId, Value)],
-        component_names: &[(flux_syntax::ComponentId, String)],
-    ) -> Vec<u8> {
-        match self.try_build_init(arena, closures, state_seed, component_names) {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                // Audit H14: fall back to an `Error` frame rather than
-                // panicking the pipeline thread on a legitimately large
-                // program. Same fallback `init_frame` already applies on
-                // the reconnect path.
-                let diagnostic = Diagnostic::new(
-                    format!(
-                        "Init frame exceeds wire length limits: {e} —                          the project is too large for a single connection;                          split it into multiple components"
-                    ),
-                    None,
-                );
-                self.error_frame(&diagnostic)
-            }
-        }
-    }
-
-    /// Fallible form of [`Self::build_init`]. Returns
-    /// [`WireError::LengthExceedsU16`] when the tree carries a value too large
-    /// for the wire's `u16` length prefix (audit H14). Callers either fall
-    /// back to an `Error` frame (see `init_frame`) or the panicking wrapper
-    /// `build_init`.
+    ///
+    /// Returns [`WireError::LengthExceedsU16`] when the tree carries a value
+    /// too large for the wire's `u16` length prefix (audit H14). Every caller
+    /// — [`Self::compile`] on first success, [`Self::init_frame`] on reconnect
+    /// — falls back to an `Error` frame via [`Self::error_frame`] on overflow.
     fn try_build_init(
         &mut self,
         arena: &IRArena,
@@ -1042,31 +999,10 @@ impl Pipeline {
     }
 
     /// Builds the `Delta` frame bytes for `patches` (spec §D.1).
-    fn build_delta(
-        &mut self,
-        arena: &IRArena,
-        patches: &[Patch],
-        closures: &[flux_ir::ClosureIR],
-    ) -> Vec<u8> {
-        match self.try_build_delta(arena, patches, closures) {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                // Audit H14: fall back to an `Error` frame rather than
-                // panicking the pipeline thread on a legitimately large
-                // delta. Same shape as `build_init`'s fallback.
-                let diagnostic = Diagnostic::new(
-                    format!(
-                        "Delta frame exceeds wire length limits: {e} —                          the change set is too large for a single frame;                          edit fewer files at once"
-                    ),
-                    None,
-                );
-                self.error_frame(&diagnostic)
-            }
-        }
-    }
-
-    /// Fallible form of [`Self::build_delta`] (audit H14). See
-    /// [`Self::try_build_init`] for the caller-contract rationale.
+    ///
+    /// Returns [`WireError::LengthExceedsU16`] on overflow; the caller falls
+    /// back to an `Error` frame (see [`Self::try_build_init`] for the
+    /// caller-contract rationale).
     fn try_build_delta(
         &mut self,
         arena: &IRArena,
@@ -1667,13 +1603,13 @@ mod tests {
             assert!(!rec.samples.is_empty(), "a record must carry a sample");
         }
     }
-    /// Audit H14: the `Error`-frame fallback (`build_init`/`build_delta`/
-    /// `build_dispatch_delta` and `init_frame` all route through
-    /// `error_frame` when the encoder returns `Err`) must produce a
-    /// *decodable* `Error` frame. This locks the shape of that fallback: a
-    /// wrong version, seq, or header layout here would leave the host with an
-    /// undecodable frame when a program legitimately overflows the wire — the
-    /// exact situation the fallback exists to handle.
+    /// Audit H14: the `Error`-frame fallback used by every caller that hits
+    /// an encoder-overflow (`compile`, `init_frame`, and the dispatch path all
+    /// route through `error_frame`) must produce a *decodable* `Error` frame.
+    /// This locks the shape of that fallback: a wrong version, seq, or header
+    /// layout here would leave the host with an undecodable frame when a
+    /// program legitimately overflows the wire — the exact situation the
+    /// fallback exists to handle.
     #[test]
     fn error_frame_round_trips_as_decodable_error_frame() {
         let mut pipeline = Pipeline::new("/tmp/project", false);
