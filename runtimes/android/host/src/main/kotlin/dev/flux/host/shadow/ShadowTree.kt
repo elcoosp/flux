@@ -211,6 +211,9 @@ public class ShadowTree(
     /** Signals [id] reads (R1), for trace/parity inspection. */
     public fun signalDependencies(id: UInt): Set<UInt> = signalDeps[id]?.toSet() ?: emptySet()
 
+    /** Test-only snapshot of the wire-node index, for the staleness invariant test. */
+    internal fun debugWireIndex(): Map<UInt, WireNode> = wireIndex
+
     /** The sequence number of the most recently applied frame (for trace events). */
     public fun lastSeq(): UInt = lastSeq
 
@@ -385,6 +388,11 @@ public class ShadowTree(
             }
         if (oldRootRemoved && newRootInserted) {
             rebuildFromPatchIndex(patchIndex, executor)
+            // Refresh `wireIndex` so a later `reconcileForEach` (which reads it
+            // for template/descendant lookups) sees the post-rebuild node set,
+            // not the ids from the last full frame.
+            val live = nodes.keys
+            wireIndex = wireIndex.filterKeys { it in live } + patchIndex.filterKeys { it in live }
             emitTrace(
                 TraceEvent.Frame(
                     seq = frame.seq,
@@ -399,6 +407,16 @@ public class ShadowTree(
         }
         if (frame.patches.isNotEmpty()) {
             for (patch in frame.patches) applyPatch(patch, patchIndex, executor)
+            // Refresh `wireIndex` to reflect the post-patch node set. `nodes`
+            // holds the authoritative live ids after any frame; `wireIndex` is
+            // the wire-node mirror `reconcileForEach` reads for template and
+            // descendant lookups. Prune ids no longer live and merge this
+            // frame's new nodes. Without this, a Delta that replaced the tree
+            // would leave `wireIndex` pointing at the previous frame's ids and
+            // `reconcileForEach` would build rows from stale wire nodes
+            // (hot-reload blank-list bug on Android).
+            val live = nodes.keys
+            wireIndex = wireIndex.filterKeys { it in live } + patchIndex.filterKeys { it in live }
             emitTrace(TraceEvent.ApplyPatch(seq = frame.seq, patches = frame.patches.size.toUInt()))
             emitStepEnd()
         }
