@@ -965,7 +965,10 @@ impl Frame {
             return Err(WireError::HandlerCountMismatch {
                 at: r.pos(),
                 expected: handler_count as u32,
-                actual: closures.len() as u32,
+                // Diagnostic-only field: saturate rather than panic/truncate.
+                // A silently-wrapped count here changes only the message, but
+                // saturating keeps the value honest (audit H14 consistency).
+                actual: u32::try_from(closures.len()).unwrap_or(u32::MAX),
             });
         }
         // ADR-0027 (FA-IRWIRE): `signal_meta` section, present only when the
