@@ -978,7 +978,21 @@ impl<'s> Parser<'s> {
 
     fn or_expr(&mut self) -> Result<Expr, ParseError> {
         let mut lhs = self.and_expr()?;
+        // Round-13: bounded like every other operator loop so an unbounded
+        // `a || a || a || ...` chain cannot build an N-deep left-nested tree
+        // whose `Drop` recurses N stack frames.
+        let mut chain_len = 0usize;
         while self.at(TokenKind::Or) {
+            chain_len += 1;
+            if chain_len > MAX_PARSE_DEPTH {
+                return Err(self.error(
+                    self.peek(),
+                    "or_expr chain too long",
+                    Some(format!(
+                        "at most {MAX_PARSE_DEPTH} `||`-chained terms per expression"
+                    )),
+                ));
+            }
             self.eat(TokenKind::Or)?;
             let rhs = self.and_expr()?;
             lhs = bin(BinOp::Or, lhs, rhs, self.file_id);
@@ -988,7 +1002,22 @@ impl<'s> Parser<'s> {
 
     fn and_expr(&mut self) -> Result<Expr, ParseError> {
         let mut lhs = self.cmp_expr()?;
+        // Round-13: same chain-length bound as `or_expr` / `add_expr` /
+        // `mul_expr` — an unbounded `&&` chain would otherwise build an
+        // N-deep left-nested `Expr` whose recursive `Drop` overflows the
+        // parse thread's stack.
+        let mut chain_len = 0usize;
         while self.at(TokenKind::And) {
+            chain_len += 1;
+            if chain_len > MAX_PARSE_DEPTH {
+                return Err(self.error(
+                    self.peek(),
+                    "and_expr chain too long",
+                    Some(format!(
+                        "at most {MAX_PARSE_DEPTH} `&&`-chained terms per expression"
+                    )),
+                ));
+            }
             self.eat(TokenKind::And)?;
             let rhs = self.cmp_expr()?;
             lhs = bin(BinOp::And, lhs, rhs, self.file_id);
@@ -1018,7 +1047,18 @@ impl<'s> Parser<'s> {
 
     fn add_expr(&mut self) -> Result<Expr, ParseError> {
         let mut lhs = self.mul_expr()?;
+        let mut chain_len = 0usize;
         loop {
+            chain_len += 1;
+            if chain_len > MAX_PARSE_DEPTH {
+                return Err(self.error(
+                    self.peek(),
+                    "add_expr chain too long",
+                    Some(format!(
+                        "at most {MAX_PARSE_DEPTH} terms may be chained with a single add_expr operator level"
+                    )),
+                ));
+            }
             let op = match self.peek_kind() {
                 TokenKind::Plus => Some(BinOp::Add),
                 TokenKind::Minus => Some(BinOp::Sub),
@@ -1037,7 +1077,18 @@ impl<'s> Parser<'s> {
 
     fn mul_expr(&mut self) -> Result<Expr, ParseError> {
         let mut lhs = self.unary_expr()?;
+        let mut chain_len = 0usize;
         loop {
+            chain_len += 1;
+            if chain_len > MAX_PARSE_DEPTH {
+                return Err(self.error(
+                    self.peek(),
+                    "mul_expr chain too long",
+                    Some(format!(
+                        "at most {MAX_PARSE_DEPTH} terms may be chained with a single mul_expr operator level"
+                    )),
+                ));
+            }
             let op = match self.peek_kind() {
                 TokenKind::Star => Some(BinOp::Mul),
                 TokenKind::Slash => Some(BinOp::Div),
@@ -1056,29 +1107,45 @@ impl<'s> Parser<'s> {
     }
 
     fn unary_expr(&mut self) -> Result<Expr, ParseError> {
-        if self.at(TokenKind::Not) {
+        // Round-13: `!` chains are **not** caught by the pre-scan (there are no
+        // brackets), so the ONLY guard is `MAX_PARSE_DEPTH` via `inc_depth`.
+        // But each `!` recursed through `unary_expr` once — and the counter is
+        // a *semantic* depth, not a stack-frame count, so at the counter's cap
+        // (512) the descent chain has ~10 frames per level = ~5000 frames,
+        // which overflowed a 512 KiB parse thread (tokio's worker default is
+        // 2 MiB on Linux, but embedders may configure smaller).
+        //
+        // Parse the `!` prefix iteratively: consume all leading `!`, count them
+        // against `self.depth` so an unbounded chain still fails the guard, and
+        // wrap the operand `n` times *after* the descent unwinds. No recursion
+        // — no possible overflow regardless of the chain length.
+        let mut nots: usize = 0;
+        while self.at(TokenKind::Not) {
             self.inc_depth(self.peek())?;
             self.pos += 1;
-            let operand_result = self.unary_expr();
+            nots += 1;
+        }
+        let mut expr = self.postfix_expr()?;
+        // Desugar each `!x` to `x != true` so it reuses the existing
+        // `BinOp::Ne` lowering (EQ + NOT_BOOL) without a new expression kind.
+        // The construction below moves `expr` (`Box::new(expr)`), never clones.
+        for _ in 0..nots {
             self.depth -= 1;
-            let operand = operand_result?;
-            let end = operand.span.end;
-            // Desugar `!x` to `x != true` so it reuses the existing `BinOp::Ne`
-            // lowering (EQ + NOT_BOOL) without inventing a new expression kind.
+            let end = expr.span.end;
             let true_lit = Expr {
                 kind: ExprKind::Bool(true),
-                span: operand.span,
+                span: expr.span,
             };
-            return Ok(Expr {
+            expr = Expr {
                 kind: ExprKind::Binary {
                     op: BinOp::Ne,
-                    lhs: Box::new(operand),
+                    lhs: Box::new(expr),
                     rhs: Box::new(true_lit),
                 },
                 span: Span::new(self.file_id, end, end),
-            });
+            };
         }
-        self.postfix_expr()
+        Ok(expr)
     }
 
     fn postfix_expr(&mut self) -> Result<Expr, ParseError> {
