@@ -150,7 +150,14 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
             .get(id)
             .copied()
             .unwrap_or_else(|| (synthetic_root_id(), 0));
-        (depth_of(*id), parent, index)
+        // Round-14: append the node id as the final tie-breaker. Two new
+        // top-level roots that have no parent in `new_index` share the
+        // fallback `(synthetic_root_id, 0)` key, and `inserted` comes from
+        // `HashSet::difference` whose order is randomized per process — so
+        // without this the multi-root insert order (and therefore the frame
+        // bytes) varied between runs. Node ids are content-derived, so
+        // ordering by them is stable across processes for the same input.
+        (depth_of(*id), parent, index, u32::from(*id))
     });
 
     for id in &inserted {
