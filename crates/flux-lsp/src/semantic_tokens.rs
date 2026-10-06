@@ -70,6 +70,12 @@ pub(crate) fn classify(kind: TokenKind) -> Option<u32> {
 /// Line comments are recovered with [`comment_spans`] (the lexer discards them);
 /// all other tokens come from the real lexer so highlighting never disagrees
 /// with the parser.
+///
+/// Every offset here is a **UTF-8 byte** offset, matching the encoding this
+/// server declares (`PositionEncodingKind::UTF8`): `delta_start` is the byte
+/// distance from the previous token's start (or from line start), and `length`
+/// is the byte span `end - start`. `line_col_at` and `length` must share the
+/// unit or the relative-encoded stream desyncs on multi-byte source.
 #[must_use]
 pub(crate) fn tokens_for_text(src: &str) -> Vec<SemanticToken> {
     let mut raw: Vec<(usize, usize, u32)> = Vec::new();
@@ -112,14 +118,22 @@ pub(crate) fn tokens_for_text(src: &str) -> Vec<SemanticToken> {
     out
 }
 
-/// Returns `(0-based line, 0-based character)` for `byte` in `src`, counting
-/// characters (not bytes) for the column so multi-byte source aligns.
+/// Returns `(0-based line, 0-based character)` for `byte` in `src`.
+///
+/// `character` is the **UTF-8 byte** column from line start (not a Unicode
+/// scalar count), matching the encoding this server declares to LSP clients
+/// (`PositionEncodingKind::UTF8`, set in `initialize`) and the
+/// `SemanticToken::length` field, which `tokens_for_text` computes as
+/// `end - start` (also bytes). Before the fix this function counted Unicode
+/// scalars while `length` counted bytes, so a multi-byte character before a
+/// token desynced the relative-encoded stream — every subsequent token's
+/// `delta_start` was off by the byte/char delta.
 fn line_col_at(src: &str, byte: usize) -> (u32, u32) {
     let byte = byte.min(src.len());
     let before = &src[..byte];
     let line = before.bytes().filter(|&b| b == b'\n').count() as u32;
     let line_start = before.rfind('\n').map_or(0, |i| i + 1);
-    let character = src[line_start..byte].chars().count() as u32;
+    let character = (byte - line_start) as u32;
     (line, character)
 }
 
@@ -195,6 +209,77 @@ mod tests {
         assert!(
             !tokens.iter().any(|t| t.token_type == COMMENT),
             "in-string // must not be highlighted as a comment"
+        );
+    }
+
+    /// Regression (audit §9): a non-ASCII character before a token must not
+    /// desync the relative-encoded stream. `line_col_at` and `length` must
+    /// both use UTF-8 byte offsets — before the fix, `line_col_at` counted
+    /// Unicode scalars while `length` counted bytes, so `é` (2 bytes, 1 char)
+    /// shifted every subsequent token's `delta_start` by one.
+    #[test]
+    fn multibyte_chars_do_not_desync_relative_encoding() {
+        // Line 0: `// café` (comment). Line 1: `state x = 1` (keyword).
+        // The `é` in café is 2 bytes / 1 UTF-16 unit / 1 scalar — every
+        // convention produces a *different* column, so this test pins which
+        // one we use.
+        let src = "// caf\u{e9}\nstate x = 1\n";
+
+        // The line-1 `state` keyword must start at byte column 0 of line 1.
+        // (Whichever encoding we used, this part is unambiguous.)
+        let state_byte = src.find("state").expect("state present");
+        let (line, char_col) = line_col_at(src, state_byte);
+        assert_eq!(line, 1, "state must be on line 1");
+        assert_eq!(char_col, 0, "state must start at column 0 of line 1");
+
+        let toks = tokens_for_text(src);
+        // The first line's comment token: byte span is `// caf\u{e9}` = 8 bytes.
+        // Its `length` field must be 8 (bytes), not 7 (chars).
+        let comment_len: u32 = toks
+            .iter()
+            .find(|t| t.token_type == COMMENT)
+            .map(|t| t.length)
+            .expect("comment token present");
+        assert_eq!(
+            comment_len, 8,
+            "comment length must be counted in UTF-8 bytes (got {comment_len})",
+        );
+
+        // The `state` token's `delta_start` (line changed, so it is the
+        // absolute byte column of `state` within line 1) must be 0.
+        let state_tok = toks
+            .iter()
+            .find(|t| t.token_type == KEYWORD)
+            .expect("keyword token present");
+        assert_eq!(state_tok.delta_line, 1, "state must be +1 line from the comment");
+        assert_eq!(
+            state_tok.delta_start, 0,
+            "state is at byte column 0 of its line",
+        );
+    }
+
+    /// `line_col_at` must return the **byte** column within the line, not a
+    /// Unicode scalar count. Direct unit test (the fn is module-private) —
+    /// this is the exact conversion the relative-encoded stream depends on.
+    /// `é` is 2 bytes / 1 scalar; a char-counting implementation returns 3
+    /// here instead of 4, shifting every token after the first non-ASCII char.
+    #[test]
+    fn line_col_at_counts_utf8_bytes_not_scalars() {
+        let src = "caf\u{e9}x";
+        // Byte layout: 'c'(1) 'a'(1) 'f'(1) '\u{e9}'(2) 'x'(1)
+        //             offsets 0   1   2   3..5    5
+        let (line_at_0, col_at_0) = line_col_at(src, 0);
+        assert_eq!((line_at_0, col_at_0), (0, 0), "start of line");
+        let (line_at_3, col_at_3) = line_col_at(src, 3);
+        assert_eq!(
+            (line_at_3, col_at_3),
+            (0, 3),
+            "column at the é start is 3 bytes",
+        );
+        let (_line_at_5, col_at_5) = line_col_at(src, 5);
+        assert_eq!(
+            col_at_5, 5,
+            "column after `café` is 5 bytes; a char-counting impl gives 4",
         );
     }
 }
