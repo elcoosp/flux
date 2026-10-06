@@ -19,15 +19,6 @@ fn nested_list(depth: usize) -> String {
     )
 }
 
-fn nested_paren(depth: usize) -> String {
-    format!(
-        "compo X\n  Text(text: {}{}1{})\n",
-        "(".repeat(depth),
-        "".to_string(), // no-op to keep the format simple
-        ")".repeat(depth),
-    )
-}
-
 #[test]
 fn deeply_nested_list_is_rejected_before_recursion() {
     // 17 > MAX_NESTING_DEPTH (16); must be a clean error, not a stack overflow.
