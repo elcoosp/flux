@@ -15,10 +15,10 @@ enum FluxTheme {
 }
 
 struct Detail: View {
-    let model: Model
+    let title: String
     var body: some View {
   VStack {
-      Text(model.title)
+      Text(title)
   }
     }
 }
