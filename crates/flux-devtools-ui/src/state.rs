@@ -234,6 +234,15 @@ impl DeviceSession {
 /// the worst-case replay ~5-10 ms even for large states.
 const CHECKPOINT_INTERVAL: u64 = 256;
 
+/// Maximum number of simultaneously-retained host sessions. Each
+/// `HostAnnounce` creates or refreshes a session; without a cap a client
+/// cycling through distinct identities would grow the map (and each
+/// session's 10k-event timeline) without bound. The eviction policy drops the
+/// oldest non-active session when the cap is exceeded — a developer rarely
+/// inspects more than a handful of devices at once, and the picker would not
+/// usefully render more.
+const MAX_SESSIONS: usize = 16;
+
 /// DevTools' shared state: the retained timeline, the legacy single-host
 /// mirror, per-host sessions, and the new checkpoints used to bound
 /// `state_at` replays.
@@ -252,6 +261,12 @@ pub struct DevToolsState {
     /// Per-host reconstructed sessions, keyed by [`HostKey`] (FLUX-061). Lets
     /// DevTools connect to more than one host at once and scrub each independently.
     pub sessions: RwLock<BTreeMap<HostKey, DeviceSession>>,
+    /// Arrival order of `sessions` keys (most-recent last). Bounds the map:
+    /// every `HostAnnounce` calls `set_host`, which would otherwise grow
+    /// `sessions` without limit if a client cycled through many distinct
+    /// host identities. When the cap is exceeded the oldest non-active
+    /// session is evicted (see [`MAX_SESSIONS`]).
+    pub session_order: RwLock<std::collections::VecDeque<HostKey>>,
     /// The host whose telemetry the [`handle_telemetry`](Self::handle_telemetry)
     /// calls currently route to (the most recent `HostAnnounce` on this
     /// connection). `None` until a host announces, then the anonymous key.
@@ -344,6 +359,7 @@ impl DevToolsState {
             net: RwLock::new(NetworkLog::new(512)),
             host: RwLock::new(None),
             sessions: RwLock::new(BTreeMap::new()),
+            session_order: RwLock::new(std::collections::VecDeque::new()),
             active: RwLock::new(None),
             perf_records: RwLock::new(Vec::new()),
             perf_record_generation: RwLock::new(0),
@@ -414,9 +430,26 @@ impl DevToolsState {
         let key = HostKey::from_host(&host);
         {
             let mut sessions = self.sessions.write();
+            let mut order = self.session_order.write();
+            // Promote `key` to most-recently-seen (idempotent: an existing
+            // session is refreshed, not duplicated).
+            order.retain(|k| k != &key);
+            order.push_back(key.clone());
             sessions
                 .entry(key.clone())
                 .or_insert_with(|| DeviceSession::new(host.clone()));
+            // Evict oldest non-active sessions until within the cap. The active
+            // session is the one `set_host` is about to mark, so never evict
+            // `key` — eviction walks from the front (oldest) and skips it.
+            while order.len() > MAX_SESSIONS {
+                let Some(oldest) = order.front().cloned() else { break };
+                if oldest == key {
+                    // Only the active session remains over the cap — stop.
+                    break;
+                }
+                order.pop_front();
+                sessions.remove(&oldest);
+            }
         }
         *self.host.write() = Some(host);
         *self.active.write() = Some(key);
@@ -1049,5 +1082,70 @@ mod tests {
             .expect("android session present");
         assert_eq!(android.timeline_len(), 1);
         assert_eq!(android.vm_state().bytecode_offset, Some(20));
+    }
+
+    /// Regression (round 7): `set_host` must evict the oldest session once
+    /// the cap is exceeded, so a client cycling through many distinct host
+    /// identities cannot grow `sessions` without bound. The active (most
+    /// recent) session is always retained.
+    #[test]
+    fn sessions_are_capped_and_evict_oldest() {
+        let state = DevToolsState::new();
+        // Announce 20 distinct hosts (> MAX_SESSIONS). Each gets its own key.
+        for i in 0..20u32 {
+            state.set_host(HostInfo {
+                platform: "ios".into(),
+                device: format!("Device-{i}"),
+                capabilities: Vec::new(),
+            });
+        }
+        // Exactly MAX_SESSIONS retained.
+        let keys = state.host_keys();
+        assert_eq!(
+            keys.len(),
+            16,
+            "sessions must be capped at MAX_SESSIONS; got {}",
+            keys.len(),
+        );
+        // The most-recent host is present (never evicted as the active one).
+        let newest = HostKey::from_host(&HostInfo {
+            platform: "ios".into(),
+            device: "Device-19".into(),
+            capabilities: Vec::new(),
+        });
+        assert!(
+            state.session_state(&newest).is_some(),
+            "the active (most-recent) session must survive eviction",
+        );
+        // The oldest host was dropped.
+        let oldest = HostKey::from_host(&HostInfo {
+            platform: "ios".into(),
+            device: "Device-0".into(),
+            capabilities: Vec::new(),
+        });
+        assert!(
+            state.session_state(&oldest).is_none(),
+            "the oldest session must be evicted first",
+        );
+    }
+
+    /// Re-announcing an existing host refreshes (does not duplicate) its
+    /// session and promotes it to most-recent.
+    #[test]
+    fn set_host_is_idempotent_for_an_existing_key() {
+        let state = DevToolsState::new();
+        let host = HostInfo {
+            platform: "ios".into(),
+            device: "iPhone17,1".into(),
+            capabilities: Vec::new(),
+        };
+        state.set_host(host.clone());
+        let len_after_first = state.host_keys().len();
+        state.set_host(host);
+        assert_eq!(
+            state.host_keys().len(),
+            len_after_first,
+            "re-announcing the same host must not create a duplicate session",
+        );
     }
 }
