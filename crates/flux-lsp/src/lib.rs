@@ -148,9 +148,22 @@ impl FluxLsp {
                     {
                         *text = updated;
                     } else {
-                        // Fall back to full replace if the range can't be mapped
-                        // (defensive — should not happen with a conformant client).
-                        *text = change.text;
+                        // An incremental change whose range could not be mapped
+                        // onto the cached document (a non-conformant or
+                        // out-of-sync client). We **cannot** fall back to
+                        // `*text = change.text`: for an incremental change,
+                        // `change.text` is the *replacement fragment*, not the
+                        // whole document, so assigning it would silently
+                        // truncate the buffer to a few bytes — corrupting every
+                        // subsequent diagnostic and symbol lookup until a full
+                        // sync arrives. Leave the document at its previous
+                        // (correct) state and log; the next `range: None`
+                        // change resynchronises.
+                        tracing::warn!(
+                            uri = %uri,
+                            "incremental LSP edit range could not be mapped; \
+                             leaving document unchanged (awaiting full sync)"
+                        );
                     }
                 }
                 // Full document sync: the client sent the entire new text.
