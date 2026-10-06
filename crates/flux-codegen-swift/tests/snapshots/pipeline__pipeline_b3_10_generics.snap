@@ -14,12 +14,12 @@ enum FluxTheme {
     static let textTitle: CGFloat = 28
 }
 
-struct List<T>: View {
+struct List<T: Hashable>: View {
     let items: [T]
     var body: some View {
   VStack {
-      ForEach(items, id: \.id) { item in
-          Text(item)
+      ForEach(items, id: \.self) { _ in
+          Text("item")
       }
   }
     }
