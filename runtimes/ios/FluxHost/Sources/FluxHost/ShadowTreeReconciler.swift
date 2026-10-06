@@ -247,7 +247,16 @@ struct ShadowTreeReconciler {
             // every delta frame destroyed all native view identity (scroll/focus/
             // text loss) and skipped adapter.destroy/onCleanup.
             let rootReplaced = newRootId != rootId
-            if rootReplaced { built.removeAll() }
+            if rootReplaced {
+                // A full root replacement destroys every prior view; wipe the
+                // entire per-node state, not just `built`, so a long session
+                // does not accumulate `signalDeps` / `forEachRowContext` /
+                // `thunkHandlerToNode` entries for ids that no longer exist.
+                built.removeAll()
+                signalDeps.removeAll()
+                forEachRowContext.removeAll()
+                thunkHandlerToNode.removeAll()
+            }
             nodeTable = patchNodes
             currentRootId = newRootId
             reconcile(nodeId: newRootId, parentId: 0, nodes: patchNodes, report: &report)
