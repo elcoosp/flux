@@ -18,7 +18,7 @@ struct Feed: View {
     @State private var items: [String] = ["a", "b"]
     var body: some View {
   VStack {
-      ForEach(items, id: \.id) { item in
+      ForEach(items, id: \.self) { item in
           Text(item)
       }
   }
