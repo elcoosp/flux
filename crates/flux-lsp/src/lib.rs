@@ -398,6 +398,17 @@ impl LanguageServer for FluxLsp {
         Box::pin(async {
             Ok(InitializeResult {
                 capabilities: ServerCapabilities {
+                    // FLUX-027 / audit §9: declare the position-encoding
+                    // convention explicitly. Without it LSP clients default to
+                    // **UTF-16** code units (per the spec) while every helper
+                    // in this crate (`util::position_to_offset`,
+                    // `semantic_tokens::line_col_at`) counts **UTF-8 bytes** —
+                    // so any non-ASCII character before a position shifts every
+                    // diagnostic, hover, goto-def, completion, and semantic
+                    // token. Declaring `UTF8` makes the three subsystems agree.
+                    position_encoding: Some(
+                        async_lsp::lsp_types::PositionEncodingKind::UTF8,
+                    ),
                     text_document_sync: Some(TextDocumentSyncCapability::Kind(
                         TextDocumentSyncKind::INCREMENTAL,
                     )),
