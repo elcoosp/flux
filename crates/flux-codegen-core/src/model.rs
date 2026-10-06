@@ -56,11 +56,22 @@ impl<'a> ComponentMeta<'a> {
         if self.decl.generics.is_empty() {
             String::new()
         } else {
+            // Round-15: preserve the parsed `T: Bound` constraint. The previous
+            // implementation emitted only the parameter name (`<T>`), so a Flux
+            // declaration `compo List[T: Hashable]` produced a bare `struct
+            // List<T>`. Any use of `T` in a position that requires the bound
+            // (e.g. `ForEach(items, id: \.self)` where `ForEach` needs
+            // `ID: Hashable`) then failed Swift's type-check. The `name: Bound`
+            // spelling is accepted by both Swift (`<T: Hashable>`) and Kotlin
+            // (`<T: Hashable>`, whitespace around `:` optional).
             let params: Vec<String> = self
                 .decl
                 .generics
                 .iter()
-                .map(|g| g.name.name.clone())
+                .map(|g| match &g.bound {
+                    Some(b) => format!("{}: {}", g.name.name, b.name),
+                    None => g.name.name.clone(),
+                })
                 .collect();
             format!("<{}>", params.join(", "))
         }
