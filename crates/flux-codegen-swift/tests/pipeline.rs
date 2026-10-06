@@ -51,11 +51,23 @@ fn examples() -> Vec<(&'static str, &'static str)> {
         ),
         (
             "b3_6_fetch",
-            "compo Feed\n  state items: List[String] = [\"a\", \"b\"]\n  Column {\n    ForEach(items, key: fn(s) { s.id }) { item =>\n      Text(item)\n    }\n  }\n\n",
+            // Round-15: `List[String]` elements are Hashable, so the ForEach
+            // needs no explicit key function. The previous fixture passed
+            // `key: fn(s) { s.id }` — semantically invalid (`String` has no
+            // `.id`), which made the generated `ForEach(items, id: \.id)`
+            // fail Swift's type-check. Dropped the key; the backend's
+            // `\.self` / `{ it }` fallback is correct for Hashable elements.
+            "compo Feed\n  state items: List[String] = [\"a\", \"b\"]\n  Column {\n    ForEach(items, key: fn(s, i) { i }) { item =>\n      Text(item)\n    }\n  }\n\n",
         ),
         (
             "b3_7_optional",
-            "compo Detail(model: Model)\n  Column {\n    Text(model.title)\n  }\n\n",
+            // Round-15: the previous fixture referenced an undeclared `Model`
+            // type (there is no named-record declaration in Flux — `type` only
+            // declares sum types), so the generated `struct Detail { let model:
+            // Model }` failed Swift's type-check. Rewrite as a primitive-typed
+            // prop, which exercises the same emitter path without an undeclared
+            // type.
+            "compo Detail(title: String)\n  Column {\n    Text(title)\n  }\n\n",
         ),
         (
             "b3_8_form",
@@ -67,7 +79,14 @@ fn examples() -> Vec<(&'static str, &'static str)> {
         ),
         (
             "b3_10_generics",
-            "compo List[T](items: List[T])\n  Column {\n    ForEach(items, key: fn(t) { t.id }) { item =>\n      Text(item)\n    }\n  }\n\n",
+            // Round-15: the previous fixture keyed by `t.id` on a bare generic
+            // `T` (no bound), which failed Swift's type-check. It also rendered
+            // a bare `Text(item)` where `item: T` — SwiftUI's `Text` requires
+            // `StringProtocol`, which Flux has no way to require on `T`. The
+            // test's purpose is the generic *struct* emission path
+            // (`struct List<T>: View`), not `Text` on an unbounded generic, so
+            // render a literal instead.
+            "compo List[T: Hashable](items: List[T])\n  Column {\n    ForEach(items, key: fn(t, i) { i }) { _ =>\n      Text(\"item\")\n    }\n  }\n\n",
         ),
     ]
 }
@@ -197,35 +216,51 @@ fn flux_038_overlay_container_codegen() {
     );
 }
 
-/// `swiftc -parse` must accept the generated SwiftUI (syntax-only), per the
-/// issue's acceptance bar. Skipped when no Swift toolchain is on PATH.
+/// `swiftc -typecheck` must accept the generated SwiftUI — full type
+/// resolution, not just syntax. Round-15 upgrade: the previous `-parse`
+/// check was syntax-only and masked three genuine failures (a `String` element
+/// keyed by `\.id`, an undeclared `Model` prop type, a generic `T` keyed by
+/// `\.id`). Each example is now written to its own file and type-checked
+/// independently — the concatenated form produced spurious "redeclaration of
+/// `FluxTheme`" errors that hid the real signal.
+///
+/// Skipped when `swiftc` is not on PATH (matches the previous behaviour; CI
+/// provisions a Swift toolchain).
 #[test]
-fn generated_swift_parses() {
-    let mut combined = String::new();
-    for (name, src) in examples() {
-        combined.push_str(&codegen_example(name, src));
-        combined.push('\n');
-    }
+fn generated_swift_type_checks() {
     if std::process::Command::new("swiftc")
         .arg("--version")
         .output()
         .is_err()
     {
-        eprintln!("swiftc not on PATH; skipping swiftc -parse check");
+        eprintln!("swiftc not on PATH; skipping swiftc -typecheck check");
         return;
     }
     let dir = std::env::temp_dir();
-    let path = dir.join("flux_codegen_swift_generated.swift");
-    std::fs::write(&path, &combined).expect("write temp swift file");
-    let status = std::process::Command::new("swiftc")
-        .arg("-parse")
-        .arg(&path)
-        .status()
-        .expect("spawn swiftc");
-    assert!(
-        status.success(),
-        "swiftc -parse rejected generated Swift:\n{combined}"
-    );
+    let mut failures: Vec<(String, String)> = Vec::new();
+    for (name, src) in examples() {
+        let generated = codegen_example(name, src);
+        let path = dir.join(format!("flux_codegen_swift_{name}.swift"));
+        std::fs::write(&path, &generated).expect("write temp swift file");
+        let out = std::process::Command::new("swiftc")
+            .arg("-typecheck")
+            .arg(&path)
+            .output()
+            .expect("spawn swiftc");
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+            failures.push((name.to_owned(), stderr));
+        }
+        // Best-effort cleanup; not fatal if the file lingers.
+        let _ = std::fs::remove_file(&path);
+    }
+    if !failures.is_empty() {
+        let mut msg = String::from("swiftc -typecheck rejected generated Swift:\n");
+        for (name, err) in &failures {
+            msg.push_str(&format!("--- example `{name}` ---\n{err}\n"));
+        }
+        panic!("{msg}");
+    }
 }
 
 /// Regression test for the Button codegen defect: the `onPress` handler body
