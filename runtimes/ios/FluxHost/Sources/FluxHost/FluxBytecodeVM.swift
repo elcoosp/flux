@@ -285,7 +285,7 @@ enum FluxBytecodeVM {
                 let b = try requireFloat(reg(instr.u8(2)), at: instr.offset)
                 let r: Bool
                 switch op {
-                case .eqF64: r = (a == b) || (a.isNaN && b.isNaN)
+                case .eqF64: r = (a == b)
                 case .ltF64: r = a < b
                 case .gtF64: r = a > b
                 default:
@@ -876,7 +876,7 @@ enum FluxBytecodeVM {
                 let b = try requireFloat(reg(instr.u8(2)), at: instr.offset)
                 let r: Bool
                 switch op {
-                case .eqF64: r = (a == b) || (a.isNaN && b.isNaN)
+                case .eqF64: r = (a == b)
                 case .ltF64: r = a < b
                 case .gtF64: r = a > b
                 default:
@@ -1291,7 +1291,7 @@ enum FluxBytecodeVM {
                 let b = try requireFloat(reg(instr.u8(2)), at: instr.offset)
                 let r: Bool
                 switch instr.opcode {
-                case .eqF64: r = (a == b) || (a.isNaN && b.isNaN)
+                case .eqF64: r = (a == b)
                 case .ltF64: r = a < b
                 case .gtF64: r = a > b
                 default: fatalError("unreachable")
