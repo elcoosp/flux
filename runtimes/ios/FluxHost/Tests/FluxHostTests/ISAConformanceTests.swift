@@ -49,12 +49,25 @@ final class ISAConformanceTests: XCTestCase {
         guard let dir = vectorsDirectory() else {
             throw XCTSkip("ISA vectors not found; set FLUX_ISA_VECTORS to the directory")
         }
-        let urls = try FileManager.default.contentsOfDirectory(
+        // The `tests/isa-vectors/` directory also hosts a handful of
+        // non-ISA-vector fixtures (e.g. `foreach_ids.json`, a keyed-list
+        // diff scenario with a different schema). Only files whose top-level
+        // JSON object carries a `bytecode_hex` key are ISA vectors; skip
+        // anything else rather than failing to decode it as `ISAVector`.
+        let candidateUrls = try FileManager.default.contentsOfDirectory(
             at: dir,
             includingPropertiesForKeys: nil
         ).filter { $0.pathExtension == "json" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
 
-        XCTAssertFalse(urls.isEmpty, "no vectors loaded from \(dir.path)")
+        func looksLikeIsaVector(_ url: URL) -> Bool {
+            guard let data = try? Data(contentsOf: url),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { return false }
+            return obj["bytecode_hex"] != nil
+        }
+        let urls = candidateUrls.filter(looksLikeIsaVector)
+
+        XCTAssertFalse(urls.isEmpty, "no ISA vectors loaded from \(dir.path)")
 
         var passed = 0
         var failures: [String] = []
@@ -67,9 +80,15 @@ final class ISAConformanceTests: XCTestCase {
             ))
             let payload = vector.payload.map(toValue) ?? .null
 
+            // Seed the string table the vector declares. Vectors that exercise
+            // STR_LEN / STR_EQ / STR_CONCAT carry `strings` entries; those with
+            // none see an empty (but functional) table.
+            var strings = ConformanceStringTable()
+            strings.seed(vector.strings)
+
             if let expected = vector.expectedError {
                 do {
-                    _ = try FluxBytecodeVM.run(bytecode, signals: &signals, payload: payload)
+                    _ = try FluxBytecodeVM.run(bytecode, signals: &signals, payload: payload, stringTable: strings)
                     failures.append("\(vector.name): expected error \(expected) but succeeded")
                 } catch let err as VmError {
                     if err.kind.name != expected.rawValue {
@@ -79,7 +98,7 @@ final class ISAConformanceTests: XCTestCase {
             } else {
                 let out: VmOutcome
                 do {
-                    out = try FluxBytecodeVM.run(bytecode, signals: &signals, payload: payload)
+                    out = try FluxBytecodeVM.run(bytecode, signals: &signals, payload: payload, stringTable: strings)
                 } catch {
                     failures.append("\(vector.name): unexpected error \(error)")
                     continue
@@ -126,11 +145,19 @@ func toValue(_ v: VecValue) -> FluxValue {
     case "Str": return FluxValue.str(UInt32(truncatingIfNeeded: v.value?.asInt64 ?? 0))
     case "Null": return FluxValue.null
     case "List":
+        // `v.value` is a `[AnyCodable]` where each element wraps a
+        // `{"type":..,"value":..}` dictionary. Unwrap with `asDictionaryType`
+        // / `asDictionaryValue` so nested values decode to their real type
+        // (previously they silently collapsed to `.null`).
         let items = v.value?.asArray ?? []
-        return .list(items.map { toValue(VecValue(type: $0.asDictionaryType, value: $0)) })
+        return .list(items.map { item in
+            toValue(VecValue(type: item.asDictionaryType, value: item.asDictionaryValue))
+        })
     case "Record":
         let items = v.value?.asArray ?? []
-        return .record(items.enumerated().map { (UInt16($0.offset), toValue(VecValue(type: $0.element.asDictionaryType, value: $0.element))) })
+        return .record(items.enumerated().map { (offset, item) in
+            (UInt16(offset), toValue(VecValue(type: item.asDictionaryType, value: item.asDictionaryValue)))
+        })
     default: return FluxValue.null
     }
 }
@@ -140,6 +167,10 @@ private extension AnyCodable {
     /// used when flattening List/Record payloads.
     var asDictionaryType: String {
         (value as? [String: AnyCodable])?["type"]?.asString ?? "Null"
+    }
+    /// The nested `value` of a typed value object, or `nil` if not a dict.
+    var asDictionaryValue: AnyCodable? {
+        (value as? [String: AnyCodable])?["value"]
     }
 }
 
@@ -171,5 +202,36 @@ private extension StringProtocol {
             out.append(h << 4 | l)
         }
         return out
+    }
+}
+
+// MARK: - Conformance string table
+
+/// A `StringResolver` mirroring the Rust reference VM's conformance behavior:
+/// `lookup` resolves the vector's seeded (id, text) pairs, and `intern` mints
+/// the same FNV-1a synthetic id the oracle uses for `STR_CONCAT` / `TO_STRING`
+/// results (see `synthetic_str_id` in `crates/flux-vm-ref/src/vm.rs`).
+final class ConformanceStringTable: StringResolver {
+    private var strings: [UInt32: String] = [:]
+
+    init() {}
+
+    func seed(_ entries: [StringSeed]) {
+        for entry in entries {
+            strings[entry.id] = entry.text
+        }
+    }
+
+    func lookup(_ id: UInt32) -> String? { strings[id] }
+
+    /// Mirrors the oracle's `synthetic_str_id`: FNV-1a over the UTF-8 bytes,
+    /// masked into the reserved high half (`0x8000_0000 | hash`).
+    func intern(_ value: String) -> UInt32 {
+        var hash: UInt32 = 0x811c_9dc5
+        for byte in value.utf8 {
+            hash ^= UInt32(byte)
+            hash = hash &* 0x0100_0193
+        }
+        return 0x8000_0000 | (hash & 0x7FFF_FFFF)
     }
 }
