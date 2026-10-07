@@ -185,6 +185,15 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
         }
     }
 
+    // Round-19: `pairs` is built by iterating `removed`, which comes from
+    // `AHashSet::difference()` — iteration order randomized per process. Two
+    // span-shifted siblings therefore emitted their `Reattach` patches in
+    // whichever order the hash set happened to produce, making the frame bytes
+    // nondeterministic. Sort by `old_id` so the emitted order is stable and
+    // reproducible; the pairs are otherwise independent, so the reordering has
+    // no semantic effect. Mirrors the round-14 sort applied to `inserted`.
+    let mut pairs = pairs;
+    pairs.sort_by_key(|(old_id, _)| u32::from(*old_id));
     for (old_id, new_id) in pairs {
         let n = new.get(new_id).expect("present in new");
         patches.push(Patch::Reattach {
