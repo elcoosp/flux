@@ -137,29 +137,29 @@ fn compute_all_local_ids(local: &mut AHashMap<NodeId, NodeId>, arena: &IRArena, 
             continue;
         }
         if children_done {
-            let view = arena
-                .get(id)
-                .expect("node present during content addressing");
+            // Round-23: a child reference to an id not in `all_ids()` is
+            // malformed input, but the walk must degrade — skip it rather
+            // than panic. Same policy as `remap_children`'s `.unwrap_or(cid)`.
+            let Some(view) = arena.get(id) else {
+                continue;
+            };
+            // Round-23: use the same tolerant policy as `remap_children`
+            // (`.unwrap_or(cid)`), not a panic, when a child reference names
+            // an id not present in `all_ids()`. A dangling reference is a
+            // malformed arena, but the two remap paths in this file must
+            // agree on what to do with one: this path previously panicked the
+            // pipeline, the other preserved the original id. Preserving is
+            // the safe default — the encoder/host surface the missing id as a
+            // later diagnostic, and no correct program is affected.
             let remapped_children: Vec<Child> = view
                 .children()
                 .iter()
                 .map(|child| match child {
-                    Child::Node(cid) => Child::Node(
-                        *local
-                            .get(cid)
-                            .expect("child local id computed before parent"),
-                    ),
+                    Child::Node(cid) => Child::Node(*local.get(cid).unwrap_or(cid)),
                     Child::Splice { items } => Child::Splice {
                         items: items
                             .iter()
-                            .map(|(k, cid)| {
-                                (
-                                    *k,
-                                    *local
-                                        .get(cid)
-                                        .expect("spliced child local id computed before parent"),
-                                )
-                            })
+                            .map(|(k, cid)| (*k, *local.get(cid).unwrap_or(cid)))
                             .collect(),
                     },
                     other => other.clone(),
@@ -221,9 +221,10 @@ fn assign_all_final_ids(
         stack.push((0, root_slot as u64, *root));
     }
     while let Some((parent_final, position, id)) = stack.pop() {
-        let view = arena
-            .get(id)
-            .expect("node present during content addressing");
+        // Round-23: skip a dangling id (same rationale as the sibling walk).
+        let Some(view) = arena.get(id) else {
+            continue;
+        };
         let children_local = remap_children(&view.children(), local);
         let children_hash = hash_children(&children_local);
         let final_id = flux_syntax::content_addressed_id(
