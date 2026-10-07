@@ -1,0 +1,20 @@
+{
+  "bytecode_hex": "80000400b0016400000000000000810001b002c800000000000000810002b0032c0100000000000085000103",
+  "description": "LIST_INSERT at index 1 of [100, 200] with 300 yields [100, 300, 200].",
+  "expected_error": null,
+  "expected_gas_used": 7,
+  "expected_registers": {
+    "r0": {
+      "type": "List",
+      "value": [
+        { "type": "Int", "value": 100 },
+        { "type": "Int", "value": 300 },
+        { "type": "Int", "value": 200 }
+      ]
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "list_insert_basic",
+  "payload": null
+}
