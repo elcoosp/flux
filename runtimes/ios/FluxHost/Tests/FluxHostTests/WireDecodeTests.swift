@@ -319,7 +319,7 @@ final class WireDecodeTests: XCTestCase {
         let bytes = try Data(contentsOf: url)
         let frame = [UInt8](bytes)
         let decoded = try FrameDeserializer.decode(frame)
-        XCTAssertFalse(decoded.patches.isEmpty(), "delta_v2 must carry patches")
+        XCTAssertFalse(decoded.patches.isEmpty, "delta_v2 must carry patches")
     }
 
     /// `InternString` (0x07) and `StringInterned` (0x08) decode to control
