@@ -8,7 +8,7 @@
 
 /// Frame kind and flag constants mirroring the Rust wire protocol
 /// (`crates/flux-ir-serde/src/frame.rs`, Appendix D §D.1).
-private enum FrameKind {
+enum FrameKind {
     /// `Init` (full-tree) frame type byte.
     static let initByte: UInt8 = 0x02
     /// `Delta` (patch) frame type byte.
