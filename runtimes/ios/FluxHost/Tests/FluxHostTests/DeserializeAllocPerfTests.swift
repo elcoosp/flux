@@ -19,25 +19,42 @@ private func u32(_ v: UInt32) -> [UInt8] { withUnsafeBytes(of: v.littleEndian) {
 
 /// Builds an Init frame with a root carrying `propCount` props and `childCount`
 /// children, to exercise the per-node array allocations.
+///
+/// The layout matches the current v3 decoder (`FrameDeserializer.decodeInit`):
+/// header `magic(u32) version(u8) kind(u8)`, then
+///   `seq(u32) root extra_count(u32) seed_count(u32) sm_count(u32)
+///    str_count(u32) comp_count(u32) handler_blob_len(u32)`.
+/// Every count is a `u32` at v3 (was `u16` at v2). Earlier revisions omitted
+/// the kind byte entirely, which the decoder rejected as `unknownTag(offset: 5)`.
 private func makeFrame(propCount: Int, childCount: Int) -> [UInt8] {
     var node: [UInt8] = []
     node += u32(1)        // id
     node += [0x01]        // kind = Primitive
     node += u32(0)        // component_id
-    node += u16(UInt16(propCount))
+    node += u32(UInt32(propCount))
     for i in 0..<propCount {
-        node += u16(UInt16(i))
+        node += u16(UInt16(i)) // prop index stays u16
         node += [0x04] + u32(UInt32(100 + i)) // Str(id)
     }
-    node += u16(UInt16(childCount))
+    node += u32(UInt32(childCount))
     for c in 0..<childCount {
         node += [0x01] + u32(UInt32(10 + c)) // child Node(id)
     }
-    node += u16(0)        // handler_count
+    node += u32(0)        // handler_count
     node += u32(0) + u32(0) + u32(0) // span
 
-    let body = u16(0) + u16(0) + u16(0) + node
-    return u32(FrameDeserializer.magic) + [FrameDeserializer.protocolVersion] + u32(0) + [0x01] + body
+    let body = u32(0)            // seq
+        + node                    // root
+        + u32(0)                  // extra_count
+        + u32(0)                  // seed_count
+        + u32(0)                  // sm_count
+        + u32(0)                  // str_count
+        + u32(0)                  // comp_count
+        + u32(0)                  // handler_blob_len
+    return u32(FrameDeserializer.magic)
+        + [FrameDeserializer.protocolVersion]
+        + [0x02]                  // kind = Init
+        + body
 }
 
 final class DeserializeAllocPerfTests: XCTestCase {
