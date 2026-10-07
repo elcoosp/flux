@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b0000000000000000080250100",
+  "description": "NEG_I64 of i64::MIN wraps to i64::MIN (two's-complement semantics, matching ADD/SUB/MUL wrapping policy). Pins the audit §2.1 fix so all three VMs converge.",
+  "expected_error": null,
+  "expected_gas_used": 2,
+  "expected_registers": {
+    "r1": {
+      "type": "Int",
+      "value": -9223372036854775808
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "neg_i64_min",
+  "payload": null
+}
