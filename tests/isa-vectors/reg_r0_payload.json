@@ -17,13 +17,13 @@
   "expected_signals": [],
   "initial_signals": [],
   "name": "reg_r0_payload",
-  "payload": [
-    "Record",
-    [
-      [
-        "Int",
-        99
-      ]
+  "payload": {
+    "type": "Record",
+    "value": [
+      {
+        "type": "Int",
+        "value": 99
+      }
     ]
-  ]
+  }
 }
