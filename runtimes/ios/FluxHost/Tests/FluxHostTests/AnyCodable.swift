@@ -26,6 +26,8 @@ struct AnyCodable: Decodable {
             value = s
         } else if let a = try? container.decode([AnyCodable].self) {
             value = a
+        } else if let d = try? container.decode([String: AnyCodable].self) {
+            value = d
         } else {
             value = Optional<Any>.none as Any
         }
@@ -45,7 +47,15 @@ struct AnyCodable: Decodable {
     }
 
     var asInt64: Int64? { value as? Int64 }
-    var asBool: Bool? { value as? Bool }
+    var asBool: Bool? {
+        // The golden vectors encode booleans as `{"type":"Bool","value":1}`,
+        // i.e. JSON int 0/1 rather than JSON true/false. Rust's fixture loader
+        // accepts both (`as_bool().or_else(|| as_i64().map(|n| n != 0))`);
+        // mirror that here so `Bool` expected values decode correctly.
+        if let b = value as? Bool { return b }
+        if let i = value as? Int64 { return i != 0 }
+        return nil
+    }
     var asString: String? { value as? String }
     var asArray: [AnyCodable]? { value as? [AnyCodable] }
 }
