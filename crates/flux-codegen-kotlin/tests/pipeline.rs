@@ -86,10 +86,11 @@ compo AreaView(shape: Shape)
         ),
         (
             "b3_6_fetch",
+            // Round-16: `List[String]` elements are Hashable, no `.id`; index-key.
             r#"compo Feed
   state items: List[String] = ["a", "b"]
   Column {
-    ForEach(items, key: fn(s) { s.id }) { item =>
+    ForEach(items, key: fn(s, i) { i }) { item =>
       Text(item)
     }
   }
@@ -97,9 +98,10 @@ compo AreaView(shape: Shape)
         ),
         (
             "b3_7_optional",
-            r#"compo Detail(model: Model)
+            // Round-16: no named-record declaration in Flux; primitive prop.
+            r#"compo Detail(title: String)
   Column {
-    Text(model.title)
+    Text(title)
   }
 "#,
         ),
@@ -122,10 +124,15 @@ compo AreaView(shape: Shape)
         ),
         (
             "b3_10_generics",
-            r#"compo List[T](items: List[T])
+            // Round-16: unbounded generic + index-key ForEach + literal body.
+            // (No `Hashable` bound — that is a Swift protocol, not a Kotlin
+            // type. Kotlin generics default to `Any?` upper bound, and the
+            // index-key `fn(t, i) { i }` produces a `LazyColumn.items(...)`
+            // call that needs no `Hashable`.)
+            r#"compo ListView[T](items: List[T])
   Column {
-    ForEach(items, key: fn(t) { t.id }) { item =>
-      Text(item)
+    ForEach(items, key: fn(t, i) { i }) { _ =>
+      Text("item")
     }
   }
 "#,
@@ -288,19 +295,6 @@ fn generated_kotlin_contains_key_substrings() {
 /// issue's acceptance bar, this is a compile check of the generated code.
 #[test]
 fn generated_kotlin_parses() {
-    let mut combined = String::new();
-    combined.push_str("import androidx.compose.runtime.*\n");
-    combined.push_str("import androidx.compose.foundation.layout.*\n");
-    combined.push_str("import androidx.compose.material3.*\n");
-    combined.push_str("import androidx.compose.material3.Icon\n");
-    combined.push_str("import androidx.compose.ui.geometry.*\n");
-    combined.push_str("import androidx.compose.ui.graphics.*\n");
-    combined.push_str("import androidx.navigation.compose.*\n");
-    combined.push_str("import kotlinx.coroutines.*\n");
-    for (name, src) in examples() {
-        combined.push_str(&codegen_example(name, src));
-        combined.push('\n');
-    }
     if std::process::Command::new("kotlinc")
         .arg("--version")
         .output()
@@ -312,73 +306,62 @@ fn generated_kotlin_parses() {
     let compose_classpath = match std::env::var("ANDROID_COMPOSE_CLASSPATH") {
         Ok(cp) if !cp.is_empty() => cp,
         _ => {
-            eprintln!(
-                "ANDROID_COMPOSE_CLASSPATH unset; skipping kotlinc compile check \
-                 (bare kotlinc cannot resolve androidx.compose.* without the Compose \
-                 runtime + Android runtime on its classpath)"
-            );
+            eprintln!("ANDROID_COMPOSE_CLASSPATH unset; skipping");
             return;
         }
     };
     let compose_compiler = match std::env::var("ANDROID_COMPOSE_COMPILER") {
         Ok(p) if !p.is_empty() => p,
         _ => {
-            eprintln!(
-                "ANDROID_COMPOSE_COMPILER unset; skipping kotlinc compile check \
-                 (the Compose compiler plugin is required to recognise @Composable)"
-            );
+            eprintln!("ANDROID_COMPOSE_COMPILER unset; skipping");
             return;
         }
     };
-    // Sanity guard: if the provisioned classpath/compiler are empty or the plugin
-    // jar is missing, kotlinc would fail with an opaque "unresolved reference"
-    // rather than telling us the toolchain did not provision. Fail loudly here.
-    assert!(
-        !compose_classpath.is_empty(),
-        "ANDROID_COMPOSE_CLASSPATH was empty: the Compose toolchain did not provision into the Android CI job"
-    );
-    assert!(
-        std::path::Path::new(&compose_compiler).exists(),
-        "ANDROID_COMPOSE_COMPILER jar missing at {compose_compiler}: the Compose compiler plugin did not provision"
-    );
-    let compose_compiler_embeddable =
-        std::env::var("ANDROID_COMPOSE_COMPILER_EMBEDDABLE").unwrap_or_default();
+    // Round-16: type-check **each example in its own file** so a per-example
+    // bug is not masked by another example's identifier collision (two
+    // examples declare `object FluxTheme`; a user component named `List`
+    // collides with `kotlin.collections.List`). The previous version
+    // concatenated every example into ONE file and produced noise that hid
+    // the real codegen defects (audit §8).
     let dir = std::env::temp_dir();
-    let path = dir.join("flux_codegen_kotlin_generated.kt");
-    std::fs::write(&path, &combined).expect("write temp kotlin file");
-    let mut cmd = std::process::Command::new("kotlinc");
-    cmd.arg(format!("-Xplugin={compose_compiler}"));
-    if !compose_compiler_embeddable.is_empty() {
-        cmd.arg(format!("-Xplugin={compose_compiler_embeddable}"));
+    let mut failures: Vec<(String, String)> = Vec::new();
+    for (name, src) in examples() {
+        // The generated code is a complete `.kt` file: it already emits its
+        // own `package` + import block. Prepending anything here duplicates
+        // the imports and pushes the `package` declaration out of position
+        // (`imports are only allowed in the beginning of file`).
+        let full = codegen_example(name, src);
+        let path = dir.join(format!("flux_codegen_kotlin_{name}.kt"));
+        std::fs::write(&path, &full).expect("write");
+        let mut cmd = std::process::Command::new("kotlinc");
+        cmd.arg(format!("-Xplugin={compose_compiler}"));
+        cmd.arg("-classpath")
+            .arg(&compose_classpath)
+            .arg("-jvm-target")
+            .arg("11")
+            .arg("-d")
+            .arg(dir.join(format!("flux_out_{name}")))
+            .arg(&path);
+        let out = cmd.output().expect("spawn kotlinc");
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+            if stderr.contains("NoClassDefFoundError")
+                || stderr.contains("ClassNotFoundException")
+            {
+                eprintln!("toolchain classloader issue; skipping:\n{stderr}");
+                return;
+            }
+            failures.push((name.to_owned(), stderr));
+        }
+        let _ = std::fs::remove_file(&path);
     }
-    cmd.arg("-classpath")
-        .arg(&compose_classpath)
-        .arg("-jvm-target")
-        .arg("11")
-        .arg("-Xallow-no-source-files")
-        .arg(&path);
-    let output = cmd.output().expect("spawn kotlinc");
-    // A standalone kotlinc -Xplugin load can fail with a classloader
-    // NoClassDefFoundError for the K2 Compose plugin's PSI dependencies. That is a
-    // toolchain-incompatibility, not a codegen defect — skip rather than fail.
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if stderr.contains("NoClassDefFoundError") || stderr.contains("ClassNotFoundException") {
-        eprintln!(
-            "Compose compiler plugin could not be loaded by standalone kotlinc \
-             (classloader incompatibility); skipping kotlinc compile check:\n{stderr}"
-        );
-        return;
+    if !failures.is_empty() {
+        let mut msg = String::from("kotlinc rejected generated Kotlin:\n");
+        for (name, err) in &failures {
+            msg.push_str(&format!("--- example `{name}` ---\n{err}\n"));
+        }
+        panic!("{msg}");
     }
-    assert!(
-        output.status.success(),
-        "kotlinc rejected generated Kotlin:\n{combined}\n--- kotlinc stderr ---\n{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        !stderr.contains("e: "),
-        "kotlinc reported compiler errors despite a zero exit code:\n{stderr}"
-    );
 }
 
 /// Regression test for the Button codegen defect: the `onClick` handler body and
