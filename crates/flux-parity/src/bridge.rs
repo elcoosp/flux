@@ -130,6 +130,13 @@ pub(crate) fn canonicalize_expr(text: &str) -> String {
     let t = t
         .replace("{ it }", "key:.self")
         .replace("{ it.id }", "key:.id");
+    // Round-16: the Kotlin backend emits `key = null` as the positional-
+    // identity key (compiles for any element type, including an unbounded
+    // `T`, whose Kotlin upper bound is `Any?`). It is structurally the same
+    // as Swift's `\.self`; canonicalize it so cross-language parity holds.
+    if t == "null" {
+        return "key:.self".to_owned();
+    }
     // The codegen backends emit an `unsupported expr` placeholder when a
     // sub-expression cannot be lowered (`0 /* unsupported */` on Swift,
     // `/* unsupported expr */ 0` on Kotlin), and the dev-path reducer renders
