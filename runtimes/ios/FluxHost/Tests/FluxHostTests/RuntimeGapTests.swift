@@ -260,8 +260,11 @@ final class GapG4CapRegistryTests: XCTestCase {
         ]
         full.append(contentsOf: bc)
         let out = try FluxBytecodeVM.run(full, signals: &signals, payload: .null, capRegistry: registry)
+        // The impl writes the argument into signal 50 and returns the signal
+        // *id*; the VM stores that id in `result_reg`. Matches `flux-vm-ref`'s
+        // CALL_CAP arm (`regs[result_reg] = Value::Int(id)`).
         XCTAssertEqual(signals.read(50), FluxHost.FluxValue.int(42))
-        XCTAssertEqual(out.registers[0], FluxHost.FluxValue.int(42))
+        XCTAssertEqual(out.registers[0], FluxHost.FluxValue.int(50))
     }
 
     @MainActor
