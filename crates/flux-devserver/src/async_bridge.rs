@@ -312,4 +312,44 @@ mod tests {
         assert!(bridge.park(AwaitSuspendFrame::new(9, 5, 0)).unwrap().is_none());
         assert_eq!(bridge.parked_len(), 1);
     }
+
+    /// Round-18: a second `AwaitSuspend` for a cell already parked under a
+    /// *different* handler must error, not silently overwrite the first
+    /// handler's `resume_ip` (which would deadlock that handler when the cell
+    /// eventually settles, since the emitted `Resume` would target the second).
+    /// Re-sending for the *same* handler is a legitimate retransmit and stays
+    /// idempotent.
+    #[test]
+    fn duplicate_park_for_a_different_handler_errors_not_overwrites() {
+        let mut bridge = AsyncBridge::new();
+
+        // First handler A parks on cell 5 with resume_ip 11.
+        let first = bridge
+            .park(AwaitSuspendFrame::new(10, 5, 11))
+            .expect("first park ok");
+        assert!(first.is_none(), "no early value yet, so A stays parked");
+        assert_eq!(bridge.resume_ip(5), Some(11));
+
+        // Handler B tries the same cell with a different resume_ip -> error,
+        // and the original entry (handler A, resume_ip 11) is untouched.
+        let collision = bridge.park(AwaitSuspendFrame::new(11, 5, 99));
+        assert!(
+            collision.is_err(),
+            "a different handler on the same cell must be rejected, not silently overwrite"
+        );
+        assert_eq!(
+            bridge.resume_ip(5),
+            Some(11),
+            "the original handler's resume_ip must be preserved after a rejected duplicate"
+        );
+        assert_eq!(bridge.parked_len(), 1, "no entry was added by the rejected park");
+
+        // Same-handler retransmit is idempotent: Ok(None), entry unchanged.
+        let retransmit = bridge
+            .park(AwaitSuspendFrame::new(10, 5, 11))
+            .expect("same-handler retransmit ok");
+        assert!(retransmit.is_none(), "retransmit stays parked");
+        assert_eq!(bridge.resume_ip(5), Some(11));
+        assert_eq!(bridge.parked_len(), 1);
+    }
 }
