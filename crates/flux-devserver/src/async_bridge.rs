@@ -67,15 +67,40 @@ impl AsyncBridge {
         bytes: &[u8],
     ) -> Result<Option<Vec<u8>>, flux_ir_serde::WireError> {
         let frame = AwaitSuspendFrame::from_bytes(bytes)?;
-        Ok(self.park(frame))
+        self.park(frame)
     }
 
     /// Records a decoded suspension, resuming at once if the cell already
     /// settled.
-    #[must_use]
-    pub fn park(&mut self, frame: AwaitSuspendFrame) -> Option<Vec<u8>> {
+    ///
+    /// Returns [`WireError::InvalidTag`] when the host re-sends an
+    /// `AwaitSuspend` for a cell that is already parked under a *different*
+    /// handler. The previous implementation overwrote the entry, silently
+    /// dropping the first handler's `resume_ip`; on the eventual settle the
+    /// `Resume` frame addressed the second handler and the first deadlocked
+    /// in the host's continuation with no diagnostic. Re-sending for the
+    /// *same* handler is idempotent (a retransmit), so the check compares
+    /// `handler_id`.
+    pub fn park(
+        &mut self,
+        frame: AwaitSuspendFrame,
+    ) -> Result<Option<Vec<u8>>, flux_ir_serde::WireError> {
         if let Some(settled) = self.early.remove(&frame.cell) {
-            return Some(resume_bytes(frame.handler_id, frame.cell, &settled));
+            return Ok(Some(resume_bytes(frame.handler_id, frame.cell, &settled)));
+        }
+        if let Some(existing) = self.parked.get(&frame.cell) {
+            if existing.handler_id != frame.handler_id {
+                return Err(flux_ir_serde::WireError::InvalidTag {
+                    // `tag` is the offending cell id truncated to u8 for the
+                    // diagnostic; the full id is in `context`.
+                    tag: (u32::from(frame.cell) & 0xFF) as u8,
+                    context: "await_suspend.cell_already_parked",
+                    at: 0,
+                });
+            }
+            // Same handler retransmit: keep the (identical) entry, do not
+            // overwrite with a possibly-stale `resume_ip`.
+            return Ok(None);
         }
         self.parked.insert(
             frame.cell,
@@ -84,7 +109,7 @@ impl AsyncBridge {
                 resume_ip: frame.resume_ip,
             },
         );
-        None
+        Ok(None)
     }
 
     /// Settles `cell` with a successful `value`.
@@ -139,6 +164,24 @@ impl AsyncBridge {
         match self.parked.remove(&cell) {
             Some(parked) => Some(resume_bytes(parked.handler_id, cell, &settled)),
             None => {
+                // Bound `early` so a caller that settles cells the host never
+                // awaits (a buggy capability bridge, a fuzzer) cannot grow the
+                // map without limit between `clear_session` calls. Overflow
+                // drops the oldest entry — the value was never awaited, so no
+                // handler deadlocks. This mirrors `parked`'s own bound: every
+                // parked entry is also dropped by `clear_session` on
+                // disconnect.
+                const MAX_EARLY: usize = 1024;
+                if self.early.len() >= MAX_EARLY {
+                    // `HashMap` has no stable "oldest"; use the smallest
+                    // cell id as an arbitrary victim. Cell ids are allocated
+                    // monotonically by the pipeline, so the smallest tends to
+                    // be the oldest. Determinism is not required — the entry
+                    // was never awaited.
+                    if let Some(&victim) = self.early.keys().min() {
+                        self.early.remove(&victim);
+                    }
+                }
                 self.early.insert(cell, settled);
                 None
             }
@@ -180,7 +223,7 @@ mod tests {
     #[test]
     fn suspension_then_completion_resumes_the_parked_handler() {
         let mut bridge = AsyncBridge::new();
-        let parked = bridge.park(AwaitSuspendFrame::new(4, 77, 32));
+        let parked = bridge.park(AwaitSuspendFrame::new(4, 77, 32)).unwrap();
         assert!(
             parked.is_none(),
             "no value yet, so the handler stays parked"
@@ -204,7 +247,7 @@ mod tests {
         let mut bridge = AsyncBridge::new();
         assert!(bridge.settle(5, Value::Bool(true)).is_none());
         let bytes = bridge
-            .park(AwaitSuspendFrame::new(2, 5, 16))
+            .park(AwaitSuspendFrame::new(2, 5, 16)).unwrap()
             .expect("the early value resumes the handler immediately");
         let frame = decode(&bytes);
         assert_eq!(frame.handler_id, 2);
@@ -215,7 +258,7 @@ mod tests {
     #[test]
     fn error_completion_resumes_down_the_error_path() {
         let mut bridge = AsyncBridge::new();
-        let _ = bridge.park(AwaitSuspendFrame::new(1, 3, 8));
+        let _ = bridge.park(AwaitSuspendFrame::new(1, 3, 8)).unwrap();
         let bytes = bridge.settle_error(3, Value::Int(-1)).expect("resumes");
         assert!(decode(&bytes).is_error);
     }
@@ -223,7 +266,7 @@ mod tests {
     #[test]
     fn a_cell_resumes_at_most_once() {
         let mut bridge = AsyncBridge::new();
-        let _ = bridge.park(AwaitSuspendFrame::new(1, 3, 8));
+        let _ = bridge.park(AwaitSuspendFrame::new(1, 3, 8)).unwrap();
         assert!(bridge.settle(3, Value::Null).is_some());
         assert!(
             bridge.settle(3, Value::Null).is_none(),
@@ -234,8 +277,8 @@ mod tests {
     #[test]
     fn independent_cells_do_not_cross_resume() {
         let mut bridge = AsyncBridge::new();
-        let _ = bridge.park(AwaitSuspendFrame::new(1, 10, 4));
-        let _ = bridge.park(AwaitSuspendFrame::new(2, 20, 8));
+        let _ = bridge.park(AwaitSuspendFrame::new(1, 10, 4)).unwrap();
+        let _ = bridge.park(AwaitSuspendFrame::new(2, 20, 8)).unwrap();
         let bytes = bridge.settle(20, Value::Int(1)).expect("resumes");
         assert_eq!(decode(&bytes).handler_id, 2);
         assert_eq!(bridge.parked_len(), 1, "cell 10 is still parked");
@@ -266,7 +309,7 @@ mod tests {
         bridge.clear_session();
         // A new session reporting the suspension must NOT resume from the
         // stale value.
-        assert!(bridge.park(AwaitSuspendFrame::new(9, 5, 0)).is_none());
+        assert!(bridge.park(AwaitSuspendFrame::new(9, 5, 0)).unwrap().is_none());
         assert_eq!(bridge.parked_len(), 1);
     }
 }
