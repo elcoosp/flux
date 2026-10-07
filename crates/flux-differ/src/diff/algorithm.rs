@@ -25,7 +25,17 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
     let new_index = build_parent_index(new);
 
     // Nodes present in both: compare for in-place changes.
-    for id in old_ids.intersection(&new_ids) {
+    //
+    // Round-20: `old_ids.intersection(&new_ids)` iterates an `AHashSet`,
+    // whose order is randomized per process. The loop below emits
+    // `Replace`/`Reattach`/`Update`/`Handler` patches directly, so a two-node
+    // edit shipped different wire bytes on each run. Collect and sort by
+    // `NodeId` (content-derived, so stable) to make the in-place patch stream
+    // deterministic. Same class as the round-14 (`Insert`) and round-19
+    // (`Reattach`) fixes.
+    let mut in_both: Vec<NodeId> = old_ids.intersection(&new_ids).copied().collect();
+    in_both.sort_unstable_by_key(|id| u32::from(*id));
+    for id in &in_both {
         let o = old.get(*id).expect("present in old");
         let n = new.get(*id).expect("present in new");
         if o.kind() != n.kind() {
