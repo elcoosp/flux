@@ -33,9 +33,11 @@ fn stale_early_value_does_not_leak_across_sessions() {
     // A different handler parks on the same cell id (42). If the stale `early`
     // value from session 1 were still present, this park would immediately
     // return a Resume — the bug we are guarding against.
-    let maybe_resume = bridge.park(AwaitSuspendFrame::new(
-        /* handler_id= */ 99, /* cell= */ 42, /* resume_ip= */ 7,
-    ));
+    let maybe_resume = bridge
+        .park(AwaitSuspendFrame::new(
+            /* handler_id= */ 99, /* cell= */ 42, /* resume_ip= */ 7,
+        ))
+        .unwrap();
     assert!(
         maybe_resume.is_none(),
         "session 2 must NOT be resumed by session 1's stale early value; \
@@ -56,7 +58,7 @@ fn parked_handler_from_session_one_is_orphaned_not_resumed_in_session_two() {
     let mut bridge = AsyncBridge::new();
 
     // Session 1: handler 10 parks on cell 5, never resumes.
-    let resume = bridge.park(AwaitSuspendFrame::new(10, 5, 11));
+    let resume = bridge.park(AwaitSuspendFrame::new(10, 5, 11)).unwrap();
     assert!(resume.is_none());
     assert_eq!(bridge.parked_len(), 1);
 
@@ -66,7 +68,7 @@ fn parked_handler_from_session_one_is_orphaned_not_resumed_in_session_two() {
     // Session 2: a DIFFERENT handler (11) parks on the SAME cell (5).
     // The old parked entry for cell 5 is overwritten — not resumed — because
     // cell 5's handler from session 1 is gone (socket closed).
-    let resume2 = bridge.park(AwaitSuspendFrame::new(11, 5, 22));
+    let resume2 = bridge.park(AwaitSuspendFrame::new(11, 5, 22)).unwrap();
     assert!(
         resume2.is_none(),
         "session 2's handler must park fresh, not inherit session 1's parked state"
