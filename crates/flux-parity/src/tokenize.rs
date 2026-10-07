@@ -56,7 +56,13 @@ fn split_tokens(line: &str) -> Vec<String> {
             }
             continue;
         }
-        if "{}():,".contains(ch) {
+        // Round-16: `<` and `>` are now delimiters too. Kotlin places a
+        // function's type-parameter clause before the name
+        // (`fun <T: Numeric>Counter(…)`), so the recognizer must see `<` and
+        // `>` as their own tokens to skip the clause. Adding them to the split
+        // set does not affect structural extraction: the recognizer walks
+        // brace/paren-delimited bodies and ignores comparison operators.
+        if "{}():,<>".contains(ch) {
             if !buf.is_empty() {
                 out.push(std::mem::take(&mut buf));
             }
