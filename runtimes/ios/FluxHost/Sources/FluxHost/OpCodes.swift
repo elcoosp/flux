@@ -176,12 +176,12 @@ enum Opcode: UInt8, CaseIterable, Equatable {
         switch self {
         case .halt, .nop: 0
         case .loadNull: 1
-        case .negI64, .negF64, .i64ToF64, .f64ToI64, .notBool, .boolEq, .strLen,
+        case .negI64, .negF64, .i64ToF64, .f64ToI64, .notBool, .strLen,
              .mov, .listLen, .toString: 2
         case .addI64, .subI64, .mulI64, .divI64, .modI64, .eqI64, .ltI64, .gtI64,
              .lteI64, .gteI64, .addF64, .subF64, .mulF64, .divF64, .eqF64, .ltF64,
-             .gtF64, .andBool, .orBool, .strConcat, .strEq, .recordEq, .listGet,
-             .listConcat: 3
+             .gtF64, .andBool, .orBool, .boolEq, .strConcat, .strEq, .recordEq,
+             .listGet, .listConcat: 3
         case .readSignal, .writeSignal, .condJump, .condJumpNot, .strIntern,
              .loadStrConst: 5
         case .allocRecord, .allocList: 3
