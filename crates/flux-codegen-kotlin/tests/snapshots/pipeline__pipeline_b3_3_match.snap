@@ -17,9 +17,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -47,13 +49,15 @@ object FluxTheme {
 ) {
     Column {
         when (shape) {
-            is Circle ->
+            is Circle -> {
                 val r = shape.field0
                 Text("circle")
-            is Rect ->
+            }
+            is Rect -> {
                 val w = shape.field0
                 val h = shape.field1
                 Text("rect")
+            }
         }
     }
 }
