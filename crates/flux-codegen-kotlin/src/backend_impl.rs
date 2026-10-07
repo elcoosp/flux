@@ -189,7 +189,14 @@ impl Backend for Kotlin {
                 }
             }
         }
-        "{ it }".to_owned()
+        // Round-16: `null` is Kotlin's positional-identity key. It compiles
+        // for ANY element type (including an unbounded `T`, whose upper bound
+        // is `Any?`), whereas the identity lambda `{ it }` requires
+        // `T: Any`. The Swift emitter's equivalent is `\.self`; both are
+        // normalized to the same canonical token by the parity recognizers
+        // (`swift_views::normalize_key` / `kotlin_views::normalize_key`), so
+        // structural parity still holds.
+        "null".to_owned()
     }
 
     fn interp_open() -> &'static str {
@@ -227,7 +234,38 @@ impl Backend for Kotlin {
     }
 
     fn prelude() -> &'static str {
-        "package dev.flux.app\n\nimport androidx.compose.animation.core.*\nimport androidx.compose.foundation.Image\nimport androidx.compose.foundation.layout.*\nimport androidx.compose.foundation.lazy.*\nimport androidx.compose.foundation.shape.RoundedCornerShape\nimport androidx.compose.foundation.text.KeyboardActions\nimport androidx.compose.foundation.text.KeyboardOptions\nimport androidx.compose.material3.*\nimport androidx.compose.material3.Button\nimport androidx.compose.material3.Text\nimport androidx.compose.runtime.*\nimport androidx.compose.ui.Alignment\nimport androidx.compose.ui.Modifier\nimport androidx.compose.ui.res.painterResource\nimport androidx.compose.ui.text.input.KeyboardType\nimport androidx.compose.ui.unit.dp\nimport androidx.navigation.NavHostController\nimport androidx.navigation.compose.NavHost\nimport androidx.navigation.compose.composable\nimport androidx.navigation.compose.rememberNavController\nimport kotlinx.coroutines.GlobalScope\nimport kotlinx.coroutines.launch\n\n"
+        // Round-16: `Color(0xFF…)` (in the FluxTheme block) needs
+        // `androidx.compose.ui.graphics.Color`, and `<n>.sp` needs
+        // `androidx.compose.ui.unit.sp`. Both were missing from the emitted
+        // import block, so every generated file failed type-check with
+        // `unresolved reference 'Color'` / `'sp'`. The Swift prelude emits
+        // equivalent symbols via `import SwiftUI`, which is why the same bug
+        // never surfaced there.
+        "package dev.flux.app\n\n\
+import androidx.compose.animation.core.*\n\
+import androidx.compose.foundation.Image\n\
+import androidx.compose.foundation.layout.*\n\
+import androidx.compose.foundation.lazy.*\n\
+import androidx.compose.foundation.shape.RoundedCornerShape\n\
+import androidx.compose.foundation.text.KeyboardActions\n\
+import androidx.compose.foundation.text.KeyboardOptions\n\
+import androidx.compose.material3.*\n\
+import androidx.compose.material3.Button\n\
+import androidx.compose.material3.Text\n\
+import androidx.compose.runtime.*\n\
+import androidx.compose.ui.Alignment\n\
+import androidx.compose.ui.Modifier\n\
+import androidx.compose.ui.graphics.Color\n\
+import androidx.compose.ui.res.painterResource\n\
+import androidx.compose.ui.text.input.KeyboardType\n\
+import androidx.compose.ui.unit.dp\n\
+import androidx.compose.ui.unit.sp\n\
+import androidx.navigation.NavHostController\n\
+import androidx.navigation.compose.NavHost\n\
+import androidx.navigation.compose.composable\n\
+import androidx.navigation.compose.rememberNavController\n\
+import kotlinx.coroutines.GlobalScope\n\
+import kotlinx.coroutines.launch\n\n"
     }
 
     fn escape_text(s: &str) -> String {
@@ -344,11 +382,17 @@ impl Backend for Kotlin {
                 format!("{}: {}", prop.name.name, ty)
             })
             .collect();
+        // Round-16: Kotlin places a function's type-parameter clause **before**
+        // the function name (`fun <T> ListView(...)`), unlike Swift where it
+        // follows the type name (`struct ListView<T>`). The trait passes
+        // `generics` as the Swift-style `<T: Bound>` suffix, so Kotlin must
+        // reorder. `generic_clause` in `model.rs` produces the same `<T: Bound>`
+        // spelling that Kotlin accepts, only in a different position.
         let header = if params.is_empty() {
-            format!("@Composable fun {name}{generics}(\n) {{")
+            format!("@Composable fun {generics}{name}(\n) {{")
         } else {
             format!(
-                "@Composable fun {name}{generics}(\n     {}\n) {{",
+                "@Composable fun {generics}{name}(\n     {}\n) {{",
                 params.join("\n     ")
             )
         };
@@ -426,16 +470,34 @@ impl Backend for Kotlin {
                     em.emit_expr_body(&arm.body, indent + 2 * step);
                 }
                 flux_parser::MatchPatternKind::Variant { name, fields } => {
-                    em.line(indent + step, &format!("is {} ->", name.name));
-                    for (i, field) in fields.iter().enumerate() {
-                        if let flux_parser::Pattern::Ident(bind) = field {
-                            em.line(
-                                indent + 2 * step,
-                                &format!("val {} = {}.field{i}", bind.name, subject),
-                            );
+                    // Round-16: Kotlin `when` arms accept either a single
+                    // expression or a `{ … }` block after `->`. When the
+                    // pattern binds fields, we emit `val r = shape.field0`
+                    // statements, which are NOT expressions — so the arm must
+                    // be wrapped in a block. The previous version emitted the
+                    // bare `val …` on the line after `->`, which is a Kotlin
+                    // syntax error (`Expecting an expression`). The Swift
+                    // backend sidesteps this because it binds fields inline
+                    // (`case .circle(let r):`); Kotlin cannot.
+                    let has_bindings = fields
+                        .iter()
+                        .any(|f| matches!(f, flux_parser::Pattern::Ident(_)));
+                    if !has_bindings {
+                        em.line(indent + step, &format!("is {} ->", name.name));
+                        em.emit_expr_body(&arm.body, indent + 2 * step);
+                    } else {
+                        em.line(indent + step, &format!("is {} -> {{", name.name));
+                        for (i, field) in fields.iter().enumerate() {
+                            if let flux_parser::Pattern::Ident(bind) = field {
+                                em.line(
+                                    indent + 2 * step,
+                                    &format!("val {} = {}.field{i}", bind.name, subject),
+                                );
+                            }
                         }
+                        em.emit_expr_body(&arm.body, indent + 2 * step);
+                        em.line(indent + step, "}");
                     }
-                    em.emit_expr_body(&arm.body, indent + 2 * step);
                 }
                 flux_parser::MatchPatternKind::Literal(lit) => {
                     em.line(indent + step, &format!("{} ->", em.render(lit)));
