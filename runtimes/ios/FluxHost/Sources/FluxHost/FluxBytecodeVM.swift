@@ -473,8 +473,16 @@ enum FluxBytecodeVM {
                 regs[Int(list)] = .list(items)
 
             case .listRemove:
-                let list = instr.u8(1)
-                let idx = Int(instr.u8(2))
+                // Audit C11 / round-25: the emitter writes LIST_REMOVE as
+                // `opcode | list(u8) | idx(u8)`, and the Rust VM reads
+                // `list = u8(0), idx = u8(1)`. This Swift copy read
+                // `u8(1)/u8(2)` — one slot off — so every compiled
+                // `list.remove(idx)` on iOS read the wrong register and the
+                // byte past the instruction (a following opcode), silently
+                // corrupting the list. Ported the correct indices from
+                // `flux-vm-ref` and from the correct `.listInsert` arm.
+                let list = instr.u8(0)
+                let idx = Int(instr.u8(1))
                 guard case var .list(items) = regs[Int(list)] else {
                     throw VmError.typeMismatch(offset: instr.offset)
                 }
@@ -1035,8 +1043,16 @@ enum FluxBytecodeVM {
                 regs[Int(list)] = .list(items)
 
             case .listRemove:
-                let list = instr.u8(1)
-                let idx = Int(instr.u8(2))
+                // Audit C11 / round-25: the emitter writes LIST_REMOVE as
+                // `opcode | list(u8) | idx(u8)`, and the Rust VM reads
+                // `list = u8(0), idx = u8(1)`. This Swift copy read
+                // `u8(1)/u8(2)` — one slot off — so every compiled
+                // `list.remove(idx)` on iOS read the wrong register and the
+                // byte past the instruction (a following opcode), silently
+                // corrupting the list. Ported the correct indices from
+                // `flux-vm-ref` and from the correct `.listInsert` arm.
+                let list = instr.u8(0)
+                let idx = Int(instr.u8(1))
                 guard case var .list(items) = regs[Int(list)] else {
                     throw VmError.typeMismatch(offset: instr.offset)
                 }
@@ -1437,6 +1453,53 @@ enum FluxBytecodeVM {
             case opcodeIndex[.gasCheck]!:
                 let budget = instr.u32(0)
                 if gas < budget { throw VmError.gasExhausted(offset: instr.offset) }
+            // Round-25: these five opcodes were missing from the dispatch-table
+            // variant, and its `default` panics — so running any program with
+            // them through `runViaDispatchTable` crashed the process. They are
+            // now byte-for-byte equivalent to their switch-path arms.
+            case opcodeIndex[.isNull]!:
+                let src = Int(instr.u8(1))
+                regs[Int(instr.u8(0))] = .bool(regs[src] == .null)
+            case opcodeIndex[.listInsert]!:
+                let list = instr.u8(0)
+                let idx = Int(instr.u8(1))
+                let val = reg(instr.u8(2))
+                guard case var .list(items) = regs[Int(list)] else {
+                    throw VmError.typeMismatch(offset: instr.offset)
+                }
+                if idx > items.count {
+                    throw VmError.indexOutOfBounds(offset: instr.offset)
+                }
+                items.insert(val, at: idx)
+                regs[Int(list)] = .list(items)
+            case opcodeIndex[.listRemove]!:
+                let list = instr.u8(0)
+                let idx = Int(instr.u8(1))
+                guard case var .list(items) = regs[Int(list)] else {
+                    throw VmError.typeMismatch(offset: instr.offset)
+                }
+                if idx >= items.count {
+                    throw VmError.indexOutOfBounds(offset: instr.offset)
+                }
+                items.remove(at: idx)
+                regs[Int(list)] = .list(items)
+            case opcodeIndex[.listClear]!:
+                let list = instr.u8(0)
+                guard case var .list(items) = regs[Int(list)] else {
+                    throw VmError.typeMismatch(offset: instr.offset)
+                }
+                items.removeAll()
+                regs[Int(list)] = .list(items)
+            case opcodeIndex[.listRemoveItem]!:
+                let list = instr.u8(0)
+                let val = reg(instr.u8(1))
+                guard case var .list(items) = regs[Int(list)] else {
+                    throw VmError.typeMismatch(offset: instr.offset)
+                }
+                if let pos = items.firstIndex(where: { $0 == val }) {
+                    items.remove(at: pos)
+                }
+                regs[Int(list)] = .list(items)
             default:
                 fatalError("unknown opcode tag \(tag)")
             }
