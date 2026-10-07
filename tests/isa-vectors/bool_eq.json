@@ -1,0 +1,13 @@
+{
+  "bytecode_hex": "b20001b2010143020001",
+  "description": "BOOL_EQ r2 = (true == true) == true.",
+  "expected_error": null,
+  "expected_gas_used": 3,
+  "expected_registers": {
+    "r2": { "type": "Bool", "value": true }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "bool_eq",
+  "payload": null
+}
