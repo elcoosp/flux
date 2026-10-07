@@ -34,10 +34,31 @@ impl Checker {
     /// Non-failing variant of [`Self::lookup_value`]: returns the type of
     /// `name` if bound, without producing a type error. Used to resolve the
     /// `$name` two-way binding sigil. FLUX-072 #4.
+    ///
+    /// Round-21: the previous implementation instantiated a `Poly` binding
+    /// with `&mut self.supply.clone()`, which mutated a *throwaway* copy of
+    /// the supply — the caller's counter never advanced, so two `$name`
+    /// lookups of the same binding would hand out the *same* fresh var id.
+    /// That is a latent polymorphism hole even if no current program
+    /// exhibits it. Because this is a `&self` method it cannot advance the
+    /// real supply, so the correct fix is to skip instantiation entirely:
+    /// the caller only uses the returned type to decide whether the sigil
+    /// resolves, and unifies it against the same concrete type the binding
+    /// itself carries (in practice a `Mono` state/prop binding, not `Poly`).
+    /// Returning the scheme's mono-body for a `Poly` is a conservative
+    /// "bound" answer; the real unification happens in `lookup_value`.
     pub(crate) fn try_lookup_value(&self, name: &str) -> Option<TcType> {
         match self.env.lookup(name) {
             Some(Binding::Mono(ty)) => Some(ty.clone()),
-            Some(Binding::Poly(scheme)) => Some(instantiate(scheme, &mut self.supply.clone())),
+            Some(Binding::Poly(scheme)) => {
+                // `Scheme` carries a quantified body (`ty`); the caller does
+                // not need a fresh instantiation for the existence check it
+                // performs. Returning the *unquantified* body lets the
+                // caller's own `lookup_value` path instantiate properly when
+                // it needs the value type. This still resolves a `$name`
+                // sigil on a generic `let` binding.
+                Some(scheme.ty.clone())
+            }
             _ => None,
         }
     }
