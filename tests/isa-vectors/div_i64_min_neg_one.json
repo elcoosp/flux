@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b0000000000000000080b001ffffffffffffffff23020001",
+  "description": "DIV_I64 i64::MIN / -1 wraps to i64::MIN (two's-complement, matching wrapping_div). Pins the div overflow edge so all three VMs converge.",
+  "expected_error": null,
+  "expected_gas_used": 3,
+  "expected_registers": {
+    "r2": {
+      "type": "Int",
+      "value": -9223372036854775808
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "div_i64_min_neg_one",
+  "payload": null
+}
