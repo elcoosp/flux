@@ -319,6 +319,11 @@ struct AnyFluxAdapter {
     func destroy(_ view: AnyObject) {
         destroyImpl(view)
     }
+
+    /// Stable per-box identity. Two `AnyFluxAdapter` values wrap different
+    /// `Holder` instances iff the registry produced fresh adapters, so tests
+    /// can assert freshness without reaching into the private storage.
+    var instanceIdentity: ObjectIdentifier { ObjectIdentifier(holder) }
 }
 
 /// A closure that builds a fresh adapter pre-wired to `executor`, used by the
