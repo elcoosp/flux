@@ -74,7 +74,10 @@ final class AdapterRegistryTests: XCTestCase {
         let registry = makeRegistry([(1, "Text")])
         let first = registry.make(for: 1, executor: nil)
         let second = registry.make(for: 1, executor: nil)
-        XCTAssertNotEqual(ObjectIdentifier(first!), ObjectIdentifier(second!),
+        // `AnyFluxAdapter` is a struct wrapping a private `Holder` object;
+        // compare the boxed holders via the small `instanceIdentity` accessor
+        // so the test still proves each `make` returns a distinct adapter.
+        XCTAssertNotEqual(first!.instanceIdentity, second!.instanceIdentity,
             "each resolve must build a fresh adapter instance")
     }
 }
