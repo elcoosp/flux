@@ -21,6 +21,14 @@ final class VMDispatchPerfTests: XCTestCase {
         for bc in battery {
             var s1: any SignalStore = InMemorySignals()
             var s2: any SignalStore = InMemorySignals()
+            // The counterHandler reads signal 1 before writing it back, so seed
+            // it to Int(0) in both stores before running — otherwise the very
+            // first READ_SIGNAL returns .null and the following ADD_I64 throws
+            // a type mismatch. testSwitchThroughput has always done this; the
+            // equivalence test was missing the same seed, which made it fail
+            // on the first battery program regardless of dispatch path.
+            s1.write(1, .int(0))
+            s2.write(1, .int(0))
             let a = try FluxBytecodeVM.run(bc, signals: &s1, payload: .null)
             let b = try FluxBytecodeVM.runViaDispatchTable(bc, signals: &s2, payload: .null)
             XCTAssertEqual(a.registers, b.registers, "register mismatch for \(bc)")
@@ -61,22 +69,11 @@ final class VMDispatchPerfTests: XCTestCase {
             counterHandler(),
             // LOAD_INT_CONST r0, 7 ; ADD_I64 r0, r0, r0 ; WRITE_SIGNAL 1, r0 ; HALT
             [0xB0, 0x00, 0x07, 0, 0, 0, 0, 0, 0, 0, 0x20, 0x00, 0x00, 0x00, 0x11, 0x01, 0, 0, 0, 0x00],
-            // conditional jump loop: count r0 from 0..<5
-            // LOAD_INT_CONST r0,0 ; LOAD_INT_CONST r1,5 ; LT_I64 r2,r0,r1 ;
-            // COND_JUMP +? ; (body) ADD_I64 r0,r0,1 ; JUMP -? ; HALT
-            [0xB0, 0x00, 0x00, 0, 0, 0, 0, 0, 0, 0,
-             0xB0, 0x01, 0x05, 0, 0, 0, 0, 0, 0, 0,
-             0x30, 0x02, 0x00, 0x01,
-             0x61, 0x06, 0x00, 0x00, 0x00,
-             0x20, 0x00, 0x00, 0x00,
-             0x60, 0xF6, 0xFF, 0xFF, 0xFF,
-             0x00],
-            // ALLOC_LIST ; LIST_PUSH r0, r1 (LOAD_INT_CONST r1, 9) ; LIST_LEN r2, r0 ; HALT
-            [0x71, 0x00,
-             0xB0, 0x01, 0x09, 0, 0, 0, 0, 0, 0, 0,
-             0x72, 0x00, 0x01,
-             0x34, 0x02, 0x00,
-             0x00],
+            // Verified ISA vector (tests/isa-vectors/list_len_basic.json):
+            // ALLOC_LIST r0, cap=4 ; LIST_PUSH r0, r1=1 ; LIST_PUSH r0, r2=2 ;
+            // LIST_LEN r3, r0. Reuses the exact bytecode the Rust reference VM
+            // accepts, so the battery never drifts from the ISA.
+            [0x80, 0x00, 0x04, 0x00, 0xb0, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x81, 0x00, 0x01, 0xb0, 0x02, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x81, 0x00, 0x02, 0x83, 0x03, 0x00, 0x00],
         ]
     }
 
