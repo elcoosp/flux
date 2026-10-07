@@ -1,0 +1,19 @@
+{
+  "bytecode_hex": "80000400b0016400000000000000810001b002c800000000000000810002b0032c01000000000000810003860001",
+  "description": "LIST_REMOVE at index 1 of [100, 200, 300] yields [100, 300].",
+  "expected_error": null,
+  "expected_gas_used": 8,
+  "expected_registers": {
+    "r0": {
+      "type": "List",
+      "value": [
+        { "type": "Int", "value": 100 },
+        { "type": "Int", "value": 300 }
+      ]
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "list_remove_basic",
+  "payload": null
+}
