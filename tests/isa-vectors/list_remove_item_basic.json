@@ -1,0 +1,18 @@
+{
+  "bytecode_hex": "80000400b0016400000000000000810001b002c800000000000000810002880001",
+  "description": "LIST_REMOVE_ITEM of 100 from [100, 200] yields [200].",
+  "expected_error": null,
+  "expected_gas_used": 6,
+  "expected_registers": {
+    "r0": {
+      "type": "List",
+      "value": [
+        { "type": "Int", "value": 200 }
+      ]
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "list_remove_item_basic",
+  "payload": null
+}
