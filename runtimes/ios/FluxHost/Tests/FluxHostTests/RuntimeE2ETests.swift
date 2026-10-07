@@ -35,16 +35,31 @@ private func node(_ id: UInt32, componentId: UInt32, props: [Prop] = [], childre
 /// interning the stdlib primitive names (so the registry can resolve adapters)
 /// and the provided strings.
 @MainActor
+/// FNV-1a 16-bit prop index mirroring `Props.propIndex(for:)` on the kit side.
+/// The adapters look up props *by name*, so a fixture that seeds
+/// `Prop(index: 0)` on a `Text` node never resolves — the `text` prop's
+/// canonical index is `propIdx("text")`.
+private func propIdx(_ name: String) -> UInt16 {
+    var hash: UInt32 = 0x811c_9dc5
+    for b in name.utf8 {
+        hash ^= UInt32(b)
+        hash &*= 0x0100_0193
+    }
+    return UInt16(hash & 0xFFFF)
+}
+
 private func initFrame(root: ShadowNode, descendantNodes: [ShadowNode] = [], strings: [StringEntry] = [], state: [StateCell] = []) -> FluxFrame {
-    let table = MaterializationStringTable()
-    table.store(id: 0, value: "Text")
-    table.store(id: 1, value: "Button")
-    table.store(id: 2, value: "Column")
-    table.store(id: 3, value: "Row")
-    table.store(id: 4, value: "TextField")
-    table.store(id: 5, value: "Router")
-    table.store(id: 6, value: "Screen")
-    for s in strings { table.store(id: s.stringId, value: s.value) }
+    // Names of the primitive components this fixture declares. `ShadowTreeReconciler`
+    // resolves an adapter by reading `frame.componentNames[node.componentId]`, so
+    // these MUST travel as `componentNames` (a distinct wire field from
+    // `strings`); previously they were only added to the local test table and
+    // the reconciler fell back to a plain `ContainerAdapter`, never the real
+    // `UILabel` / row view the tests assert.
+    let primitiveNames: [(UInt32, String)] = [
+        (0, "Text"), (1, "Button"), (2, "Column"), (3, "Row"),
+        (4, "TextInput"), (5, "Router"), (6, "Screen"),
+    ]
+    let componentNames = primitiveNames.map { StringEntry(stringId: $0.0, value: $0.1) }
 
     var nodes: [UInt32: ShadowNode] = [root.id: root]
     for n in descendantNodes { nodes[n.id] = n }
@@ -54,7 +69,7 @@ private func initFrame(root: ShadowNode, descendantNodes: [ShadowNode] = [], str
         root: root, nodes: nodes,
         patches: [], handlers: [],
         strings: strings, state: state,
-        files: [], componentNames: [], signalMeta: [:]
+        files: [], componentNames: componentNames, signalMeta: [:]
     )
 }
 
@@ -84,7 +99,7 @@ final class RuntimeE2ETests: XCTestCase {
     /// text is set from the resolved string prop.
     @MainActor
     func testInitBuildsRealViewTree() async {
-        let textNode = node(10, componentId: 0, props: [Prop(index: 0, value: .str(7))])
+        let textNode = node(10, componentId: 0, props: [Prop(index: propIdx("text"), value: .str(7))])
         let frame = initFrame(
             root: textNode,
             strings: [StringEntry(stringId: 7, value: "Hello, Flux")]
@@ -104,7 +119,7 @@ final class RuntimeE2ETests: XCTestCase {
     /// should produce neither `built` (views already exist) nor `updated`.
     @MainActor
     func testReapplyingUnchangedFrameSkipsUpdates() async {
-        let textNode = node(10, componentId: 0, props: [Prop(index: 0, value: .str(7))])
+        let textNode = node(10, componentId: 0, props: [Prop(index: propIdx("text"), value: .str(7))])
         let frame = initFrame(
             root: textNode,
             strings: [StringEntry(stringId: 7, value: "Hello, Flux")]
@@ -124,9 +139,9 @@ final class RuntimeE2ETests: XCTestCase {
     /// reconciler applies it in place and reuses the SAME `UILabel` instance
     /// (identity preserved, no recreation).
     @MainActor
-    func testTapUpdatesLabelWithoutRecreatingView() async {
-        let labelNode = node(10, componentId: 0, props: [Prop(index: 0, value: .str(7))])
-        let buttonNode = node(11, componentId: 1, props: [Prop(index: 0, value: .str(8))], handlers: [1])
+    func testTapUpdatesLabelWithoutRecreatingView() async throws {
+        let labelNode = node(10, componentId: 0, props: [Prop(index: propIdx("text"), value: .str(7))])
+        let buttonNode = node(11, componentId: 1, props: [Prop(index: propIdx("text"), value: .str(8))], handlers: [1])
         let column = node(20, componentId: 2, children: [.node(10), .node(11)])
         let frame = initFrame(
             root: column,
@@ -148,14 +163,20 @@ final class RuntimeE2ETests: XCTestCase {
 
         // Simulate a tap on the button: dispatch handler 1 with no payload.
         // The VM reads signal 1 (0), adds 1, writes signal 1 (1) back.
+        // `dispatch` returns synchronously but the handler runs on an async
+        // `Task { @MainActor in ... }`; poll until the write lands.
         executor.dispatch(FluxEvent(handlerId: 1, nodeId: 11))
+        for _ in 0..<200 {
+            if executor.graph.read(1) == .int(1) { break }
+            try await Task.sleep(nanoseconds: 1_000_000) // 1ms
+        }
         XCTAssertEqual(executor.graph.read(1), .int(1))
 
         // The dev server pushes an Update patch with the recomputed label text.
         let patchFrame = FluxFrame(
             version: 1, seq: 1, flags: 0x00,
             root: nil, nodes: [:],
-            patches: [.update(id: 10, changes: [Prop(index: 0, value: .str(9))], removals: [])],
+            patches: [.update(id: 10, changes: [Prop(index: propIdx("text"), value: .str(9))], removals: [])],
             handlers: [],
             strings: [StringEntry(stringId: 9, value: "Count: 1")],
             state: [], files: [], componentNames: [], signalMeta: [:]
@@ -171,7 +192,7 @@ final class RuntimeE2ETests: XCTestCase {
     /// a new one.
     @MainActor
     func testPatchUpdateReusesView() async {
-        let textNode = node(10, componentId: 0, props: [Prop(index: 0, value: .str(7))])
+        let textNode = node(10, componentId: 0, props: [Prop(index: propIdx("text"), value: .str(7))])
         let frame = initFrame(
             root: textNode,
             strings: [StringEntry(stringId: 7, value: "first")]
@@ -185,7 +206,7 @@ final class RuntimeE2ETests: XCTestCase {
             version: 1, seq: 1, flags: 0x00,
             root: nil,
             nodes: [:],
-            patches: [.update(id: 10, changes: [Prop(index: 0, value: .str(9))], removals: [])],
+            patches: [.update(id: 10, changes: [Prop(index: propIdx("text"), value: .str(9))], removals: [])],
             handlers: [],
             strings: [StringEntry(stringId: 9, value: "second")],
             state: [],
@@ -205,9 +226,9 @@ final class RuntimeE2ETests: XCTestCase {
     func testRouterPreservesScreenStateAcrossPushPop() async {
         // Two screens, each hosting a TextField bound to its own signal.
         let screenA = node(30, componentId: 6, children: [.node(31)])
-        let fieldA = node(31, componentId: 4, props: [Prop(index: 0, value: .str(7))], handlers: [1])
+        let fieldA = node(31, componentId: 4, props: [Prop(index: propIdx("text"), value: .str(7))], handlers: [1])
         let screenB = node(40, componentId: 6, children: [.node(41)])
-        let fieldB = node(41, componentId: 4, props: [Prop(index: 0, value: .str(8))], handlers: [2])
+        let fieldB = node(41, componentId: 4, props: [Prop(index: propIdx("text"), value: .str(8))], handlers: [2])
         let router = node(50, componentId: 5, children: [.node(30), .node(40)])
 
         let frame = initFrame(
@@ -263,7 +284,7 @@ final class RuntimeE2ETests: XCTestCase {
         table.store(id: 1, value: "Button")
         table.store(id: 2, value: "Column")
         table.store(id: 3, value: "Row")
-        table.store(id: 4, value: "TextField")
+        table.store(id: 4, value: "TextInput")
         table.store(id: 5, value: "Router")
         table.store(id: 6, value: "Screen")
         table.store(id: 9, value: "Image")
@@ -279,7 +300,7 @@ final class RuntimeE2ETests: XCTestCase {
         table.store(id: 1, value: "Button")
         table.store(id: 2, value: "Column")
         table.store(id: 3, value: "Row")
-        table.store(id: 4, value: "TextField")
+        table.store(id: 4, value: "TextInput")
         table.store(id: 5, value: "Router")
         table.store(id: 6, value: "Screen")
         let registry = AdapterRegistry(table: table)
@@ -292,7 +313,7 @@ final class RuntimeE2ETests: XCTestCase {
     /// Gas exhaustion must be reported, not loop forever, on the real pipeline.
     @MainActor
     func testGasExhaustionIsReported() async {
-        let textNode = node(10, componentId: 0, props: [Prop(index: 0, value: .str(7))])
+        let textNode = node(10, componentId: 0, props: [Prop(index: propIdx("text"), value: .str(7))])
         let frame = initFrame(root: textNode, strings: [StringEntry(stringId: 7, value: "x")])
         let executor = FluxExecutor(graph: SignalGraph(), registry: buildRegistry())
         _ = executor.apply(frame)
@@ -368,7 +389,7 @@ final class RuntimeE2ETests: XCTestCase {
                 StringEntry(stringId: 1, value: "Button"),
                 StringEntry(stringId: 2, value: "Column"),
                 StringEntry(stringId: 3, value: "Row"),
-                StringEntry(stringId: 4, value: "TextField"),
+                StringEntry(stringId: 4, value: "TextInput"),
                 StringEntry(stringId: 5, value: "Router"),
                 StringEntry(stringId: 6, value: "Screen"),
                 StringEntry(stringId: 8, value: "initial"),
@@ -384,7 +405,7 @@ final class RuntimeE2ETests: XCTestCase {
                 StringEntry(stringId: 1, value: "Button"),
                 StringEntry(stringId: 2, value: "Column"),
                 StringEntry(stringId: 3, value: "Row"),
-                StringEntry(stringId: 4, value: "TextField"),
+                StringEntry(stringId: 4, value: "TextInput"),
                 StringEntry(stringId: 5, value: "Router"),
                 StringEntry(stringId: 6, value: "Screen"),
             ],
@@ -400,16 +421,17 @@ final class RuntimeE2ETests: XCTestCase {
         // ForEach root (1000) is built as a ColumnAdapter-hosted container.
         XCTAssertTrue(built.contains(1000), "ForEach root should be built")
 
-        // Row 0 expanded: deriveRowId(1000, 0) then deriveChildId(rowId, 10).
-        let row0: UInt32 = (((1000 &* 0x0100_0193) ^ 0) &* 0x0100_0193) | 0x8000_0000
-        let child0: UInt32 = ((((row0 &* 0x0100_0193) ^ 10) &* 0x0100_0193) ^ 0x5555_5555) | 0xC000_0000
+        // Row 0 expanded: deriveForEachRowId(1000, 0) then deriveForEachChildId(rowId, 10).
+        // The helper mirrors the reconciler's exact byte stream (u32 LE || 0x2C || u64 LE).
+        let row0 = derivedRowId(foreachId: 1000, seed: 0)
+        let child0 = derivedChildId(rowId: row0, origId: 10)
 
-        let row1View = executor.view(for: child0)
-        XCTAssertNotNil(row1View, "Row 0's Text view should be built (childId=0x\(String(child0, radix: 16)))")
-        if let label = row1View as? UILabel {
+        let row0View = executor.view(for: child0)
+        XCTAssertNotNil(row0View, "Row 0's Text view should be built (childId=0x\(String(child0, radix: 16)))")
+        if let label = row0View as? UILabel {
             XCTAssertEqual(label.text, "initial",
                 "Row 0's Text should show the task's label from the initial Task record")
-        } else if let v = row1View {
+        } else if let v = row0View {
             XCTFail("Expected UILabel for row 0's Text, got \(type(of: v))")
         }
 
@@ -419,8 +441,8 @@ final class RuntimeE2ETests: XCTestCase {
         executor.dispatch(FluxEvent(handlerId: 1, nodeId: 1000))
 
         // After dispatch, tasks has 2 elements. Row 1's Text should render "initial".
-        let row1: UInt32 = (((1000 &* 0x0100_0193) ^ 1) &* 0x0100_0193) | 0x8000_0000
-        let child1: UInt32 = ((((row1 &* 0x0100_0193) ^ 10) &* 0x0100_0193) ^ 0x5555_5555) | 0xC000_0000
+        let row1 = derivedRowId(foreachId: 1000, seed: 1)
+        let child1 = derivedChildId(rowId: row1, origId: 10)
 
         // Poll for the dispatch Task to complete and reconcile the new row.
         for _ in 0..<100 {
@@ -567,8 +589,48 @@ private func buildRegistry() -> AdapterRegistry {
     table.store(id: 1, value: "Button")
     table.store(id: 2, value: "Column")
     table.store(id: 3, value: "Row")
-    table.store(id: 4, value: "TextField")
+    table.store(id: 4, value: "TextInput")
     table.store(id: 5, value: "Router")
     table.store(id: 6, value: "Screen")
     return AdapterRegistry(table: table)
+}
+
+// MARK: - ForEach derived-id mirrors
+
+/// The reconciler's `deriveForEachRowId` byte stream: `u32 LE || 0x2C || u64 LE`.
+/// Reproduced here so the test's assertions use the exact ids the reconciler
+/// mints (the previous shortcut, `(x ^ 0) * prime`, skipped the byte stream).
+func derivedRowId(foreachId: UInt32, seed: UInt64) -> UInt32 {
+    var bytes: [UInt8] = []
+    for shift in stride(from: 0, through: 24, by: 8) {
+        bytes.append(UInt8((foreachId >> UInt32(shift)) & 0xFF))
+    }
+    bytes.append(0x2C)
+    for shift in stride(from: 0, through: 56, by: 8) {
+        bytes.append(UInt8((seed >> UInt64(shift)) & 0xFF))
+    }
+    return fnv1a32(bytes) | 0x8000_0000
+}
+
+/// The reconciler's `deriveForEachChildId` byte stream: `u64 LE rowId || 0x3F || u64 LE origId`.
+func derivedChildId(rowId: UInt32, origId: UInt32) -> UInt32 {
+    var bytes: [UInt8] = []
+    let r = UInt64(rowId)
+    for shift in stride(from: 0, through: 56, by: 8) {
+        bytes.append(UInt8((r >> UInt64(shift)) & 0xFF))
+    }
+    bytes.append(0x3F)
+    let o = UInt64(origId)
+    for shift in stride(from: 0, through: 56, by: 8) {
+        bytes.append(UInt8((o >> UInt64(shift)) & 0xFF))
+    }
+    return fnv1a32(bytes) | 0xC000_0000
+}
+
+private func fnv1a32(_ bytes: [UInt8]) -> UInt32 {
+    var h: UInt32 = 0x811c_9dc5
+    for b in bytes {
+        h = (h ^ UInt32(b)) &* 0x0100_0193
+    }
+    return h
 }
