@@ -1,0 +1,13 @@
+{
+  "bytecode_hex": "80000400b00164000000000000008100018700",
+  "description": "LIST_CLEAR of [100] yields [].",
+  "expected_error": null,
+  "expected_gas_used": 4,
+  "expected_registers": {
+    "r0": { "type": "List", "value": [] }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "list_clear_basic",
+  "payload": null
+}
