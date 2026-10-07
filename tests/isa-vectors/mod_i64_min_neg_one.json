@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b0000000000000000080b001ffffffffffffffff24020001",
+  "description": "MOD_I64 i64::MIN % -1 == 0 (two's-complement, matching wrapping_rem). Pins the mod overflow edge so all three VMs converge.",
+  "expected_error": null,
+  "expected_gas_used": 3,
+  "expected_registers": {
+    "r2": {
+      "type": "Int",
+      "value": 0
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "mod_i64_min_neg_one",
+  "payload": null
+}
