@@ -48,7 +48,7 @@ kotlin == [
                 children: [
                     ForEach {
                         collection: "messages",
-                        key_path: "{it}",
+                        key_path: "key:.self",
                     },
                 ],
             },
