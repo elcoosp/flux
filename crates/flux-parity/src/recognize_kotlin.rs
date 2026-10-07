@@ -73,8 +73,33 @@ fn parse_composable(
     while j < tokens.len() && tokens[j].text != "fun" {
         j += 1;
     }
+    // Round-16: Kotlin places a function's type-parameter clause **before** the
+    // function name (`fun <T: Numeric>Counter(...)`). The previous version
+    // read the token immediately after `fun` as the name, which — once the
+    // emitter correctly began prepending the clause — was `<`, and produced
+    // `name: ""`. Skip a `<...>` clause if present, then read the name.
+    let mut name_idx = j + 1;
+    // Now that the tokenizer splits `<` and `>` as delimiters, the generic
+    // clause is a clean `< ... >` sequence. Skip it if present.
+    if tokens.get(name_idx).map(|t| t.text.as_str()) == Some("<") {
+        let mut depth = 0i32;
+        while name_idx < tokens.len() {
+            match tokens[name_idx].text.as_str() {
+                "<" => depth += 1,
+                ">" => {
+                    depth -= 1;
+                    if depth == 0 {
+                        name_idx += 1;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            name_idx += 1;
+        }
+    }
     let name = tokens
-        .get(j + 1)
+        .get(name_idx)
         .ok_or_else(|| KotlinRecognitionError("composable missing name".into()))?
         .text
         .split(['<', '('])
@@ -82,8 +107,10 @@ fn parse_composable(
         .unwrap_or("")
         .to_owned();
 
-    // Find the body `{` after the parameter list.
-    let mut o = j + 2;
+    // Find the body `{` after the parameter list. Start scanning from just
+    // past the name so a generic clause before the name (already consumed) is
+    // not re-entered.
+    let mut o = name_idx + 1;
     while o < tokens.len() && tokens[o].text != "{" {
         o += 1;
     }
