@@ -70,8 +70,17 @@ final class Flux047HttpPersistTests: XCTestCase {
             transport: transport,
             tableProvider: { table }
         )
+        // Build a registry from the same `httpPersistEntries(store:transport:)`
+        // factory that produced the resolver, so the impl and the resolver
+        // share one `HttpRequestStore`. Using `CapabilityRegistry.dev` here
+        // silently wired a second, private store and any request stashed by
+        // the impl was invisible to the resolver.
+        let registry = CapabilityRegistry(entries: CapabilityRegistry.httpPersistEntries(
+            store: store,
+            transport: transport
+        ))
         var signals: any SignalStore = InMemorySignals()
-        let cell = try CapabilityRegistry.dev.lookup(14, 2)!(14, 2, FluxHost.FluxValue.record([(0 as UInt16, .str(42))]), &signals)
+        let cell = try registry.lookup(14, 2)!(14, 2, FluxHost.FluxValue.record([(0 as UInt16, .str(42))]), &signals)
         XCTAssertEqual(signals.cellState(cell), .pending, "Http.getJson parks the cell")
         let settled = await resolver.resolve(.int(Int64(cell)))
         guard case .record = settled as FluxHost.FluxValue else { XCTFail("Http.getJson response parses to a RecordVal"); return }
