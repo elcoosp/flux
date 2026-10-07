@@ -293,29 +293,324 @@ fn generated_kotlin_contains_key_substrings() {
 /// actually succeed (e.g. an Android CI that resolves the Compose BOM into
 /// `~/.gradle`), and skips cleanly in the plain Rust `rust-check` runner. Per the
 /// issue's acceptance bar, this is a compile check of the generated code.
+/// Locates `kotlinc` on `PATH`. The compiler answers `-version` (single dash);
+/// `--version` is an error on some distributions, so probing with the former
+/// is what actually determines availability.
+fn kotlinc_on_path() -> bool {
+    std::process::Command::new("kotlinc")
+        .arg("-version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// Parses the Kotlin compiler version out of `kotlinc -version`'s stderr,
+/// e.g. `info: kotlinc-jvm 2.4.20 (JRE 21.0.11+10-LTS)` → `Some("2.4.20")`.
+///
+/// The Compose compiler plugin is a *compiler extension*: it must be built
+/// against the exact Kotlin release it plugs into. A 2.4.10 plugin loaded by
+/// a 2.4.20 `kotlinc` throws `ClassCastException: ... BasicWritableSlice
+/// cannot be cast to ... Key` during IR lowering (the plugin's classes and
+/// the compiler's are in two classloaders with mismatched layouts). Picking
+/// the matching cached plugin is what lets the check run against any local
+/// Kotlin install, rather than requiring the toolchain to be pinned.
+fn kotlinc_version() -> Option<String> {
+    let out = std::process::Command::new("kotlinc")
+        .arg("-version")
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&out.stderr);
+    // The version token is the first `\d+\.\d+\.\d+` after `kotlinc`.
+    for tok in text.split_whitespace() {
+        if tok.chars().next().is_some_and(|c| c.is_ascii_digit())
+            && tok.matches('.').count() >= 2
+        {
+            return Some(
+                tok.chars()
+                    .take_while(|c| c.is_ascii_digit() || *c == '.')
+                    .collect(),
+            );
+        }
+    }
+    None
+}
+
+/// Locates the Compose compiler plugin jar and the runtime classpath the
+/// kotlinc compile-check needs.
+///
+/// Order:
+/// 1. `ANDROID_COMPOSE_CLASSPATH` / `ANDROID_COMPOSE_COMPILER` from the
+///    environment, if both are set (what CI exports).
+/// 2. Extract them from `~/.gradle/caches/modules-2/` — the same logic CI's
+///    `rust-check.yml` step runs before invoking the test. Any developer who
+///    has ever run `./gradlew` has the AARs cached, so the check runs without
+///    any manual provisioning. The extraction lands in a per-run temp dir
+///    that outlives the test process long enough for kotlinc to read it.
+/// 3. `None` — skip (no kotlinc, or no cache to build a classpath from).
+fn try_compose_classpath() -> Option<(String, String, Option<String>)> {
+    // The plugin's K2 extension path loads `org.jetbrains.kotlin.com.intellij.*`
+    // classes, which are **shaded into `kotlin-compiler-embeddable.jar`** and
+    // not visible to a plugin loaded by the non-embeddable `kotlin-compiler.jar`
+    // (homebrew's `kotlinc`). Passing the embeddable as a *second* `-Xplugin`
+    // puts those classes on the plugin's classloader parent chain — this is
+    // exactly what CI's `codegen-compile.yml` does with the two
+    // `-Xplugin=$ANDROID_COMPOSE_COMPILER{,_EMBEDDABLE}` flags.
+    if let (Ok(cp), Ok(cc)) = (
+        std::env::var("ANDROID_COMPOSE_CLASSPATH"),
+        std::env::var("ANDROID_COMPOSE_COMPILER"),
+    ) {
+        if !cp.is_empty() && !cc.is_empty() {
+            let embeddable = std::env::var("ANDROID_COMPOSE_COMPILER_EMBEDDABLE")
+                .ok()
+                .filter(|s| !s.is_empty());
+            return Some((cp, cc, embeddable));
+        }
+    }
+
+    // Extract Compose runtime AARs from the gradle cache.
+    let gradle_cache = dirs_gradle_cache()?;
+    let android_jar = find_android_jar();
+    // The Compose plugin must be built against the exact Kotlin release the
+    // running `kotlinc` is, so pick by version, not by "newest cached".
+    let kver = kotlinc_version()?;
+    let compose_compiler = find_in_gradle_cache_for_version(
+        &gradle_cache,
+        "kotlin-compose-compiler-plugin-embeddable",
+        &kver,
+    )?;
+    let compose_compiler_embeddable = find_in_gradle_cache_for_version(
+        &gradle_cache,
+        "kotlin-compiler-embeddable",
+        &kver,
+    );
+
+    let tmp = std::env::temp_dir().join(format!("flux_kt_compose_{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&tmp);
+
+    let mut cp_parts: Vec<String> = Vec::new();
+    if let Some(jar) = android_jar {
+        cp_parts.push(jar);
+    }
+
+    // Walk the cache and extract `classes.jar` from each Compose AAR. Bounded
+    // by the cache size (typically tens of AARs), performed once per test run.
+    //
+    // The gradle cache lays group ids out with dots as directory separators
+    // (`androidx.compose.runtime/runtime-android/1.7.6/...`), unlike the Maven
+    // coordinate spelling `androidx/compose/runtime`. Match both, so the check
+    // works regardless of which form a future gradle release uses.
+    // Gradle uses **dots** as the group-id separator
+    // (`androidx.navigation/navigation-compose-android/...`), not the Maven
+    // slash form, and artifact directory names may carry `-android`/`-release`
+    // suffixes. Match on the dotted prefix so both spellings resolve.
+    // Match the WHOLE androidx.navigation. and androidx.activity. groups: the
+    // Compose-layer AAR (`navigation-compose`) references `NavHostController`
+    // and friends from the base `navigation-runtime` AAR, which is a
+    // *transitive* dependency. Including every group member guarantees the
+    // transitive classes are on the classpath.
+    // Gradle stores a group id as a *single directory name with dots* (e.g.
+    // `androidx.navigation/`, `androidx.activity/`, and the sub-groups
+    // `androidx.compose.runtime/`, `androidx.compose.foundation/`). For a
+    // two-segment group the directory is `androidx.navigation` followed by `/`;
+    // for a three-segment group it is `androidx.compose.runtime` followed by
+    // `/`. The prefixes below use a trailing `/` for the short groups and a
+    // trailing `.` for the compose sub-groups (which continue with `.runtime`,
+    // `.foundation`, etc.).
+    let wanted_aar_prefixes = [
+        "/androidx.compose.",
+        "/androidx.navigation/",
+        "/androidx.activity/",
+    ];
+    // Plain jars (not AARs) that the generated Compose imports. The coroutines
+    // runtime ships as a normal JAR, so it needs a separate collection pass.
+    let wanted_jar_prefixes = [
+        "/org.jetbrains.kotlinx/kotlinx-coroutines-core-jvm/",
+        "/org.jetbrains.kotlinx/kotlinx-coroutines-android/",
+    ];
+    let mut visited: usize = 0;
+    let mut extracted: usize = 0;
+    for entry in walk_aars(&gradle_cache) {
+        let path_str = entry.to_string_lossy();
+        if !wanted_aar_prefixes.iter().any(|p| path_str.contains(p)) {
+            continue;
+        }
+        visited += 1;
+        let stem = entry
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("compose");
+        let out_jar = tmp.join(format!("{stem}.jar"));
+        if out_jar.exists() {
+            cp_parts.push(out_jar.to_string_lossy().into_owned());
+            extracted += 1;
+            continue;
+        }
+        // `unzip -p <aar> classes.jar > <out>` extracts the embedded jar
+        // without needing a full unzip to a scratch dir.
+        let status = std::process::Command::new("unzip")
+            .arg("-p")
+            .arg(&entry)
+            .arg("classes.jar")
+            .stdout(std::fs::File::create(&out_jar).ok()?)
+            .status()
+            .ok()?;
+        if status.success() && out_jar.metadata().map(|m| m.len() > 0).unwrap_or(false) {
+            cp_parts.push(out_jar.to_string_lossy().into_owned());
+            extracted += 1;
+        }
+    }
+    // Plain jars (coroutines). Prefer the newest version of each artifact —
+    // mixing coroutines 1.6 and 1.11 on one classpath is what triggered the
+    // earlier "return type mismatch" (a 1.x-API class shadowing the 1.11 one).
+    for prefix in &wanted_jar_prefixes {
+        let mut best: Option<std::path::PathBuf> = None;
+        for entry in walk_files(&gradle_cache) {
+            let path_str = entry.to_string_lossy();
+            if !path_str.contains(*prefix) {
+                continue;
+            }
+            let Some(name) = entry.file_name().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            if !name.ends_with(".jar") || name.ends_with("-sources.jar") {
+                continue;
+            }
+            // Prefer the lexicographically-largest path (contains the version
+            // dir, so this picks the newest by string compare, which works for
+            // the dot-separated numeric versions gradle caches).
+            if best.as_ref().map(|b| entry > *b).unwrap_or(true) {
+                best = Some(entry);
+            }
+        }
+        if let Some(jar) = best {
+            cp_parts.push(jar.to_string_lossy().into_owned());
+        }
+    }
+
+    eprintln!(
+        "compose cache scan: {} AARs matched, {} extracted, cp has {} entries",
+        visited,
+        extracted,
+        cp_parts.len(),
+    );
+    if cp_parts.is_empty() {
+        return None;
+    }
+    Some((
+        cp_parts.join(":"),
+        compose_compiler,
+        compose_compiler_embeddable,
+    ))
+}
+
+/// `$HOME/.gradle/caches/modules-2/files-2.1` if present.
+fn dirs_gradle_cache() -> Option<std::path::PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    let p = std::path::PathBuf::from(home)
+        .join(".gradle/caches/modules-2/files-2.1");
+    if p.is_dir() {
+        Some(p)
+    } else {
+        None
+    }
+}
+
+/// The Android platform `android.jar` (either the env-provided SDK or the
+/// default macOS location). `None` if not present.
+fn find_android_jar() -> Option<String> {
+    let mut roots: Vec<std::path::PathBuf> = Vec::new();
+    if let Some(home) = std::env::var_os("HOME") {
+        roots.push(std::path::PathBuf::from(home).join("Library/Android/sdk"));
+    }
+    if let Ok(sdk) = std::env::var("ANDROID_HOME") {
+        roots.push(std::path::PathBuf::from(sdk));
+    }
+    if let Ok(sdk) = std::env::var("ANDROID_SDK_ROOT") {
+        roots.push(std::path::PathBuf::from(sdk));
+    }
+    for root in roots {
+        let platforms = root.join("platforms");
+        if let Ok(rd) = std::fs::read_dir(&platforms) {
+            let mut versions: Vec<_> = rd
+                .filter_map(Result::ok)
+                .filter_map(|e| e.file_name().into_string().ok())
+                .collect();
+            versions.sort();
+            if let Some(latest) = versions.last() {
+                let jar = platforms.join(latest).join("android.jar");
+                if jar.is_file() {
+                    return Some(jar.to_string_lossy().into_owned());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Finds a jar whose filename matches `<prefix>-<version>.jar` for an exact
+/// `version`. Returns `None` when no cached artifact carries that version —
+/// the caller skips the compile check rather than loading a mismatched plugin
+/// (which fails with a classloader error, not a codegen error).
+fn find_in_gradle_cache_for_version(
+    cache: &std::path::Path,
+    prefix: &str,
+    version: &str,
+) -> Option<String> {
+    let target = format!("{prefix}-{version}.jar");
+    for entry in walk_files(cache) {
+        if let Some(name) = entry.file_name().and_then(|s| s.to_str()) {
+            if name == target {
+                return Some(entry.to_string_lossy().into_owned());
+            }
+        }
+    }
+    None
+}
+
+/// Yields every `.aar` under `root` (bounded; gradle cache trees are shallow).
+fn walk_aars(root: &std::path::Path) -> Vec<std::path::PathBuf> {
+    walk_files(root)
+        .into_iter()
+        .filter(|p| p.extension().map(|e| e == "aar").unwrap_or(false))
+        .collect()
+}
+
+/// Recursively yields every file under `root`. Depth-bounded to keep the walk
+/// cheap in a test.
+fn walk_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
+    fn recurse(dir: &std::path::Path, depth: usize, out: &mut Vec<std::path::PathBuf>) {
+        if depth > 12 {
+            return;
+        }
+        let Ok(rd) = std::fs::read_dir(dir) else { return };
+        for entry in rd.filter_map(Result::ok) {
+            let p = entry.path();
+            if p.is_dir() {
+                recurse(&p, depth + 1, out);
+            } else {
+                out.push(p);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    recurse(root, 0, &mut out);
+    out
+}
+
 #[test]
 fn generated_kotlin_parses() {
-    if std::process::Command::new("kotlinc")
-        .arg("--version")
-        .output()
-        .is_err()
-    {
+    if !kotlinc_on_path() {
         eprintln!("kotlinc not on PATH; skipping kotlinc compile check");
         return;
     }
-    let compose_classpath = match std::env::var("ANDROID_COMPOSE_CLASSPATH") {
-        Ok(cp) if !cp.is_empty() => cp,
-        _ => {
-            eprintln!("ANDROID_COMPOSE_CLASSPATH unset; skipping");
-            return;
-        }
-    };
-    let compose_compiler = match std::env::var("ANDROID_COMPOSE_COMPILER") {
-        Ok(p) if !p.is_empty() => p,
-        _ => {
-            eprintln!("ANDROID_COMPOSE_COMPILER unset; skipping");
-            return;
-        }
+    let Some((compose_classpath, compose_compiler, compose_compiler_embeddable)) =
+        try_compose_classpath()
+    else {
+        eprintln!(
+            "no Compose toolchain (ANDROID_COMPOSE_CLASSPATH unset and no AARs in \
+             ~/.gradle/caches); skipping kotlinc compile check"
+        );
+        return;
     };
     // Round-16: type-check **each example in its own file** so a per-example
     // bug is not masked by another example's identifier collision (two
@@ -335,6 +630,13 @@ fn generated_kotlin_parses() {
         std::fs::write(&path, &full).expect("write");
         let mut cmd = std::process::Command::new("kotlinc");
         cmd.arg(format!("-Xplugin={compose_compiler}"));
+        // Pass the embeddable Kotlin compiler as a second `-Xplugin` so the
+        // plugin classloader can resolve the shaded `org.jetbrains.kotlin.com.intellij`
+        // classes (see the note in `try_compose_classpath`). Mirrors CI's
+        // `-Xplugin="$ANDROID_COMPOSE_COMPILER" -Xplugin="$ANDROID_COMPOSE_COMPILER_EMBEDDABLE"`.
+        if let Some(ref embeddable) = compose_compiler_embeddable {
+            cmd.arg(format!("-Xplugin={embeddable}"));
+        }
         cmd.arg("-classpath")
             .arg(&compose_classpath)
             .arg("-jvm-target")
