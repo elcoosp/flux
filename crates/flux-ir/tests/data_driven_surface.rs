@@ -705,3 +705,38 @@ fn float_le_ge_are_ieee_correct_for_nan_operands() {
         }
     }
 }
+
+/// Regression: `list.isEmpty()` emitted `EQ_I64 dst, len, <next-opcode>`
+/// because the zero register was allocated *after* the compare. The third
+/// operand slot received the following `LOAD_INT_CONST` opcode byte, and the
+/// VM faulted with `InvalidDispatch` on the next instruction. This pins the
+/// end-to-end pipeline (`parse → type_check → lower → run`) for `isEmpty`.
+#[test]
+fn list_isempty_call_runs_to_bool() {
+    let src = "compo C
+        state items: List[Int] = []
+        state empty: Bool = false
+        Button(onPress: || { empty = items.isEmpty() })
+    ";
+    let (ast, typed) = typed(src);
+    let lowered = lower(&ast, &typed).expect("lower");
+
+    let (_, closure) = lowered.closures.iter().next().expect("a handler");
+    let bc = closure.bytecode.clone();
+
+    let mut signals = flux_vm_ref::InMemorySignals::from_signals([
+        (flux_syntax::SignalId::from(1u32), Value::List(vec![])),
+        (flux_syntax::SignalId::from(2u32), Value::Bool(false)),
+    ]);
+    flux_vm_ref::run(&bc, &mut signals, &StringTable::new(), Value::Null)
+        .expect("isEmpty handler must run without faulting");
+
+    let empty = signals.snapshot().into_iter()
+        .find(|(k, _)| *k == flux_syntax::SignalId::from(2u32))
+        .map(|(_, v)| v);
+    assert_eq!(
+        empty,
+        Some(Value::Bool(true)),
+        "items.isEmpty() on an empty list must set `empty` to true",
+    );
+}
