@@ -119,8 +119,15 @@ pub(crate) fn canonicalize_expr(text: &str) -> String {
     let t = text.trim();
     if t.starts_with('"') && t.ends_with('"') && t.len() >= 2 {
         // String literal: normalize interpolation delimiters to `{…}`.
+        //
+        // Both backends can produce an interpolation with an inner expression:
+        // Swift emits `\(expr)`, Kotlin `${expr}`. We must (a) rewrite the
+        // *opening* delimiter (`\(` or `${`) to `{` and (b) rewrite the
+        // *closing* delimiter to `}` — Swift's closing `)` is the one that
+        // matches the opening `\(`, tracking paren depth so a nested call
+        // such as `\(foo(a, b))` is handled.
         let inner = &t[1..t.len() - 1];
-        let inner = inner.replace("\\(", "{").replace("${", "{");
+        let inner = canonicalize_interp(inner);
         return format!("\"{inner}\"");
     }
     // Key paths: `\.self` / `\.id` (Swift) and `{ it }` / `{ it.id }` (Kotlin).
@@ -150,4 +157,109 @@ pub(crate) fn canonicalize_expr(text: &str) -> String {
         return "0".to_owned();
     }
     t
+}
+
+
+
+/// Canonicalizes the body of a Swift/Kotlin string literal (without the outer
+/// quotes) so that both backends produce the same `{…}` interpolation form.
+///
+/// * Swift emits `\(expr)` — the opening `\(` becomes `{`, the matching `)`
+///   becomes `}`. Because the expression itself may contain parens
+///   (`\(foo(a, b))`), a nesting depth counter is tracked so only the
+///   interpolation's own closing `)` becomes `}`.
+/// * Kotlin emits `${expr}` — the opening `${` becomes `{`, the closing `}` is
+///   preserved.
+///
+/// Previously the code performed a naive `.replace("\\(", "{")`, leaving the
+/// Swift closing `)` in place. Swift `"\(x)"` became `"{x)"`, which never
+/// equalled Kotlin's `"{x}"` — every interpolated string diverged between the
+/// two backends, falsely failing parity.
+fn canonicalize_interp(inner: &str) -> String {
+    let mut out = String::with_capacity(inner.len());
+    let mut chars = inner.chars().peekable();
+    // Stack of paren depths for currently-open Swift interpolations.
+    // Each entry is the current depth within that interpolation; `(` pushes a
+    // new frame, `)` decrements — when a frame would go below 0 that `)` is
+    // the interpolation's own closer and becomes `}`.
+    let mut interp_depth: Vec<i32> = Vec::new();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\\' if chars.peek() == Some(&'(') => {
+                // Swift interpolation opener `\(`.
+                chars.next();
+                out.push('{');
+                interp_depth.push(0);
+            }
+            '$' if chars.peek() == Some(&'{') => {
+                // Kotlin interpolation opener `${`.
+                chars.next();
+                out.push('{');
+                interp_depth.push(0);
+            }
+            '(' => {
+                if let Some(depth) = interp_depth.last_mut() {
+                    *depth += 1;
+                }
+                out.push('(');
+            }
+            ')' => {
+                match interp_depth.last_mut() {
+                    // Inside a Swift interpolation at depth 0: this `)` closes
+                    // the interpolation, not a nested call. Emit `}`.
+                    Some(0) => {
+                        out.push('}');
+                        interp_depth.pop();
+                    }
+                    Some(depth) => {
+                        *depth -= 1;
+                        out.push(')');
+                    }
+                    None => out.push(')'),
+                }
+            }
+            '}' if !interp_depth.is_empty() => {
+                // Kotlin interpolation closer.
+                out.push('}');
+                interp_depth.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod interp_tests {
+    use super::*;
+
+    #[test]
+    fn swift_and_kotlin_interpolation_canonicalize_to_same_form() {
+        let swift = r#""\(count) items""#;
+        let kotlin = r#""${count} items""#;
+        assert_eq!(
+            canonicalize_expr(swift),
+            canonicalize_expr(kotlin),
+            "Swift \\(x) and Kotlin ${{x}} must canonicalize to the same form",
+        );
+        assert_eq!(canonicalize_expr(swift), r#""{count} items""#);
+    }
+
+    #[test]
+    fn swift_interpolation_with_nested_call_parens() {
+        // The expression inside `\(…)` may itself contain parens.
+        let swift = r#""\(foo(a, b)) done""#;
+        assert_eq!(canonicalize_expr(swift), r#""{foo(a, b)} done""#);
+    }
+
+    #[test]
+    fn multiple_interpolations_in_one_string() {
+        let swift = r#""\(a) and \(b)""#;
+        assert_eq!(canonicalize_expr(swift), r#""{a} and {b}""#);
+    }
+
+    #[test]
+    fn plain_string_without_interpolation_is_unchanged() {
+        assert_eq!(canonicalize_expr(r#""hello""#), r#""hello""#);
+    }
 }
