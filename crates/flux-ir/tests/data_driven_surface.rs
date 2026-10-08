@@ -650,3 +650,58 @@ compo C
         );
     }
 }
+
+/// Regression: float `<=` / `>=` must be IEEE-754 correct for NaN operands.
+///
+/// The legacy lowering emitted `!(a > b)` for `a <= b`, which is `true` when
+/// either operand is NaN — while IEEE says `NaN <= x` and `x <= NaN` are both
+/// `false`. The same bug existed for `>=` (`!(a < b)`). The fix lowers to
+/// `(a < b) || (a == b)` and `(a > b) || (a == b)`, both false under NaN.
+///
+/// This test drives the bytecode end-to-end through the reference VM with a
+/// NaN operand on each side and asserts the resulting signal is `false`.
+#[test]
+fn float_le_ge_are_ieee_correct_for_nan_operands() {
+    // Handler writes the boolean result of `NaN <= 1.0`, `1.0 <= NaN`,
+    // `NaN >= 1.0`, and `1.0 >= NaN` into four separate signals.
+    let src = "compo C
+        state a: Float = 0.0
+        state b: Float = 0.0
+        state le_ab: Bool = false
+        state le_ba: Bool = false
+        state ge_ab: Bool = false
+        state ge_ba: Bool = false
+        Button(text: \"x\", onPress: || {
+            le_ab = a <= b
+            le_ba = b <= a
+            ge_ab = a >= b
+            ge_ba = b >= a
+        })
+    ";
+    let (ast, typed) = typed(src);
+    let lowered = lower(&ast, &typed).expect("lower");
+
+    // Seed `a` with NaN, `b` with 1.0.
+    let mut signals = flux_vm_ref::InMemorySignals::from_signals([
+        (flux_syntax::SignalId::from(1u32), Value::Float(f64::NAN)),
+        (flux_syntax::SignalId::from(2u32), Value::Float(1.0)),
+    ]);
+
+    // Name the four result signals by index — the source declares them in
+    // order after `a` and `b`, so ids 3..=6 (SignalScope allocates in order).
+    let (_, closure) = lowered.closures.iter().next().expect("a handler");
+    let bc = closure.bytecode.clone();
+    flux_vm_ref::run(&bc, &mut signals, &StringTable::new(), Value::Null)
+        .expect("handler runs");
+
+    // Read the four result signals.
+    let sig = |id: u32| signals.snapshot().into_iter()
+        .find(|(k, _)| *k == flux_syntax::SignalId::from(id))
+        .map(|(_, v)| v);
+    for id in 3u32..=6u32 {
+        match sig(id) {
+            Some(Value::Bool(false)) => {} // IEEE: NaN <cmp> x is always false
+            other => panic!("signal {id} must be false under NaN (IEEE 754), got {other:?}"),
+        }
+    }
+}
