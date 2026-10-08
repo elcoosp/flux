@@ -121,3 +121,40 @@ mod use_resolution_tests {
         assert!(result.is_err(), "cyclic use must be rejected");
     }
 }
+
+
+mod nested_use_regression {
+    use super::*;
+    use crate::type_check_with_loader;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    fn mem_loader(map: HashMap<String, String>) -> ModuleLoader {
+        Arc::new(move |name: &str| map.get(name).cloned())
+    }
+
+    /// Regression: a 3-segment `use a::b::c` used to fall through to the
+    /// bare-module branch and glob *every* export of `a`, silently leaking
+    /// names the user never asked for. It now surfaces a clear error.
+    #[test]
+    fn three_segment_use_is_rejected_not_globbed() {
+        let mut modules = HashMap::new();
+        modules.insert(
+            "a".to_owned(),
+            "compo Kept()\n  Text(\"k\")\n\ncompo Leaked()\n  Text(\"l\")\n".to_owned(),
+        );
+        let entry = "use a::b::Kept\n\ncompo Main()\n  Kept()\n";
+        let ast = flux_parser::parse(entry, 0, "main").expect("entry parses");
+        let typed = type_check_with_loader(&ast, Some(mem_loader(modules.clone())));
+        let err = typed.expect_err("3+ segment use must be rejected");
+        assert!(
+            format!("{err}").contains("nested module"),
+            "error must explain nested-module paths are unsupported: {err}",
+        );
+
+        // `use a` and `use a::b` continue to work as before.
+        let ok_bare = "use a\n\ncompo Main()\n  Kept()\n";
+        let ast_ok = flux_parser::parse(ok_bare, 0, "main").expect("parses");
+        assert!(type_check_with_loader(&ast_ok, Some(mem_loader(modules))).is_ok());
+    }
+}
