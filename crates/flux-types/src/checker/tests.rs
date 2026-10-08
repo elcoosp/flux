@@ -158,3 +158,66 @@ mod nested_use_regression {
         assert!(type_check_with_loader(&ast_ok, Some(mem_loader(modules))).is_ok());
     }
 }
+
+mod reserved_identifier_regression {
+    use crate::type_check;
+    use flux_parser::parse;
+
+    /// Regression: a Flux component named `class` (a Swift reserved word) used
+    /// to reach the codegen backend, which emitted `struct class: View { ... }`
+    /// — invalid Swift that failed the native `swiftc -typecheck` step with an
+    /// obscure error. The type checker now rejects any declaration whose name
+    /// is reserved in either target language.
+    #[test]
+    fn swift_keyword_component_name_is_rejected() {
+        let src = "compo class\n  Text(\"hi\")\n";
+        let ast = parse(src, 0, "main").expect("parses");
+        let err = type_check(&ast).expect_err("`class` must be rejected");
+        assert!(
+            err.message.contains("reserved"),
+            "error must mention the reserved-name cause: {}",
+            err.message,
+        );
+        assert!(
+            err.hint.as_deref().is_some_and(|h| h.contains("class_")),
+            "hint must suggest a rename: {:?}",
+            err.hint,
+        );
+    }
+
+    /// Same rejection for a Kotlin reserved word (`object`).
+    #[test]
+    fn kotlin_keyword_component_name_is_rejected() {
+        let src = "compo object\n  Text(\"hi\")\n";
+        let ast = parse(src, 0, "main").expect("parses");
+        let err = type_check(&ast).expect_err("`object` must be rejected");
+        assert!(err.message.contains("reserved"));
+    }
+
+    /// The rejection covers `type` declarations, not just components, since
+    /// their name becomes a native `enum`/`struct` identifier.
+    #[test]
+    fn reserved_type_declaration_name_is_rejected() {
+        let src = "type struct = A(Int)\n\ncompo Main\n  Text(\"x\")\n";
+        let ast = parse(src, 0, "main").expect("parses");
+        let err = type_check(&ast).expect_err("`type struct` must be rejected");
+        assert!(err.message.contains("reserved"));
+    }
+
+    /// An ordinary component name is unaffected.
+    #[test]
+    fn ordinary_component_name_is_accepted() {
+        let src = "compo Counter\n  Text(\"hi\")\n";
+        let ast = parse(src, 0, "main").expect("parses");
+        assert!(type_check(&ast).is_ok());
+    }
+
+    /// A name that resembles but does not equal a keyword (`Class` vs `class`)
+    /// is accepted, matching the target languages' case sensitivity.
+    #[test]
+    fn case_mismatched_name_is_accepted() {
+        let src = "compo Class\n  Text(\"hi\")\n";
+        let ast = parse(src, 0, "main").expect("parses");
+        assert!(type_check(&ast).is_ok());
+    }
+}
