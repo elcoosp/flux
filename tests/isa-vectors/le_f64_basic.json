@@ -1,0 +1,16 @@
+{
+  "bytecode_hex": "b100000000000000f03fb101000000000000004036020001350300014104020300",
+  "description": "Float `<=` is lowered (the ISA has no LTE_F64) to `(a < b) || (a == b)`. With a=1.0, b=2.0 the result is true.",
+  "expected_error": null,
+  "expected_gas_used": 5,
+  "expected_registers": {
+    "r4": {
+      "type": "Bool",
+      "value": 1
+    }
+  },
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "le_f64_basic",
+  "payload": null
+}
