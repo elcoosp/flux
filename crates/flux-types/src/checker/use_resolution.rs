@@ -179,6 +179,27 @@ fn export_name(decl: &Decl) -> Option<String> {
 /// recorded node id of the declaration and its inferred type.
 pub fn check_decl(checker: &mut Checker, decl: &Decl) -> Result<(NodeId, TcType), TypeError> {
     let span = decl.span();
+    // Reject any declaration whose name is reserved in a codegen target
+    // language (Swift or Kotlin). The two backends emit a Flux name verbatim
+    // as a native identifier (`struct {name}: View`, `@State var {name}`), so a
+    // component named `class` or `func` used to produce source that fails the
+    // native `swiftc -typecheck` / `kotlinc` step with an obscure error. Surface
+    // it here, before lowering, with a clear rename hint.
+    if let Some((name, name_span)) = super::reserved::decl_name(decl) {
+        if super::reserved::is_reserved(name) {
+            return Err(TypeError::new(
+                format!(
+                    "`{name}` is a reserved identifier in Swift / Kotlin and cannot be \
+                     emitted as a native name",
+                ),
+                name_span,
+            )
+            .with_hint(format!(
+                "rename the declaration (e.g. `{name}_`); the Swift and Kotlin \
+                 codegen backends use Flux names verbatim",
+            )));
+        }
+    }
     match decl {
         Decl::Type(_) => {
             // Already collected.
