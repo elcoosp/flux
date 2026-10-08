@@ -221,6 +221,7 @@ mod field;
 mod generics;
 mod infer;
 mod opt_field;
+mod reserved;
 mod scope;
 mod use_resolution;
 
