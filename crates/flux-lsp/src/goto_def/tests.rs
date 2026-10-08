@@ -68,3 +68,21 @@ fn resolve_produces_an_lsp_range() {
         .expect("found");
     let _ = span_to_range(src, span); // must not panic
 }
+
+/// Regression: a component name must resolve from ANYWHERE in the file,
+/// not only inside its own body. `index_component` used to push the
+/// component name with `scope = c.body.span`, so `Profile()` in a different
+/// component (the common `App` → `Profile` case) failed to resolve.
+#[test]
+fn component_name_resolves_from_another_component() {
+    let src = "compo Profile\n  Text(\"hi\")\n\ncompo App\n  Profile()\n";
+    let ast = parse(src, 0, "f.flux").expect("parses");
+    let idx = DefIndex::build(&ast);
+    let use_pos = src.rfind("Profile()").expect("call present") as u32;
+    let span = idx
+        .resolve(src, use_pos)
+        .expect("cross-component call must resolve to the declaration");
+    let decl = cursor_at(src, "Profile");
+    assert_eq!(span.start, decl, "must land on the `Profile` declaration");
+    assert_eq!(span.end, decl + 7);
+}
