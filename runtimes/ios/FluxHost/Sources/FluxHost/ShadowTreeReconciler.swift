@@ -295,6 +295,17 @@ struct ShadowTreeReconciler {
                 }
             }
             mark(rootId)
+            // ForEach-expanded rows are not reachable through `nodeTable`
+            // (which holds the *template* splice, e.g. 1000 -> [splice(key:0,
+            // node:10)]); the derived row ids (0x8000_0000 / 0xC000_0000
+            // markers) live only in `forEachRowContext`, populated this pass
+            // by `expandForEach`. Without this, the prune below destroys every
+            // freshly-built row view the moment `apply` returns — the row is
+            // in `report.built` but no longer in `built`, so
+            // `view(for: derivedRowId)` returns nil.
+            for derivedId in forEachRowContext.keys where built[derivedId] != nil {
+                reachable.insert(derivedId)
+            }
             for (id, builtNode) in built where !reachable.contains(id) {
                 builtNode.adapter.destroy(builtNode.view)
                 built.removeValue(forKey: id)
