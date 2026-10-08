@@ -175,6 +175,12 @@ impl DevToolsRouter {
                 // Disconnected or lagged (Full): evict the slow client.
                 Err(_) => false,
             });
+        // Also prune `devtools` senders whose clients disappeared between
+        // telemetry events. An announce is rare (once per host connect), so
+        // without this the `devtools` vector would keep dead senders until
+        // the next telemetry event — same class of leak as the host-identity
+        // side, just with a different trigger.
+        self.devtools.retain(|tx| !tx.is_closed());
         tracing::debug!(reached, "announce_host: broadcast complete");
         reached
     }
@@ -199,6 +205,17 @@ impl DevToolsRouter {
                 // Disconnected or lagged (buffer full): evict the slow client.
                 Err(_) => false,
             });
+        // Prune dead senders on the host-identity stream too. Without this a
+        // DevTools client that subscribed to the identity stream and then
+        // disconnected *before any announce fired* left a dead `Sender` in
+        // `host_announce` until the next real announce — which in a session
+        // that follows the live host may never happen. Over a long DevTools
+        // session with reconnects that accumulates without bound.
+        //
+        // `route_telemetry` is the hot path (one call per telemetry event);
+        // pruning here keeps the vector bounded without requiring a separate
+        // tick. The `is_closed()` check is O(1) per entry.
+        self.host_announce.retain(|tx| !tx.is_closed());
         tracing::debug!(reached, "route_telemetry: broadcast complete");
         reached
     }
@@ -207,6 +224,20 @@ impl DevToolsRouter {
     #[must_use]
     pub fn route_command(&self, command: DebugCommand) -> bool {
         self.host_command.try_send(command).is_ok()
+    }
+
+    /// Live subscriber counts as `(devtools, host_announce)`.
+    ///
+    /// Exposed so a test can assert dead subscribers do not silently
+    /// accumulate: `route_telemetry` prunes `devtools`, `announce_host` prunes
+    /// `host_announce`. A client that subscribes to the host-identity stream
+    /// and disconnects before any announce fires previously leaked an entry
+    /// in `host_announce` until the next real announce (which may never
+    /// happen in a session that follows the live host).
+    #[doc(hidden)]
+    #[must_use]
+    pub fn debug_subscriber_counts(&self) -> (usize, usize) {
+        (self.devtools.len(), self.host_announce.len())
     }
 }
 
@@ -579,5 +610,64 @@ mod tests {
         let got = HostAnnounceFrame::from_bytes(&bytes).expect("decodes host announce");
         assert_eq!(got.platform, "ios");
         assert_eq!(got.device, "iPhone17,1");
+    }
+}
+
+#[cfg(test)]
+mod subscriber_leak_regression {
+    use super::*;
+
+    /// Regression: a DevTools client that subscribes to the host-identity
+    /// stream and disconnects *before any announce fires* used to leave a
+    /// dead entry in `host_announce` until the next real announce — which may
+    /// never happen in a session that follows the live host. `route_telemetry`
+    /// now prunes both subscriber lists (it is the hot path), so a burst of
+    /// connect/disconnect churn cannot grow the router unbounded.
+    #[test]
+    fn dead_host_announce_subscribers_are_pruned() {
+        let (host_tx, _host_rx) = mpsc::channel(1024);
+        let mut router = DevToolsRouter::new(SourceMap::default(), host_tx);
+
+        for _ in 0..20 {
+            let dev_rx = router.subscribe_devtools();
+            let host_rx = router.subscribe_host_announce();
+            drop(dev_rx);
+            drop(host_rx);
+        }
+        // One telemetry event drives pruning of both lists.
+        let event = TelemetryEvent::VmStep {
+            bytecode_offset: 0,
+            opcode: 1,
+            registers: Box::new([const { flux_syntax::Value::Null }; 16]),
+            gas_remaining: 1000,
+        };
+        router.route_telemetry(&event);
+
+        let (devtools, host_announce) = router.debug_subscriber_counts();
+        assert_eq!(
+            (devtools, host_announce),
+            (0, 0),
+            "dead subscribers must not accumulate: `route_telemetry` prunes both lists",
+        );
+    }
+
+    /// Live subscribers are preserved by the prune.
+    #[test]
+    fn live_subscribers_survive_the_prune() {
+        let (host_tx, _host_rx) = mpsc::channel(1024);
+        let mut router = DevToolsRouter::new(SourceMap::default(), host_tx);
+        let _dev = router.subscribe_devtools();
+        let _announce = router.subscribe_host_announce();
+
+        let event = TelemetryEvent::VmStep {
+            bytecode_offset: 0,
+            opcode: 1,
+            registers: Box::new([const { flux_syntax::Value::Null }; 16]),
+            gas_remaining: 1000,
+        };
+        router.route_telemetry(&event);
+
+        let (devtools, host_announce) = router.debug_subscriber_counts();
+        assert_eq!((devtools, host_announce), (1, 1));
     }
 }
