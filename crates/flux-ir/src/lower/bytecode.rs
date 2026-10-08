@@ -709,14 +709,22 @@ impl<'a> Emitter<'a> {
                 let len = self.alloc_reg()?;
                 self.emit_list_len(len, list_reg);
                 let out = self.alloc_reg()?;
-                // `isEmpty` == (length == 0).
-                self.code.push(raw::EQ_I64);
-                self.code.push(out);
-                self.code.push(len);
+                // `isEmpty` == (length == 0). The zero register must be loaded
+                // *before* the `EQ_I64` opcode is emitted: the emitter builds
+                // instructions opcode-first, and every operand of an
+                // instruction must be emitted contiguously, or the next
+                // instruction's opcode byte is read as a register operand.
+                // The previous ordering pushed `EQ_I64 out, len, <next-opcode>`
+                // — the third operand slot received the `LOAD_INT_CONST`
+                // opcode byte, and the VM read register 0xB0 out of range.
                 let zero = self.alloc_reg()?;
                 self.code.push(raw::LOAD_INT_CONST);
                 self.code.push(zero);
                 self.code.extend_from_slice(&0i64.to_le_bytes());
+                self.code.push(raw::EQ_I64);
+                self.code.push(out);
+                self.code.push(len);
+                self.code.push(zero);
                 Ok(out)
             }
             ListMethod::Length => {
