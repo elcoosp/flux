@@ -1523,14 +1523,20 @@ impl<'a> Emitter<'a> {
                     // See Appendix E §E.2 "ISA gap: missing Float <=/>= ops".
                     BinOp::Le => {
                         if is_float {
-                            raw::GT_F64
+                            // `a <= b`  ≡  `(a < b) || (a == b)` under IEEE 754.
+                            // `!(a > b)` would be wrong when either operand is
+                            // NaN: it is `true`, but `a <= b` is `false`.
+                            raw::LT_F64
                         } else {
                             raw::LTE_I64
                         }
                     }
                     BinOp::Ge => {
                         if is_float {
-                            raw::LT_F64
+                            // `a >= b`  ≡  `(a > b) || (a == b)` under IEEE 754.
+                            // `!(a < b)` would be wrong when either operand is
+                            // NaN: it is `true`, but `a >= b` is `false`.
+                            raw::GT_F64
                         } else {
                             raw::GTE_I64
                         }
@@ -1548,11 +1554,30 @@ impl<'a> Emitter<'a> {
                 self.code.push(dst);
                 self.code.push(a);
                 self.code.push(b);
-                // `Ne` negates its `Eq` opcode; float `<=`/`>=` negate the
-                // complementary comparison (no LTE_F64/GTE_F64 in the ISA).
-                let negate =
-                    matches!(op, BinOp::Ne) || (is_float && matches!(op, BinOp::Le | BinOp::Ge));
-                if negate {
+                // Float `<=`/`>=`: the ISA has no LTE_F64 / GTE_F64, but the
+                // obvious `!(a > b)` / `!(a < b)` substitution is unsound under
+                // IEEE 754 — with either operand NaN, `!(a > b)` is `true` while
+                // `a <= b` is `false`. Lower the sound form instead:
+                //   `a <= b`  ≡  `(a < b) || (a == b)`
+                //   `a >= b`  ≡  `(a > b) || (a == b)`
+                // Both comparisons are `false` for NaN, so the OR is too.
+                // `dst` already holds LT_F64 / GT_F64(a, b); compute EQ_F64(a, b)
+                // into a scratch register and OR the two booleans back into
+                // `dst`.
+                if is_float && matches!(op, BinOp::Le | BinOp::Ge) {
+                    let eq = self.alloc_reg()?;
+                    self.code.push(raw::EQ_F64);
+                    self.code.push(eq);
+                    self.code.push(a);
+                    self.code.push(b);
+                    self.code.push(raw::OR_BOOL);
+                    self.code.push(dst);
+                    self.code.push(dst);
+                    self.code.push(eq);
+                    return Ok(dst);
+                }
+                // `Ne` negates its `Eq` opcode.
+                if matches!(op, BinOp::Ne) {
                     let negated = self.alloc_reg()?;
                     self.code.push(raw::NOT_BOOL);
                     self.code.push(negated);
@@ -2613,10 +2638,13 @@ mod tests {
     }
 
     #[test]
-    fn typed_opcode_selection_float_le_emits_gt_f64_plus_not_bool() {
-        // `count <= 1.0` where count: Float → GT_F64 + NOT_BOOL.
-        // Appendix E §E.2: the ISA has no LTE_F64, so `<=` is lowered to
-        // `!(a > b)` via GT_F64 followed by NOT_BOOL.
+    fn typed_opcode_selection_float_le_emits_lt_f64_or_eq_f64() {
+        // `count <= 1.0` where count: Float → LT_F64 + EQ_F64 + OR_BOOL.
+        // Appendix E §E.2: the ISA has no LTE_F64. The obvious
+        // `!(a > b)` substitution is unsound under IEEE 754 — with either
+        // operand NaN, `!(a > b)` is `true` while `a <= b` is `false`. The
+        // sound lowering is `(a < b) || (a == b)`, both of which are false
+        // for NaN.
         let lhs = ident("count");
         let mut expr_types = HashMap::new();
         expr_types.insert(expr_node_id(&lhs, ExprNodeKind::Primitive), TypeKind::Float);
@@ -2652,12 +2680,24 @@ mod tests {
         .expect("compiles");
 
         assert!(
-            bytecode.contains(&raw::GT_F64),
-            "expected GT_F64 for Float `<=`: {bytecode:?}"
+            bytecode.contains(&raw::LT_F64),
+            "expected LT_F64 for Float `<=` (sound substitution): {bytecode:?}"
         );
         assert!(
-            bytecode.contains(&raw::NOT_BOOL),
-            "expected NOT_BOOL to negate the GT_F64 result: {bytecode:?}"
+            bytecode.contains(&raw::EQ_F64),
+            "expected EQ_F64 for Float `<=` (sound substitution): {bytecode:?}"
+        );
+        assert!(
+            bytecode.contains(&raw::OR_BOOL),
+            "expected OR_BOOL to combine the two comparisons: {bytecode:?}"
+        );
+        assert!(
+            !bytecode.contains(&raw::GT_F64),
+            "the old `!(a > b)` lowering is unsound under NaN and must not be emitted: {bytecode:?}"
+        );
+        assert!(
+            !bytecode.contains(&raw::NOT_BOOL),
+            "no NOT_BOOL is required by the sound `(a < b) || (a == b)` lowering: {bytecode:?}"
         );
     }
 
