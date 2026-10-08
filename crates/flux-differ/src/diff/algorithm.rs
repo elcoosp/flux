@@ -121,7 +121,17 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
     // removed id plus an inserted id that still denote the SAME component at
     // the same parent/index. Pair those up into a state-preserving
     // `Patch::Reattach` before falling back to remove+insert (roadmap Phase 3).
-    let removed: Vec<NodeId> = old_ids.difference(&new_ids).copied().collect();
+    //
+    // Round-26: `old_ids.difference(&new_ids)` iterates an `AHashSet`, whose
+    // order is randomized per process. The `for id in &removed` loop below
+    // emits `Patch::Remove` patches directly, so a single edit that dropped
+    // two nodes shipped different wire bytes on each run. Collect and sort by
+    // `NodeId` (content-derived, so stable) to make the remove stream
+    // deterministic. Same class as the round-14 (`Insert`), round-19
+    // (`Reattach`), and round-20 (in-place) fixes; the four sites now all
+    // sort before emitting.
+    let mut removed: Vec<NodeId> = old_ids.difference(&new_ids).copied().collect();
+    removed.sort_unstable_by_key(|id| u32::from(*id));
     let mut inserted: Vec<NodeId> = new_ids.difference(&old_ids).copied().collect();
     let pairs = reattach_pairs(old, new, &old_index, &new_index, &removed, &inserted);
 
@@ -315,4 +325,46 @@ mod tests {
             "a newly added top-level component must produce an Insert patch (audit C9)"
         );
     }
+
+    /// Regression (round-26): the `removed` vector is built from
+    /// `AHashSet::difference()`, whose iteration order is randomized per
+    /// process. Without an explicit sort, the emitted `Patch::Remove` order
+    /// varied between runs — the same bug class the rounds 14/19/20 fixes
+    /// closed for `Insert`, `Reattach`, and in-place patches.
+    ///
+    /// The input uses 15 removable children with non-contiguous ids: the
+    /// probability that AHashSet iteration happens to produce an ascending
+    /// order is ~1/15!, so this test fires reliably on the un-sorted code.
+    #[test]
+    fn remove_patches_are_emitted_in_ascending_node_id_order() {
+        // 15 removable children, ids deliberately shuffled.
+        let ids: [u32; 15] = [91, 3, 47, 18, 76, 5, 88, 24, 60, 12, 99, 31, 55, 7, 70];
+        let children: Vec<(u32, NodeKind)> =
+            ids.iter().map(|id| (*id, NodeKind::Primitive)).collect();
+        let old = build_tree(1, NodeKind::Component, &children);
+        let new = build_tree(1, NodeKind::Component, &[]);
+
+        let patches = diff(&old, &new);
+        let actual: Vec<u32> = patches
+            .iter()
+            .filter_map(|p| match p {
+                Patch::Remove { id } => Some(u32::from(*id)),
+                _ => None,
+            })
+            .collect();
+
+        let mut sorted = actual.clone();
+        sorted.sort_unstable();
+        assert_eq!(
+            actual, sorted,
+            "Remove patches must be emitted in ascending node-id order; \
+             got {actual:?}",
+        );
+        assert_eq!(
+            actual.len(),
+            15,
+            "all 15 removable children must produce a Remove patch",
+        );
+    }
+
 }
