@@ -68,6 +68,35 @@ impl Checker {
             .filter_map(|name| sub.env.lookup(&name).map(|b| (name, b.clone())))
             .collect();
 
+        // A `use` path may be a bare module (`use theme`), a selective
+        // import (`use theme::red`), or a glob (`use theme::*`). Paths with
+        // more than two segments (`use a::b::c`) would require a nested-
+        // module loader, which the current loader signature
+        // (`Fn(name) -> Option<String>`) cannot express. Before this
+        // rejection, a 3+ segment path silently fell into the `else`
+        // branch and behaved as `use a` — globbing *every* export of the
+        // first module into the caller's scope, including names the user
+        // never asked for. Reject explicitly rather than silently leak.
+        if use_decl.segments.len() > 2 {
+            return Err(TypeError::new(
+                format!(
+                    "nested module paths are not yet supported: \
+                     `use {}`",
+                    use_decl
+                        .segments
+                        .iter()
+                        .map(|s| s.name.as_str())
+                        .collect::<Vec<_>>()
+                        .join("::"),
+                ),
+                span,
+            )
+            .with_hint(
+                "use at most two segments (`use module::symbol` or \
+                 `use module::*`); nested modules need a loader extension"
+                    .to_owned(),
+            ));
+        }
         if use_decl.glob {
             for (name, binding) in &exports {
                 self.env.insert(name.clone(), binding.clone());
