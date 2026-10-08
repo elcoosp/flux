@@ -172,12 +172,20 @@ impl Divergence {
             display_line,
             self.right.as_deref().unwrap_or("<end of trace>")
         ));
-        for i in idx..end {
-            if i == idx {
-                continue;
+        // Context after the divergence: only render right-side frames when
+        // the right trace actually has entries beyond the divergence.
+        // (`right.len() - 1` underflows when the right trace is empty — the
+        // common case for a length-mismatch where left is longer than right
+        // and right happens to have zero frames — and the resulting index
+        // panics.)
+        if !right.is_empty() {
+            for i in (idx + 1)..end {
+                if i >= right.len() {
+                    break;
+                }
+                let f = &right[i];
+                out.push_str(&format!("  right {}: {}\n", f.line, f.canonical));
             }
-            let f = &right[i.min(right.len() - 1)];
-            out.push_str(&format!("  right {}: {}\n", f.line, f.canonical));
         }
         out
     }
@@ -201,7 +209,13 @@ pub fn compare(left: &[Frame], right: &[Frame]) -> Result<(), Divergence> {
         }
     }
     if left.len() != right.len() {
-        let at = len + 1;
+        // The extra frame's *file* line (a 1-based index into the source
+        // text, not `frames.len()+1`), so a trace with blank lines reports
+        // the correct location. Fall back to `1` when neither side has an
+        // extra frame (impossible by construction: only reached when the
+        // lengths differ).
+        let extra = left.get(len).or_else(|| right.get(len));
+        let at = extra.map_or(1, |f| f.line);
         return Err(Divergence {
             left_line: at,
             left: left.get(len).map(|f| f.canonical.clone()),
@@ -329,5 +343,48 @@ mod tests {
         let err = compare(&a, &b).unwrap_err();
         assert_eq!(err.left_line, 2);
         assert_eq!(err.right, None);
+    }
+}
+
+
+#[cfg(test)]
+mod regression_tests {
+    use super::*;
+
+    /// A length-mismatch must report the extra frame's *file* line, not its
+    /// index into the canonicalized frame vector. Blank lines in the source
+    /// were previously skipped, so `frames.len()+1` was wrong whenever a
+    /// blank preceded the divergence.
+    #[test]
+    fn length_mismatch_reports_file_line() {
+        // Left: blank line 1, `a` on line 2, `b` on line 3.
+        // Right: blank line 1, `a` on line 2.
+        let left = load_trace_str("\n{\"event\":\"a\"}\n{\"event\":\"b\"}\n").unwrap();
+        let right = load_trace_str("\n{\"event\":\"a\"}\n").unwrap();
+        let err = compare(&left, &right).unwrap_err();
+        assert_eq!(err.left_line, 3);
+        assert!(err.left.is_some());
+        assert!(err.right.is_none());
+    }
+
+    /// `Divergence::render` must not panic when the right trace is empty —
+    /// the common case for the CLI when one side has no frames at all.
+    #[test]
+    fn render_does_not_panic_on_empty_right() {
+        let left = load_trace_str("{\"event\":\"a\"}\n{\"event\":\"b\"}").unwrap();
+        let right: Vec<Frame> = Vec::new();
+        let err = compare(&left, &right).unwrap_err();
+        let rendered = err.render(&left, &right);
+        assert!(rendered.contains("divergence"));
+        assert!(rendered.contains("\"a\""));
+    }
+
+    /// The symmetric case: empty left trace.
+    #[test]
+    fn render_does_not_panic_on_empty_left() {
+        let left: Vec<Frame> = Vec::new();
+        let right = load_trace_str("{\"event\":\"a\"}\n{\"event\":\"b\"}").unwrap();
+        let err = compare(&left, &right).unwrap_err();
+        let _ = err.render(&left, &right); // must not panic
     }
 }
