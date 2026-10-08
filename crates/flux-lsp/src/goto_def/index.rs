@@ -24,11 +24,17 @@ pub(crate) struct DefIndex {
 
 impl DefIndex {
     /// Builds the index by walking the whole AST.
+    ///
+    /// Every declaration's *name* (component, top-level fn) is visible from
+    /// anywhere in the file, so it is pushed with `ast.span` as its scope.
+    /// Inner bindings (props, state cells, lambda params, `let`/`match`
+    /// patterns) are pushed with their tighter lexical scope, which the
+    /// resolver's tie-break (tightest enclosing scope wins) already honours.
     #[must_use]
     pub(crate) fn build(ast: &Ast) -> Self {
         let mut defs: Vec<Def> = Vec::new();
         for decl in &ast.decls {
-            index_decl(decl, &mut defs);
+            index_decl(decl, ast.span, &mut defs);
         }
         Self { defs }
     }
@@ -63,10 +69,10 @@ fn push(defs: &mut Vec<Def>, name: &str, def_span: Span, scope: Span) {
     });
 }
 
-fn index_decl(decl: &Decl, defs: &mut Vec<Def>) {
+fn index_decl(decl: &Decl, module_scope: Span, defs: &mut Vec<Def>) {
     match decl {
-        Decl::Component(c) => index_component(c, defs),
-        Decl::Fn(f) => index_fn(f, defs),
+        Decl::Component(c) => index_component(c, module_scope, defs),
+        Decl::Fn(f) => index_fn(f, module_scope, defs),
         // Import/Use/Type/Trait/Capability/Const introduce names at module
         // scope, but the MLP editor's go-to-definition targets component and
         // value bindings; the rest are out of scope for now.
@@ -74,17 +80,23 @@ fn index_decl(decl: &Decl, defs: &mut Vec<Def>) {
     }
 }
 
-fn index_component(c: &ComponentDecl, defs: &mut Vec<Def>) {
-    // The component name is visible from the opening brace of its body onward,
-    // so a bare `Counter()` occurrence below resolves to the declaration.
-    push(defs, &c.name.name, c.name.span, c.body.span);
+fn index_component(c: &ComponentDecl, module_scope: Span, defs: &mut Vec<Def>) {
+    // The component's own name is a top-level declaration visible from
+    // anywhere in the file (e.g. `Profile()` inside `App` resolves to
+    // `Profile`'s declaration), so its scope is the whole-module span.
+    // Previously this used `c.body.span`, which meant a cross-component
+    // call landed on nothing.
+    push(defs, &c.name.name, c.name.span, module_scope);
     for prop in &c.props {
         push(defs, &prop.name.name, prop.name.span, c.body.span);
     }
     index_block(&c.body, defs);
 }
 
-fn index_fn(f: &FnDecl, defs: &mut Vec<Def>) {
+fn index_fn(f: &FnDecl, module_scope: Span, defs: &mut Vec<Def>) {
+    // A top-level `fn`'s own name is a module-level declaration, visible
+    // from anywhere in the file (same rule as a component).
+    push(defs, &f.name.text, f.name.span, module_scope);
     let body = &f.body;
     for param in &f.params {
         push(defs, &param.name.name, param.name.span, body.span);
