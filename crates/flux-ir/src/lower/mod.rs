@@ -198,9 +198,19 @@ struct Lowerer<'a> {
     handler_counter: flux_syntax::HandlerId,
     /// Generic-instantiation cursor (roadmap Phase 1).
     mono: mono::MonoTable,
-    /// Names of record types declared with `record Name { … }`; calls to these
-    /// construct values (FLUX-072), not capability invocations.
+    /// Names of record types declared with `record Name { … }` and of every
+    /// ADT variant declared with `type X = A(..) | B(..)`; calls to these
+    /// construct values (FLUX-072 / audit C5), not capability invocations.
     record_ctors: std::collections::HashSet<String>,
+    /// Module-level associated constants (`Name.field = expr`, e.g.
+    /// `Color.red = RGB(1.0, 0.0, 0.0)` from `stdlib/color.flux`). Dotted path
+    /// joined with `.`; the value is the fully-lowered constant.
+    ///
+    /// Before this field existed, `Button(color: Color.red)` lowered the
+    /// `Field { base: Ident("Color"), field: "red" }` expression through
+    /// `lower_value`'s fallthrough to `Value::Null`, silently dropping every
+    /// stdlib preset (`Color.red`, `Font.body`, …).
+    const_bindings: std::collections::HashMap<String, flux_syntax::Value>,
     /// Declared component bodies, retained so `lower_call` can inline a
     /// component's body at the call site — binding its `prop`s to the call's
     /// argument signals. This is what lets `TaskRow(task: item, …)` inside a
@@ -233,6 +243,7 @@ impl<'a> Lowerer<'a> {
             handler_counter: flux_syntax::HandlerId::from(0u32),
             mono: mono::MonoTable::new(typed),
             record_ctors: std::collections::HashSet::new(),
+            const_bindings: std::collections::HashMap::new(),
             component_decls: std::collections::HashMap::new(),
             prop_indices: std::collections::HashMap::new(),
             inline_salt: None,
@@ -410,8 +421,30 @@ impl<'a> Lowerer<'a> {
             Decl::Fn(_)
             | Decl::Trait(_)
             | Decl::Capability(_)
-            | Decl::Use(_)
-            | Decl::Const(_) => Ok(()),
+            | Decl::Use(_) => Ok(()),
+            // Module-level associated constant, e.g. `Color.red = RGB(1.0, 0.0, 0.0)`
+            // or `Font.body = Font("", 17.0, Regular, Normal)`. Retain the
+            // lowered value under its dotted path (`Color.red`) so a call site
+            // like `Button(color: Color.red)` resolves to the actual record
+            // instead of Null (see `Lowerer::const_bindings`).
+            Decl::Const(binding) => {
+                let path = binding
+                    .path
+                    .iter()
+                    .map(|id| id.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(".");
+                // A closure table is required by `lower_value`'s signature but
+                // a stdlib constant never contains a closure; pass a throwaway.
+                let mut discarded = Vec::new();
+                let value = self.lower_value(
+                    &binding.value,
+                    ComponentId::from(0u32),
+                    &mut discarded,
+                )?;
+                self.const_bindings.insert(path, value);
+                Ok(())
+            }
             // An ADT declaration registers each *variant* name in the same
             // constructor registry a `record` type uses. Variants are called
             // exactly like record constructors (`RGB(1.0, 0.0, 0.0)`,
@@ -946,6 +979,24 @@ impl<'a> Lowerer<'a> {
             flux_parser::ExprKind::Bool(b) => Ok(Value::Bool(*b)),
             flux_parser::ExprKind::Str(parts) => self.lower_str(parts, owner, handlers),
             flux_parser::ExprKind::Null => Ok(Value::Null),
+            // Module-level associated constant, e.g. `Color.red` used at a call
+            // site. The field-access shape is `Field { base: Ident("Color"),
+            // field: Ident("red") }`; look the dotted path up in
+            // `const_bindings` (populated by `lower_decl` from `Decl::Const`).
+            // Without this branch the value silently lowered to Null.
+            flux_parser::ExprKind::Field { base, field } => {
+                if let flux_parser::ExprKind::Ident(base_ident) = &base.kind {
+                    let key = format!("{}.{}", base_ident.name, field.name);
+                    if let Some(value) = self.const_bindings.get(&key) {
+                        return Ok(value.clone());
+                    }
+                }
+                // Not a module-level constant — the lowering layer has no
+                // runtime record reader here (the codegen layer renders
+                // runtime field access from the AST), so keep the previous
+                // Null placeholder.
+                Ok(Value::Null)
+            }
             flux_parser::ExprKind::Lambda { params, body } => {
                 let handler = self.next_handler();
                 let mut intern = |s: &str| self.builder.intern_string(s);
