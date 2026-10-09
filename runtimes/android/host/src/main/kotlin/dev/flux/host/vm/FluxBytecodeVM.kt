@@ -114,7 +114,11 @@ public object FluxBytecodeVM {
             try {
                 Decoder.decodeProgram(bytecode)
             } catch (e: VmError) {
-                return RunResult.Halt(VmOutcome(emptyList(), Array(16) { FluxValue.NullVal }, 0u))
+                // F3: a decode failure is a terminal fault, not a silent
+                // empty-program Halt. The previous behaviour made every
+                // corrupt handler a "successful" no-op, hiding genuine opcode
+                // errors from the host (AGENTS.md §3.11).
+                return RunResult.Fault(e.kind, e.offset)
             }
         val offsets: List<UInt> = program.map { it.offset }
         val regs = Array<FluxValue>(16) { FluxValue.NullVal }
@@ -195,7 +199,11 @@ public object FluxBytecodeVM {
             try {
                 Decoder.decodeProgram(state.program)
             } catch (e: VmError) {
-                return RunResult.Halt(VmOutcome(emptyList(), Array(16) { FluxValue.NullVal }, 0u))
+                // F3: a decode failure is a terminal fault, not a silent
+                // empty-program Halt. The previous behaviour made every
+                // corrupt handler a "successful" no-op, hiding genuine opcode
+                // errors from the host (AGENTS.md §3.11).
+                return RunResult.Fault(e.kind, e.offset)
             }
         val offsets: List<UInt> = program.map { it.offset }
         val regs = state.registers.copyOf()
