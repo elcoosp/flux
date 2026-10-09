@@ -32,6 +32,16 @@ public interface SignalStore {
     /** Marks [id] as [CellState.Pending] (an async capability has started). */
     public fun markPending(id: UInt)
 
+    /**
+     * Marks [id] as [CellState.Error] with [message] (an async capability failed).
+     * A later [read] of the cell yields the error path, and the VM faults when it
+     * tries to resume the handler (F4).
+     */
+    public fun markError(
+        id: UInt,
+        message: String,
+    )
+
     /** Resolves [id] to [value], marking it [CellState.Ready] (async finished). */
     public fun resolveCell(
         id: UInt,
@@ -97,6 +107,13 @@ public class InMemorySignals(
 
     override fun markPending(id: UInt) {
         cellStates[id] = CellState.Pending
+    }
+
+    override fun markError(
+        id: UInt,
+        message: String,
+    ) {
+        cellStates[id] = CellState.Error
     }
 
     override fun resolveCell(
