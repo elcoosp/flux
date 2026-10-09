@@ -75,6 +75,11 @@ impl From<&WireError> for WireErrorKind {
             // at ~4 billion items (unreachable in practice); map to the same
             // decode-neutral kind as its u16 sibling.
             WireError::LengthExceedsU32 { .. } => WireErrorKind::MalformedBytecode,
+            // F5: a duplicate handler id in the closure stream is a wire-format
+            // defect (two closures compete for the same slot), which the host
+            // surfaces as MalformedBytecode so the developer sees the shape
+            // mismatch instead of a dispatch failure on the first tap.
+            WireError::DuplicateHandlerId { .. } => WireErrorKind::MalformedBytecode,
         }
     }
 }
