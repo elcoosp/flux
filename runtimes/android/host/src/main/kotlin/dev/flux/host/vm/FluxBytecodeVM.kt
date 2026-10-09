@@ -1,5 +1,7 @@
 package dev.flux.host.vm
 
+import dev.flux.host.BuildFlags
+
 import dev.flux.host.vm.debug.TelemetryBridge
 import dev.flux.host.vm.debug.TelemetryEvent
 
@@ -313,7 +315,7 @@ public object FluxBytecodeVM {
                         )
                     }
                 }
-            if (TelemetryBridge.sink != null) {
+            if (BuildFlags.DEBUG && TelemetryBridge.sink != null) {
                 TelemetryBridge.emit(
                     TelemetryEvent.VmStep(
                         bytecodeOffset = instr.offset,
