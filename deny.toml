@@ -1,0 +1,39 @@
+# Cargo-deny configuration (F9).
+#
+# The audit found no `cargo audit` / `cargo deny` gate in CI; this file
+# declares the policy that `.github/workflows/security.yml` enforces. `[advisories]` and `[licenses]`
+# use conservative defaults: denied advisories, a small allow-list of
+# well-known open-source licences, and duplicate-version and wildcard bans.
+
+[graph]
+all-features = true
+
+[advisories]
+yanked = "deny"
+ignore = []
+
+[licenses]
+version = 2
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "MIT",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+deny = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
