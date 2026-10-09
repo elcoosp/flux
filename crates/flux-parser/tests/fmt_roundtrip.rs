@@ -16,7 +16,7 @@
 //! matters, optional chaining, trailing blocks with/without args, generic
 //! type applications, and pattern binding forms.
 
-use flux_parser::{format_str, parse_str};
+use flux_parser::format_str;
 
 /// Runs the round-trip invariant on `src` (which must parse). Panics with the
 /// full pipeline on any mismatch.
