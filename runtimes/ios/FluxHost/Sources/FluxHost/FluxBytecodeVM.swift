@@ -255,7 +255,7 @@ enum FluxBytecodeVM {
                     if b == 0 { throw VmError.divByZero(offset: instr.offset) }
                     r = wrappingRem(a, b)
                 default:
-                    fatalError("unreachable: matched arithmetic set")
+                    throw VmError.invalidDispatch(offset: instr.offset)
                 }
                 regs[Int(dst)] = .int(r)
 
@@ -276,7 +276,7 @@ enum FluxBytecodeVM {
                 case .lteI64: r = a <= b
                 case .gteI64: r = a >= b
                 default:
-                    fatalError("unreachable: matched integer compare set")
+                    throw VmError.invalidDispatch(offset: instr.offset)
                 }
                 regs[Int(dst)] = .bool(r)
 
@@ -291,7 +291,7 @@ enum FluxBytecodeVM {
                 case .mulF64: r = a * b
                 case .divF64: r = fdiv(a, b)
                 default:
-                    fatalError("unreachable: matched float arithmetic set")
+                    throw VmError.invalidDispatch(offset: instr.offset)
                 }
                 regs[Int(dst)] = .float(r)
 
@@ -310,7 +310,7 @@ enum FluxBytecodeVM {
                 case .ltF64: r = a < b
                 case .gtF64: r = a > b
                 default:
-                    fatalError("unreachable: matched float compare set")
+                    throw VmError.invalidDispatch(offset: instr.offset)
                 }
                 regs[Int(dst)] = .bool(r)
 
@@ -1281,7 +1281,7 @@ enum FluxBytecodeVM {
                 case .modI64:
                     if b == 0 { throw VmError.divByZero(offset: instr.offset) }
                     r = wrappingRem(a, b)
-                default: fatalError("unreachable")
+                default: throw VmError.invalidDispatch(offset: instr.offset)
                 }
                 regs[Int(dst)] = .int(r)
             case opcodeIndex[.negI64]!:
@@ -1299,7 +1299,7 @@ enum FluxBytecodeVM {
                 case .gtI64: r = a > b
                 case .lteI64: r = a <= b
                 case .gteI64: r = a >= b
-                default: fatalError("unreachable")
+                default: throw VmError.invalidDispatch(offset: instr.offset)
                 }
                 regs[Int(dst)] = .bool(r)
             case opcodeIndex[.addF64]!, opcodeIndex[.subF64]!, opcodeIndex[.mulF64]!, opcodeIndex[.divF64]!:
@@ -1312,7 +1312,7 @@ enum FluxBytecodeVM {
                 case .subF64: r = a - b
                 case .mulF64: r = a * b
                 case .divF64: r = fdiv(a, b)
-                default: fatalError("unreachable")
+                default: throw VmError.invalidDispatch(offset: instr.offset)
                 }
                 regs[Int(dst)] = .float(r)
             case opcodeIndex[.negF64]!:
@@ -1328,7 +1328,7 @@ enum FluxBytecodeVM {
                 case .eqF64: r = (a == b)
                 case .ltF64: r = a < b
                 case .gtF64: r = a > b
-                default: fatalError("unreachable")
+                default: throw VmError.invalidDispatch(offset: instr.offset)
                 }
                 regs[Int(dst)] = .bool(r)
             case opcodeIndex[.i64ToF64]!:
@@ -1537,7 +1537,7 @@ enum FluxBytecodeVM {
                 }
                 regs[Int(list)] = .list(items)
             default:
-                fatalError("unknown opcode tag \(tag)")
+                throw VmError.invalidDispatch(offset: instr.offset)
             }
 
             ip = nextIP
