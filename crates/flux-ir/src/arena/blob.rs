@@ -34,7 +34,7 @@ impl<'b> Cursor<'b> {
     /// the cursor position, the requested length, and the buffer size, so a
     /// regression is diagnosed in seconds rather than by bisecting an arena.
     fn ensure(&self, n: usize, what: &'static str) {
-        let end = self.pos.checked_add(n).unwrap_or(usize::MAX);
+        let end = self.pos.saturating_add(n);
         assert!(
             end <= self.bytes.len(),
             "blob cursor overrun reading {what}: want {n} bytes at pos {}, buffer is {} bytes",

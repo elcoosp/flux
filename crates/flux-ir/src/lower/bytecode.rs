@@ -122,6 +122,9 @@ pub fn compile_handler(
 /// callers that already have it (e.g. `lower_value` for a `Lambda` AST node)
 /// need not re-read `body.params`. The first parameter is bound to `r0` (the
 /// host-supplied event payload) so bodies can read typed/event values.
+// 8 parameters by design: threading them through a struct would
+// relocate state without simplifying the only call site.
+#[allow(clippy::too_many_arguments)]
 pub fn compile_handler_with_params(
     body: &Block,
     params: &[flux_parser::Pattern],
@@ -498,7 +501,7 @@ impl<'a> Emitter<'a> {
     /// enclosing `Lowerer` and vice versa (audit P2.9 / theme #2).
     fn intern_prop_index(&mut self, name: &str) -> Result<u16, HandlerCompileError> {
         let idx = prop_index_for_name(name);
-        let key = u16::from(idx);
+        let key = idx;
         if let Some(existing) = self.prop_indices.get(&key) {
             if existing != name {
                 return Err(HandlerCompileError::new(

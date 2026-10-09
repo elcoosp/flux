@@ -255,7 +255,7 @@ impl<'a> Lowerer<'a> {
     /// for tests; this method wraps it with a collision-detecting registry.
     fn intern_prop_index(&mut self, name: &str) -> Result<flux_syntax::PropIdx, LoweringError> {
         let idx = prop_index_for_name(name);
-        let key = u16::from(idx);
+        let key = idx;
         if let Some(existing) = self.prop_indices.get(&key) {
             if existing != name {
                 return Err(LoweringError::new(

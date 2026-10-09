@@ -143,9 +143,10 @@ impl Checker {
                     format!("no list method `{}` on `List[{}]`", field.name, inner),
                     field.span,
                 )
-                .with_hint(format!(
+                .with_hint(
                     "list methods: append, insert, remove, removeAt, clear, isEmpty, length"
-                ))),
+                        .to_string(),
+                )),
             },
             other => Err(TypeError::new(
                 format!("cannot access field `{}` on `{other}`", field.name),
