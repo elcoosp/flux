@@ -229,22 +229,21 @@ fn write_closures(w: &mut Writer, closures: &[ClosureIR]) -> Result<(), WireErro
         // instead: the host will surface an InvalidDispatch on the first
         // invocation, which is a visible diagnostic rather than a silent
         // thread death.
-        let len = match u16::try_from(closure.bytecode.len()) {
-            Ok(len) => len,
-            Err(_) => {
-                tracing::warn!(
-                    handler = ?closure.id,
-                    bytecode_len = closure.bytecode.len(),
-                    "handler body exceeds u16 length; emitting a zero-length closure ref"
-                );
-                0
-            }
-        };
+        // F5: an oversized handler body is a legitimate program the author
+        // wrote (a long chain of statements, a deeply nested `match`) — but
+        // the `ClosureRef.bytecode_len` wire prefix is `u16`, so the frame
+        // cannot ship it. Return an error; the pipeline turns this into an
+        // actionable `Error` frame (the alternative — a zero-length closure
+        // ref — silently masked the failure until the first tap).
+        let len = u16::try_from(closure.bytecode.len()).map_err(|_| WireError::LengthExceedsU16 {
+            what: "frame.closure.bytecode_len",
+            n: closure.bytecode.len(),
+        })?;
+        // F5: a duplicate handler id used to `panic!`, killing the pipeline
+        // thread on a hot-reload frame. Return a `WireError` so the caller can
+        // ship an `Error` frame and keep the previous tree alive.
         if by_id.insert(closure.id, (offset, len)).is_some() {
-            panic!(
-                "duplicate handler id {:#x} in closure stream (audit §3.3)",
-                closure.id
-            );
+            return Err(WireError::DuplicateHandlerId { id: closure.id });
         }
     }
     encode_bytecode_blob(w, &blob)?;
