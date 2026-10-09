@@ -12,7 +12,7 @@ fn list_insert_does_not_panic() {
         0xB0, 1, 42, 0, 0, 0, 0, 0, 0, 0, // LOAD_INT_CONST r1, 42
         0xB0, 2, 0, 0, 0, 0, 0, 0, 0, 0, // LOAD_INT_CONST r2, 0 (index)
         0x80, 0, 0, 0, // ALLOC_LIST r0, cap=0
-        0x85, 0, 2, 1, // LIST_INSERT r0, idx=r2, val=r1
+        0x85, 0, 2, 1,    // LIST_INSERT r0, idx=r2, val=r1
         0x00, // HALT
     ];
     let result = run(
@@ -37,7 +37,7 @@ fn list_remove_does_not_panic() {
         0xB0, 1, 42, 0, 0, 0, 0, 0, 0, 0, // LOAD_INT_CONST r1, 42
         0xB0, 2, 0, 0, 0, 0, 0, 0, 0, 0, // LOAD_INT_CONST r2, 0 (index)
         0x85, 0, 2, 1, // LIST_INSERT r0, idx=r2, val=r1
-        0x86, 0, 2, // LIST_REMOVE r0, idx=r2
+        0x86, 0, 2,    // LIST_REMOVE r0, idx=r2
         0x00, // HALT
     ];
     let result = run(

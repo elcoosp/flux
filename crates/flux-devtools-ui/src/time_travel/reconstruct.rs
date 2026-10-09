@@ -64,7 +64,6 @@ pub struct ReconstructedState {
     /// signal-graph view renders these so a developer can see reactivity the way
     /// the VM actually works.
     pub signal_edges: Vec<(SignalId, Vec<EffectId>)>,
-
 }
 
 impl ReconstructedState {
@@ -79,7 +78,6 @@ impl ReconstructedState {
             signals: Vec::new(),
             view_frames: Vec::new(),
             signal_edges: Vec::new(),
-
         }
     }
 }

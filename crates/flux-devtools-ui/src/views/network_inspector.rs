@@ -54,7 +54,7 @@ impl TableDelegate for NetworkDelegate {
         _window: &mut Window,
         cx: &mut Context<TableState<Self>>,
     ) -> impl IntoElement + '_ {
-                // Extract an owned clone of the record once per cell (the previous
+        // Extract an owned clone of the record once per cell (the previous
         // amplification was the full-buffer clone *per cell*). We then drop
         // the RefCell borrow before the return expression so the `impl
         // IntoElement + '_` return type — which borrows from `&mut self`, not
@@ -76,7 +76,11 @@ impl TableDelegate for NetworkDelegate {
                 .into_any_element(),
             2 => {
                 let (text, color) = status_cell(&rec, cx);
-                div().px(px(8.)).text_color(color).child(text).into_any_element()
+                div()
+                    .px(px(8.))
+                    .text_color(color)
+                    .child(text)
+                    .into_any_element()
             }
             _ => {
                 let latency = rec

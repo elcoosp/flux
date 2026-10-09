@@ -379,11 +379,7 @@ pub trait Backend {
     /// handler was supplied — the backend must emit a valid no-op in that
     /// case rather than a syntax hole).
     #[must_use]
-    fn form_control(
-        spec: &PrimitiveSpec,
-        value: &str,
-        on_change: &str,
-    ) -> Option<String> {
+    fn form_control(spec: &PrimitiveSpec, value: &str, on_change: &str) -> Option<String> {
         let _ = (spec, value, on_change);
         None
     }

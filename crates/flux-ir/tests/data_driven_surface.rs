@@ -691,13 +691,16 @@ fn float_le_ge_are_ieee_correct_for_nan_operands() {
     // order after `a` and `b`, so ids 3..=6 (SignalScope allocates in order).
     let (_, closure) = lowered.closures.iter().next().expect("a handler");
     let bc = closure.bytecode.clone();
-    flux_vm_ref::run(&bc, &mut signals, &StringTable::new(), Value::Null)
-        .expect("handler runs");
+    flux_vm_ref::run(&bc, &mut signals, &StringTable::new(), Value::Null).expect("handler runs");
 
     // Read the four result signals.
-    let sig = |id: u32| signals.snapshot().into_iter()
-        .find(|(k, _)| *k == flux_syntax::SignalId::from(id))
-        .map(|(_, v)| v);
+    let sig = |id: u32| {
+        signals
+            .snapshot()
+            .into_iter()
+            .find(|(k, _)| *k == flux_syntax::SignalId::from(id))
+            .map(|(_, v)| v)
+    };
     for id in 3u32..=6u32 {
         match sig(id) {
             Some(Value::Bool(false)) => {} // IEEE: NaN <cmp> x is always false
@@ -731,7 +734,9 @@ fn list_isempty_call_runs_to_bool() {
     flux_vm_ref::run(&bc, &mut signals, &StringTable::new(), Value::Null)
         .expect("isEmpty handler must run without faulting");
 
-    let empty = signals.snapshot().into_iter()
+    let empty = signals
+        .snapshot()
+        .into_iter()
         .find(|(k, _)| *k == flux_syntax::SignalId::from(2u32))
         .map(|(_, v)| v);
     assert_eq!(
@@ -802,11 +807,14 @@ compo C
     ]);
     let (_, closure) = lowered.closures.iter().next().expect("a handler closure");
     let bc = closure.bytecode.clone();
-    flux_vm_ref::run(&bc, &mut signals, &StringTable::new(), Value::Null)
-        .expect("handler runs");
+    flux_vm_ref::run(&bc, &mut signals, &StringTable::new(), Value::Null).expect("handler runs");
 
     let snap = signals.snapshot();
-    let by_id = |id: u32| snap.iter().find(|(k, _)| u32::from(*k) == id).map(|(_, v)| v.clone());
+    let by_id = |id: u32| {
+        snap.iter()
+            .find(|(k, _)| u32::from(*k) == id)
+            .map(|(_, v)| v.clone())
+    };
     assert_eq!(
         by_id(2),
         Some(Value::Int(1)),
@@ -860,9 +868,18 @@ fn module_level_const_binding_resolves_in_prop_position() {
         "the const's ADT variant tag must be at slot 0; got {value:?}",
     );
     // Channels: (1.0, 0.0, 0.0) at slots 1, 2, 3.
-    let slot1 = fields.iter().find(|(k, _)| u32::from(*k) == 1).map(|(_, v)| v.clone());
-    let slot2 = fields.iter().find(|(k, _)| u32::from(*k) == 2).map(|(_, v)| v.clone());
-    let slot3 = fields.iter().find(|(k, _)| u32::from(*k) == 3).map(|(_, v)| v.clone());
+    let slot1 = fields
+        .iter()
+        .find(|(k, _)| u32::from(*k) == 1)
+        .map(|(_, v)| v.clone());
+    let slot2 = fields
+        .iter()
+        .find(|(k, _)| u32::from(*k) == 2)
+        .map(|(_, v)| v.clone());
+    let slot3 = fields
+        .iter()
+        .find(|(k, _)| u32::from(*k) == 3)
+        .map(|(_, v)| v.clone());
     assert_eq!(slot1, Some(Value::Float(1.0)));
     assert_eq!(slot2, Some(Value::Float(0.0)));
     assert_eq!(slot3, Some(Value::Float(0.0)));
@@ -896,12 +913,23 @@ fn list_remove_at_uses_the_register_value_not_the_register_number() {
     };
 
     let mut signals = flux_vm_ref::InMemorySignals::from_signals([
-        (flux_syntax::SignalId::from(1u32), seed_by_id(1).expect("items seeded")),
-        (flux_syntax::SignalId::from(2u32), seed_by_id(2).expect("i seeded")),
+        (
+            flux_syntax::SignalId::from(1u32),
+            seed_by_id(1).expect("items seeded"),
+        ),
+        (
+            flux_syntax::SignalId::from(2u32),
+            seed_by_id(2).expect("i seeded"),
+        ),
     ]);
     let (_, closure) = lowered.closures.iter().next().expect("handler");
-    flux_vm_ref::run(&closure.bytecode, &mut signals, &StringTable::new(), Value::Null)
-        .expect("handler runs");
+    flux_vm_ref::run(
+        &closure.bytecode,
+        &mut signals,
+        &StringTable::new(),
+        Value::Null,
+    )
+    .expect("handler runs");
 
     let after = signals
         .snapshot()

@@ -872,7 +872,7 @@ impl<'a, B: Backend> Emitter<'a, B> {
 
     /// Returns the whitespace prefix for `indent` levels (each level =
     /// `INDENT_UNIT` spaces).
-fn indent_prefix(indent: usize) -> &'static str {
+    fn indent_prefix(indent: usize) -> &'static str {
         // Fast path: the pre-computed tables cover the common depths (0..=16)
         // with zero allocation and zero locking.
         //

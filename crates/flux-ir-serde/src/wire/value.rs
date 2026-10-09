@@ -163,8 +163,7 @@ mod tests {
         let items: Vec<Value> = (0..former_u16_ceiling).map(|_| Value::Null).collect();
         let value = Value::List(items);
         let mut w = Writer::new();
-        encode_value(&mut w, &value)
-            .expect("v3 list wider than u16::MAX must encode");
+        encode_value(&mut w, &value).expect("v3 list wider than u16::MAX must encode");
     }
 
     /// ADR-0059: v3 widens the record field count to u32, so a record wider
@@ -178,8 +177,7 @@ mod tests {
             .collect();
         let value = Value::Record(fields);
         let mut w = Writer::new();
-        encode_value(&mut w, &value)
-            .expect("v3 record wider than u16::MAX must encode");
+        encode_value(&mut w, &value).expect("v3 record wider than u16::MAX must encode");
     }
 
     /// A normal-sized list still round-trips through the fallible encoder.
@@ -194,4 +192,3 @@ mod tests {
         assert_eq!(w.buf_len(), 1 + 4 + 3 * 9);
     }
 }
-

@@ -1148,8 +1148,9 @@ fn expect_list_index(list: Value, idx: u8, off: u32) -> Result<(Vec<Value>, usiz
 /// is `IndexOutOfBounds`; a non-Int is `TypeMismatch`.
 fn list_index(v: Value, off: u32) -> Result<usize, VmError> {
     match v {
-        Value::Int(i) => usize::try_from(i)
-            .map_err(|_| VmError::at(VmErrorKind::IndexOutOfBounds, off)),
+        Value::Int(i) => {
+            usize::try_from(i).map_err(|_| VmError::at(VmErrorKind::IndexOutOfBounds, off))
+        }
         _ => Err(VmError::at(VmErrorKind::TypeMismatch, off)),
     }
 }

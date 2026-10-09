@@ -251,7 +251,10 @@ mod tests {
             .iter()
             .find(|t| t.token_type == KEYWORD)
             .expect("keyword token present");
-        assert_eq!(state_tok.delta_line, 1, "state must be +1 line from the comment");
+        assert_eq!(
+            state_tok.delta_line, 1,
+            "state must be +1 line from the comment"
+        );
         assert_eq!(
             state_tok.delta_start, 0,
             "state is at byte column 0 of its line",

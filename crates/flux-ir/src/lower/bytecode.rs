@@ -220,8 +220,7 @@ pub(crate) fn compile_prop_thunk(
     // collisions in handler reads/writes/records are caught. A follow-up can
     // thread the real map here too.
     let mut local_prop_indices = std::collections::HashMap::new();
-    let mut emitter =
-        Emitter::for_thunk(&mut local_prop_indices, scope, metadata, str_interner);
+    let mut emitter = Emitter::for_thunk(&mut local_prop_indices, scope, metadata, str_interner);
     let count = narrow_count(props.len(), "prop thunk field", Span::new(0, 0, 0))?;
     emitter.emit_alloc_record(1, count);
     let mut layout = Vec::with_capacity(props.len());
@@ -1432,11 +1431,7 @@ impl<'a> Emitter<'a> {
             // A list literal `[a, b, c]` → ALLOC_LIST + LIST_PUSH per element.
             ExprKind::List(items) => {
                 let dst = self.alloc_reg()?;
-                let cap = narrow_count(
-                    items.len().max(1),
-                    "list item",
-                    expr.span,
-                )?;
+                let cap = narrow_count(items.len().max(1), "list item", expr.span)?;
                 self.emit_alloc_list(dst, cap);
                 for item in items {
                     let v = self.compile_value(item)?;
@@ -1813,15 +1808,9 @@ impl<'a> Emitter<'a> {
                     // with 0.
                     let dst = self.alloc_reg()?;
                     // +1 for the leading variant-tag slot (audit C5).
-                    let record_len = arg_regs
-                        .len()
-                        .checked_add(1)
-                        .ok_or_else(|| {
-                            HandlerCompileError::new(
-                                "call argument count overflowed usize",
-                                expr.span,
-                            )
-                        })?;
+                    let record_len = arg_regs.len().checked_add(1).ok_or_else(|| {
+                        HandlerCompileError::new("call argument count overflowed usize", expr.span)
+                    })?;
                     let record_count = narrow_count(record_len, "call argument", expr.span)?;
                     self.emit_alloc_record(dst, record_count);
                     let tag_reg = self.alloc_reg()?;

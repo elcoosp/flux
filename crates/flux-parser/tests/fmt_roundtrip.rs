@@ -28,9 +28,9 @@ fn roundtrip(src: &str) {
     };
     let printed2 = match format_str(&printed1, "rt.flux") {
         Ok(s) => s,
-        Err(e) => panic!(
-            "second format failed.\nsource: {src:?}\nprinted1: {printed1:?}\nerror: {e}"
-        ),
+        Err(e) => {
+            panic!("second format failed.\nsource: {src:?}\nprinted1: {printed1:?}\nerror: {e}")
+        }
     };
     assert_eq!(
         printed1, printed2,
@@ -52,7 +52,11 @@ fn in_state(expr_src: &str) -> String {
 #[test]
 fn numeric_literals_roundtrip() {
     for src in [
-        "1", "0", "42", "-1", "-42",
+        "1",
+        "0",
+        "42",
+        "-1",
+        "-42",
         "1000000000",
         // Hex / binary / octal — parser may normalise; the AST is what matters.
         // (If the parser rejects these the test is skipped by the initial format
@@ -65,8 +69,16 @@ fn numeric_literals_roundtrip() {
 #[test]
 fn float_literals_roundtrip() {
     for src in [
-        "1.0", "0.0", "-0.0", "1.5", "-1.5",
-        "0.1", "3.14159", "1e10", "1.5e10", "1.5e-10",
+        "1.0",
+        "0.0",
+        "-0.0",
+        "1.5",
+        "-1.5",
+        "0.1",
+        "3.14159",
+        "1e10",
+        "1.5e10",
+        "1.5e-10",
         "1234567890.1234567",
     ] {
         roundtrip(&in_state(src));
@@ -104,9 +116,7 @@ fn interpolated_strings_roundtrip() {
         "\"{\"suffix\"}\"",
         "\"a {1 + 2} b\"",
     ] {
-        roundtrip(&format!(
-            "compo T\n  state x: Int = 0\n  Text({src})\n"
-        ));
+        roundtrip(&format!("compo T\n  state x: Int = 0\n  Text({src})\n"));
     }
 }
 
@@ -116,11 +126,7 @@ fn list_and_record_literals_roundtrip() {
         roundtrip(&in_handler(&format!("x = {src}")));
     }
     // Record literals: `{ field: value, ... }`.
-    for src in [
-        "{ a: 1 }",
-        "{ a: 1, b: 2 }",
-        "{ a: { b: 1 } }",
-    ] {
+    for src in ["{ a: 1 }", "{ a: 1, b: 2 }", "{ a: { b: 1 } }"] {
         roundtrip(&in_handler(&format!("x = {src}")));
     }
 }
@@ -158,9 +164,7 @@ fn boolean_parentheses_roundtrip() {
         "!(true && false)",
         "!true && false",
     ] {
-        roundtrip(&format!(
-            "compo T\n  state a: Bool = {src}\n"
-        ));
+        roundtrip(&format!("compo T\n  state a: Bool = {src}\n"));
     }
 }
 
@@ -175,22 +179,13 @@ fn comparison_parentheses_roundtrip() {
         "(1 + 2) < 3",
         "1 < (2 + 3)",
     ] {
-        roundtrip(&format!(
-            "compo T\n  state a: Bool = {src}\n"
-        ));
+        roundtrip(&format!("compo T\n  state a: Bool = {src}\n"));
     }
 }
 
 #[test]
 fn field_access_and_optional_chaining_roundtrip() {
-    for expr in [
-        "x.y",
-        "x.y.z",
-        "x?.y",
-        "x?.y?.z",
-        "x?.y.z",
-        "x.y?.z",
-    ] {
+    for expr in ["x.y", "x.y.z", "x?.y", "x?.y?.z", "x?.y.z", "x.y?.z"] {
         roundtrip(&format!(
             "compo T\n  state x: Int = 0\n  state y: Int = {expr}\n"
         ));

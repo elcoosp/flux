@@ -32,7 +32,10 @@ fn from_json_rejects_nan_latency() {
       "tree_size":50,
       "samples":[{"latency":null,"size":null}]
     }"#;
-    assert!(MetricRecord::from_json(json).is_err(), "null latency must be rejected");
+    assert!(
+        MetricRecord::from_json(json).is_err(),
+        "null latency must be rejected"
+    );
 }
 
 #[test]

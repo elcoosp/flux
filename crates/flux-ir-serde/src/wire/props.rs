@@ -6,10 +6,7 @@ use super::cursor::Reader;
 use super::value::encode_value;
 use super::{WireError, decode_value};
 
-pub(crate) fn encode_props(
-    w: &mut super::cursor::Writer,
-    props: &Props,
-) -> Result<(), WireError> {
+pub(crate) fn encode_props(w: &mut super::cursor::Writer, props: &Props) -> Result<(), WireError> {
     // Audit H14 cascade: fallible now, so a value that overflows the u16
     // prefix propagates through `encode_node` → `encode_patch` → the frame
     // encoders rather than panicking mid-write. The caller still `.expect()`s

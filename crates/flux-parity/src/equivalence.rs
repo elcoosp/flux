@@ -455,4 +455,3 @@ mod tests {
         assert_eq!(norm_cond(input), r#""a\\""#);
     }
 }
-

@@ -331,8 +331,8 @@ impl TelemetryEvent {
         // Back-patch the length (body + tag + the length field itself).
         // Checked (audit H14): a silent truncation here corrupts every
         // event-length prefix on this frame, desyncing the decoder.
-        let len = u32::try_from(end - start - 4)
-            .expect("telemetry event body exceeds u32::MAX bytes");
+        let len =
+            u32::try_from(end - start - 4).expect("telemetry event body exceeds u32::MAX bytes");
         w.patch_u32_at(start, len);
     }
 
@@ -1073,8 +1073,8 @@ impl EnrichedTelemetryEvent {
             }
         }
         let end = w.buf_len();
-        let len = u32::try_from(end - start - 4)
-            .expect("enriched event body exceeds u32::MAX bytes");
+        let len =
+            u32::try_from(end - start - 4).expect("enriched event body exceeds u32::MAX bytes");
         w.patch_u32_at(start, len);
     }
 

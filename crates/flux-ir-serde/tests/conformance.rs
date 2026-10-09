@@ -63,8 +63,7 @@ fn hello_frame_type_byte_is_0x01() {
     assert_eq!(bytes[4], PROTOCOL_VERSION);
     assert_eq!(bytes[5], FRAME_HELLO);
     // D.12.1 + ADR-0059: after frame_type, platform_len(u32) + platform bytes.
-    let plat_len =
-        u32::from_le_bytes([bytes[6], bytes[7], bytes[8], bytes[9]]) as usize;
+    let plat_len = u32::from_le_bytes([bytes[6], bytes[7], bytes[8], bytes[9]]) as usize;
     assert_eq!(&bytes[10..10 + plat_len], b"ios");
 }
 

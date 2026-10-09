@@ -183,4 +183,3 @@ fn v3_fixture_is_wider_than_v2() {
         delta_v2.len()
     );
 }
-

@@ -122,7 +122,6 @@ mod use_resolution_tests {
     }
 }
 
-
 mod nested_use_regression {
     use super::*;
     use crate::type_check_with_loader;

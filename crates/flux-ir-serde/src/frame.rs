@@ -235,10 +235,11 @@ fn write_closures(w: &mut Writer, closures: &[ClosureIR]) -> Result<(), WireErro
         // cannot ship it. Return an error; the pipeline turns this into an
         // actionable `Error` frame (the alternative — a zero-length closure
         // ref — silently masked the failure until the first tap).
-        let len = u16::try_from(closure.bytecode.len()).map_err(|_| WireError::LengthExceedsU16 {
-            what: "frame.closure.bytecode_len",
-            n: closure.bytecode.len(),
-        })?;
+        let len =
+            u16::try_from(closure.bytecode.len()).map_err(|_| WireError::LengthExceedsU16 {
+                what: "frame.closure.bytecode_len",
+                n: closure.bytecode.len(),
+            })?;
         // F5: a duplicate handler id used to `panic!`, killing the pipeline
         // thread on a hot-reload frame. Return a `WireError` so the caller can
         // ship an `Error` frame and keep the previous tree alive.

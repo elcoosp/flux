@@ -8,10 +8,7 @@ use super::cursor::Reader;
 use super::node::{decode_node, encode_node};
 use super::prop_diff::{decode_prop_diff, encode_prop_diff};
 
-pub(crate) fn encode_patch(
-    w: &mut super::cursor::Writer,
-    patch: &Patch,
-) -> Result<(), WireError> {
+pub(crate) fn encode_patch(w: &mut super::cursor::Writer, patch: &Patch) -> Result<(), WireError> {
     // Audit H14 cascade: fallible now so a >64 KB prop value, a >65 535
     // child/handler count, or a >65 535 reorder key list surfaces as a
     // typed `WireError::LengthExceedsU16` at this encoder's boundary. The

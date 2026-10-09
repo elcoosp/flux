@@ -94,9 +94,7 @@ fn validate_project_name(name: &str) -> anyhow::Result<()> {
         bail!("invalid project name: empty — hint: pass a name like `flux init blog-app`");
     }
     if name.len() > MAX_PROJECT_NAME_LEN {
-        bail!(
-            "invalid project name {name:?}: exceeds {MAX_PROJECT_NAME_LEN} characters",
-        );
+        bail!("invalid project name {name:?}: exceeds {MAX_PROJECT_NAME_LEN} characters",);
     }
     let mut chars = name.chars();
     let first = chars.next().expect("non-empty checked above");

@@ -509,6 +509,6 @@ fn binop_symbol(op: BinOp) -> &'static str {
         BinOp::Ge => ">=",
         BinOp::And => "&&",
         BinOp::Or => "||",
-        _ => "<unknown-binop>",  // Mirrors flux-parity; see audit theme #1.
+        _ => "<unknown-binop>", // Mirrors flux-parity; see audit theme #1.
     }
 }

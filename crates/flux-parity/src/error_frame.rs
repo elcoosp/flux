@@ -140,10 +140,12 @@ impl ReferenceDecoder {
                 Some(f) => Rejection::Accepted(f.kind),
                 None => Rejection::Rejected(WireErrorKind::InvalidTag),
             },
-            flux_ir_serde::FRAME_STRING_INTERNED => match Frame::from_string_interned_bytes(bytes) {
-                Some(f) => Rejection::Accepted(f.kind),
-                None => Rejection::Rejected(WireErrorKind::InvalidTag),
-            },
+            flux_ir_serde::FRAME_STRING_INTERNED => {
+                match Frame::from_string_interned_bytes(bytes) {
+                    Some(f) => Rejection::Accepted(f.kind),
+                    None => Rejection::Rejected(WireErrorKind::InvalidTag),
+                }
+            }
             _ => Rejection::Rejected(WireErrorKind::InvalidTag),
         }
     }

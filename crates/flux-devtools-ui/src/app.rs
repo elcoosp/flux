@@ -11,14 +11,14 @@ use gpui::{
 use gpui_component::{
     Icon, IconName, Root, Theme, TitleBar,
     badge::Badge,
+    button::Button,
     notification::Notification,
+    popover::Popover,
     resizable::{h_resizable, resizable_panel, v_resizable},
     scroll::ScrollableElement,
     status_bar::StatusBar,
     switch::Switch,
-
-    popover::Popover,
-    button::Button,};
+};
 use gpui_component::{ThemeMode, WindowExt};
 
 use gpui_platform::application;
@@ -173,7 +173,6 @@ struct DevToolsRoot {
     logs: Entity<LogViewerView>,
     net: Entity<NetworkInspectorView>,
 }
-
 
 /// Requests a fresh animation frame on the active window, so a mutation to
 /// the `Arc<DevToolsState>` (which is not a gpui `Entity` and produces no
@@ -341,10 +340,7 @@ impl DevToolsRoot {
 
     /// The current host identity, formatted for display.
     /// Renders the host picker when more than one host is connected.
-    fn host_picker(
-        &self,
-        cx: &mut Context<'_, Self>,
-    ) -> gpui::AnyElement {
+    fn host_picker(&self, cx: &mut Context<'_, Self>) -> gpui::AnyElement {
         let keys = self.state.host_keys();
         if keys.len() <= 1 {
             return gpui::div().into_any_element();
@@ -357,10 +353,7 @@ impl DevToolsRoot {
             .map_or_else(|| self.state.effective_host_key().label(), |k| k.label());
 
         Popover::new("host-picker")
-            .trigger(
-                Button::new("host-picker-trigger")
-                    .label(format!("Host: {current_label}")),
-            )
+            .trigger(Button::new("host-picker-trigger").label(format!("Host: {current_label}")))
             .content(move |_popover_cx, _window, _cx| {
                 let state = state.clone();
                 let this = this.clone();
@@ -373,7 +366,11 @@ impl DevToolsRoot {
                     let is_selected = state.selected_host_key().as_ref() == Some(&k);
                     col = col.child(
                         Button::new(gpui::ElementId::from(format!("host-{}", k_label)))
-                            .label(format!("{} {}", if is_selected { "✓" } else { " " }, k_label))
+                            .label(format!(
+                                "{} {}",
+                                if is_selected { "✓" } else { " " },
+                                k_label
+                            ))
                             .on_click(move |_ev, _win, cx| {
                                 state.select_host(k_clone.clone());
                                 this.update(cx, |_, cx| cx.notify());

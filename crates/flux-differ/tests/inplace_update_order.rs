@@ -6,7 +6,7 @@
 
 use flux_differ::diff;
 use flux_ir::{ArenaBuilder, Node};
-use flux_syntax::{ComponentId, NodeId, NodeKind, Props, PropIdx, Span, Value};
+use flux_syntax::{ComponentId, NodeId, NodeKind, PropIdx, Props, Span, Value};
 
 fn tree(v0: i64, v1: i64) -> flux_ir::IRArena {
     let mut b = ArenaBuilder::new();

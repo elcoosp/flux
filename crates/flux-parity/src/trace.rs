@@ -346,7 +346,6 @@ mod tests {
     }
 }
 
-
 #[cfg(test)]
 mod regression_tests {
     use super::*;

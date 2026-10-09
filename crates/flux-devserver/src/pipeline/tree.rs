@@ -80,8 +80,7 @@ fn root_ids(arena: &IRArena) -> Vec<NodeId> {
     // the iterator-chain form cannot be collected directly because
     // `view.children()` returns an owned `Vec` whose `iter()` borrows the
     // temporary, which does not outlive the closure.
-    let mut referenced: std::collections::HashSet<NodeId> =
-        std::collections::HashSet::new();
+    let mut referenced: std::collections::HashSet<NodeId> = std::collections::HashSet::new();
     for id in arena.all_ids() {
         if let Some(view) = arena.get(id) {
             referenced.extend(view.children().iter().flat_map(Child::node_ids));

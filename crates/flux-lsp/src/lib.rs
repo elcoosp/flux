@@ -942,8 +942,14 @@ mod tests {
         // A range far past the end of the buffer — `apply_range_edit` returns
         // None, which previously triggered the truncating fallback.
         let bad_range = async_lsp::lsp_types::Range {
-            start: async_lsp::lsp_types::Position { line: 99, character: 0 },
-            end:   async_lsp::lsp_types::Position { line: 99, character: 5 },
+            start: async_lsp::lsp_types::Position {
+                line: 99,
+                character: 0,
+            },
+            end: async_lsp::lsp_types::Position {
+                line: 99,
+                character: 5,
+            },
         };
         let _ = server.did_change(DidChangeTextDocumentParams {
             text_document: VersionedTextDocumentIdentifier {

@@ -252,7 +252,10 @@ mod tests {
         assert_eq!(bridge.parked_len(), 1);
         assert_eq!(bridge.resume_ip(77), Some(32));
 
-        let bytes = bridge.settle(77, Value::Int(9)).expect("encodes").expect("resumes");
+        let bytes = bridge
+            .settle(77, Value::Int(9))
+            .expect("encodes")
+            .expect("resumes");
         let frame = decode(&bytes);
         assert_eq!(frame.handler_id, 4);
         assert_eq!(frame.cell, 77);
@@ -266,9 +269,15 @@ mod tests {
         // A capability that resolves faster than the host reports its suspension
         // must not deadlock the handler.
         let mut bridge = AsyncBridge::new();
-        assert!(bridge.settle(5, Value::Bool(true)).expect("encodes").is_none());
+        assert!(
+            bridge
+                .settle(5, Value::Bool(true))
+                .expect("encodes")
+                .is_none()
+        );
         let bytes = bridge
-            .park(AwaitSuspendFrame::new(2, 5, 16)).unwrap()
+            .park(AwaitSuspendFrame::new(2, 5, 16))
+            .unwrap()
             .expect("the early value resumes the handler immediately");
         let frame = decode(&bytes);
         assert_eq!(frame.handler_id, 2);
@@ -303,7 +312,10 @@ mod tests {
         let mut bridge = AsyncBridge::new();
         let _ = bridge.park(AwaitSuspendFrame::new(1, 10, 4)).unwrap();
         let _ = bridge.park(AwaitSuspendFrame::new(2, 20, 8)).unwrap();
-        let bytes = bridge.settle(20, Value::Int(1)).expect("encodes").expect("resumes");
+        let bytes = bridge
+            .settle(20, Value::Int(1))
+            .expect("encodes")
+            .expect("resumes");
         assert_eq!(decode(&bytes).handler_id, 2);
         assert_eq!(bridge.parked_len(), 1, "cell 10 is still parked");
     }
@@ -333,7 +345,12 @@ mod tests {
         bridge.clear_session();
         // A new session reporting the suspension must NOT resume from the
         // stale value.
-        assert!(bridge.park(AwaitSuspendFrame::new(9, 5, 0)).unwrap().is_none());
+        assert!(
+            bridge
+                .park(AwaitSuspendFrame::new(9, 5, 0))
+                .unwrap()
+                .is_none()
+        );
         assert_eq!(bridge.parked_len(), 1);
     }
 
@@ -366,7 +383,11 @@ mod tests {
             Some(11),
             "the original handler's resume_ip must be preserved after a rejected duplicate"
         );
-        assert_eq!(bridge.parked_len(), 1, "no entry was added by the rejected park");
+        assert_eq!(
+            bridge.parked_len(),
+            1,
+            "no entry was added by the rejected park"
+        );
 
         // Same-handler retransmit is idempotent: Ok(None), entry unchanged.
         let retransmit = bridge

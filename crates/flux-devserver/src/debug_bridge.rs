@@ -16,8 +16,7 @@ use std::collections::HashMap;
 
 use flux_ir::LoweredIr;
 use flux_ir_serde::{
-    DebugCommand, EnrichedTelemetryEvent, EnrichedTelemetryFrame, HostAnnounceFrame,
-    TelemetryEvent,
+    DebugCommand, EnrichedTelemetryEvent, EnrichedTelemetryFrame, HostAnnounceFrame, TelemetryEvent,
 };
 use flux_syntax::{NodeId, Span};
 use futures_util::{SinkExt, StreamExt};
@@ -513,8 +512,8 @@ mod tests {
     /// receives the enriched frame.
     #[tokio::test]
     async fn host_telemetry_reaches_devtools_client() {
-        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
         use tokio_tungstenite::connect_async;
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
         // Fixed ephemeral-range port for the test endpoint. A probe/rebind race
         // with `serve_devtools` (which binds the same addr itself) would hang
@@ -544,14 +543,11 @@ mod tests {
 
         // DevTools client: receives the enriched frame (broadcast by the
         // router to every subscribed client).
-        let msg = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            devtools_ws.next(),
-        )
-        .await
-        .expect("devtools client must receive the broadcast within 2s")
-        .unwrap()
-        .unwrap();
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(2), devtools_ws.next())
+            .await
+            .expect("devtools client must receive the broadcast within 2s")
+            .unwrap()
+            .unwrap();
 
         let bytes = match msg {
             tokio_tungstenite::tungstenite::Message::Binary(b) => b,

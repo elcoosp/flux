@@ -245,11 +245,7 @@ impl Backend for Swift {
         out
     }
 
-    fn form_control(
-        spec: &PrimitiveSpec,
-        value: &str,
-        on_change: &str,
-    ) -> Option<String> {
+    fn form_control(spec: &PrimitiveSpec, value: &str, on_change: &str) -> Option<String> {
         // SwiftUI form controls read/write a `Binding`; the emitter's generic
         // `{native}({value})` fallback produces `Toggle(v)` / `Slider(v)` /
         // `TextEditor(v)`, all of which are compile errors (SwiftUI expects a

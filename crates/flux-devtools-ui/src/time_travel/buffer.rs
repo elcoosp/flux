@@ -54,7 +54,6 @@ impl TimelineBuffer {
         self.events.len()
     }
 
-
     /// Whether the buffer holds no events.
     #[must_use]
     pub fn is_empty(&self) -> bool {

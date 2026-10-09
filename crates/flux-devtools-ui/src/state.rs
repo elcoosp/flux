@@ -442,7 +442,9 @@ impl DevToolsState {
             // session is the one `set_host` is about to mark, so never evict
             // `key` — eviction walks from the front (oldest) and skips it.
             while order.len() > MAX_SESSIONS {
-                let Some(oldest) = order.front().cloned() else { break };
+                let Some(oldest) = order.front().cloned() else {
+                    break;
+                };
                 if oldest == key {
                     // Only the active session remains over the cap — stop.
                     break;
@@ -1002,11 +1004,11 @@ mod tests {
         // Push enough events that the state's own `apply_event` fold reaches
         // each target, then compare against `state_at`.
         for &target in &[
-            0usize,                             // before first checkpoint
-            CHECKPOINT_INTERVAL as usize - 1,   // last event before first cp
-            CHECKPOINT_INTERVAL as usize,       // right after first cp
-            CHECKPOINT_INTERVAL as usize * 2,   // second cp
-            n - 1,                              // deep — would fail if any cp stale
+            0usize,                           // before first checkpoint
+            CHECKPOINT_INTERVAL as usize - 1, // last event before first cp
+            CHECKPOINT_INTERVAL as usize,     // right after first cp
+            CHECKPOINT_INTERVAL as usize * 2, // second cp
+            n - 1,                            // deep — would fail if any cp stale
         ] {
             // From-scratch replay.
             let mut expected = ReconstructedState::base();
@@ -1026,12 +1028,19 @@ mod tests {
                 got.bytecode_offset, expected.bytecode_offset,
                 "bytecode_offset mismatch at {target}"
             );
-            assert_eq!(got.gas_remaining, expected.gas_remaining,
-                       "gas mismatch at {target}");
-            assert_eq!(got.signals, expected.signals,
-                       "signals mismatch at {target}");
-            assert_eq!(got.view_frames.len(), expected.view_frames.len(),
-                       "view frame count mismatch at {target}");
+            assert_eq!(
+                got.gas_remaining, expected.gas_remaining,
+                "gas mismatch at {target}"
+            );
+            assert_eq!(
+                got.signals, expected.signals,
+                "signals mismatch at {target}"
+            );
+            assert_eq!(
+                got.view_frames.len(),
+                expected.view_frames.len(),
+                "view frame count mismatch at {target}"
+            );
         }
     }
 

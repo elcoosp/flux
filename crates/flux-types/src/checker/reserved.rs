@@ -31,15 +31,68 @@ use flux_syntax::Span;
 /// legal identifiers in their own language and a Flux name that matches one is
 /// not actually invalid output.
 const RESERVED: &[&str] = &[
-    "Any", "Self", "as", "associatedtype", "break", "case", "catch", "class",
-    "continue", "default", "defer", "deinit", "do", "else", "enum",
-    "extension", "fallthrough", "false", "fileprivate", "for", "fun", "func",
-    "guard", "if", "import", "in", "init", "inout", "interface", "internal",
-    "is", "let", "nil", "null", "object", "open", "operator", "package",
-    "private", "protocol", "public", "repeat", "rethrows", "return", "self",
-    "static", "struct", "subscript", "super", "switch", "this", "throw",
-    "throws", "true", "try", "typealias", "typeof", "val", "var", "when",
-    "where", "while",
+    "Any",
+    "Self",
+    "as",
+    "associatedtype",
+    "break",
+    "case",
+    "catch",
+    "class",
+    "continue",
+    "default",
+    "defer",
+    "deinit",
+    "do",
+    "else",
+    "enum",
+    "extension",
+    "fallthrough",
+    "false",
+    "fileprivate",
+    "for",
+    "fun",
+    "func",
+    "guard",
+    "if",
+    "import",
+    "in",
+    "init",
+    "inout",
+    "interface",
+    "internal",
+    "is",
+    "let",
+    "nil",
+    "null",
+    "object",
+    "open",
+    "operator",
+    "package",
+    "private",
+    "protocol",
+    "public",
+    "repeat",
+    "rethrows",
+    "return",
+    "self",
+    "static",
+    "struct",
+    "subscript",
+    "super",
+    "switch",
+    "this",
+    "throw",
+    "throws",
+    "true",
+    "try",
+    "typealias",
+    "typeof",
+    "val",
+    "var",
+    "when",
+    "where",
+    "while",
 ];
 
 /// Returns `true` when `name` is reserved in Swift or Kotlin and therefore
@@ -73,21 +126,33 @@ mod tests {
 
     #[test]
     fn swift_reserved_words_are_rejected() {
-        for w in ["class", "struct", "func", "let", "var", "Self", "self", "nil", "true", "false"] {
+        for w in [
+            "class", "struct", "func", "let", "var", "Self", "self", "nil", "true", "false",
+        ] {
             assert!(is_reserved(w), "Swift keyword `{w}` must be rejected");
         }
     }
 
     #[test]
     fn kotlin_reserved_words_are_rejected() {
-        for w in ["fun", "object", "val", "when", "null", "package", "interface"] {
+        for w in [
+            "fun",
+            "object",
+            "val",
+            "when",
+            "null",
+            "package",
+            "interface",
+        ] {
             assert!(is_reserved(w), "Kotlin keyword `{w}` must be rejected");
         }
     }
 
     #[test]
     fn ordinary_names_are_accepted() {
-        for w in ["Counter", "Button", "count", "items", "onPress", "class_", "Class"] {
+        for w in [
+            "Counter", "Button", "count", "items", "onPress", "class_", "Class",
+        ] {
             assert!(!is_reserved(w), "ordinary identifier `{w}` must be allowed");
         }
     }

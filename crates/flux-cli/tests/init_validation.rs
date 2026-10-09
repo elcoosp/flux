@@ -27,10 +27,7 @@ fn try_init(name: &str) -> (bool, std::path::PathBuf) {
 fn init_rejects_unsafe_names() {
     for bad in ["a\"b", "a\nb", "../x", "/abs", "a/b", "a\\b", "", ".", ".."] {
         let (ok, path) = try_init(bad);
-        assert!(
-            !ok,
-            "`flux init {bad:?}` must fail; scaffolded {path:?}",
-        );
+        assert!(!ok, "`flux init {bad:?}` must fail; scaffolded {path:?}",);
     }
 }
 

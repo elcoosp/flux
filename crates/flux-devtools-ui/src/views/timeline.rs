@@ -18,7 +18,6 @@ use gpui_component::slider::{Slider, SliderEvent, SliderState, SliderValue};
 
 use flux_perf_harness::MetricRecord;
 
-
 use crate::row::{into_any, kv_row, rows_column};
 use crate::state::DevToolsState;
 

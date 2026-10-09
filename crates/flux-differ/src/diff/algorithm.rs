@@ -366,5 +366,4 @@ mod tests {
             "all 15 removable children must produce a Remove patch",
         );
     }
-
 }

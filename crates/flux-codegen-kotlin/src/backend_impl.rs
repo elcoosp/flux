@@ -516,16 +516,16 @@ import kotlinx.coroutines.launch\n\n"
         em.line(indent, "}");
     }
 
-    fn form_control(
-        spec: &PrimitiveSpec,
-        value: &str,
-        on_change: &str,
-    ) -> Option<String> {
+    fn form_control(spec: &PrimitiveSpec, value: &str, on_change: &str) -> Option<String> {
         // Compose form controls take named arguments; the emitter's generic
         // `{native}({value})` fallback is a Kotlin compile error for every
         // one of these primitives. An empty handler becomes a no-op lambda
         // (`{}`) so the shape always compiles.
-        let handler = if on_change.is_empty() { "{}" } else { on_change };
+        let handler = if on_change.is_empty() {
+            "{}"
+        } else {
+            on_change
+        };
         match spec.flux_name {
             "Switch" => Some(format!(
                 "Switch(checked = {value}, onCheckedChange = {{ {handler} }})"

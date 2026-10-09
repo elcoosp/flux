@@ -285,9 +285,9 @@ impl<'a> Parser<'a> {
                     }
                     b'u' => {
                         // \uXXXX — parse 4 hex digits, handle surrogate pairs.
-                        let hex = raw.get(j + 1..j + 5).ok_or_else(|| {
-                            format!("truncated \\u escape at {}", start + j)
-                        })?;
+                        let hex = raw
+                            .get(j + 1..j + 5)
+                            .ok_or_else(|| format!("truncated \\u escape at {}", start + j))?;
                         let hi = u16::from_str_radix(
                             std::str::from_utf8(hex).map_err(|_| "bad hex digits")?,
                             16,
@@ -321,7 +321,8 @@ impl<'a> Parser<'a> {
                     other => {
                         return Err(format!(
                             "unsupported escape \\{} at {}",
-                            other as char, start + j
+                            other as char,
+                            start + j
                         ));
                     }
                 }

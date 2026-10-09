@@ -335,7 +335,11 @@ mod tests {
         };
         absorb(Ok(ev), &mut pending, &mut last);
 
-        assert_eq!(pending, vec![PathBuf::from("/tmp/a.flux")], "only .flux files enter pending");
+        assert_eq!(
+            pending,
+            vec![PathBuf::from("/tmp/a.flux")],
+            "only .flux files enter pending"
+        );
         assert!(last.is_some(), "absorb records the event timestamp");
         assert!(last.unwrap() >= t0);
     }
@@ -352,7 +356,10 @@ mod tests {
             attrs: Default::default(),
         };
         absorb(Ok(ev), &mut pending, &mut last);
-        assert!(pending.is_empty(), "read-only access must not trigger recompile");
+        assert!(
+            pending.is_empty(),
+            "read-only access must not trigger recompile"
+        );
         assert!(last.is_none(), "no timestamp recorded for filtered events");
     }
 

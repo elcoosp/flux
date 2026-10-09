@@ -8,10 +8,7 @@ use super::cursor::Reader;
 use super::props::{decode_props, encode_props};
 use super::span::{decode_span, encode_span};
 
-pub(crate) fn encode_node(
-    w: &mut super::cursor::Writer,
-    node: &NodeRef,
-) -> Result<(), WireError> {
+pub(crate) fn encode_node(w: &mut super::cursor::Writer, node: &NodeRef) -> Result<(), WireError> {
     // Audit H14 cascade: fallible now so a >64 KB prop value or a >65 535
     // child/handler count surfaces as `WireError::LengthExceedsU16` at this
     // encoder's boundary. `encode_child` and `encode_span` are still

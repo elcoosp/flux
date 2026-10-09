@@ -680,21 +680,17 @@ impl Pipeline {
                 // Audit H14: on encoder overflow, ship an `Error` frame under
                 // the `Init` variant. Hosts dispatch by the wire frame-kind
                 // byte, so they read a valid Error frame either way.
-                let bytes = match self.try_build_init(
-                    &arena,
-                    &closures,
-                    &state_seed,
-                    &component_names,
-                ) {
-                    Ok(b) => b,
-                    Err(e) => {
-                        let diag = Diagnostic::new(
-                            format!("Init frame exceeds wire length limits: {e}"),
-                            None,
-                        );
-                        self.error_frame(&diag)
-                    }
-                };
+                let bytes =
+                    match self.try_build_init(&arena, &closures, &state_seed, &component_names) {
+                        Ok(b) => b,
+                        Err(e) => {
+                            let diag = Diagnostic::new(
+                                format!("Init frame exceeds wire length limits: {e}"),
+                                None,
+                            );
+                            self.error_frame(&diag)
+                        }
+                    };
                 self.timings.serialize = started.elapsed();
                 Compiled::Init(bytes)
             }
@@ -778,28 +774,30 @@ impl Pipeline {
             // lowered result when a file's source is unchanged, so a save that
             // touches one file does not re-parse / re-type-check / re-lower the
             // others. `lower_count` records only the files actually re-lowered.
-            let (lowered, ast) =
-                if let Some((cached_src, cached_ir, cached_ast)) = self.file_cache.get(&file_id) {
-                    if cached_src == &source {
-                        (cached_ir.clone(), cached_ast.clone())
-                    } else {
-                        self.lower_count += 1;
-                        let produced = self.compile_one(&source, file_id, &display, next_handler_base)?;
-                        self.file_cache.insert(
-                            file_id,
-                            (source.clone(), produced.0.clone(), produced.1.clone()),
-                        );
-                        produced
-                    }
+            let (lowered, ast) = if let Some((cached_src, cached_ir, cached_ast)) =
+                self.file_cache.get(&file_id)
+            {
+                if cached_src == &source {
+                    (cached_ir.clone(), cached_ast.clone())
                 } else {
                     self.lower_count += 1;
-                    let produced = self.compile_one(&source, file_id, &display, next_handler_base)?;
+                    let produced =
+                        self.compile_one(&source, file_id, &display, next_handler_base)?;
                     self.file_cache.insert(
                         file_id,
                         (source.clone(), produced.0.clone(), produced.1.clone()),
                     );
                     produced
-                };
+                }
+            } else {
+                self.lower_count += 1;
+                let produced = self.compile_one(&source, file_id, &display, next_handler_base)?;
+                self.file_cache.insert(
+                    file_id,
+                    (source.clone(), produced.0.clone(), produced.1.clone()),
+                );
+                produced
+            };
             // Advance the seed past every handler id this file produced —
             // both the top-level handlers (`lowered.closures`) and the
             // per-node prop thunks (`lowered.prop_thunks`) share the same
@@ -888,17 +886,12 @@ impl Pipeline {
             // `..`, `/`, absolute paths, Windows drive prefixes and every
             // other escape hatchet.
             fn is_safe_segment(seg: &str) -> bool {
-                !seg.is_empty()
-                    && seg
-                        .chars()
-                        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+                !seg.is_empty() && seg.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
             }
-            let safe = name
-                .split('/')
-                .all(is_safe_segment)
-                && name
-                    .split('.')
-                    .all(|seg| !seg.is_empty() && seg.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+            let safe = name.split('/').all(is_safe_segment)
+                && name.split('.').all(|seg| {
+                    !seg.is_empty() && seg.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                })
                 && !name.contains("..");
             if !safe {
                 tracing::warn!(name, "rejecting module use with unsafe path segment");
@@ -1619,8 +1612,8 @@ mod tests {
 
         // The frame decodes via the client-side helper; a corrupt header would
         // fail here (the same path a real host takes).
-        let frame = Frame::from_error_bytes(&bytes)
-            .expect("error frame must decode via from_error_bytes");
+        let frame =
+            Frame::from_error_bytes(&bytes).expect("error frame must decode via from_error_bytes");
 
         assert_eq!(
             frame.kind,

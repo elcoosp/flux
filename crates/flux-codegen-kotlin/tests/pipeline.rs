@@ -322,9 +322,7 @@ fn kotlinc_version() -> Option<String> {
     let text = String::from_utf8_lossy(&out.stderr);
     // The version token is the first `\d+\.\d+\.\d+` after `kotlinc`.
     for tok in text.split_whitespace() {
-        if tok.chars().next().is_some_and(|c| c.is_ascii_digit())
-            && tok.matches('.').count() >= 2
-        {
+        if tok.chars().next().is_some_and(|c| c.is_ascii_digit()) && tok.matches('.').count() >= 2 {
             return Some(
                 tok.chars()
                     .take_while(|c| c.is_ascii_digit() || *c == '.')
@@ -378,11 +376,8 @@ fn try_compose_classpath() -> Option<(String, String, Option<String>)> {
         "kotlin-compose-compiler-plugin-embeddable",
         &kver,
     )?;
-    let compose_compiler_embeddable = find_in_gradle_cache_for_version(
-        &gradle_cache,
-        "kotlin-compiler-embeddable",
-        &kver,
-    );
+    let compose_compiler_embeddable =
+        find_in_gradle_cache_for_version(&gradle_cache, "kotlin-compiler-embeddable", &kver);
 
     let tmp = std::env::temp_dir().join(format!("flux_kt_compose_{}", std::process::id()));
     let _ = std::fs::create_dir_all(&tmp);
@@ -506,13 +501,8 @@ fn try_compose_classpath() -> Option<(String, String, Option<String>)> {
 /// `$HOME/.gradle/caches/modules-2/files-2.1` if present.
 fn dirs_gradle_cache() -> Option<std::path::PathBuf> {
     let home = std::env::var_os("HOME")?;
-    let p = std::path::PathBuf::from(home)
-        .join(".gradle/caches/modules-2/files-2.1");
-    if p.is_dir() {
-        Some(p)
-    } else {
-        None
-    }
+    let p = std::path::PathBuf::from(home).join(".gradle/caches/modules-2/files-2.1");
+    if p.is_dir() { Some(p) } else { None }
 }
 
 /// The Android platform `android.jar` (either the env-provided SDK or the
@@ -582,7 +572,9 @@ fn walk_files(root: &std::path::Path) -> Vec<std::path::PathBuf> {
         if depth > 12 {
             return;
         }
-        let Ok(rd) = std::fs::read_dir(dir) else { return };
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
         for entry in rd.filter_map(Result::ok) {
             let p = entry.path();
             if p.is_dir() {
@@ -647,8 +639,7 @@ fn generated_kotlin_parses() {
         let out = cmd.output().expect("spawn kotlinc");
         if !out.status.success() {
             let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
-            if stderr.contains("NoClassDefFoundError")
-                || stderr.contains("ClassNotFoundException")
+            if stderr.contains("NoClassDefFoundError") || stderr.contains("ClassNotFoundException")
             {
                 eprintln!("toolchain classloader issue; skipping:\n{stderr}");
                 return;

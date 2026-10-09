@@ -95,11 +95,7 @@ impl Writer {
     ///
     /// Unifies every user-authored-length site behind one call so the encoder
     /// sites do not branch on version — the dispatch lives here.
-    pub(crate) fn count_prefix(
-        &mut self,
-        n: usize,
-        what: &'static str,
-    ) -> Result<(), WireError> {
+    pub(crate) fn count_prefix(&mut self, n: usize, what: &'static str) -> Result<(), WireError> {
         if self.version >= 3 {
             self.u32_len_checked(n, what)
         } else {

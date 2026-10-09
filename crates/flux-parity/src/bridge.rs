@@ -107,7 +107,7 @@ fn binop_symbol(op: BinOp) -> &'static str {
         BinOp::Ge => ">=",
         BinOp::And => "&&",
         BinOp::Or => "||",
-        _ => "<unknown-binop>",  // Mirrors flux-codegen-core; see audit theme #1.
+        _ => "<unknown-binop>", // Mirrors flux-codegen-core; see audit theme #1.
     }
 }
 
@@ -158,8 +158,6 @@ pub(crate) fn canonicalize_expr(text: &str) -> String {
     }
     t
 }
-
-
 
 /// Canonicalizes the body of a Swift/Kotlin string literal (without the outer
 /// quotes) so that both backends produce the same `{…}` interpolation form.

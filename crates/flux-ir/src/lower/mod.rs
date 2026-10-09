@@ -418,10 +418,7 @@ impl<'a> Lowerer<'a> {
             }
             // fn / trait / capability / import / use / const are type-level
             // only; the type checker handled them, so we skip them.
-            Decl::Fn(_)
-            | Decl::Trait(_)
-            | Decl::Capability(_)
-            | Decl::Use(_) => Ok(()),
+            Decl::Fn(_) | Decl::Trait(_) | Decl::Capability(_) | Decl::Use(_) => Ok(()),
             // Module-level associated constant, e.g. `Color.red = RGB(1.0, 0.0, 0.0)`
             // or `Font.body = Font("", 17.0, Regular, Normal)`. Retain the
             // lowered value under its dotted path (`Color.red`) so a call site
@@ -437,11 +434,8 @@ impl<'a> Lowerer<'a> {
                 // A closure table is required by `lower_value`'s signature but
                 // a stdlib constant never contains a closure; pass a throwaway.
                 let mut discarded = Vec::new();
-                let value = self.lower_value(
-                    &binding.value,
-                    ComponentId::from(0u32),
-                    &mut discarded,
-                )?;
+                let value =
+                    self.lower_value(&binding.value, ComponentId::from(0u32), &mut discarded)?;
                 self.const_bindings.insert(path, value);
                 Ok(())
             }
@@ -1289,8 +1283,8 @@ mod tests {
 
     #[test]
     fn narrow_bytecode_len_rejects_u16_max_plus_one() {
-        let err = narrow_bytecode_len(u16::MAX as usize + 1)
-            .expect_err("u16::MAX + 1 must be rejected");
+        let err =
+            narrow_bytecode_len(u16::MAX as usize + 1).expect_err("u16::MAX + 1 must be rejected");
         let rendered = format!("{err:?}");
         assert!(
             rendered.contains("exceeds the u16 wire length prefix"),
