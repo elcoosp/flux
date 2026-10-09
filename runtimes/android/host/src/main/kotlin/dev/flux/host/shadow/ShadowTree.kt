@@ -544,7 +544,7 @@ public class ShadowTree(
                 // in-memory adapter views, so geometry (frame) is unavailable here
                 // — it is filled by the platform shell (ADR-0048). `null` still
                 // records node presence in the DevTools state.
-                if (TelemetryBridge.sink != null) {
+                if (BuildFlags.DEBUG && TelemetryBridge.sink != null) {
                     TelemetryBridge.emit(
                         TelemetryEvent.ViewMutation(
                             nodeId = node.id,
@@ -580,7 +580,7 @@ public class ShadowTree(
                 // DevTools: report the newly-created node so the component tree
                 // shows the live node graph (geometry is unavailable in the
                 // Android-free host crate; the shell fills it — ADR-0048).
-                if (TelemetryBridge.sink != null) {
+                if (BuildFlags.DEBUG && TelemetryBridge.sink != null) {
                     TelemetryBridge.emit(
                         TelemetryEvent.ViewMutation(
                             nodeId = built.id,
@@ -606,7 +606,7 @@ public class ShadowTree(
                 emitTrace(TraceEvent.Detach(seq = lastSeq, id = patch.id))
                 // DevTools: report the removed node (mutation_kind 1) so the
                 // component tree drops it from the live node graph.
-                if (TelemetryBridge.sink != null) {
+                if (BuildFlags.DEBUG && TelemetryBridge.sink != null) {
                     TelemetryBridge.emit(
                         TelemetryEvent.ViewMutation(
                             nodeId = patch.id,
