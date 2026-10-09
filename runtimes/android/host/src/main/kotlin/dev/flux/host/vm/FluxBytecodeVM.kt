@@ -128,7 +128,20 @@ public object FluxBytecodeVM {
         val regs = Array<FluxValue>(16) { FluxValue.NullVal }
         regs[0] = payload
         regs[15] = FluxValue.IntVal(ENTRY_GAS.toLong())
-        return execTail(program, offsets, signals, 0, regs, ENTRY_GAS, strings, capabilities, permissions)
+        return execTail(
+            program,
+            offsets,
+            signals,
+            0,
+            regs,
+            ENTRY_GAS,
+            strings,
+            capabilities,
+            permissions,
+            // F11.1: pass the original bytecode so a suspend does not have to
+            // re-serialise the decoded program.
+            programBytes = bytecode,
+        )
     }
 
     /**
@@ -234,6 +247,13 @@ public object FluxBytecodeVM {
         strings: StringResolver,
         capabilities: CapabilityRegistry,
         permissions: PermissionChecker,
+        // F11.1: the original bytecode, if the caller still has it (the
+        // `runResumable(bytecode)` overload does). Used to fill
+        // `SuspendState.program` without re-serialising `program` into a
+        // boxed `ArrayList<Byte>` on every suspend — which was O(program)
+        // allocation in the AWAIT hot path. `null` falls back to re-serialising
+        // for callers that only have the decoded program.
+        programBytes: ByteArray? = null,
     ): RunResult {
         val regs = initialRegs.copyOf()
         var gas: UInt = initialGas
@@ -279,7 +299,11 @@ public object FluxBytecodeVM {
                     is StepResult.Suspend -> {
                         return RunResult.Suspended(
                             SuspendState(
-                                program = stateProgram(program),
+                                // F11.1: reuse the caller-provided bytecode
+                                // when available; only re-serialise as a
+                                // fallback. Avoids an O(program) allocation
+                                // on every suspend.
+                                program = programBytes ?: stateProgram(program),
                                 resumeIndex = result.resumeIndex,
                                 registers = regs.copyOf(),
                                 gasRemaining = gas,
