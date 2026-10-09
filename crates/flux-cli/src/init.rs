@@ -46,9 +46,13 @@ platforms/
 ";
 
 /// Minimal `flux.toml` project config.
+///
+/// `{{PROJECT_NAME}}` is replaced with the (validated) user-supplied name.
+/// A distinct placeholder is used so a template with the literal substring
+/// `myapp` elsewhere would not be corrupted.
 const SAMPLE_CONFIG: &str = "\
 [project]
-name = \"myapp\"
+name = \"{{PROJECT_NAME}}\"
 entry = \"main.flux\"
 
 [dev]
@@ -68,7 +72,53 @@ http_port = 7332
 /// ```ignore
 /// flux_cli::run(flux_cli::Command::Init { name: "myapp".into() }).await?;
 /// ```
+/// Maximum length of a project name.
+const MAX_PROJECT_NAME_LEN: usize = 64;
+
+/// Validates a project name.
+///
+/// The name becomes both a directory name (so it must be a single path
+/// segment, no separators or `..`) and a TOML basic-string value (so it must
+/// not contain a `"` or a newline). Restricting to `[A-Za-z][A-Za-z0-9_-]*`
+/// covers every reasonable project identifier and keeps the generator free of
+/// escaping logic — the previous implementation substituted the raw name into
+/// `flux.toml`, which could inject TOML keys or break the string.
+///
+/// # Errors
+///
+/// Returns an error naming the offending character when the name is empty,
+/// too long, starts with a non-letter, or contains anything but ASCII
+/// alphanumerics, `-`, or `_`.
+fn validate_project_name(name: &str) -> anyhow::Result<()> {
+    if name.is_empty() {
+        bail!("invalid project name: empty — hint: pass a name like `flux init blog-app`");
+    }
+    if name.len() > MAX_PROJECT_NAME_LEN {
+        bail!(
+            "invalid project name {name:?}: exceeds {MAX_PROJECT_NAME_LEN} characters",
+        );
+    }
+    let mut chars = name.chars();
+    let first = chars.next().expect("non-empty checked above");
+    if !first.is_ascii_alphabetic() {
+        bail!(
+            "invalid project name {name:?}: must start with an ASCII letter \
+             — hint: use `[A-Za-z][A-Za-z0-9_-]*`, e.g. `blog-app`"
+        );
+    }
+    for c in chars {
+        if !c.is_ascii_alphanumeric() && c != '-' && c != '_' {
+            bail!(
+                "invalid project name {name:?}: contains `{c}` — hint: use only \
+                 ASCII letters, digits, `-`, and `_`"
+            );
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn run(name: &str) -> anyhow::Result<()> {
+    validate_project_name(name)?;
     let root = Path::new(name);
     if root.exists() && !is_empty_dir(root) {
         bail!(
@@ -80,10 +130,8 @@ pub(crate) fn run(name: &str) -> anyhow::Result<()> {
     fs::create_dir_all(root).with_context(|| format!("creating project directory {name}"))?;
     write_file(root, ENTRY_FILE, SAMPLE_ENTRY)?;
     write_file(root, IGNORE_FILE, SAMPLE_IGNORE)?;
-    // Audit fix: `SAMPLE_CONFIG` hardcodes `name = "myapp"`. Interpolate the
-    // user-supplied project name so `flux init blog-app` scaffolds a project
-    // whose `[project] name` actually is `blog-app`.
-    let config = SAMPLE_CONFIG.replace("myapp", name);
+    // Interpolate the (validated) user-supplied project name.
+    let config = SAMPLE_CONFIG.replace("{{PROJECT_NAME}}", name);
     write_file(root, CONFIG_FILE, &config)?;
 
     tracing::info!(project = name, "scaffolded new Flux project");
