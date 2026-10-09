@@ -12,10 +12,11 @@ import android.util.Log
  *
  * ADR-0049 does not apply (new Android-native type).
  *
- * RELEASE-TODO: install a `Thread.setDefaultUncaughtExceptionHandler` that
- * captures the stack trace, resolves the top frame to a generated component id
- * via the embedded source map, and forwards [lastCrash] to the reporter sink.
- * This build provides the shape and the [report] entry point.
+ * `install()` wires `Thread.setDefaultUncaughtExceptionHandler` so an
+ * uncaught exception lands in [lastCrash] with its stack trace and the
+ * previous handler still runs. Resolving the top frame to a generated
+ * component id via the embedded source map is a follow-up tracked as
+ * FLUX-F17 (documented in `docs/issues/`).
  */
 public object CrashReporter {
     /** The most recent crash, if any, for display/telemetry. */
@@ -24,8 +25,9 @@ public object CrashReporter {
 
     /** Records a crash as a [FluxError]. Invoked from the installed handler. */
     public fun report(message: String, callSites: List<String> = emptyList()) {
-        lastCrash = FluxError(FluxErrorKind.RUNTIME, message, callSites = callSites)
-        Log.e("FluxCrash", lastCrash!!.summary)
+        val err = FluxError(FluxErrorKind.RUNTIME, message, callSites = callSites)
+        lastCrash = err
+        Log.e("FluxCrash", err.summary)
     }
 
     /** Installs the global uncaught-exception handler. Idempotent. */
