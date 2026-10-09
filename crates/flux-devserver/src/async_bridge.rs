@@ -86,7 +86,7 @@ impl AsyncBridge {
         frame: AwaitSuspendFrame,
     ) -> Result<Option<Vec<u8>>, flux_ir_serde::WireError> {
         if let Some(settled) = self.early.remove(&frame.cell) {
-            return Ok(Some(resume_bytes(frame.handler_id, frame.cell, &settled)));
+            return resume_bytes(frame.handler_id, frame.cell, &settled).map(Some);
         }
         if let Some(existing) = self.parked.get(&frame.cell) {
             if existing.handler_id != frame.handler_id {
@@ -125,14 +125,22 @@ impl AsyncBridge {
     /// calls to this method.
     #[cfg(test)]
     #[must_use]
-    pub fn settle(&mut self, cell: SignalId, value: Value) -> Option<Vec<u8>> {
+    pub fn settle(
+        &mut self,
+        cell: SignalId,
+        value: Value,
+    ) -> Result<Option<Vec<u8>>, flux_ir_serde::WireError> {
         self.settle_inner(cell, value, false)
     }
 
     /// Settles `cell` with a capability error payload (test seam only).
     #[cfg(test)]
     #[must_use]
-    pub fn settle_error(&mut self, cell: SignalId, value: Value) -> Option<Vec<u8>> {
+    pub fn settle_error(
+        &mut self,
+        cell: SignalId,
+        value: Value,
+    ) -> Result<Option<Vec<u8>>, flux_ir_serde::WireError> {
         self.settle_inner(cell, value, true)
     }
 
@@ -142,7 +150,11 @@ impl AsyncBridge {
     /// send to the host; otherwise the value is retained as `early` for the
     /// next `AwaitSuspend` for that cell.
     #[must_use]
-    pub fn resume(&mut self, cell: SignalId, value: Value) -> Option<Vec<u8>> {
+    pub fn resume(
+        &mut self,
+        cell: SignalId,
+        value: Value,
+    ) -> Result<Option<Vec<u8>>, flux_ir_serde::WireError> {
         self.settle_inner(cell, value, false)
     }
 
@@ -159,10 +171,15 @@ impl AsyncBridge {
         self.parked.clear();
     }
 
-    fn settle_inner(&mut self, cell: SignalId, value: Value, is_error: bool) -> Option<Vec<u8>> {
+    fn settle_inner(
+        &mut self,
+        cell: SignalId,
+        value: Value,
+        is_error: bool,
+    ) -> Result<Option<Vec<u8>>, flux_ir_serde::WireError> {
         let settled = Settled { value, is_error };
         match self.parked.remove(&cell) {
-            Some(parked) => Some(resume_bytes(parked.handler_id, cell, &settled)),
+            Some(parked) => resume_bytes(parked.handler_id, cell, &settled).map(Some),
             None => {
                 // Bound `early` so a caller that settles cells the host never
                 // awaits (a buggy capability bridge, a fuzzer) cannot grow the
@@ -183,7 +200,7 @@ impl AsyncBridge {
                     }
                 }
                 self.early.insert(cell, settled);
-                None
+                Ok(None)
             }
         }
     }
@@ -203,13 +220,17 @@ impl AsyncBridge {
     }
 }
 
-fn resume_bytes(handler_id: HandlerId, cell: SignalId, settled: &Settled) -> Vec<u8> {
+fn resume_bytes(
+    handler_id: HandlerId,
+    cell: SignalId,
+    settled: &Settled,
+) -> Result<Vec<u8>, flux_ir_serde::WireError> {
     let frame = if settled.is_error {
         ResumeFrame::error(handler_id, cell, settled.value.clone())
     } else {
         ResumeFrame::ready(handler_id, cell, settled.value.clone())
     };
-    frame.to_bytes()
+    frame.try_to_bytes()
 }
 
 #[cfg(test)]
@@ -231,7 +252,7 @@ mod tests {
         assert_eq!(bridge.parked_len(), 1);
         assert_eq!(bridge.resume_ip(77), Some(32));
 
-        let bytes = bridge.settle(77, Value::Int(9)).expect("resumes");
+        let bytes = bridge.settle(77, Value::Int(9)).expect("encodes").expect("resumes");
         let frame = decode(&bytes);
         assert_eq!(frame.handler_id, 4);
         assert_eq!(frame.cell, 77);
@@ -245,7 +266,7 @@ mod tests {
         // A capability that resolves faster than the host reports its suspension
         // must not deadlock the handler.
         let mut bridge = AsyncBridge::new();
-        assert!(bridge.settle(5, Value::Bool(true)).is_none());
+        assert!(bridge.settle(5, Value::Bool(true)).expect("encodes").is_none());
         let bytes = bridge
             .park(AwaitSuspendFrame::new(2, 5, 16)).unwrap()
             .expect("the early value resumes the handler immediately");
@@ -259,7 +280,10 @@ mod tests {
     fn error_completion_resumes_down_the_error_path() {
         let mut bridge = AsyncBridge::new();
         let _ = bridge.park(AwaitSuspendFrame::new(1, 3, 8)).unwrap();
-        let bytes = bridge.settle_error(3, Value::Int(-1)).expect("resumes");
+        let bytes = bridge
+            .settle_error(3, Value::Int(-1))
+            .expect("encodes")
+            .expect("resumes");
         assert!(decode(&bytes).is_error);
     }
 
@@ -267,9 +291,9 @@ mod tests {
     fn a_cell_resumes_at_most_once() {
         let mut bridge = AsyncBridge::new();
         let _ = bridge.park(AwaitSuspendFrame::new(1, 3, 8)).unwrap();
-        assert!(bridge.settle(3, Value::Null).is_some());
+        assert!(bridge.settle(3, Value::Null).expect("encodes").is_some());
         assert!(
-            bridge.settle(3, Value::Null).is_none(),
+            bridge.settle(3, Value::Null).expect("encodes").is_none(),
             "a second completion must not re-resume the same continuation"
         );
     }
@@ -279,7 +303,7 @@ mod tests {
         let mut bridge = AsyncBridge::new();
         let _ = bridge.park(AwaitSuspendFrame::new(1, 10, 4)).unwrap();
         let _ = bridge.park(AwaitSuspendFrame::new(2, 20, 8)).unwrap();
-        let bytes = bridge.settle(20, Value::Int(1)).expect("resumes");
+        let bytes = bridge.settle(20, Value::Int(1)).expect("encodes").expect("resumes");
         assert_eq!(decode(&bytes).handler_id, 2);
         assert_eq!(bridge.parked_len(), 1, "cell 10 is still parked");
     }
@@ -303,7 +327,7 @@ mod tests {
     fn clear_early_drops_stale_completions() {
         let mut bridge = AsyncBridge::new();
         // A completion arrives before any suspension is reported.
-        assert!(bridge.settle(5, Value::Int(42)).is_none());
+        assert!(bridge.settle(5, Value::Int(42)).expect("encodes").is_none());
         assert_eq!(bridge.parked_len(), 0);
         // The stale `early` value is discarded on session end.
         bridge.clear_session();
