@@ -486,16 +486,49 @@ public class FluxExecutor(
                         when (signals.cellState(cellId)) {
                             CellState.Ready -> signals.read(cellId) ?: FluxValue.NullVal
                             CellState.Pending -> {
+                                // F4: an async resolver that throws must fault the
+                                // handler and mark the cell Error. The previous
+                                // `catch (e: Exception) { NullVal }` turned every
+                                // network failure into a silent blank result with no
+                                // banner (AGENTS.md §3.11). CancellationException is
+                                // re-thrown so structured concurrency still works.
                                 val settled =
                                     try {
                                         asyncResolver.resolve(step.state.registers[step.state.futureReg])
+                                    } catch (e: kotlinx.coroutines.CancellationException) {
+                                        throw e
+                                    } catch (e: dev.flux.host.vm.VmError) {
+                                        signals.markError(cellId, e.message ?: "async capability failed")
+                                        onError?.invoke(
+                                            FluxError(
+                                                kind = FluxErrorKind.CAPABILITY,
+                                                message = e.message ?: "async capability failed",
+                                            ),
+                                        )
+                                        return
                                     } catch (e: Exception) {
-                                        FluxValue.NullVal
+                                        signals.markError(cellId, e.message ?: "async capability failed")
+                                        onError?.invoke(
+                                            FluxError(
+                                                kind = FluxErrorKind.CAPABILITY,
+                                                message = e.message ?: "async capability failed",
+                                            ),
+                                        )
+                                        return
                                     }
                                 signals.resolveCell(cellId, settled)
                                 settled
                             }
-                            CellState.Error -> FluxValue.NullVal
+                            CellState.Error -> {
+                                // Sync AWAIT parity: an Error cell faults the handler.
+                                onError?.invoke(
+                                    FluxError(
+                                        kind = FluxErrorKind.CAPABILITY,
+                                        message = "awaited cell $cellId is in an error state",
+                                    ),
+                                )
+                                return
+                            }
                         }
                     current =
                         FluxBytecodeVM.resume(
