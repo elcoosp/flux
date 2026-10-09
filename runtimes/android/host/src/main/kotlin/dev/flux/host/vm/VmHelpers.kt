@@ -85,6 +85,25 @@ internal fun requireRecord(
     off: UInt,
 ): List<FluxValue.Field> = (v as? FluxValue.RecordVal)?.fields ?: throw VmError(VmErrorKind.TYPE_MISMATCH, off)
 
+/**
+ * Reads a list index from a register: a non-negative `Int` that fits `Int`.
+ *
+ * `LIST_INSERT` / `LIST_REMOVE` take the index from a *register* holding an
+ * `Int` (matching `LIST_GET` and the bytecode emitter's `compile_list_method`),
+ * not from the operand byte itself (audit F1). A negative or oversized Int is
+ * `INDEX_OUT_OF_BOUNDS`; a non-Int is `TYPE_MISMATCH`.
+ */
+internal fun requireIndexReg(
+    v: FluxValue,
+    off: UInt,
+): Int {
+    val i = requireInt(v, off)
+    if (i < 0L || i > Int.MAX_VALUE.toLong()) {
+        throw VmError(VmErrorKind.INDEX_OUT_OF_BOUNDS, off)
+    }
+    return i.toInt()
+}
+
 internal fun requireListIndex(
     list: FluxValue,
     idx: Int,
