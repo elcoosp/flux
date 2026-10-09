@@ -1,15 +1,24 @@
 {
-  "bytecode_hex": "80000400b0016400000000000000810001b002c800000000000000810002b0032c0100000000000085000103",
-  "description": "LIST_INSERT at index 1 of [100, 200] with 300 yields [100, 300, 200].",
+  "bytecode_hex": "80010400b0026400000000000000810102b003c800000000000000810103b0050100000000000000b0062c010000000000008501050600",
+  "description": "LIST_INSERT with the index in a register: r1 = [100,200], r5 = Int(1), r6 = Int(300); insert 300 at index 1 -> [100,300,200].",
   "expected_error": null,
-  "expected_gas_used": 7,
+  "expected_gas_used": 8,
   "expected_registers": {
-    "r0": {
+    "r1": {
       "type": "List",
       "value": [
-        { "type": "Int", "value": 100 },
-        { "type": "Int", "value": 300 },
-        { "type": "Int", "value": 200 }
+        {
+          "type": "Int",
+          "value": 100
+        },
+        {
+          "type": "Int",
+          "value": 300
+        },
+        {
+          "type": "Int",
+          "value": 200
+        }
       ]
     }
   },

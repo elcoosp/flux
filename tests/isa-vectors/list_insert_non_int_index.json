@@ -1,0 +1,11 @@
+{
+  "bytecode_hex": "80010400b0020a00000000000000810102b0031400000000000000810103b0041e00000000000000810104b30500000000b00663000000000000008501050600",
+  "description": "LIST_INSERT faults with TypeMismatch when the index register holds a non-Int (Str).",
+  "expected_error": "TypeMismatch",
+  "expected_gas_used": 0,
+  "expected_registers": {},
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "list_insert_non_int_index",
+  "payload": null
+}

@@ -1,0 +1,11 @@
+{
+  "bytecode_hex": "80010400b0020a00000000000000810102b0031400000000000000810103b0041e00000000000000810104b005ffffffffffffffff86010500",
+  "description": "LIST_REMOVE faults with IndexOutOfBounds when the index register holds a negative Int (-1).",
+  "expected_error": "IndexOutOfBounds",
+  "expected_gas_used": 0,
+  "expected_registers": {},
+  "expected_signals": [],
+  "initial_signals": [],
+  "name": "list_remove_negative_index",
+  "payload": null
+}

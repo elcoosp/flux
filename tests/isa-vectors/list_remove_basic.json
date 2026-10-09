@@ -1,14 +1,20 @@
 {
-  "bytecode_hex": "80000400b0016400000000000000810001b002c800000000000000810002b0032c01000000000000810003860001",
-  "description": "LIST_REMOVE at index 1 of [100, 200, 300] yields [100, 300].",
+  "bytecode_hex": "80010400b0026400000000000000810102b003c800000000000000810103b0042c01000000000000810104b005010000000000000086010500",
+  "description": "LIST_REMOVE with the index in a register: r1 = [100,200,300], r5 = Int(1); remove index 1 -> [100,300].",
   "expected_error": null,
-  "expected_gas_used": 8,
+  "expected_gas_used": 9,
   "expected_registers": {
-    "r0": {
+    "r1": {
       "type": "List",
       "value": [
-        { "type": "Int", "value": 100 },
-        { "type": "Int", "value": 300 }
+        {
+          "type": "Int",
+          "value": 100
+        },
+        {
+          "type": "Int",
+          "value": 300
+        }
       ]
     }
   },
