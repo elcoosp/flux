@@ -442,11 +442,16 @@ public class ShadowTree(
         executor: FluxExecutor,
     ) {
         val childIds = patchIndex.values.flatMap { childIdList(it) }.toSet()
-        val rootId = patchIndex.keys.firstOrNull { it !in childIds } ?: return
+        // F7: a delta frame may carry multiple parentless roots or none. Reject
+        // the frame rather than picking an arbitrary root or crashing.
+        val roots = patchIndex.keys.filter { it !in childIds }
+        if (roots.size != 1) return
+        val rootId = roots.first()
         root?.let { destroySubtree(it) }
         nodes.clear()
         parents.clear()
-        val newRoot = build(patchIndex[rootId]!!, patchIndex, executor, depth = 0u)
+        val rootNode = patchIndex[rootId] ?: return
+        val newRoot = build(rootNode, patchIndex, executor, depth = 0u)
         root = newRoot
         collect(newRoot)
         thunkHandlerToNode.entries.removeIf { it.value !in nodes }
