@@ -776,10 +776,10 @@ fn exec_tail(
                 regs[usize::from(instr.u8(0))] = Value::List(items);
             }
             Opcode::ListInsert => {
-                // LIST_INSERT list(u8), idx(u8), val(u8) — audit C11: the
-                // oracle read positions 2/3/1, one past the 3-byte operand
-                // window, panicking on any compiled insert.
-                let idx = usize::from(instr.u8(1));
+                // LIST_INSERT list(u8), idx_reg(u8), val_reg(u8): the index is
+                // a *register* holding an `Int`, matching LIST_GET and the
+                // emitter's `compile_list_method` (audit F1).
+                let idx = list_index(reg!(instr.u8(1)), instr.offset)?;
                 let val = reg!(instr.u8(2));
                 let list = instr.u8(0);
                 match &mut regs[usize::from(list)] {
@@ -793,8 +793,10 @@ fn exec_tail(
                 }
             }
             Opcode::ListRemove => {
-                // LIST_REMOVE list(u8), idx(u8) — audit C11 (same off-by-one).
-                let idx = usize::from(instr.u8(1));
+                // LIST_REMOVE list(u8), idx_reg(u8): the index is a *register*
+                // holding an `Int`, matching LIST_GET and the emitter's
+                // `compile_list_method` (audit F1).
+                let idx = list_index(reg!(instr.u8(1)), instr.offset)?;
                 let list = instr.u8(0);
                 match &mut regs[usize::from(list)] {
                     Value::List(items) => {
@@ -1133,6 +1135,23 @@ fn expect_list_index(list: Value, idx: u8, off: u32) -> Result<(Vec<Value>, usiz
         return Err(VmError::at(VmErrorKind::IndexOutOfBounds, off));
     }
     Ok((items, i))
+}
+
+/// Reads a list index from a register: a non-negative `Int` that fits `usize`.
+///
+/// `LIST_INSERT` / `LIST_REMOVE` take the index from a register, not a
+/// literal — this mirrors `LIST_GET` (which has always used a register)
+/// and the bytecode emitter, whose `compile_list_method` passes the
+/// register holding the index value. Audit C11 got the *operand layout*
+/// right but kept the emitter's value semantics on the register number;
+/// this helper restores the intended meaning. A negative or oversized Int
+/// is `IndexOutOfBounds`; a non-Int is `TypeMismatch`.
+fn list_index(v: Value, off: u32) -> Result<usize, VmError> {
+    match v {
+        Value::Int(i) => usize::try_from(i)
+            .map_err(|_| VmError::at(VmErrorKind::IndexOutOfBounds, off)),
+        _ => Err(VmError::at(VmErrorKind::TypeMismatch, off)),
+    }
 }
 
 /// Resolves a relative jump offset (relative to the *next* instruction) to a
