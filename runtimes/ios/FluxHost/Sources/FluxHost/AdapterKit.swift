@@ -91,10 +91,13 @@ public final class MaterializationStringTable: StringResolver, @unchecked Sendab
         if let existing = reverseLookup[value] { return existing }
         let id = nextDerivedId
         // Guard against wrap into the server-assigned range (FLUX-084). After
-        // ~1 billion host-derived uniques in a single session we fail loud
-        // rather than risk a non-canonical id leaking across the wire.
-        if id == MaterializationStringTable.derivedIdCeiling {
-            fatalError("MaterializationStringTable.intern: derived id counter exhausted")
+        // ~1 billion host-derived uniques in a single session we saturate at
+        // the ceiling instead of crashing the process: an id collision is
+        // recoverable (a string renders as its sibling) while a crash kills a
+        // long-running dev session. The invariant (>= ceiling id, never crosses
+        // the wire as canonical) is preserved.
+        if id >= MaterializationStringTable.derivedIdCeiling {
+            return MaterializationStringTable.derivedIdCeiling - 1
         }
         nextDerivedId = nextDerivedId &+ 1
         strings[id] = value
