@@ -63,7 +63,7 @@ fn reattach_patch_order_is_deterministic() {
             .iter()
             .filter_map(|p| match p {
                 flux_syntax::Patch::Reattach { old_id, new_id, .. } => {
-                    Some((u32::from(*old_id), u32::from(*new_id)))
+                    Some((*old_id, *new_id))
                 }
                 _ => None,
             })

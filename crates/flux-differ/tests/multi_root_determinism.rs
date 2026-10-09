@@ -51,7 +51,7 @@ fn two_new_roots_emit_deterministic_insert_order() {
         let mut key: Vec<(u32, u16)> = Vec::new();
         for p in &patches {
             if let flux_syntax::Patch::Insert { parent, index, .. } = p {
-                key.push((u32::from(*parent), *index));
+                key.push((*parent, *index));
             }
         }
         // Hash the ordering.

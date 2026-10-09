@@ -80,7 +80,7 @@ impl<'a, B: Backend> Emitter<'a, B> {
     pub fn emit_program(&mut self) {
         // FLUX-047: emit the backend's prelude (imports / package decl) first,
         // so generated sources are self-contained and compile standalone.
-        self.push_raw(&B::prelude());
+        self.push_raw(B::prelude());
         self.emit_sum_types();
         // FLUX-043: emit the native design-token theme extension once, before
         // the components, so every component can reference tokens by name
@@ -525,7 +525,7 @@ impl<'a, B: Backend> Emitter<'a, B> {
                     // `handler_prop`, so the branch below catches it),
                     // matching `Switch`/`Checkbox`/`Slider` and removing the
                     // special case.
-                    self.line(indent, &B::spacer());
+                    self.line(indent, B::spacer());
                 } else if spec.handler_prop.is_some() {
                     // Form-family primitive (Switch, Checkbox, Slider,
                     // Picker, DatePicker, TextArea): the bare `{native}({value})`
@@ -726,7 +726,7 @@ impl<'a, B: Backend> Emitter<'a, B> {
                 // produced broken (or injectable) Kotlin/Swift.
                 let route = n
                     .props()
-                    .get_str(route_idx, &self.lowered.arena.string_table())
+                    .get_str(route_idx, self.lowered.arena.string_table())
                     .unwrap_or("home");
                 format!("\"{}\"", B::escape_text(route))
             }
@@ -928,9 +928,9 @@ impl<'a, B: Backend> Emitter<'a, B> {
             "                ",
         ];
         let table: &[&str] = if B::INDENT_UNIT == 4 {
-            &KOTLIN_TABLE
+            KOTLIN_TABLE
         } else {
-            &SWIFT_TABLE
+            SWIFT_TABLE
         };
         if let Some(s) = table.get(indent).copied() {
             return s;

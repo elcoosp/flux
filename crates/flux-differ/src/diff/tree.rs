@@ -72,7 +72,7 @@ pub(crate) fn reattach_pairs(
         let Some(n) = new.get(*new_id) else { continue };
         if let Some((parent, index)) = new_index.get(new_id) {
             candidates
-                .entry((u32::from(n.component_id()), n.kind(), *parent, *index))
+                .entry((n.component_id(), n.kind(), *parent, *index))
                 .or_default()
                 .push(*new_id);
         }
@@ -83,7 +83,7 @@ pub(crate) fn reattach_pairs(
         let Some((parent, index)) = old_index.get(old_id) else {
             continue;
         };
-        let key = (u32::from(o.component_id()), o.kind(), *parent, *index);
+        let key = (o.component_id(), o.kind(), *parent, *index);
         if let Some(cands) = candidates.get(&key) {
             for new_id in cands {
                 if !taken.contains(new_id) {
@@ -100,7 +100,7 @@ pub(crate) fn reattach_pairs(
 /// Audit C9: true when `id` is a root of `new` (no parent in the arena).
 pub(crate) fn is_root_of_new(new: &IRArena, id: &NodeId) -> bool {
     !new.all_ids().any(|nid| {
-        new.get(nid).map_or(false, |n| {
+        new.get(nid).is_some_and(|n| {
             n.children()
                 .iter()
                 .any(|c| matches!(c, Child::Node(n) if *n == *id))
@@ -119,7 +119,7 @@ pub(crate) fn root_position(new: &IRArena, id: &NodeId) -> u16 {
         .all_ids()
         .filter(|nid| {
             !new.all_ids().any(|pid| {
-                new.get(pid).map_or(false, |p| {
+                new.get(pid).is_some_and(|p| {
                     p.children()
                         .iter()
                         .any(|c| matches!(c, Child::Node(n) if *n == *nid))

@@ -63,7 +63,7 @@ All tasks T-101 through T-111 completed.
 - `Router.initialRouteName` is NOT dead — codegen (T-403.7) reads it for `startDestination`; preserved.
 
 ### SIDECAR (T-604.19 — fuzz targets)
-- All 8 fuzz targets exist and parse (decoded_frame, parse_flux, decode_value_blob, validate_bytecode, telemetry_frame, debug_command, await_suspend_resume, dispatch_report, host_announce, intern_string). SIDECAR rows in prior PROGRESS listing them as missing are stale.
+- All 10 fuzz targets exist and parse (decoded_frame, parse_flux, decode_value_blob, validate_bytecode, telemetry_frame, debug_command, await_suspend_resume, dispatch_report, host_announce, intern_string). SIDECAR rows in prior PROGRESS listing them as missing are stale.
 
 ### Completed This Session
 | Task | Description | Commit |
@@ -73,14 +73,7 @@ All tasks T-101 through T-111 completed.
 | T-604.17 | Router capability renamed to RouterNav | `3c594a04` |
 || T-604.19 | Fuzz targets for all wire decoders | `ac32e595` |
 || T-604.20 | Dead code deletion: `fluxTrace` already absent; `assertCanonicalStringId` retained — now correctly wired into `internString` reply validation (`FluxExecutor.kt:574`) | `5c9f2796` |
-- `crates/flux-ir-serde/src/frame.rs`: no fuzz target for `TelemetryFrame` decode
-- `crates/flux-ir-serde/src/frame.rs`: no fuzz target for `DebugCommandFrame` decode
-- `crates/flux-ir-serde/src/frame.rs`: no fuzz target for `AwaitSuspend`/`Resume` frame decode
-- `crates/flux-ir-serde/src/frame.rs`: no fuzz target for `DispatchReport` decode
-- `crates/flux-ir-serde/src/frame.rs`: no fuzz target for `HostAnnounce` decode
-- `crates/flux-ir-serde/src/wire/string_entry.rs`: no fuzz target for intern-string frame decode
-- `crates/flux-ir-serde/src/wire/value.rs`: no fuzz target for `decode_value_blob`
-- `crates/flux-ir/src/arena/blob.rs`: no fuzz target for `validate_bytecode`
+<!-- Stale 'no fuzz target for X' bullet list removed in round 26 follow-up; all targets exist. -->
 
 ### Test Status
 - Workspace tests: all green

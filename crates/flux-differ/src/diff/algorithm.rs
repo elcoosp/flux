@@ -34,7 +34,7 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
     // deterministic. Same class as the round-14 (`Insert`) and round-19
     // (`Reattach`) fixes.
     let mut in_both: Vec<NodeId> = old_ids.intersection(&new_ids).copied().collect();
-    in_both.sort_unstable_by_key(|id| u32::from(*id));
+    in_both.sort_unstable_by_key(|id| *id);
     for id in &in_both {
         let o = old.get(*id).expect("present in old");
         let n = new.get(*id).expect("present in new");
@@ -131,7 +131,7 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
     // (`Reattach`), and round-20 (in-place) fixes; the four sites now all
     // sort before emitting.
     let mut removed: Vec<NodeId> = old_ids.difference(&new_ids).copied().collect();
-    removed.sort_unstable_by_key(|id| u32::from(*id));
+    removed.sort_unstable_by_key(|id| *id);
     let mut inserted: Vec<NodeId> = new_ids.difference(&old_ids).copied().collect();
     let pairs = reattach_pairs(old, new, &old_index, &new_index, &removed, &inserted);
 
@@ -177,7 +177,7 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
         // without this the multi-root insert order (and therefore the frame
         // bytes) varied between runs. Node ids are content-derived, so
         // ordering by them is stable across processes for the same input.
-        (depth_of(*id), parent, index, u32::from(*id))
+        (depth_of(*id), parent, index, *id)
     });
 
     for id in &inserted {
@@ -213,7 +213,7 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
     // reproducible; the pairs are otherwise independent, so the reordering has
     // no semantic effect. Mirrors the round-14 sort applied to `inserted`.
     let mut pairs = pairs;
-    pairs.sort_by_key(|(old_id, _)| u32::from(*old_id));
+    pairs.sort_by_key(|(old_id, _)| *old_id);
     for (old_id, new_id) in pairs {
         let n = new.get(new_id).expect("present in new");
         patches.push(Patch::Reattach {
@@ -283,7 +283,7 @@ mod tests {
             .iter()
             .filter_map(|p| match p {
                 Patch::Insert { parent, index, .. } => {
-                    Some((u32::from(*parent), u32::from(*index)))
+                    Some((*parent, u32::from(*index)))
                 }
                 _ => None,
             })
@@ -348,7 +348,7 @@ mod tests {
         let actual: Vec<u32> = patches
             .iter()
             .filter_map(|p| match p {
-                Patch::Remove { id } => Some(u32::from(*id)),
+                Patch::Remove { id } => Some(*id),
                 _ => None,
             })
             .collect();
