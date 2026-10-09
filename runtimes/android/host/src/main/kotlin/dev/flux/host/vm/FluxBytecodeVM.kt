@@ -79,6 +79,9 @@ public object FluxBytecodeVM {
         capabilities: CapabilityRegistry = CapabilityRegistry.default(),
         permissions: PermissionChecker = AllowAllPermissionChecker,
     ): VmResult {
+        // F2: reset the written set so `snapshot()` reports only this dispatch's
+        // writes, matching the Rust oracle.
+        signals.beginRun()
         val program =
             try {
                 Decoder.decodeProgram(bytecode)
@@ -110,6 +113,7 @@ public object FluxBytecodeVM {
         capabilities: CapabilityRegistry = CapabilityRegistry.default(),
         permissions: PermissionChecker = AllowAllPermissionChecker,
     ): RunResult {
+        signals.beginRun()
         val program =
             try {
                 Decoder.decodeProgram(bytecode)
@@ -141,6 +145,7 @@ public object FluxBytecodeVM {
         capabilities: CapabilityRegistry = CapabilityRegistry.default(),
         permissions: PermissionChecker = AllowAllPermissionChecker,
     ): RunResult {
+        signals.beginRun()
         val offsets: List<UInt> = program.map { it.offset }
         val regs = Array<FluxValue>(16) { FluxValue.NullVal }
         regs[0] = payload
@@ -163,6 +168,7 @@ public object FluxBytecodeVM {
         capabilities: CapabilityRegistry = CapabilityRegistry.default(),
         permissions: PermissionChecker = AllowAllPermissionChecker,
     ): VmResult {
+        signals.beginRun()
         val offsets: List<UInt> = program.map { it.offset }
         val regs = Array<FluxValue>(16) { FluxValue.NullVal }
         regs[0] = payload
