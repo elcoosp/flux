@@ -63,7 +63,7 @@ public class SignalGraph : SignalStore {
     }
 
     /** Marks [id] as [CellState.Error] with [message]; the future resolved with a fault. */
-    public fun markError(
+    public override fun markError(
         id: UInt,
         message: String,
     ) {
