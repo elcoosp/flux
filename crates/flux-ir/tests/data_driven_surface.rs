@@ -740,3 +740,81 @@ fn list_isempty_call_runs_to_bool() {
         "items.isEmpty() on an empty list must set `empty` to true",
     );
 }
+
+/// Regression: ADT variant construction used to be a silent no-op.
+///
+/// Two bugs combined to make any `match` over an ADT value never fire:
+///  1. `record_ctors` was populated only by `record Name { .. }` and never by
+///     ADT variant names (`type Color = RGB(Float, Float, Float)`), so
+///     `state c: Color = RGB(1.0, 0.0, 0.0)` seeded the signal as `Null`.
+///  2. Even had the seed been a record, the emitter wrote the variant tag
+///     into slot 0 and then started positional payload args at slot 0 too,
+///     overwriting it. `MATCH_TAG` requires an `Int` at slot 0.
+///
+/// This test seeds an ADT state directly from Flux source, runs a handler
+/// that matches over it, and asserts an arm fires. It also reconstructs the
+/// ADT value inside the handler (`let c = RGB(…)`) so the runtime emission
+/// path is exercised too.
+#[test]
+fn adt_variant_seed_and_match_round_trip() {
+    let src = "type Color = RGB(Float, Float, Float)
+compo C
+  state c: Color = RGB(1.0, 0.0, 0.0)
+  state seeded_hit: Int = 0
+  state built_hit: Int = 0
+  Button(onPress: || {
+    match c {
+      RGB(_r, _g, _b) => { seeded_hit = 1 }
+    }
+    let rebuilt = RGB(0.0, 1.0, 0.0)
+    match rebuilt {
+      RGB(_r, _g, _b) => { built_hit = 1 }
+    }
+  })
+";
+    let (ast, typed) = typed(src);
+    let lowered = lower(&ast, &typed).expect("lower");
+
+    // The seed for signal 1 (`c`) must be a record whose slot 0 is an Int tag.
+    let seed = lowered
+        .state_seed
+        .iter()
+        .find(|(id, _)| u32::from(*id) == 1)
+        .map(|(_, v)| v.clone())
+        .expect("state c is seeded");
+    let Value::Record(fields) = &seed else {
+        panic!("seed must be a record, was {seed:?}");
+    };
+    assert!(
+        matches!(
+            fields.iter().find(|(k, _)| u32::from(*k) == 0),
+            Some((_, Value::Int(_)))
+        ),
+        "ADT seed must carry an Int variant tag at slot 0; got {seed:?}",
+    );
+
+    // Run the handler. Signal 1 = c (seeded), signal 2 = seeded_hit,
+    // signal 3 = built_hit.
+    let mut signals = flux_vm_ref::InMemorySignals::from_signals([
+        (flux_syntax::SignalId::from(1u32), seed.clone()),
+        (flux_syntax::SignalId::from(2u32), Value::Int(0)),
+        (flux_syntax::SignalId::from(3u32), Value::Int(0)),
+    ]);
+    let (_, closure) = lowered.closures.iter().next().expect("a handler closure");
+    let bc = closure.bytecode.clone();
+    flux_vm_ref::run(&bc, &mut signals, &StringTable::new(), Value::Null)
+        .expect("handler runs");
+
+    let snap = signals.snapshot();
+    let by_id = |id: u32| snap.iter().find(|(k, _)| u32::from(*k) == id).map(|(_, v)| v.clone());
+    assert_eq!(
+        by_id(2),
+        Some(Value::Int(1)),
+        "matching the seed's variant arm must set seeded_hit",
+    );
+    assert_eq!(
+        by_id(3),
+        Some(Value::Int(1)),
+        "matching a freshly-constructed variant must set built_hit",
+    );
+}
