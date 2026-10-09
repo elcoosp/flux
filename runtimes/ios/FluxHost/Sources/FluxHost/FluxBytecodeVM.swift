@@ -27,8 +27,19 @@ public protocol SignalStore {
     mutating func markPending(_ id: UInt32)
     /// Resolves `id` to `value`, marking it `.ready` (an async capability finished).
     mutating func resolveCell(_ id: UInt32, _ value: FluxValue)
-    /// Returns every written signal as a sorted `(id, value)` list.
+    /// Returns every signal **written since the last `beginRun`**, sorted by id.
+    ///
+    /// Must contain only signals the handler wrote — not every seeded cell — or
+    /// every dispatch marks the whole graph dirty and `resume` replays unrelated
+    /// signals back into the store, clobbering writes made during the suspend
+    /// window. The Rust oracle filters on a `written` set for the same reason
+    /// (`flux-vm-ref/src/vm.rs::snapshot`).
     func snapshot() -> [(UInt32, FluxValue)]
+
+    /// Starts a new handler run: `snapshot()` reports only signals written after
+    /// this call. Seeds and `resolveCell` are not `write`-ten and are excluded,
+    /// matching the Rust oracle.
+    mutating func beginRun()
 }
 
 /// In-memory `SignalStore` used by tests, the reconciler and the dev server.
@@ -44,6 +55,8 @@ struct InMemorySignals: SignalStore {
     /// Monotonic id source for `allocateCell`, drawn from a high ceiling so it
     /// never collides with fixed ids like 99.
     private var nextCell: UInt32 = 1_000_000
+    /// Signals explicitly `write`-ten since the last `beginRun` (F2).
+    private var writtenSinceRun: [UInt32: FluxValue] = [:]
 
     init(store: [UInt32: FluxValue] = [:]) {
         self.store = store
@@ -55,6 +68,11 @@ struct InMemorySignals: SignalStore {
     mutating func write(_ id: UInt32, _ value: FluxValue) {
         store[id] = value
         cellStates[id] = .ready
+        writtenSinceRun[id] = value
+    }
+
+    mutating func beginRun() {
+        writtenSinceRun.removeAll(keepingCapacity: true)
     }
 
     mutating func allocateCell() -> UInt32 {
@@ -76,7 +94,7 @@ struct InMemorySignals: SignalStore {
     }
 
     func snapshot() -> [(UInt32, FluxValue)] {
-        store.map { ($0.key, $0.value) }.sorted { $0.0 < $1.0 }
+        writtenSinceRun.map { ($0.key, $0.value) }.sorted { $0.0 < $1.0 }
     }
 }
 
@@ -176,6 +194,9 @@ enum FluxBytecodeVM {
         capRegistry: CapabilityRegistry = .dev,
         permissions: PermissionChecker = AllowAllPermissionChecker()
     ) throws -> VmOutcome {
+        // F2: reset the written set so `snapshot()` reports only this dispatch's
+        // writes, matching the Rust oracle and the Kotlin host.
+        signals.beginRun()
         let offsets = program.map { $0.offset }
         var regs = [FluxValue](repeating: .null, count: 16)
         regs[0] = payload
@@ -722,6 +743,10 @@ enum FluxBytecodeVM {
         permissions: PermissionChecker = AllowAllPermissionChecker(),
         programBytes: [UInt8]
     ) -> Result<RunResult, VmError> {
+        // F2: fresh-run entry (both `runResumable` overloads funnel here).
+        // `resume` bypasses `execTail` and calls `execTailWith` directly, so
+        // this reset does not clobber a suspended run's earlier writes.
+        signals.beginRun()
         var regs = [FluxValue](repeating: .null, count: 16)
         regs[0] = payload
         let gas = entryGas
@@ -745,6 +770,10 @@ enum FluxBytecodeVM {
         permissions: PermissionChecker = AllowAllPermissionChecker(),
         programBytes: [UInt8]
     ) -> Result<RunResult, VmError> {
+        // NOTE: execTailWith is called from BOTH the fresh-start path
+        // (`runResumable` via `execTail`) and the resume path (`resume`). The
+        // `beginRun` reset is done by the *callers* — never here — so `resume`
+        // does not clobber the earlier partial run's written set.
         let offsets = program.map { $0.offset }
         guard let startIndex = offsets.firstIndex(of: startOffset) else {
             return .failure(.invalidDispatch(offset: startOffset))
@@ -1205,6 +1234,7 @@ enum FluxBytecodeVM {
         stringTable: any StringResolver = EmptyStringTable(),
         capRegistry: CapabilityRegistry = .dev
     ) throws -> VmOutcome {
+        signals.beginRun()
         let program = try Instruction.decode(bytecode)
         let offsets = program.map { $0.offset }
         var regs = [FluxValue](repeating: .null, count: 16)
