@@ -818,3 +818,52 @@ compo C
         "matching a freshly-constructed variant must set built_hit",
     );
 }
+
+/// Regression: module-level associated constants (`Name.field = expr`) used to
+/// be typed but never lowered into a runtime value. A call site like
+/// `Button(color: Color.red)` reached the host with `color` = `Null`, silently
+/// dropping every stdlib preset (`Color.red`, `Color.green`, `Font.body`, …).
+///
+/// The fix populates a `const_bindings` table from `Decl::Const` and resolves
+/// `Field { base: Ident(name), field }` against it in `lower_value`.
+#[test]
+fn module_level_const_binding_resolves_in_prop_position() {
+    // Mirror of `stdlib/color.flux`'s `Color.red = RGB(1.0, 0.0, 0.0)` and a
+    // call site that reads it as a prop.
+    let src = "type Color = RGB(Float, Float, Float)\n\
+               Color.red = RGB(1.0, 0.0, 0.0)\n\
+               compo C\n  Button(text: \"x\", color: Color.red)\n";
+    let (ast, typed) = typed(src);
+    let lowered = lower(&ast, &typed).expect("lower");
+
+    // Locate the `color` prop on the Button primitive and assert it is a
+    // tagged Record, not Null.
+    let color_idx = flux_ir::lower::prop_index_for_name("color");
+    let mut found: Option<Value> = None;
+    for id in lowered.arena.all_ids() {
+        let view = lowered.arena.get(id).expect("node");
+        for (k, v) in view.props().fields() {
+            if *k == color_idx {
+                found = Some(v.clone());
+            }
+        }
+    }
+    let value = found.expect("`color` prop is present on the Button node");
+    let Value::Record(fields) = &value else {
+        panic!("`Color.red` must lower to a Record, was {value:?}");
+    };
+    assert!(
+        matches!(
+            fields.iter().find(|(k, _)| u32::from(*k) == 0),
+            Some((_, Value::Int(_)))
+        ),
+        "the const's ADT variant tag must be at slot 0; got {value:?}",
+    );
+    // Channels: (1.0, 0.0, 0.0) at slots 1, 2, 3.
+    let slot1 = fields.iter().find(|(k, _)| u32::from(*k) == 1).map(|(_, v)| v.clone());
+    let slot2 = fields.iter().find(|(k, _)| u32::from(*k) == 2).map(|(_, v)| v.clone());
+    let slot3 = fields.iter().find(|(k, _)| u32::from(*k) == 3).map(|(_, v)| v.clone());
+    assert_eq!(slot1, Some(Value::Float(1.0)));
+    assert_eq!(slot2, Some(Value::Float(0.0)));
+    assert_eq!(slot3, Some(Value::Float(0.0)));
+}
