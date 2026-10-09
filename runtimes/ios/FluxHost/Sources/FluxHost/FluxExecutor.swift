@@ -740,6 +740,27 @@ public final class FluxExecutor: FluxUIKit.FluxExecutor {
         reconciler.view(for: nodeId)
     }
 
+    /// Test-facing accessor: drives the reconciler's dirty-subset pass
+    /// directly, bypassing the async `Task` inside `dispatch`, so a perf
+    /// harness can measure the reconciler in isolation (ADR-0048 Phase 0/1).
+    /// Not part of the public API.
+    @discardableResult
+    func reconcileDirtyForTest(signalIds: Set<UInt32>) -> ReconcileReport {
+        guard let rootId = currentRootId else {
+            return ReconcileReport()
+        }
+        let report = reconciler.reconcileDirty(rootId: rootId, signalIds: signalIds)
+        lastReconcile = report
+        return report
+    }
+
+    /// Test-facing accessor: writes a signal directly into the executor's
+    /// graph, so a perf harness can drive the reconciler without going through
+    /// the async dispatch path. Not part of the public API.
+    func setSignalForTest(_ id: UInt32, _ value: FluxValue) {
+        graph.write(id, value)
+    }
+
     /// Registers handler bytecode so native controls can fire it later. The
     /// bytecode is decoded once into `[Instruction]` and cached (R3) so dispatch
     /// never re-decodes; re-registering invalidates the prior cache entry.
