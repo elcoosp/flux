@@ -88,6 +88,19 @@ pub enum WireError {
         n: usize,
     },
 
+    /// Two closures in one frame share a `HandlerId`.
+    ///
+    /// Audit §3.3 / F5: `write_closures` used to `panic!` on a duplicate id,
+    /// which killed the pipeline thread during a valid hot-reload (a
+    /// user-authored rename that reintroduced an id). The frame-level encoder
+    /// now returns this error, and the dev server converts it into a
+    /// diagnostic `Error` frame instead of crashing the session.
+    #[error("wire encode: duplicate handler id {id:#x} in closure stream")]
+    DuplicateHandlerId {
+        /// The duplicated handler id.
+        id: flux_syntax::HandlerId,
+    },
+
     /// A length-prefixed collection or string exceeded the `u32` width used
     /// by protocol v3 for user-authored collections (ADR-0059). In practice
     /// unreachable on 64-bit platforms (< 4 billion items), but the encode
