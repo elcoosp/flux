@@ -41,7 +41,7 @@ public object TelemetryBridge {
     public fun flush() {
         if (pending.isEmpty()) return
         val batch = mutableListOf<TelemetryEvent>()
-        while (pending.isNotEmpty()) batch.add(pending.poll()!!)
+        while (true) { batch.add(pending.poll() ?: break) }
         val out =
             ByteArrayOutputStream().apply {
                 writeUIntLE(MAGIC)
@@ -56,7 +56,7 @@ public object TelemetryBridge {
     /** Drains pending events without flushing (test/transport helper). */
     public fun takePending(): List<TelemetryEvent> {
         val drained = mutableListOf<TelemetryEvent>()
-        while (pending.isNotEmpty()) drained.add(pending.poll()!!)
+        while (true) { drained.add(pending.poll() ?: break) }
         return drained
     }
 
