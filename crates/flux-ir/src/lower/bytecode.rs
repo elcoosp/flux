@@ -1824,7 +1824,13 @@ impl<'a> Emitter<'a> {
                     let tag_reg = self.alloc_reg()?;
                     self.emit_load_int_const(tag_reg, variant_tag(&ident.name) as i64);
                     self.emit_set_field(dst, 0, tag_reg);
-                    let mut positional: u16 = 0;
+                    // Positional args start at slot 1, after the reserved tag
+                    // slot 0. The previous `positional = 0` made the first
+                    // positional arg overwrite the tag the emitter just wrote,
+                    // so any `RGB(1.0, 0.0, 0.0)` / `Font("", 17.0, …)` built
+                    // inside a handler reached `MATCH_TAG` with a non-Int at
+                    // slot 0 and never matched.
+                    let mut positional: u16 = 1;
                     for (arg, reg) in args.iter().zip(arg_regs.iter()) {
                         let idx: u16 = match arg {
                             flux_parser::Arg::Named { name, .. } => {
@@ -1840,7 +1846,7 @@ impl<'a> Emitter<'a> {
                                 idx
                             }
                             _ => {
-                                // Positional args keep their sequential slot.
+                                // Positional args start at slot 1 (see above).
                                 let p = positional;
                                 positional = positional.saturating_add(1);
                                 p
