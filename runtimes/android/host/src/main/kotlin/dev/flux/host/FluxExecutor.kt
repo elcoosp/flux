@@ -296,9 +296,9 @@ public class FluxExecutor(
                 if (frame.isControl) return@withContext
                 // A server compile error (Appendix D §D.12.3) keeps the last good tree
                 // on screen and raises the unified error; we never touch the shadow tree.
-                if (frame.serverError != null) {
-                    serverError = frame.serverError
-                    onError?.invoke(frame.serverError!!)
+                frame.serverError?.let { err ->
+                    serverError = err
+                    onError?.invoke(err)
                     return@withContext
                 }
                 registerFrameHandlers(frame)
