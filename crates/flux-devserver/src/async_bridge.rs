@@ -93,7 +93,7 @@ impl AsyncBridge {
                 return Err(flux_ir_serde::WireError::InvalidTag {
                     // `tag` is the offending cell id truncated to u8 for the
                     // diagnostic; the full id is in `context`.
-                    tag: (u32::from(frame.cell) & 0xFF) as u8,
+                    tag: (frame.cell & 0xFF) as u8,
                     context: "await_suspend.cell_already_parked",
                     at: 0,
                 });
@@ -124,7 +124,6 @@ impl AsyncBridge {
     /// capability completion path (`AsyncResolver` → `resume`), not by direct
     /// calls to this method.
     #[cfg(test)]
-    #[must_use]
     pub fn settle(
         &mut self,
         cell: SignalId,
@@ -135,7 +134,6 @@ impl AsyncBridge {
 
     /// Settles `cell` with a capability error payload (test seam only).
     #[cfg(test)]
-    #[must_use]
     pub fn settle_error(
         &mut self,
         cell: SignalId,
@@ -149,7 +147,6 @@ impl AsyncBridge {
     /// If a handler is parked on it, the `Resume` frame bytes are returned to
     /// send to the host; otherwise the value is retained as `early` for the
     /// next `AwaitSuspend` for that cell.
-    #[must_use]
     pub fn resume(
         &mut self,
         cell: SignalId,

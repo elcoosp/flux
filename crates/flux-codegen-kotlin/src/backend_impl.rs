@@ -332,7 +332,7 @@ import kotlinx.coroutines.launch\n\n"
             indent,
             &format!("val anim = animateFloatAsState(targetValue = 0f, animationSpec = {spec})"),
         );
-        em.line(indent, &format!("AnimatedContent(targetState = anim) {{"));
+        em.line(indent, "AnimatedContent(targetState = anim) {");
         em.emit_trailing_or_children(trailing, node_id, indent + Self::CHILD_STEP);
         em.line(indent, "}");
     }

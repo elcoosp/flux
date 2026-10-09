@@ -521,7 +521,7 @@ impl TelemetryFrame {
             return None;
         }
         let version = r.u8("telemetry.version").ok()?;
-        if version < crate::frame::PROTOCOL_VERSION_MIN || version > PROTOCOL_VERSION {
+        if !(crate::frame::PROTOCOL_VERSION_MIN..=PROTOCOL_VERSION).contains(&version) {
             return None;
         }
         let kind = r.u8("telemetry.kind").ok()?;
@@ -570,7 +570,7 @@ impl EnrichedTelemetryFrame {
             return None;
         }
         let version = r.u8("telemetry.version").ok()?;
-        if version < crate::frame::PROTOCOL_VERSION_MIN || version > PROTOCOL_VERSION {
+        if !(crate::frame::PROTOCOL_VERSION_MIN..=PROTOCOL_VERSION).contains(&version) {
             return None;
         }
         let kind = r.u8("telemetry.kind").ok()?;
@@ -643,7 +643,7 @@ impl HostAnnounceFrame {
             return None;
         }
         let version = r.u8("host_announce.version").ok()?;
-        if version < crate::frame::PROTOCOL_VERSION_MIN || version > PROTOCOL_VERSION {
+        if !(crate::frame::PROTOCOL_VERSION_MIN..=PROTOCOL_VERSION).contains(&version) {
             return None;
         }
         let kind = r.u8("host_announce.kind").ok()?;
@@ -803,7 +803,7 @@ impl DebugCommandFrame {
             return None;
         }
         let version = r.u8("debugcmd.version").ok()?;
-        if version < crate::frame::PROTOCOL_VERSION_MIN || version > PROTOCOL_VERSION {
+        if !(crate::frame::PROTOCOL_VERSION_MIN..=PROTOCOL_VERSION).contains(&version) {
             return None;
         }
         let kind = r.u8("debugcmd.kind").ok()?;

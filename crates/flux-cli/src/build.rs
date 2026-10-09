@@ -143,8 +143,8 @@ pub(crate) fn run_with(
             let app_code = match platform {
                 Platform::Ios => {
                     let prelude = "import SwiftUI\n";
-                    let body = if component_code.starts_with(prelude) {
-                        component_code[prelude.len()..].trim_start().to_owned()
+                    let body = if let Some(rest) = component_code.strip_prefix(prelude) {
+                        rest.trim_start().to_owned()
                     } else {
                         component_code.clone()
                     };

@@ -784,7 +784,7 @@ compo C
     let seed = lowered
         .state_seed
         .iter()
-        .find(|(id, _)| u32::from(*id) == 1)
+        .find(|(id, _)| *id == 1)
         .map(|(_, v)| v.clone())
         .expect("state c is seeded");
     let Value::Record(fields) = &seed else {
@@ -792,7 +792,7 @@ compo C
     };
     assert!(
         matches!(
-            fields.iter().find(|(k, _)| u32::from(*k) == 0),
+            fields.iter().find(|(k, _)| *k == 0),
             Some((_, Value::Int(_)))
         ),
         "ADT seed must carry an Int variant tag at slot 0; got {seed:?}",
@@ -812,7 +812,7 @@ compo C
     let snap = signals.snapshot();
     let by_id = |id: u32| {
         snap.iter()
-            .find(|(k, _)| u32::from(*k) == id)
+            .find(|(k, _)| *k == id)
             .map(|(_, v)| v.clone())
     };
     assert_eq!(
@@ -862,7 +862,7 @@ fn module_level_const_binding_resolves_in_prop_position() {
     };
     assert!(
         matches!(
-            fields.iter().find(|(k, _)| u32::from(*k) == 0),
+            fields.iter().find(|(k, _)| *k == 0),
             Some((_, Value::Int(_)))
         ),
         "the const's ADT variant tag must be at slot 0; got {value:?}",
@@ -870,15 +870,15 @@ fn module_level_const_binding_resolves_in_prop_position() {
     // Channels: (1.0, 0.0, 0.0) at slots 1, 2, 3.
     let slot1 = fields
         .iter()
-        .find(|(k, _)| u32::from(*k) == 1)
+        .find(|(k, _)| *k == 1)
         .map(|(_, v)| v.clone());
     let slot2 = fields
         .iter()
-        .find(|(k, _)| u32::from(*k) == 2)
+        .find(|(k, _)| *k == 2)
         .map(|(_, v)| v.clone());
     let slot3 = fields
         .iter()
-        .find(|(k, _)| u32::from(*k) == 3)
+        .find(|(k, _)| *k == 3)
         .map(|(_, v)| v.clone());
     assert_eq!(slot1, Some(Value::Float(1.0)));
     assert_eq!(slot2, Some(Value::Float(0.0)));
@@ -908,7 +908,7 @@ fn list_remove_at_uses_the_register_value_not_the_register_number() {
         lowered
             .state_seed
             .iter()
-            .find(|(k, _)| u32::from(*k) == id)
+            .find(|(k, _)| *k == id)
             .map(|(_, v)| v.clone())
     };
 

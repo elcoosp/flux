@@ -158,8 +158,7 @@ impl Divergence {
         let mut out = String::new();
         let display_line = self.left_line;
         out.push_str(&format!("trace divergence at line {}:\n", display_line));
-        for i in start..idx {
-            let f = &left[i];
+        for f in &left[start..idx] {
             out.push_str(&format!("  left  {}: {}\n", f.line, f.canonical));
         }
         out.push_str(&format!(

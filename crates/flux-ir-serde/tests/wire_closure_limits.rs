@@ -43,7 +43,7 @@ fn duplicate_handler_ids_return_wire_error() {
         &[],
     );
     match frame.try_to_bytes() {
-        Err(WireError::DuplicateHandlerId { id }) => assert_eq!(u32::from(id), 7),
+        Err(WireError::DuplicateHandlerId { id }) => assert_eq!(id, 7),
         other => panic!("expected DuplicateHandlerId, got {other:?}"),
     }
 }

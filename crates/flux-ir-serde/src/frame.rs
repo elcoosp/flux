@@ -293,7 +293,7 @@ fn read_frame_type(bytes: &[u8]) -> Result<(u8, FrameKind, &[u8]), WireError> {
     // Anything newer than us is a forward-compat failure (host built for a
     // future spec); anything older than the minimum is a v1 host, which the
     // project no longer ships. Both reject fail-closed before field decode.
-    if version < PROTOCOL_VERSION_MIN || version > PROTOCOL_VERSION {
+    if !(PROTOCOL_VERSION_MIN..=PROTOCOL_VERSION).contains(&version) {
         return Err(WireError::InvalidTag {
             tag: version,
             context: "frame.version",

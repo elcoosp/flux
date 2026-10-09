@@ -806,8 +806,8 @@ impl Pipeline {
             for id in lowered
                 .closures
                 .values()
-                .map(|c| u32::from(c.id))
-                .chain(lowered.prop_thunks.values().map(|c| u32::from(c.id)))
+                .map(|c| c.id)
+                .chain(lowered.prop_thunks.values().map(|c| c.id))
             {
                 next_handler_base = next_handler_base.max(id.saturating_add(1));
             }
