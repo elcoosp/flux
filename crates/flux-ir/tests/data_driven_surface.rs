@@ -867,3 +867,50 @@ fn module_level_const_binding_resolves_in_prop_position() {
     assert_eq!(slot2, Some(Value::Float(0.0)));
     assert_eq!(slot3, Some(Value::Float(0.0)));
 }
+
+/// Regression (F1): the emitter passes the *register* holding the index to
+/// `LIST_INSERT` / `LIST_REMOVE`. All three VMs previously read the operand
+/// byte itself as the index, so `items.removeAt(i)` removed by `i`'s register
+/// number rather than by the value in `i`. This test runs the whole pipeline
+/// (`parse → type_check → lower → run`) on a handler that removes by an
+/// indirect index.
+#[test]
+fn list_remove_at_uses_the_register_value_not_the_register_number() {
+    // `i = 2` (not 1) so `i`'s value differs from the register number it
+    // happens to be loaded into — otherwise a regression that reads the
+    // register number as the index would coincidentally produce the same
+    // result and the test would not catch the bug.
+    let src = "compo C
+        state items: List[Int] = [10, 20, 30]
+        state i: Int = 2
+        Button(onPress: || { items.removeAt(i) })
+    ";
+    let (ast, typed) = typed(src);
+    let lowered = lower(&ast, &typed).expect("lower");
+    let seed_by_id = |id: u32| {
+        lowered
+            .state_seed
+            .iter()
+            .find(|(k, _)| u32::from(*k) == id)
+            .map(|(_, v)| v.clone())
+    };
+
+    let mut signals = flux_vm_ref::InMemorySignals::from_signals([
+        (flux_syntax::SignalId::from(1u32), seed_by_id(1).expect("items seeded")),
+        (flux_syntax::SignalId::from(2u32), seed_by_id(2).expect("i seeded")),
+    ]);
+    let (_, closure) = lowered.closures.iter().next().expect("handler");
+    flux_vm_ref::run(&closure.bytecode, &mut signals, &StringTable::new(), Value::Null)
+        .expect("handler runs");
+
+    let after = signals
+        .snapshot()
+        .into_iter()
+        .find(|(k, _)| *k == flux_syntax::SignalId::from(1u32))
+        .map(|(_, v)| v);
+    assert_eq!(
+        after,
+        Some(Value::List(vec![Value::Int(10), Value::Int(20)])),
+        "`items.removeAt(i)` with `i = 2` must remove index 2, not register-r",
+    );
+}
