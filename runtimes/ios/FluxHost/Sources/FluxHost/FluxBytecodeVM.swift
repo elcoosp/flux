@@ -461,7 +461,8 @@ enum FluxBytecodeVM {
             // --- FLUX-072: dynamic-list mutation (mirror flux-vm-ref). ---
             case .listInsert:
                 let list = instr.u8(0)
-                let idx = Int(instr.u8(1))
+                // The index operand is a *register* holding an Int (audit F1).
+                let idx = try Self.listIndex(regs[Int(instr.u8(1))], offset: instr.offset)
                 let val = reg(instr.u8(2))
                 guard case var .list(items) = regs[Int(list)] else {
                     throw VmError.typeMismatch(offset: instr.offset)
@@ -482,7 +483,8 @@ enum FluxBytecodeVM {
                 // corrupting the list. Ported the correct indices from
                 // `flux-vm-ref` and from the correct `.listInsert` arm.
                 let list = instr.u8(0)
-                let idx = Int(instr.u8(1))
+                // The index operand is a *register* holding an Int (audit F1).
+                let idx = try Self.listIndex(regs[Int(instr.u8(1))], offset: instr.offset)
                 guard case var .list(items) = regs[Int(list)] else {
                     throw VmError.typeMismatch(offset: instr.offset)
                 }
@@ -1031,7 +1033,8 @@ enum FluxBytecodeVM {
             // --- FLUX-072: dynamic-list mutation (mirror flux-vm-ref). ---
             case .listInsert:
                 let list = instr.u8(0)
-                let idx = Int(instr.u8(1))
+                // The index operand is a *register* holding an Int (audit F1).
+                let idx = try Self.listIndex(regs[Int(instr.u8(1))], offset: instr.offset)
                 let val = reg(instr.u8(2))
                 guard case var .list(items) = regs[Int(list)] else {
                     throw VmError.typeMismatch(offset: instr.offset)
@@ -1052,7 +1055,8 @@ enum FluxBytecodeVM {
                 // corrupting the list. Ported the correct indices from
                 // `flux-vm-ref` and from the correct `.listInsert` arm.
                 let list = instr.u8(0)
-                let idx = Int(instr.u8(1))
+                // The index operand is a *register* holding an Int (audit F1).
+                let idx = try Self.listIndex(regs[Int(instr.u8(1))], offset: instr.offset)
                 guard case var .list(items) = regs[Int(list)] else {
                     throw VmError.typeMismatch(offset: instr.offset)
                 }
@@ -1462,7 +1466,8 @@ enum FluxBytecodeVM {
                 regs[Int(instr.u8(0))] = .bool(regs[src] == .null)
             case opcodeIndex[.listInsert]!:
                 let list = instr.u8(0)
-                let idx = Int(instr.u8(1))
+                // The index operand is a *register* holding an Int (audit F1).
+                let idx = try Self.listIndex(regs[Int(instr.u8(1))], offset: instr.offset)
                 let val = reg(instr.u8(2))
                 guard case var .list(items) = regs[Int(list)] else {
                     throw VmError.typeMismatch(offset: instr.offset)
@@ -1474,7 +1479,8 @@ enum FluxBytecodeVM {
                 regs[Int(list)] = .list(items)
             case opcodeIndex[.listRemove]!:
                 let list = instr.u8(0)
-                let idx = Int(instr.u8(1))
+                // The index operand is a *register* holding an Int (audit F1).
+                let idx = try Self.listIndex(regs[Int(instr.u8(1))], offset: instr.offset)
                 guard case var .list(items) = regs[Int(list)] else {
                     throw VmError.typeMismatch(offset: instr.offset)
                 }
@@ -1538,6 +1544,21 @@ enum FluxBytecodeVM {
     private static func requireInt(_ v: FluxValue, at offset: Int) throws -> Int64 {
         guard case let .int(i) = v else { throw VmError.typeMismatch(offset: offset) }
         return i
+    }
+
+    /// Reads a list index from a register: a non-negative `.int` that fits
+    /// `Int`. `LIST_INSERT` / `LIST_REMOVE` take the index from a *register*
+    /// holding an `Int` (matching `LIST_GET` and the emitter's
+    /// `compile_list_method`), not from the operand byte (audit F1). Negative
+    /// or oversized -> `indexOutOfBounds`; non-Int -> `typeMismatch`.
+    private static func listIndex(_ value: FluxValue, offset: Int) throws -> Int {
+        guard case .int(let i) = value else {
+            throw VmError.typeMismatch(offset: offset)
+        }
+        guard i >= 0, i <= Int64(Int.max) else {
+            throw VmError.indexOutOfBounds(offset: offset)
+        }
+        return Int(i)
     }
 
     private static func requireFloat(_ v: FluxValue, at offset: Int) throws -> Double {
