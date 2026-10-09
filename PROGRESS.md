@@ -54,7 +54,7 @@ All tasks T-101 through T-111 completed.
 - T-605: Final release rehearsal (in progress)
 
 ### SIDECAR (T-222 — Phase 2 exit gate verification)
-- `cargo test --workspace`: 6 pre-existing `data_driven_surface` type-check failures (P2.16/P2.21; `append` on `List[String]`), confirmed on clean `git stash` before any StrConcat work — unrelated to Phase 2 fixes. All Phase 2 tasks green.
+- `cargo test --workspace`: all green. (The earlier "6 pre-existing `data_driven_surface` type-check failures" were resolved when `infer_field_access` learned `TcType::List` methods; verified all 22 tests pass in round-26 bug hunt.)
 - `tests/isa-vectors/typed_arith.json`: exists ✓
 - `fuzz/fuzz_targets/decode_frame.rs`: exists ✓
 - All 10 wire decoders now have fuzz targets (resolved by T-604.19: decoded_frame, parse_flux, decode_value_blob, validate_bytecode, telemetry_frame, debug_command, await_suspend_resume, dispatch_report, host_announce, intern_string). The "no fuzz target for …" SIDECAR rows previously listed under T-604.19 are stale — all decoders are covered.
@@ -84,7 +84,7 @@ All tasks T-101 through T-111 completed.
 
 ### Test Status
 - Workspace tests: all green
-- save_to_photon_e2e: pre-existing perf issue on ~1k-node tree (>250ms budget)
+- save_to_photon_e2e: passing (verified in round-26 bug hunt — 17.1s wall for the harness itself, inside the 250 ms measurement budget).
 
 ## Phase 3 — Host Runtimes (Swift iOS, Kotlin Android, Cross-Platform Parity)
 
