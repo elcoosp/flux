@@ -59,3 +59,26 @@ see commit history. Those four fixes are prerequisites for option 2:
 - `flux-ir/arena/blob.rs`         manual_saturating_arithmetic
 - `flux-ir/lower/bytecode.rs`     too_many_arguments (targeted allow)
 - `flux-ir/lower/{bytecode,mod}`  useless_conversion (u16::from on u16)
+
+## Workspace clippy --all-targets results (2026-10-09, round 26)
+
+`cargo clippy --workspace --all-targets --all-features -- -D warnings`
+still fails on **pre-existing** findings in two crates even without the
+new gate (they were masked earlier because the raw `cargo clippy` run
+was not using `--all-targets`):
+
+### `flux-differ` (lib + lib test)
+- 6x `clippy::useless_conversion` — `u32::from(*id)` where `*id: u32`
+  (`src/diff/algorithm.rs:37,134,180,216`, `src/diff/tree.rs:75,86`)
+- 2x `clippy::unnecessary_map_or` — `.map_or(false, …)` -> `.is_some_and`
+  (`src/diff/tree.rs:103,122`)
+- 1x `clippy::module_inception` (lib test)
+- 2x additional findings in lib test
+
+### `flux-codegen-core`
+- 1x `clippy::double_must_use`
+- 5x `clippy::needless_borrow`
+
+Both are outside the F10 scope (which named `flux-ir-serde` and
+`flux-devserver`). They block the F10 lint gate for the workspace as a
+whole and are part of the option-1/2 work tracked here.
