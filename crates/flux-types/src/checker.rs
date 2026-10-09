@@ -149,6 +149,21 @@ impl Checker {
     }
 
     /// Fully applies the current substitution to `ty`.
+    ///
+    /// A substitution that fails to converge after 64 passes implies a cycle
+    /// (e.g. `X→Y, Y→X`), which cannot arise from a well-typed program or a
+    /// sound type checker — it indicates a checker bug. `resolve` is on the
+    /// hot path of every `infer`/`expect` call, so the fix here cannot be a
+    /// full `Result<TcType, TypeError>` migration: that would ripple through
+    /// every caller. Instead:
+    ///
+    /// * `debug_assert!(false, …)` fires in dev / test builds so a regression
+    ///   surfaces immediately at the point of failure.
+    /// * In release the function returns the last (unconverged) form, which is
+    ///   a bounded, non-panicking answer. It is wrong, but it cannot crash the
+    ///   host on user input — the audit's explicit requirement ("never a panic
+    ///   on user input"). A follow-up can migrate `resolve` to a fallible
+    ///   signature once the surrounding error plumbing supports it.
     fn resolve(&self, ty: &TcType) -> TcType {
         let mut out = ty.clone();
         for _ in 0..64 {
@@ -158,13 +173,11 @@ impl Checker {
             }
             out = next;
         }
-        // A substitution that fails to converge after 64 passes implies
-        // a cycle (e.g. X→Y, Y→X), which cannot arise from a well-typed
-        // program or a sound type checker. This is a checker bug.
-        unreachable!(
-            "resolve exceeded 64 substitution passes without convergence \
-             — substitution contains a cycle"
-        )
+        debug_assert!(
+            false,
+            "resolve exceeded 64 substitution passes — substitution contains a cycle",
+        );
+        out
     }
 
     fn fresh(&mut self) -> u32 {
