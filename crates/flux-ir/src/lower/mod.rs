@@ -405,14 +405,28 @@ impl<'a> Lowerer<'a> {
                     .insert(comp.name.name.clone(), comp.clone());
                 self.lower_component(comp)
             }
-            // fn / type / trait / capability / import / use / const are
-            // type-level only; the type checker handled them, so we skip them.
+            // fn / trait / capability / import / use / const are type-level
+            // only; the type checker handled them, so we skip them.
             Decl::Fn(_)
-            | Decl::Type(_)
             | Decl::Trait(_)
             | Decl::Capability(_)
             | Decl::Use(_)
             | Decl::Const(_) => Ok(()),
+            // An ADT declaration registers each *variant* name in the same
+            // constructor registry a `record` type uses. Variants are called
+            // exactly like record constructors (`RGB(1.0, 0.0, 0.0)`,
+            // `Font("", 17.0, Regular, Normal)`), and their value is a tagged
+            // record — without this registration, every variant-call seed and
+            // handler-level variant construction silently lowered to `Null`,
+            // and any `match` over the value never matched a single arm.
+            // (Bug: `stdlib/color.flux` `Color.red = RGB(1.0, 0.0, 0.0)` was
+            // reaching the host as Null.)
+            Decl::Type(type_decl) => {
+                for variant in &type_decl.variants {
+                    self.record_ctors.insert(variant.name.name.clone());
+                }
+                Ok(())
+            }
             // Record types register their constructor name so handler calls to
             // `Name(field: …)` lower as value construction (FLUX-072).
             Decl::Record(rec) => {
@@ -1002,9 +1016,25 @@ impl<'a> Lowerer<'a> {
                 // `record_ctors` guard keeps them out of this path.
                 if let flux_parser::ExprKind::Ident(ident) = &callee.kind {
                     if self.record_ctors.contains(&ident.name) {
+                        // Slot 0 carries the constructor's variant tag (the
+                        // FNV-1a of the constructor name, `variant_tag`). This
+                        // matches the runtime emitter's `compile_call`
+                        // ADT/variant branch (which writes the same tag into
+                        // slot 0 before any payload) and the `Record { .. }`
+                        // literal path above. Without a tag at slot 0, the
+                        // VM's `MATCH_TAG` returns `false` for the value and
+                        // every `match` arm is skipped.
+                        //
+                        // Positional payload args therefore start at slot 1;
+                        // a positional arg at slot 0 previously overwrote the
+                        // variant tag with the arg's value.
                         let mut lowered: Vec<(flux_syntax::PropIdx, Value)> =
-                            Vec::with_capacity(args.len());
-                        let mut next_positional: u16 = 0;
+                            Vec::with_capacity(args.len() + 1);
+                        lowered.push((
+                            flux_syntax::PropIdx::from(0u16),
+                            Value::Int(i64::from(variant_tag(ident.name.as_str()))),
+                        ));
+                        let mut next_positional: u16 = 1;
                         for arg in args {
                             let (idx, value) = match arg {
                                 flux_parser::Arg::Named { name, value } => (
