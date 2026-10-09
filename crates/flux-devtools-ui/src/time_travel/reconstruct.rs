@@ -395,4 +395,85 @@ mod tests {
         assert_eq!(full.bytecode_offset, Some(2));
         assert_eq!(full.signals.len(), 1);
     }
+
+    /// Regression (F13.5): `apply_event` mutates the state *in place*. The
+    /// previous implementation cloned the base on every `state_at(i)` call,
+    /// making a scrub to index `i` O(i × state-size). This test pins the
+    /// in-place contract by driving `apply_event` directly through a shared
+    /// state and comparing the result to the pure `reconstruct_state` fold.
+    #[test]
+    fn apply_event_in_place_matches_pure_fold() {
+        let events = vec![
+            vm_step(4, 1),
+            signal_write(1, 10),
+            vm_step(8, 2),
+            signal_write(2, 20),
+        ];
+
+        let pure = reconstruct_state(&ReconstructedState::base(), &events);
+
+        let mut in_place = ReconstructedState::base();
+        for e in &events {
+            apply_event(&mut in_place, e);
+        }
+
+        assert_eq!(in_place, pure, "in-place fold must equal the pure fold");
+    }
+
+    /// Regression (F13.5): a state reconstructed by folding a *prefix* of the
+    /// event stream must be a snapshot of the same fold at that index — the
+    /// key invariant the time-travel scrubber depends on. Without this, an
+    /// `apply_event` that silently clobbered unrelated fields would make the
+    /// scrubber return a state that never existed at any point in the run.
+    #[test]
+    fn prefix_fold_is_a_snapshot_of_the_full_run() {
+        let events = vec![
+            vm_step(4, 1),
+            signal_write(1, 10),
+            vm_step(8, 2),
+            signal_write(2, 20),
+            signal_write(1, 100),
+        ];
+
+        let full = reconstruct_state(&ReconstructedState::base(), &events);
+
+        for cut in 0..=events.len() {
+            let prefix = reconstruct_state(&ReconstructedState::base(), &events[..cut]);
+            // Replay the *remaining* events onto the prefix. The result must
+            // equal the full run: no event's effect may depend on state that
+            // `apply_event` failed to update.
+            let mut replayed = prefix.clone();
+            for e in &events[cut..] {
+                apply_event(&mut replayed, e);
+            }
+            assert_eq!(
+                replayed, full,
+                "prefix-then-suffix at cut {cut} must equal the full fold",
+            );
+        }
+    }
+
+    /// Regression (F13.5): re-applying the same event twice must not double-
+    /// count. `SignalWrite` upserts by id (last write wins) and `VmStep` is a
+    /// full register/ip/gas replacement, so a buggy implementation that
+    /// *accumulated* (e.g. `signals.push((id, value))` instead of upsert)
+    /// would fail this.
+    #[test]
+    fn replayed_signal_write_is_idempotent() {
+        let e = signal_write(7, 42);
+        let mut s = ReconstructedState::base();
+        apply_event(&mut s, &e);
+        apply_event(&mut s, &e);
+        let matching: Vec<_> = s
+            .signals
+            .iter()
+            .filter(|(id, _)| *id == SignalId::from(7u32))
+            .collect();
+        assert_eq!(
+            matching.len(),
+            1,
+            "a write to the same signal id must upsert, not accumulate",
+        );
+        assert_eq!(matching[0].1, Value::Int(42));
+    }
 }
