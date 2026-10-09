@@ -82,3 +82,59 @@ was not using `--all-targets`):
 Both are outside the F10 scope (which named `flux-ir-serde` and
 `flux-devserver`). They block the F10 lint gate for the workspace as a
 whole and are part of the option-1/2 work tracked here.
+
+## Concrete site enumeration (2026-10-09, round 26 follow-up)
+
+After the workspace reached clippy-clean under `--all-targets
+--all-features -- -D warnings`, applying the F10 gate exactly as the
+plan specified exposes **25 pre-existing sites** in production code
+(test code is exempted via the `#[cfg_attr(test, allow(...))]`).
+
+### `crates/flux-ir-serde/src/frame.rs` (11 sites)
+
+All are the well-known "this encoder assumes its own caller produced
+well-formed data" family:
+
+- L283 `bytes[0..4].try_into().unwrap()` — magic read in `from_bytes`
+- L336 `try_encode_str(...).expect(...)` — inside an infallible `to_bytes`
+- L796 `self.try_to_bytes().expect(...)` — `InitFrame::to_bytes` shim
+- L873 `self.try_encode_into(buf).expect(...)` — `InitFrame::encode_into`
+- L1011 `self.try_to_bytes().expect(...)` — `DeltaFrame::to_bytes` shim
+- L1059 `self.try_encode_into(buf).expect(...)` — `DeltaFrame::encode_into`
+- L1231 `payload[0..4].try_into().unwrap()` — heartbeat decode
+- L1280 `u16::try_from(bytes.len()).expect(...)` — InternString length
+- L1301 `u16::try_from(len).expect(...)` — InternString length (audit H14)
+- L1420 `payload[0..4].try_into().unwrap()` — signal-meta decode
+- (one more in the same file; see the count)
+
+### `crates/flux-ir-serde/src/resume.rs` (1 site)
+
+- L160 `self.try_to_bytes().expect(...)` — `ResumeFrame::to_bytes` shim
+
+### `crates/flux-ir-serde/src/telemetry.rs` (>= 1 site)
+
+- L219 `...expect(...)` in the telemetry frame encoders
+
+### `crates/flux-devserver/src/*` (remaining)
+
+Findings continue through the devserver's frame construction sites.
+Full list available by running:
+
+    cargo clippy -p flux-ir-serde -p flux-devserver --lib --bins -- \
+      -D warnings
+    # with the gate applied to both lib.rs files
+
+### Why the gate was reverted rather than landed with `#[allow]`
+
+The audit plan is explicit that the gate is meant to make regressions
+*hard* failures. Landing it with site-by-site `#[allow]` would defeat
+that: a future regression would just add one more allow. The
+correct path is to fix the 25 sites (each is mechanical — convert the
+`to_bytes`/`encode_into` shims into `try_*`, propagate `WireError` up
+to the frame construction call sites in the devserver, and change the
+`bytes[0..4].try_into().unwrap()` reads to `Reader::u32` calls) and
+then land the gate unmodified.
+
+Estimated effort: ~2 hours, mechanical. **Recommendation:** option 2
+(crate-by-crate ratchet) starting with `flux-ir-serde`, per the
+existing "Recommended next step" section.
