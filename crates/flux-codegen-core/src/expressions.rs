@@ -130,6 +130,27 @@ fn render_list<B: Backend>(items: &[Expr]) -> String {
     B::list_literal(&rendered)
 }
 
+/// Renders a general call expression `callee(args...)` as native source.
+///
+/// The callee is rendered as an identifier or a `base.field` path (matching
+/// the two shapes `render_expr` already handles); the args are rendered
+/// through `render_expr`. Round 34: previously any call inside a handler that
+/// was not `RouterNav.navigate(...)` fell through to `unsupported_placeholder`,
+/// so `{ handleTap() }`, `{ Api.fetch() }`, and `{ await Cap.method(x) }` all
+/// emitted the placeholder instead of the call the user wrote.
+#[must_use]
+fn render_call<B: Backend>(callee: &Expr, args: &[flux_parser::Arg]) -> String {
+    let callee_text = match &callee.kind {
+        ExprKind::Ident(i) => i.name.clone(),
+        ExprKind::Field { base, field, .. } => {
+            format!("{}.{}", render_expr::<B>(base), field.name)
+        }
+        _ => return B::unsupported_placeholder(),
+    };
+    let arg_texts: Vec<String> = args.iter().map(|a| render_expr::<B>(a.value())).collect();
+    format!("{}({})", callee_text, arg_texts.join(", "))
+}
+
 /// Renders one statement of a handler/lambda body.
 #[must_use]
 fn render_stmt<B: Backend>(stmt: &Expr) -> String {
@@ -138,8 +159,21 @@ fn render_stmt<B: Backend>(stmt: &Expr) -> String {
             format!("{} = {}", render_expr::<B>(target), render_expr::<B>(value))
         }
         ExprKind::Await(inner) => {
-            // Audit T-403.8: backend-specific await rendering (Swift await vs Kotlin expr.await()).
-            let rendered = render_expr::<B>(inner);
+            // Audit T-403.8: backend-specific await rendering (Swift await vs
+            // Kotlin expr.await()).
+            //
+            // Round 34: render the awaited expression through `render_call`
+            // when it is a call, so the awaited call survives as real source
+            // (`Auth.login("u")`) rather than collapsing to the
+            // `unsupported_placeholder` fallback (`/* unsupported expr */ 0`).
+            // Before this fix, every `await someFn()` handler statement
+            // emitted `/* unsupported expr */ 0.await()` (Kotlin) or
+            // `await 0 /* unsupported */` (Swift) — i.e. a silent loss of the
+            // entire awaited call, no matter which backend.
+            let rendered = match &inner.kind {
+                ExprKind::Call { callee, args, .. } => render_call::<B>(callee, args),
+                _ => render_expr::<B>(inner),
+            };
             B::render_await(&rendered)
         }
         ExprKind::Call { callee, args, .. } => {
@@ -153,7 +187,13 @@ fn render_stmt<B: Backend>(stmt: &Expr) -> String {
                     return B::router_navigate_expr(&rendered);
                 }
             }
-            B::unsupported_placeholder()
+            // Round 34: render any other call faithfully instead of emitting
+            // the `unsupported_placeholder`. Before this fix, a bare call
+            // handler (`onPress: { handleTap() }`) was silently replaced with
+            // the placeholder, so every tap handler that was a plain call
+            // vanished from the generated code. Only the RouterNav branch and
+            // the Assign branch reached the emitter with the user's body.
+            render_call::<B>(callee, args)
         }
         _ => render_expr::<B>(stmt),
     }
