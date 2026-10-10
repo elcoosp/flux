@@ -610,7 +610,18 @@ fn generated_kotlin_parses() {
     // collides with `kotlin.collections.List`). The previous version
     // concatenated every example into ONE file and produced noise that hid
     // the real codegen defects (audit §8).
-    let dir = std::env::temp_dir();
+    //
+    // Round-38: write the generated files into a *per-process* scratch dir.
+    // Before this fix the test wrote `flux_codegen_kotlin_<name>.kt` directly
+    // under `std::env::temp_dir()`, so two concurrent `cargo test`
+    // invocations (a still-running prior run, or a CI matrix that fans out
+    // this binary) shared the same filename: one process would
+    // `std::fs::remove_file` the file while the other's long-running
+    // `kotlinc` was still reading it, and kotlinc reported
+    // "source file or directory not found". Per-pid isolation removes the
+    // collision. (Flake surfaced in round 37's full-workspace sweep.)
+    let dir = std::env::temp_dir().join(format!("flux_codegen_kotlin_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("create per-pid scratch dir");
     let mut failures: Vec<(String, String)> = Vec::new();
     for (name, src) in examples() {
         // The generated code is a complete `.kt` file: it already emits its
