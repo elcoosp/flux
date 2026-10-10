@@ -456,9 +456,19 @@ impl Backend for Swift {
                     em.line(indent + step, &format!("case {}:", em.render(lit)));
                     em.emit_expr_body(&arm.body, indent + 2 * step);
                 }
-                // Audit T-403.5: Guard pattern emits exact-type test (not default).
-                flux_parser::MatchPatternKind::Guard { name, .. } => {
-                    em.line(indent + step, &format!("case let .{}(_):", name.name));
+                // A `s if s > 90 => …` guard arm. Swift expresses this as
+                // `case let s where <cond>:`. Round 35: the previous emission
+                // was `case let .<name>(_):`, which (a) dropped the guard
+                // condition entirely and (b) produced invalid Swift whenever
+                // `<name>` was not an ADT case (which is the common case —
+                // a guard arm binds a value, it does not match an enum case).
+                // The `where` clause is the language's real guard form.
+                flux_parser::MatchPatternKind::Guard { name, cond } => {
+                    let cond_text = em.render(cond);
+                    em.line(
+                        indent + step,
+                        &format!("case let {} where {}:", name.name, cond_text),
+                    );
                     em.emit_expr_body(&arm.body, indent + 2 * step);
                 }
                 _ => {
