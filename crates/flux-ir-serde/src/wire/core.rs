@@ -126,6 +126,22 @@ pub enum WireError {
         /// The count decoded from the handler section.
         actual: u32,
     },
+    /// The encoder encountered a `#[non_exhaustive]` variant it has no arm
+    /// for. The tag byte is written before the match, so this is only reached
+    /// when a new variant was added to `flux-syntax` without a matching
+    /// encoder (audit P2.25). Returning a typed error instead of panicking
+    /// keeps the pipeline thread alive and surfaces the gap as an Error frame
+    /// (F18).
+    #[error(
+        "wire encode: {context}: variant tag {tag:#04x} has no encoder arm \
+         (flux-syntax added a #[non_exhaustive] variant without a matching codec)"
+    )]
+    UnsupportedVariant {
+        /// Encoder site (e.g. `"patch.encode"`).
+        context: &'static str,
+        /// The variant's tag byte as written to the wire before the match.
+        tag: u8,
+    },
 }
 
 /// Hard ceiling on a decoded `Init`/`Delta` payload (Appendix D §D.12 + D.1),

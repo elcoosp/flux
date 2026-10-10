@@ -59,10 +59,16 @@ pub(crate) fn encode_patch(w: &mut super::cursor::Writer, patch: &Patch) -> Resu
         // `Patch` is `#[non_exhaustive]` (flux-syntax): external additions
         // require a `_` arm. All variants produced by the differ are handled
         // above; an unknown variant means a new `Patch` variant was added to
-        // `flux-syntax` without a matching encoder (audit P2.25). Replacing
-        // this with a no-op desyncs the wire stream because the tag byte
-        // was already written.
-        _ => unreachable!("unknown Patch variant — add an encoder arm for it (audit P2.25)"),
+        // `flux-syntax` without a matching encoder (audit P2.25). Return a
+        // typed error (F18) so the pipeline thread survives and the gap
+        // surfaces as an Error frame; the caller drops the buffer on `Err`, so
+        // the already-written tag byte is discarded with it.
+        _ => {
+            return Err(WireError::UnsupportedVariant {
+                context: "patch.encode",
+                tag: patch.tag(),
+            });
+        }
     }
     Ok(())
 }
