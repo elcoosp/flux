@@ -121,12 +121,17 @@ pub(crate) fn parse_items(
     while m < tokens.len() && tokens[m].text != "{" {
         m += 1;
     }
-    let (_body, end) = if m < tokens.len() {
-        parse_body(tokens, m).unwrap_or_default()
+    // Propagate parse_body's error instead of swallowing it via
+    // `unwrap_or_default()`. Before this fix, an unbalanced body returned
+    // `(vec![], 0)` — i.e. `end = 0` — which the caller (parse_body) would
+    // then assign to its own `i`, causing an infinite loop over the token
+    // stream. Errors here mean the emitted source drifted from the grammar,
+    // which is exactly what the recognizer's error type is for.
+    let (_, end) = if m < tokens.len() {
+        parse_body(tokens, m)?
     } else {
         (vec![], m + 1)
     };
-    let _ = _body;
     Ok((
         ViewNode::ForEach {
             collection,
@@ -241,4 +246,27 @@ pub(crate) fn parse_view(
         },
         i,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tokenize::tokenize;
+
+    /// Regression (round 31): `parse_items` must propagate an error from the
+    /// nested `parse_body` call. Before the fix, `unwrap_or_default()` turned a
+    /// body-parsing failure into `(vec![], 0)` — returning `end = 0` to the
+    /// caller, which assigns it to its own loop index `i`, causing an infinite
+    /// loop over the token stream.
+    #[test]
+    fn parse_items_propagates_unbalanced_body_error() {
+        // An `items(...)` whose body brace is never closed.
+        let tokens = tokenize("items(list, key = it) {");
+        match parse_items(&tokens, 0) {
+            Err(_) => {}
+            Ok((_, end)) => panic!(
+                "unbalanced items must propagate Err, got Ok with end={end}"
+            ),
+        }
+    }
 }
