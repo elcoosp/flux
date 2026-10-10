@@ -82,12 +82,24 @@ Real bugs fixed:
   `u16` even at v3 (ADR-0059 lists only `frame::encode_str` +
   `StringEntry.text`). Needs design decision.
 
-### 2.5 Still open (needs design decisions)
+### 2.5 All filed issues CLOSED (rounds 63–68)
 
-- **FLUX-F16** — allocation-cap parity (Kotlin vs Swift; 8 vs 16 bytes per
-  record field, cap*8 vs 8 for lists, >= vs > boundary).
-- **FLUX-F17** — crash reporter source-map resolution (release-mode).
-- **FLUX-F21** — telemetry v3 string width (extend ADR-0059 or not).
+- **FLUX-F16** CLOSED — canonical allocation cost model (8 bytes/slot)
+  documented in `mlp-appendices.md` §E.3.1; Rust VM counter added (with
+  `SuspendState.allocated_bytes`); Swift corrected (was `× 16` / flat `+8` /
+  `>`); Kotlin was already correct; boundary ISA vector
+  `tests/isa-vectors/memory_cap_boundary.json` added (Rust conformance
+  106/106).
+- **FLUX-F17** CLOSED — codegen source-map sidecar (`<stem>.flux.map.json`)
+  emitted by `flux build`; both Swift and Kotlin `CrashReporter`s resolve
+  top frames against it and populate `FluxError.excerpt`. Schema documented
+  in `mlp-spec.md` §14.5.
+- **FLUX-F21** CLOSED — ADR-0059 amended to include telemetry strings;
+  `telemetry::encode_str`/`decode_str` are now version-dispatched (u32 at
+  v3), with `Reader::version()` threading the frame version through nested
+  sub-readers. `>u16::MAX` regression test added.
+
+**No open issues in the audit plan or its follow-ups remain.**
 
 ## 3. Session conventions
 
@@ -186,6 +198,13 @@ Preserved verbatim:
 | 59 | re-verify VM + wire-fixture gate |
 | 60 | Swift tests via FluxApp scheme: 47 passed / 2 skipped / 0 failures |
 | 61 | Kotlin host + app: BUILD SUCCESSFUL |
+| 62 | handoff refresh (rounds 45–61) |
+| 63 | F21: ADR-0059 amended; telemetry strings widen at v3 (both sides atomic) |
+| 64 | F16: canonical cost model decision (8 bytes/slot) |
+| 65 | F16: Swift VM corrected (×16→×8, cap×8, `>=`) |
+| 66 | F16: Rust counter + SuspendState field + boundary ISA vector; Rust 106/106 |
+| 67 | F17: sidecar design (source-map emitted by `flux build`) |
+| 68 | F17: sidecar + `write_source_map` + both CrashReporters; CLI regression test; F17 CLOSED |
 
 **Session owner:** the user
 **Convention reminder:** the user runs scripts as `./wr.sh`. Respond with
