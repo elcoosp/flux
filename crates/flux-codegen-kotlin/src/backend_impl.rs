@@ -461,6 +461,20 @@ import kotlinx.coroutines.launch\n\n"
         }) else {
             return;
         };
+        // F20 fix: Kotlin's `when(subject)` has no guard clause. A match that
+        // contains any `s if cond =>` arm must be lowered as a Boolean-test
+        // `when { cond -> … }` chain, where the guard's binding is scoped via
+        // `.let`. The generic path below (subject-based `when`) is used for
+        // every other match. Before this fix, guard arms emitted
+        // `is <name> ->` — invalid Kotlin that also silently dropped the
+        // condition.
+        let has_guard = arms
+            .iter()
+            .any(|a| matches!(a.pattern.kind, flux_parser::MatchPatternKind::Guard { .. }));
+        if has_guard {
+            Self::emit_match_with_guards(em, indent, &subject, &arms);
+            return;
+        }
         em.line(indent, &format!("when ({subject}) {{"));
         let step = Self::CHILD_STEP;
         for arm in &arms {
@@ -512,13 +526,18 @@ import kotlinx.coroutines.launch\n\n"
                 // invalid Kotlin but read like a type test — a reader could
                 // not tell the guard condition had been dropped. See
                 // docs/issues/FLUX-F20-kotlin-match-guard.md.
-                flux_parser::MatchPatternKind::Guard { name, cond } => {
-                    let cond_text = em.render(cond);
+                // Guard arms are handled by the top-level `has_guard` branch
+                // in `emit_match`, which routes the whole match through
+                // `emit_match_with_guards`. This arm is unreachable, but
+                // `#[non_exhaustive]` requires a total match; emit an
+                // explicit marker so a future refactor that bypasses the
+                // dispatcher does not silently emit invalid Kotlin.
+                flux_parser::MatchPatternKind::Guard { name, .. } => {
                     em.line(
                         indent + step,
                         &format!(
-                            "/* unsupported match guard: {} if {} */ ->",
-                            name.name, cond_text
+                            "/* unreachable: guard arm `{}` routed to emit_match_with_guards */ else ->",
+                            name.name
                         ),
                     );
                     em.emit_expr_body(&arm.body, indent + 2 * step);
@@ -571,6 +590,84 @@ import kotlinx.coroutines.launch\n\n"
         }
     }
 }
+
+impl Kotlin {
+/// Emits a match that contains at least one `s if cond =>` guard arm as a
+/// Kotlin `when { … }` Boolean-test chain. The subject is hoisted into a
+/// single `val __flux_scrut` so the expression is evaluated exactly once,
+/// then each arm's condition is wrapped in `__flux_scrut.let { name -> … }`
+/// to scope the guard's binding name without needing textual substitution.
+///
+/// * `Guard { name, cond }` → `__flux_scrut.let { name -> cond }`
+/// * `Literal(lit)`         → `(__flux_scrut == lit)`
+/// * `Wildcard`             → `else ->`
+/// * any Variant arm mixed with a guard → a visible `false ->` arm so the
+///   surrounding `when` still parses (the mixed case is not yet modelled,
+///   but never silently mismatches).
+fn emit_match_with_guards(
+    em: &mut Emitter<'_, Self>,
+    indent: usize,
+    subject: &str,
+    arms: &[flux_parser::MatchArm],
+) {
+    let step = Self::CHILD_STEP;
+    em.line(indent, "run {");
+    em.line(indent + step, &format!("val __flux_scrut = {subject}"));
+    em.line(indent + step, "when {");
+    for arm in arms {
+        match &arm.pattern.kind {
+            flux_parser::MatchPatternKind::Guard { name, cond } => {
+                let cond_text = em.render(cond);
+                em.line(
+                    indent + 2 * step,
+                    &format!(
+                        "__flux_scrut.let {{ {} -> {} }} -> {{",
+                        name.name, cond_text
+                    ),
+                );
+                em.emit_expr_body(&arm.body, indent + 3 * step);
+                em.line(indent + 2 * step, "}");
+            }
+            flux_parser::MatchPatternKind::Literal(lit) => {
+                let lit_text = em.render(lit);
+                em.line(
+                    indent + 2 * step,
+                    &format!("(__flux_scrut == {lit_text}) -> {{"),
+                );
+                em.emit_expr_body(&arm.body, indent + 3 * step);
+                em.line(indent + 2 * step, "}");
+            }
+            flux_parser::MatchPatternKind::Wildcard => {
+                em.line(indent + 2 * step, "else -> {");
+                em.emit_expr_body(&arm.body, indent + 3 * step);
+                em.line(indent + 2 * step, "}");
+            }
+            // The parser treats a bare `_` as `Variant { name: "_", … }`
+            // rather than `Wildcard` (matching `exhaust::has_catch_all`).
+            // Recognize that shape as the catch-all so a guard chain ends
+            // with the user's `_ => …` arm rather than a `false ->`.
+            flux_parser::MatchPatternKind::Variant { name, .. } if name.name == "_" => {
+                em.line(indent + 2 * step, "else -> {");
+                em.emit_expr_body(&arm.body, indent + 3 * step);
+                em.line(indent + 2 * step, "}");
+            }
+            _ => {
+                // Variant + guard mix is not modelled; emit a `false ->`
+                // arm so the surrounding `when` still parses.
+                em.line(
+                    indent + 2 * step,
+                    "false -> { /* unsupported variant arm in guard chain */",
+                );
+                em.emit_expr_body(&arm.body, indent + 3 * step);
+                em.line(indent + 2 * step, "}");
+            }
+        }
+    }
+    em.line(indent + step, "}");
+    em.line(indent, "}");
+}
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -650,3 +747,5 @@ mod tests {
         }
     }
 }
+
+
