@@ -63,6 +63,11 @@ pub(crate) fn encode_value(w: &mut Writer, value: &Value) -> Result<(), WireErro
 /// uses it to drive the persistence-parity trace (FLUX-082) without inventing a
 /// second codec.
 #[must_use]
+// F18: parity/storage public helper. Its inputs are storage values the
+// host itself produced, so an over-u16 blob is not reachable in the
+// current wire model. A future migration to `try_encode_value_blob`
+// would remove this allow.
+#[allow(clippy::expect_used)]
 pub fn encode_value_blob(value: &Value) -> Vec<u8> {
     let mut w = Writer::new();
     // Scaffold: `encode_value_blob` is used by the parity persistence tests

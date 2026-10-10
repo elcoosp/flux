@@ -334,6 +334,10 @@ fn r_ensure_capacity(payload: &[u8], pos: usize, count: usize, _ctx: &'static st
     Some(())
 }
 
+// F18: legacy panicking wrapper retained for callers whose strings are
+// bounded by construction (frame headers, path strings). Prefer
+// `try_encode_str` for any user-authored string.
+#[allow(clippy::expect_used)]
 fn encode_str(w: &mut Writer, s: &str) {
     // Panicking convenience wrapper. Prefer `try_encode_str` in any code path
     // that must not crash on a user-authored payload >64 KB.
@@ -796,6 +800,10 @@ impl InitFrame {
     ///
     /// Panics on encoder overflow. Prefer [`Self::try_to_bytes`] in production.
     #[must_use]
+// F18: public convenience shim. Panics on encoder overflow; production
+// paths use `try_to_bytes`. Kept for API compatibility with the frame
+// construction code and for tests.
+#[allow(clippy::expect_used)]
     pub fn to_bytes(&self) -> Vec<u8> {
         self.try_to_bytes()
             .expect("frame.init.to_bytes: value exceeds wire length limits")
@@ -873,6 +881,8 @@ impl InitFrame {
     /// production paths. The dev server migrated to the fallible API so a
     /// user-authored program too large for the wire format surfaces as a
     /// typed `Error` frame instead of killing the pipeline thread (audit H14).
+// F18: public convenience shim — prefer `try_encode_into`.
+#[allow(clippy::expect_used)]
     pub fn encode_into(&self, buf: &mut Vec<u8>) {
         self.try_encode_into(buf)
             .expect("frame.init.encode: value exceeds wire length limits");
@@ -1011,6 +1021,8 @@ impl DeltaFrame {
     ///
     /// Panics on encoder overflow. Prefer [`Self::try_to_bytes`] in production.
     #[must_use]
+// F18: public convenience shim — prefer `try_to_bytes`.
+#[allow(clippy::expect_used)]
     pub fn to_bytes(&self) -> Vec<u8> {
         self.try_to_bytes()
             .expect("frame.delta.to_bytes: value exceeds wire length limits")
@@ -1059,6 +1071,8 @@ impl DeltaFrame {
     /// Panics on encoder overflow — prefer [`Self::try_encode_into`] in
     /// production paths (see the `InitFrame` counterpart for the H14
     /// rationale).
+// F18: public convenience shim — prefer `try_encode_into`.
+#[allow(clippy::expect_used)]
     pub fn encode_into(&self, buf: &mut Vec<u8>) {
         self.try_encode_into(buf)
             .expect("frame.delta.encode: value exceeds wire length limits");
@@ -1279,6 +1293,10 @@ pub struct InternStringFrame {
 impl Frame {
     /// Builds an `InternString` request frame from raw bytes (Appendix D §D.12.6).
     #[must_use]
+// F18: public constructor panics on a >64 KB payload. Not reachable
+// from the wire path (the frame decoder rejects a u16-prefixed payload
+// first); kept for the test constructor shape.
+#[allow(clippy::expect_used)]
     pub fn intern_string(bytes: &[u8]) -> InternStringFrame {
         InternStringFrame {
             version: PROTOCOL_VERSION,

@@ -50,6 +50,10 @@ impl Writer {
     /// Migrate any encoder that can see user-authored sizes (a 70k-item
     /// `List` prop, a >65k-entry state seed) to [`Self::u16_len_checked`] as
     /// that migration lands.
+// F18: legacy panicking wrapper. All production encoder sites now use
+// `u16_len_checked` / `count_prefix`; this shim remains for a handful
+// of tests and internal sites whose inputs are bounded by construction.
+#[allow(clippy::panic)]
     pub(crate) fn u16_len(&mut self, n: usize, what: &'static str) {
         match self.u16_len_checked(n, what) {
             Ok(()) => {}

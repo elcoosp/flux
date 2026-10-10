@@ -156,6 +156,8 @@ impl ResumeFrame {
     /// wrapper exists for tests and for sites that cannot yet propagate
     /// the error (audit H14 migration is complete on the async bridge).
     #[must_use]
+// F18: public convenience shim — prefer `try_to_bytes`.
+#[allow(clippy::expect_used)]
     pub fn to_bytes(&self) -> Vec<u8> {
         self.try_to_bytes()
             .expect("resume: value exceeds wire length limits")
