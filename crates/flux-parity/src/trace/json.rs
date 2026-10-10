@@ -56,16 +56,7 @@ impl Json {
             Json::Num(n) => out.push_str(n),
             Json::Str(s) => {
                 out.push('"');
-                for ch in s.chars() {
-                    match ch {
-                        '"' => out.push_str("\\\""),
-                        '\\' => out.push_str("\\\\"),
-                        '\n' => out.push_str("\\n"),
-                        '\r' => out.push_str("\\r"),
-                        '\t' => out.push_str("\\t"),
-                        c => out.push(c),
-                    }
-                }
+                write_json_string_body(out, s);
                 out.push('"');
             }
             Json::Arr(items) => {
@@ -94,18 +85,44 @@ impl Json {
                     }
                     first = false;
                     out.push('"');
-                    for ch in k.chars() {
-                        if ch == '"' {
-                            out.push_str("\\\"");
-                        } else {
-                            out.push(ch);
-                        }
-                    }
+                    write_json_string_body(out, k);
                     out.push_str("\":");
                     v.write(out);
                 }
                 out.push('}');
             }
+        }
+    }
+}
+
+/// Writes the body of a JSON string (without the surrounding quotes),
+/// escaping every character that would otherwise make the output invalid
+/// JSON or that changes on a round-trip.
+///
+/// Round-74 fix: the previous per-value writer only handled `"`, `\\`, `\n`,
+/// `\r`, and `\t`. A string containing any other control character
+/// (`\u0000`..`\u001F`) was emitted as a **raw** byte — producing output
+/// that JSON readers reject (a NUL inside a string is invalid), and losing the
+/// escape on every round-trip. The object-key writer was even narrower: it
+/// escaped only `"`, so a key containing a backslash emitted a bare `\`,
+/// corrupting the key to a different string.
+fn write_json_string_body(out: &mut String, s: &str) {
+    for ch in s.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{08}' => out.push_str("\\b"),
+            '\u{0C}' => out.push_str("\\f"),
+            // Every other control character (U+0000..U+001F, except the ones
+            // already handled above) is emitted as a `\uXXXX` escape.
+            c if (c as u32) < 0x20 => {
+                use std::fmt::Write as _;
+                let _ = write!(out, "\\u{:04x}", c as u32);
+            }
+            c => out.push(c),
         }
     }
 }
@@ -438,5 +455,25 @@ mod tests {
     fn rejects_garbage() {
         assert!(Json::parse("{not json}").is_err());
         assert!(Json::parse("{\"a\":}").is_err());
+    }
+
+    /// Round-74 regression: a value containing a control character must be
+    /// re-escaped as `\\uXXXX`, never emitted as a raw byte (which is invalid
+    /// JSON).
+    #[test]
+    fn value_control_chars_are_escaped() {
+        let v = Json::parse(r#"{"s":"a\u0000b"}"#).unwrap();
+        let c = v.canonical();
+        assert!(c.contains("\\u0000"), "canonical form must escape NUL: {c:?}");
+        assert!(!c.contains('\u{0}'), "canonical form must not contain a raw NUL");
+    }
+
+    /// Round-74 regression: an object key containing a backslash must escape
+    /// it as `\\\\`; the previous writer emitted it bare and corrupted the key.
+    #[test]
+    fn key_backslash_is_escaped() {
+        let v = Json::parse(r#"{"a\\b":1}"#).unwrap();
+        let c = v.canonical();
+        assert!(c.contains(r#""a\\b":"#), "canonical form must escape the key's backslash: {c:?}");
     }
 }
