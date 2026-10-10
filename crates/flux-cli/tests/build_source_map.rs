@@ -56,12 +56,9 @@ fn build_writes_source_map_sidecar() {
 }
 
 fn find_file(root: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
-    for e in walk(root) {
-        if e.file_name().and_then(|s| s.to_str()) == Some(name) {
-            return Some(e);
-        }
-    }
-    None
+    walk(root)
+        .into_iter()
+        .find(|e| e.file_name().and_then(|s| s.to_str()) == Some(name))
 }
 
 fn walk(root: &std::path::Path) -> Vec<std::path::PathBuf> {
