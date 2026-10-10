@@ -280,7 +280,11 @@ fn read_frame_type(bytes: &[u8]) -> Result<(u8, FrameKind, &[u8]), WireError> {
             available: bytes.len(),
         });
     }
-    let magic = u32::from_le_bytes(bytes[0..4].try_into().unwrap());
+    // F18: replace `try_into().unwrap()` with direct byte indexing. The
+    // `bytes.len() < 6` guard above makes the slice total, and indexing a
+    // fixed-length array of bytes has no panic path — this is the same
+    // transformation the frame encoders use elsewhere.
+    let magic = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
     if magic != MAGIC {
         return Err(WireError::InvalidTag {
             tag: (magic & 0xFF) as u8,
@@ -1228,7 +1232,9 @@ impl Frame {
         if payload.len() < 4 {
             return None;
         }
-        let seq = u32::from_le_bytes(payload[0..4].try_into().unwrap());
+        // F18: the `payload.len() < 4` guard makes the slice total, so direct
+        // byte indexing removes the (already-safe) `try_into().unwrap()`.
+        let seq = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
         Some(HeartbeatFrame { version, seq, kind })
     }
 }
@@ -1293,12 +1299,15 @@ impl Frame {
         if payload.len() < 2 {
             return None;
         }
-        let len = u16::from_le_bytes([payload[0], payload[1]]) as usize;
-        let raw = payload.get(2..2 + len)?;
+        // F18: `len` was decoded from a u16 wire prefix, so the re-encoding
+        // `u16::try_from(len)` was infallible — replace the `.expect()` with
+        // the value we already have in hand.
+        let len = u16::from_le_bytes([payload[0], payload[1]]);
+        let raw = payload.get(2..2 + len as usize)?;
         Some(InternStringFrame {
             version,
             kind,
-            len: u16::try_from(len).expect("InternString payload exceeds u16 len (audit H14)"),
+            len,
             bytes: raw.to_vec(),
         })
     }
@@ -1417,7 +1426,9 @@ impl Frame {
         if payload.len() < 4 {
             return None;
         }
-        let id = u32::from_le_bytes(payload[0..4].try_into().unwrap());
+        // F18: `payload.len() < 4` guard makes the slice total (same as the
+        // heartbeat read above).
+        let id = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
         Some(StringInternedFrame { version, kind, id })
     }
 }
