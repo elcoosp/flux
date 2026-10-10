@@ -236,7 +236,14 @@ fn generated_swift_type_checks() {
         eprintln!("swiftc not on PATH; skipping swiftc -typecheck check");
         return;
     }
-    let dir = std::env::temp_dir();
+    // Round-38: write into a per-process scratch dir. Before this fix the
+    // test wrote `flux_codegen_swift_<name>.swift` directly under
+    // `std::env::temp_dir()`, so two concurrent `cargo test` invocations
+    // shared the same filename and could `remove_file` the file the other
+    // process's `swiftc` was still reading — the same class of flake
+    // already closed in `flux-codegen-kotlin`'s pipeline test.
+    let dir = std::env::temp_dir().join(format!("flux_codegen_swift_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("create per-pid scratch dir");
     let mut failures: Vec<(String, String)> = Vec::new();
     for (name, src) in examples() {
         let generated = codegen_example(name, src);
