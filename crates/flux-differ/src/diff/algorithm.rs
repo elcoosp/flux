@@ -133,6 +133,18 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
     let mut removed: Vec<NodeId> = old_ids.difference(&new_ids).copied().collect();
     removed.sort_unstable_by_key(|id| *id);
     let mut inserted: Vec<NodeId> = new_ids.difference(&old_ids).copied().collect();
+    // Round-37: sort `inserted` *before* `reattach_pairs`, not only before
+    // the later `Insert` emission loop. `reattach_pairs` populates each
+    // `candidates[key]` vector by iterating `inserted`; when two inserted
+    // nodes share `(component_id, kind, parent, index)` — an edit that
+    // shuffles the spans (hence NodeIds) of two same-component siblings at
+    // the same slot — the "first untaken candidate" the pair picks depends
+    // on `inserted`'s order. That vector came from `AHashSet::difference`,
+    // whose iteration order is randomized per process, so the `Reattach`
+    // `new_id` field — and therefore the frame bytes — varied between runs.
+    // Same bug class as the round-14/19/20/26 sorts on `inserted` (Emit),
+    // `pairs` (Reattach), `in_both` (in-place), and `removed` (Remove).
+    inserted.sort_unstable_by_key(|id| *id);
     let pairs = reattach_pairs(old, new, &old_index, &new_index, &removed, &inserted);
 
     for id in &removed {
@@ -364,6 +376,115 @@ mod tests {
             actual.len(),
             15,
             "all 15 removable children must produce a Remove patch",
+        );
+    }
+
+    /// Regression (round-37): `reattach_pairs` must be deterministic even when
+    /// two inserted nodes share the `(component_id, kind, parent, index)` key
+    /// used for pairing. Such a pair comes from `AHashSet::difference`, whose
+    /// order is randomized per process — before this fix, the "first untaken
+    /// candidate" the pairing picked (and therefore the `Reattach::new_id`
+    /// the host received) varied between runs. The fix sorts `inserted` before
+    /// calling `reattach_pairs`, so the pairing is stable.
+    ///
+    /// Setup: two same-slot, same-parent old children with different spans
+    /// (hence different NodeIds), and two new children with the SAME shapes in
+    /// the reverse order (also different NodeIds). Each old child pairs with
+    /// exactly one new child. The assertion pins *which* pairing was chosen.
+    #[test]
+    fn reattach_pairs_is_deterministic_when_candidates_share_a_key() {
+        use flux_syntax::Patch;
+
+        let mk = |id: u32, component: u32, span: Span| Node {
+            id: NodeId::from(id),
+            kind: NodeKind::Primitive,
+            component_id: ComponentId::from(component),
+            props: Props::from_fields(vec![]),
+            children: vec![],
+            handlers: vec![],
+            span,
+        };
+        let mk_root = |children: &[u32]| Node {
+            id: NodeId::from(1u32),
+            kind: NodeKind::Component,
+            component_id: ComponentId::from(0u32),
+            props: Props::from_fields(vec![]),
+            children: children.iter().map(|c| Child::Node(NodeId::from(*c))).collect(),
+            handlers: vec![],
+            span: Span::new(0, 0, 10),
+        };
+
+        // Two old children, same key: parent 1, index 0 / 1, component 100 / 101,
+        // kinds both Primitive; spans distinguish the NodeIds.
+        let old = {
+            let mut b = ArenaBuilder::new();
+            b.pack(mk_root(&[10, 11]));
+            b.pack(mk(10, 100, Span::new(0, 10, 20)));
+            b.pack(mk(11, 101, Span::new(0, 20, 30)));
+            b.finish()
+        };
+        // Two new children: same keys (component 100 / 101, parent 1,
+        // indices 0 / 1), but swapped spans so the NodeIds swap positions.
+        let new = {
+            let mut b = ArenaBuilder::new();
+            b.pack(mk_root(&[20, 21]));
+            b.pack(mk(20, 100, Span::new(0, 20, 30)));
+            b.pack(mk(21, 101, Span::new(0, 10, 20)));
+            b.finish()
+        };
+
+        let patches = diff(&old, &new);
+        // Every child must be paired as a Reattach; no Remove / Insert / Update.
+        let reattached: Vec<(NodeId, NodeId)> = patches
+            .iter()
+            .filter_map(|p| match p {
+                Patch::Reattach { old_id, new_id, .. } => Some((*old_id, *new_id)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            reattached.len(),
+            2,
+            "both sibling swaps must pair into Reattach patches; got {patches:?}"
+        );
+        // The pairing must be sorted by old_id (the emission-time sort).
+        let mut sorted = reattached.clone();
+        sorted.sort_by_key(|(o, _)| *o);
+        assert_eq!(reattached, sorted, "Reattach emission must be sorted by old_id");
+
+        // The pairing itself must be deterministic: for each old_id, the
+        // chosen new_id must be the *smallest* newly-inserted candidate that
+        // shares its key — which the fix guarantees, because `inserted` is
+        // sorted ascending before `reattach_pairs` runs.
+        for (old_id, new_id) in &reattached {
+            // Each old_id must appear exactly once.
+            assert_eq!(
+                reattached.iter().filter(|(o, _)| o == old_id).count(),
+                1,
+                "old_id {old_id} paired more than once",
+            );
+            // The chosen new_id must not be greater than any other candidate
+            // that shares the same key (component_id + parent slot + index).
+            let chosen = *new_id;
+            let other = reattached
+                .iter()
+                .find(|(o, _)| o != old_id)
+                .map(|(_, n)| *n)
+                .expect("both sides of the pair");
+            assert!(
+                chosen != other,
+                "two distinct Reattach pairs must not share a new_id ({chosen})"
+            );
+        }
+
+        // Run the diff again and confirm identical output (determinism gate).
+        // `Patch` does not implement `PartialEq`, so compare the `Debug`
+        // rendering — structurally identical patches render identically.
+        let again = diff(&old, &new);
+        assert_eq!(
+            format!("{patches:?}"),
+            format!("{again:?}"),
+            "diff must be reproducible across calls (reattach pairing must be deterministic)"
         );
     }
 }
