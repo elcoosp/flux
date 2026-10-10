@@ -372,7 +372,15 @@ fn pattern_label(pattern: &MatchPattern) -> String {
         MatchPatternKind::Wildcard => "_".to_owned(),
         MatchPatternKind::Variant { name, .. } => name.name.clone(),
         MatchPatternKind::Literal(expr) => canonicalize_expr(&render_expr(expr)),
-        MatchPatternKind::Guard { name, .. } => name.name.clone(),
+        // Round 33: keep the guard condition in the label. Before this
+        // change, the label was just the binding name, so
+        // `s if s > 90` and `s if s > 80` produced the same tree label —
+        // the release-vs-dev parity comparison could not distinguish two
+        // guarded arms with different conditions. The condition is
+        // canonicalized so Swift/Kotlin spellings compare equal.
+        MatchPatternKind::Guard { name, cond } => {
+            format!("{} if {}", name.name, canonicalize_expr(&render_expr(cond)))
+        }
         _ => "<pattern>".to_owned(),
     }
 }
