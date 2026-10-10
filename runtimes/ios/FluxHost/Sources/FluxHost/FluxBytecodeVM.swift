@@ -147,6 +147,13 @@ enum FluxBytecodeVM {
     static let entryGas: UInt32 = 100_000
 
     /// The per-dispatch allocation budget in bytes (§NFR-SEC-003 / ADR-0015).
+    /// Per-dispatch allocation ceiling (`NFR-SEC-003`, spec mlp-appendices
+    /// §E.3.1). The canonical cost model is 8 bytes per record field, 8
+    /// bytes per list backing slot (charged on `ALLOC_LIST`, not per push),
+    /// and 8 bytes per `LIST_PUSH`. The counter fires when
+    /// `allocated >= allocationBudget`. Any change must be mirrored in the
+    /// Kotlin VM, the Rust VM, and the boundary ISA vector.
+    ///
     /// A closure may allocate at most this many bytes across `ALLOC_RECORD` /
     /// `ALLOC_LIST` / `LIST_PUSH` before the VM raises `MemoryExhausted`. This
     /// bounds runaway handlers so a single bad closure cannot exhaust device
@@ -406,11 +413,11 @@ enum FluxBytecodeVM {
             case .allocRecord:
                 let dst = instr.u8(0)
                 let count = Int(instr.u16(1))
-                // Each field reserves two words of storage (a `UInt16` prop index
-                // plus a `FluxValue` tagged union). Bounds the total against the
-                // per-dispatch allocation budget (§NFR-SEC-003 / ADR-0015).
-                allocated &+= UInt64(count) &* 16
-                if allocated > allocationBudget {
+                // Each field reserves 8 bytes of logical slot cost (§E.3.1,
+                // canonical model). Bounds the total against the per-dispatch
+                // allocation budget (§NFR-SEC-003 / ADR-0015).
+                allocated &+= UInt64(count) &* 8
+                if allocated >= allocationBudget {
                     throw VmError.memoryExhausted(offset: instr.offset)
                 }
                 var fields: [(UInt16, FluxValue)] = []
@@ -439,9 +446,12 @@ enum FluxBytecodeVM {
                 regs[Int(dst)] = .bool(recordsEqual(x, y))
 
             case .allocList:
-                // A freshly allocated list reserves one word for its header.
-                allocated &+= 8
-                if allocated > allocationBudget {
+                // ALLOC_LIST reserves `cap` backing slots (one 8-byte slot
+                // per item), per §E.3.1. The previous flat `+8` accounted
+                // only for the list header and undercharged a large-cap list.
+                let cap = Int(instr.u16(1))
+                allocated &+= UInt64(cap) &* 8
+                if allocated >= allocationBudget {
                     throw VmError.memoryExhausted(offset: instr.offset)
                 }
                 regs[Int(instr.u8(0))] = .list([])
@@ -451,7 +461,7 @@ enum FluxBytecodeVM {
                 let val = reg(instr.u8(1))
                 // Pushing one element grows the backing storage by one word.
                 allocated &+= 8
-                if allocated > allocationBudget {
+                if allocated >= allocationBudget {
                     throw VmError.memoryExhausted(offset: instr.offset)
                 }
                 guard case var .list(items) = regs[Int(list)] else {
@@ -1000,8 +1010,8 @@ enum FluxBytecodeVM {
             case .allocRecord:
                 let dst = instr.u8(0)
                 let count = Int(instr.u16(1))
-                allocated &+= UInt64(count) &* 16
-                if allocated > allocationBudget { return .failure(.memoryExhausted(offset: instr.offset)) }
+                allocated &+= UInt64(count) &* 8
+                if allocated >= allocationBudget { return .failure(.memoryExhausted(offset: instr.offset)) }
                 // Audit H2: the resumable path pre-populated records with
                 // positional nulls, diverging from `run` and the oracle;
                 // after any AWAIT every record carried phantom null fields.
@@ -1027,15 +1037,18 @@ enum FluxBytecodeVM {
                 regs[Int(dst)] = .bool(recordsEqual(x, y))
 
             case .allocList:
-                allocated &+= 8
-                if allocated > allocationBudget { return .failure(.memoryExhausted(offset: instr.offset)) }
+                // ALLOC_LIST reserves `cap` backing slots (one 8-byte slot
+                // per item), per §E.3.1.
+                let cap = Int(instr.u16(1))
+                allocated &+= UInt64(cap) &* 8
+                if allocated >= allocationBudget { return .failure(.memoryExhausted(offset: instr.offset)) }
                 regs[Int(instr.u8(0))] = .list([])
 
             case .listPush:
                 let list = instr.u8(0)
                 let val = reg(instr.u8(1))
                 allocated &+= 8
-                if allocated > allocationBudget { return .failure(.memoryExhausted(offset: instr.offset)) }
+                if allocated >= allocationBudget { return .failure(.memoryExhausted(offset: instr.offset)) }
                 guard case var .list(items) = regs[Int(list)] else {
                     return .failure(.typeMismatch(offset: instr.offset))
                 }
@@ -1399,8 +1412,8 @@ enum FluxBytecodeVM {
             case opcodeIndex[.allocRecord]!:
                 let dst = instr.u8(0)
                 let count = Int(instr.u16(1))
-                allocated &+= UInt64(count) &* 16
-                if allocated > allocationBudget { throw VmError.memoryExhausted(offset: instr.offset) }
+                allocated &+= UInt64(count) &* 8
+                if allocated >= allocationBudget { throw VmError.memoryExhausted(offset: instr.offset) }
                 // Audit H2: no pre-population — records start empty on all paths.
                 regs[Int(dst)] = .record([])
             case opcodeIndex[.getField]!:
@@ -1419,14 +1432,17 @@ enum FluxBytecodeVM {
                 let y = try requireRecord(reg(instr.u8(2)), at: instr.offset)
                 regs[Int(dst)] = .bool(recordsEqual(x, y))
             case opcodeIndex[.allocList]!:
-                allocated &+= 8
-                if allocated > allocationBudget { throw VmError.memoryExhausted(offset: instr.offset) }
+                // ALLOC_LIST reserves `cap` backing slots (one 8-byte slot
+                // per item), per §E.3.1.
+                let cap = Int(instr.u16(1))
+                allocated &+= UInt64(cap) &* 8
+                if allocated >= allocationBudget { throw VmError.memoryExhausted(offset: instr.offset) }
                 regs[Int(instr.u8(0))] = .list([])
             case opcodeIndex[.listPush]!:
                 let list = instr.u8(0)
                 let val = reg(instr.u8(1))
                 allocated &+= 8
-                if allocated > allocationBudget { throw VmError.memoryExhausted(offset: instr.offset) }
+                if allocated >= allocationBudget { throw VmError.memoryExhausted(offset: instr.offset) }
                 guard case var .list(items) = regs[Int(list)] else { throw VmError.typeMismatch(offset: instr.offset) }
                 items.append(val)
                 regs[Int(list)] = .list(items)

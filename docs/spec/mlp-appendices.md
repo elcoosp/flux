@@ -2269,6 +2269,32 @@ r15       gas         Gas counter (decremented per instruction)
 - No stack. No nested calls (handlers are flat; sub-functions are inlined at bytecode level).
 - Capability calls: `CALL_CAP` stores the callback `HandlerId` in the capability's internal table. When the capability completes, the host dispatches the callback handler with the result in `r0`.
 
+#### E.3.1 Per-dispatch allocation cost model (canonical)
+
+`NFR-SEC-003` fixes the per-instance memory pool at **16,000,000 bytes** (16 MB).
+The cost model that debits that pool is pinned here so all three VMs (Rust
+oracle, Swift, Kotlin) agree byte-for-byte; the model is **logical slot cost**,
+not platform struct footprint, because the actual native representations
+differ (Swift uses a boxed enum, Kotlin uses a sealed class, Rust uses a
+tagged union) and a spec that pinned one platform's `size_of` would drift on
+every compiler update.
+
+- `ALLOC_RECORD n` debits **`n × 8` bytes** (one 8-byte slot per field).
+- `ALLOC_LIST cap` debits **`cap × 8` bytes** (one 8-byte slot reserved per
+  backing slot; the reservation is what the host allocates, so it is charged
+  even if fewer than `cap` items are written).
+- `LIST_PUSH` debits **`8` bytes** (the pushed slot).
+- The cap fires when **`allocated >= MEMORY_CAP_BYTES`** (fills to the exact
+  ceiling fault; strictly-less is OK).
+- The counter is reset at the start of every dispatch (per-handler-instance,
+  not per-session).
+
+These constants are mirrored in
+`runtimes/ios/FluxHost/Sources/FluxHost/FluxBytecodeVM.swift`,
+`runtimes/android/host/src/main/kotlin/dev/flux/host/vm/StepResult.kt` and
+`crates/flux-vm-ref/src/vm.rs`. Any future change to the model must update
+all three plus the boundary ISA vector `tests/isa-vectors/memory_cap_boundary.json`.
+
 ### E.4 Bytecode Layout
 
 ```

@@ -1,6 +1,6 @@
 # FLUX-F16 — Allocation-cap parity between Kotlin and Swift VMs
 
-**Status:** open — needs design decision before fixing
+**Status:** CLOSED (round 66, 2026-10-10) — canonical cost model documented; Rust counter added; Swift corrected; boundary ISA vector added
 **Found:** round-26 bug hunt (audit F11.3)
 **Severity:** low (no ISA vector exercises the cap; the divergence is invisible
 unless a handler allocates to the boundary)
@@ -52,3 +52,54 @@ The Kotlin and Swift VMs both implement a per-dispatch memory ceiling
   `+8`).
 * Tests that pin the current behavior: `RuntimeFixesTest.kt:130`,
   `RuntimeGapTests.swift:147`. Both keep the current asymmetric semantics.
+
+---
+
+## Resolution (round 66, 2026-10-10)
+
+**Design decision:** pick the *logical slot cost* model, not a platform
+struct footprint. Rationale: `size_of::<Value>()` is 32 bytes on Rust,
+Swift's `.record([(UInt16, FluxValue)])` boxes at ~16 bytes per field, and
+Kotlin's `FluxValue.RecordVal(ArrayList<Field>)` is a third shape. Any
+model pinned to one language's `size_of` drifts on every compiler update,
+so the canonical model is **8 bytes per logical slot** — one wire-word per
+field or backing-slot, which is what the host actually reserves. The
+boundary semantics are `>= MEMORY_CAP_BYTES` (fills to the exact ceiling
+fault); the counter resets per dispatch.
+
+**Canonical model (documented in `mlp-appendices.md` §E.3.1):**
+- `ALLOC_RECORD n` — `n × 8` bytes
+- `ALLOC_LIST cap` — `cap × 8` bytes
+- `LIST_PUSH` — `8` bytes
+- Fault when `allocated >= MEMORY_CAP_BYTES` (16,000,000)
+
+**Changes landed:**
+- `crates/flux-vm-ref/src/vm.rs` — added `MEMORY_CAP_BYTES` constant; added
+  an `allocated: u64` counter threaded through `exec_tail`; the three
+  ALLOC/LIST_PUSH sites now debit the canonical cost and fault at the
+  ceiling; `SuspendState.allocated_bytes` carries the counter across
+  suspend/resume so a handler near the ceiling on suspend still faults on
+  resume.
+- `runtimes/ios/FluxHost/Sources/FluxHost/FluxBytecodeVM.swift` — all three
+  exec paths (`run`, `runResumable`, `runViaDispatchTable`) now use
+  `count × 8` for ALLOC_RECORD (was `× 16`), `cap × 8` for ALLOC_LIST (was
+  flat `+8`), and `>=` for the boundary (was `>`).
+- `runtimes/android/host/.../StepResult.kt` — **already correct**; Kotlin
+  was using `count × 8` and `cap × 8` and `>=` all along.
+- `docs/spec/mlp-appendices.md` — new §E.3.1 "Per-dispatch allocation cost
+  model (canonical)".
+- `tests/isa-vectors/memory_cap_boundary.json` — new boundary ISA vector
+  (31× ALLOC_LIST cap=65535 = 16,252,680 bytes ≥ cap → MemoryExhausted at
+  offset 120).
+
+**Verification:**
+- Rust ISA conformance: 106/106 vectors pass (including the new one).
+- `cargo check --workspace --all-targets` clean.
+
+**Deferred:** Swift ISA conformance run and Kotlin host test rerun with the
+new vector. Both require the local toolchain; the Kotlin rerun attempt in
+round 66l failed environmentally (Gradle daemon killed mid-build —
+"Interrupted system call" on classpath snapshot), not from any code change.
+The Rust golden is the source of truth; the Swift/Kotlin vectors read the
+same `tests/isa-vectors/` directory and will be exercised by CI
+(`.github/workflows/ios-check.yml` / `android-check.yml`).

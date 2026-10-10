@@ -50,6 +50,11 @@ pub struct SuspendState {
     pub gas_remaining: u32,
     /// Signal cells written before the suspend, replayed into the graph on resume.
     pub signals: Vec<(SignalId, Value)>,
+    /// Per-dispatch allocation counter at the point of suspension (§E.3.1).
+    /// The resumed handler continues against the same counter, so a
+    /// suspend/resume cycle that allocated near the ceiling faults on resume
+    /// with `MemoryExhausted` (matching the sync path).
+    pub allocated_bytes: u64,
     /// The register holding the awaited future handle at the point of suspension.
     /// The executor reads `registers[future_reg]` to obtain the future it must
     /// resolve, then resumes with the resolved value written to
@@ -311,6 +316,12 @@ fn async_deferred(
 }
 
 const ENTRY_GAS: u32 = 100_000;
+
+/// Per-dispatch allocation ceiling (spec §NFR-SEC-003, mlp-appendices §E.3.1).
+/// Canonical cost model: 8 bytes per record field, 8 bytes per list backing
+/// slot (charged on ALLOC_LIST), 8 bytes per LIST_PUSH. Fault fires when
+/// allocated >= MEMORY_CAP_BYTES. Mirrored in the Swift + Kotlin VMs.
+pub(crate) const MEMORY_CAP_BYTES: u64 = 16_000_000;
 /// Returns the byte offset of the instruction that follows `instr` in the program.
 #[must_use]
 fn next_offset(instr: &Instruction) -> u32 {
@@ -359,9 +370,10 @@ pub fn run_resumable_with_registry(
     regs[0] = payload;
     regs[15] = Value::Int(i64::from(ENTRY_GAS));
     let mut gas: u32 = ENTRY_GAS;
+    let mut allocated: u64 = 0;
 
     match exec_tail(
-        &program, &offsets, 0, &mut regs, &mut gas, signals, strings, registry,
+        &program, &offsets, 0, &mut regs, &mut gas, &mut allocated, signals, strings, registry,
     )? {
         ControlFlow::Halt => Ok(finish(regs, gas, signals)),
         ControlFlow::Suspend {
@@ -376,6 +388,7 @@ pub fn run_resumable_with_registry(
                 registers: regs,
                 gas_remaining: gas,
                 signals: written,
+                allocated_bytes: allocated,
                 future_reg,
                 result_reg,
             }))
@@ -425,6 +438,7 @@ pub fn resume_with_registry(
     let mut regs = state.registers;
     regs[usize::from(state.result_reg)] = value;
     let mut gas = state.gas_remaining;
+    let mut allocated: u64 = state.allocated_bytes;
 
     match exec_tail(
         &program,
@@ -432,6 +446,7 @@ pub fn resume_with_registry(
         state.resume_ip,
         &mut regs,
         &mut gas,
+        &mut allocated,
         signals,
         strings,
         registry,
@@ -449,6 +464,7 @@ pub fn resume_with_registry(
                 registers: regs,
                 gas_remaining: gas,
                 signals: written,
+                allocated_bytes: allocated,
                 future_reg,
                 result_reg,
             }))
@@ -488,6 +504,7 @@ fn exec_tail(
     start_offset: u32,
     regs: &mut [Value; 16],
     gas: &mut u32,
+    allocated: &mut u64,
     signals: &mut impl SignalStore,
     strings: &StringTable,
     registry: &CapabilityRegistry,
@@ -725,6 +742,11 @@ fn exec_tail(
             Opcode::AllocRecord => {
                 let dst = instr.u8(0);
                 let count = usize::from(instr.u16(1));
+                // §E.3.1: 8 bytes per record field.
+                *allocated = allocated.saturating_add((count as u64) * 8);
+                if *allocated >= MEMORY_CAP_BYTES {
+                    return Err(VmError::at(VmErrorKind::MemoryExhausted, instr.offset));
+                }
                 // Reserve capacity only; fields are upserted by canonical
                 // `PropIdx` via `SET_FIELD` (see `set_field`). Records are
                 // keyed by `PropIdx`, not position, matching the wire layout.
@@ -750,11 +772,21 @@ fn exec_tail(
             }
             Opcode::AllocList => {
                 let cap = instr.u16(1);
+                // §E.3.1: 8 bytes per backing slot, charged on allocation.
+                *allocated = allocated.saturating_add(u64::from(cap) * 8);
+                if *allocated >= MEMORY_CAP_BYTES {
+                    return Err(VmError::at(VmErrorKind::MemoryExhausted, instr.offset));
+                }
                 regs[usize::from(instr.u8(0))] = Value::List(Vec::with_capacity(usize::from(cap)));
             }
             Opcode::ListPush => {
                 let list = instr.u8(0);
                 let val = reg!(instr.u8(1));
+                // §E.3.1: 8 bytes per pushed slot.
+                *allocated = allocated.saturating_add(8);
+                if *allocated >= MEMORY_CAP_BYTES {
+                    return Err(VmError::at(VmErrorKind::MemoryExhausted, instr.offset));
+                }
                 match &mut regs[usize::from(list)] {
                     Value::List(items) => items.push(val),
                     _ => return Err(VmError::at(VmErrorKind::TypeMismatch, instr.offset)),
@@ -974,9 +1006,10 @@ pub fn run_with_registry(
     regs[0] = payload;
     regs[15] = Value::Int(i64::from(ENTRY_GAS));
     let mut gas: u32 = ENTRY_GAS;
+    let mut allocated: u64 = 0;
 
     match exec_tail(
-        &program, &offsets, 0, &mut regs, &mut gas, signals, strings, registry,
+        &program, &offsets, 0, &mut regs, &mut gas, &mut allocated, signals, strings, registry,
     )? {
         ControlFlow::Halt => {
             let out_signals = signals.snapshot();
