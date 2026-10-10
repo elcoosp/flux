@@ -503,8 +503,24 @@ import kotlinx.coroutines.launch\n\n"
                     em.line(indent + step, &format!("{} ->", em.render(lit)));
                     em.emit_expr_body(&arm.body, indent + 2 * step);
                 }
-                flux_parser::MatchPatternKind::Guard { name, .. } => {
-                    em.line(indent + step, &format!("is {} ->", name.name));
+                // A `s if s > 90 => …` guard arm. Kotlin's `when(subject)`
+                // has no guard clause, and the codegen's Match node does not
+                // yet lower an if/else-if chain that could express one — so
+                // this arm cannot be emitted faithfully. Round 35: emit an
+                // explicit unsupported marker (the whole line is invalid
+                // Kotlin) rather than the previous `is s ->`, which was ALSO
+                // invalid Kotlin but read like a type test — a reader could
+                // not tell the guard condition had been dropped. See
+                // docs/issues/FLUX-F20-kotlin-match-guard.md.
+                flux_parser::MatchPatternKind::Guard { name, cond } => {
+                    let cond_text = em.render(cond);
+                    em.line(
+                        indent + step,
+                        &format!(
+                            "/* unsupported match guard: {} if {} */ ->",
+                            name.name, cond_text
+                        ),
+                    );
                     em.emit_expr_body(&arm.body, indent + 2 * step);
                 }
                 _ => {
