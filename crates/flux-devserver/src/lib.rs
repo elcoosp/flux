@@ -42,6 +42,13 @@
     rust_2018_idioms,
     unreachable_pub
 )]
+// F18 lint gate: make the "panicking encoder/decoder on production paths"
+// class un-regressable. Test-only code is exempted via the cfg_attr below.
+#![warn(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#![cfg_attr(
+    test,
+    allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)
+)]
 
 mod assets;
 mod async_bridge;

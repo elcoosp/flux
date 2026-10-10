@@ -296,6 +296,15 @@ pub(crate) async fn serve_devtools_on(
                         if !query.contains(&format!("token={expected}")) {
                             // Build a 401 rejection response. Use `None` body
                             // to keep the error variant small (clippy).
+                            //
+                            // F18: the `unwrap()` is provably safe — status
+                            // 401, two ASCII-valued headers, and a `None`
+                            // body are all valid `Response` inputs, so the
+                            // builder cannot return an error. The `#[allow]`
+                            // is scoped to this statement so a future edit
+                            // that introduces a fallible field is caught by
+                            // the lint gate.
+                            #[allow(clippy::unwrap_used)]
                             let err = tokio_tungstenite::tungstenite::handshake::server::Response::builder()
                                 .status(401)
                                 .header("Content-Length", "0")
