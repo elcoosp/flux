@@ -198,11 +198,11 @@ const EVENT_PERF_RECORD: u8 = 0x07;
 impl TelemetryEvent {
     /// Encodes this event into `w` as a length-prefixed union (without the
     /// outer frame header — see [`TelemetryFrame`]).
+    // F18: legacy panicking encoder. Every `expect()` in this body is an
+    // over-u16 payload from a source field the host controls (capability
+    // names, feature lists, device strings). A future fallible
+    // `try_encode_into` migration removes them.
     #[allow(clippy::expect_used)]
-    // F18: legacy panicking encoder. Every expect() in this body is a
-    // ``... no, concise: over-u16 payload from a source
-    // field the host controls (capability names, feature lists, device strings).
-    // A future fallible `try_encode_into` migration will remove these.
     fn encode_into(&self, w: &mut Writer) {
         // Reserve a 4-byte length slot, encode the body, then back-patch the
         // length so the decoder can skip an unknown tag cleanly.
@@ -938,11 +938,11 @@ pub enum EnrichedTelemetryEvent {
 
 impl EnrichedTelemetryEvent {
     /// Encodes this enriched event into `w` as a length-prefixed union.
+    // F18: legacy panicking encoder. Every `expect()` in this body is an
+    // over-u16 payload from a source field the host controls (capability
+    // names, feature lists, device strings). A future fallible
+    // `try_encode_into` migration removes them.
     #[allow(clippy::expect_used)]
-    // F18: legacy panicking encoder. Every expect() in this body is a
-    // ``... no, concise: over-u16 payload from a source
-    // field the host controls (capability names, feature lists, device strings).
-    // A future fallible `try_encode_into` migration will remove these.
     fn encode_into(&self, w: &mut Writer) {
         let start = w.buf_len();
         w.u32(0);

@@ -80,6 +80,11 @@ impl From<&WireError> for WireErrorKind {
             // surfaces as MalformedBytecode so the developer sees the shape
             // mismatch instead of a dispatch failure on the first tap.
             WireError::DuplicateHandlerId { .. } => WireErrorKind::MalformedBytecode,
+            // F18: the encoder hit a `#[non_exhaustive]` variant it has no arm
+            // for. This is an *encode* error; a decoder never produces it. Map
+            // it to `MalformedBytecode` so the parity harness compiles and any
+            // future decoder-corpus entry treats it as a shape failure.
+            WireError::UnsupportedVariant { .. } => WireErrorKind::MalformedBytecode,
         }
     }
 }
