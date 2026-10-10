@@ -90,8 +90,9 @@ fn scan_file(path: &Path, root: &Path, out: &mut Vec<AgentsFinding>) {
     let is_test_file = is_test_path(path);
     let lines: Vec<&str> = text.lines().collect();
 
-    // Rule: file > 300 lines.
-    if lines.len() > 300 {
+    // Rule: file > 300 lines. Test files are exempt (AGENTS.md §1.2 targets
+    // production source, matching the CI gate's `is_test_file` skip on rule 1).
+    if !is_test_file && lines.len() > 300 {
         out.push(AgentsFinding {
             path: rel.clone(),
             line: 1,
@@ -149,7 +150,9 @@ fn scan_rust(rel: &str, lines: &[&str], is_test_file: bool, out: &mut Vec<Agents
                 if let (Some(fs), Some(fb)) = (fn_start, fn_base) {
                     if depth == fb {
                         let len = line_no - fs + 1;
-                        if len > 40 {
+                        // Test files are exempt (their tests are often long
+                        // setup blocks; AGENTS.md §1.2 targets production).
+                        if len > 40 && !is_test_file {
                             out.push(AgentsFinding {
                                 path: rel.to_owned(),
                                 line: fs,
@@ -197,7 +200,9 @@ fn scan_swift_kotlin(rel: &str, lines: &[&str], is_test_file: bool, out: &mut Ve
                 if let (Some(fs), Some(fb)) = (fn_start, fn_base) {
                     if depth == fb {
                         let len = line_no - fs + 1;
-                        if len > 40 {
+                        // Test files are exempt (their tests are often long
+                        // setup blocks; AGENTS.md §1.2 targets production).
+                        if len > 40 && !is_test_file {
                             out.push(AgentsFinding {
                                 path: rel.to_owned(),
                                 line: fs,
@@ -256,12 +261,10 @@ fn is_swift_kotlin_fn_start(line: &str) -> bool {
 /// string literal.
 fn contains_rust_panic_api(line: &str) -> bool {
     let code = strip_comments_and_strings(line, Language::Rust);
-    code.contains(".unwrap()")
-        || code.contains(".expect(")
-        || code.contains("panic!(")
-        || code.contains("unreachable!(")
-        || code.contains("todo!(")
-        || code.contains("unimplemented!(")
+    // Match the exact set of panic APIs the CI gate (scripts/ci-size-gate.sh)
+    // flags in AGENTS.md §2.1: `unwrap`, `expect`, `panic!`. Do not extend
+    // this — the doctor must be exactly as strict as CI, not stricter.
+    code.contains(".unwrap()") || code.contains(".expect(") || code.contains("panic!(")
 }
 
 /// `true` when a Swift/Kotlin line contains `try!`, `as!`, or `!!`.
