@@ -417,7 +417,7 @@ impl<'s> Lexer<'s> {
             '>' if self.peek_at(1) == Some('=') => self.take(TokenKind::GtEq, 2),
             '>' => self.take(TokenKind::Gt, 1),
             '-' if self.peek_at(1) == Some('>') => self.take(TokenKind::Arrow, 2),
-            '-' if !self.prev_can_end_value && self.is_number(1) => self.lex_number(start),
+            '-' if !self.prev_can_end_value && self.is_number(1) => self.lex_number(start)?,
             '-' => self.take(TokenKind::Minus, 1),
             '@' => self.take(TokenKind::At, 1),
             '(' => self.bracket_tok(TokenKind::LParen),
@@ -434,7 +434,7 @@ impl<'s> Lexer<'s> {
             '|' if self.peek_at(1) == Some('|') => self.take(TokenKind::Or, 2),
             '|' => self.take(TokenKind::Pipe, 1),
             '"' => self.lex_string(start)?,
-            '0'..='9' => self.lex_number(start),
+            '0'..='9' => self.lex_number(start)?,
             c if c.is_ascii_alphabetic() || c == '_' => self.lex_ident(start),
             other => {
                 return Err(LexError::new(
@@ -526,7 +526,7 @@ impl<'s> Lexer<'s> {
     /// "unbound name `e10`" for what is plainly one number. Any exponent
     /// form (including `1.5e-10` and the integer-mantissa form `1e10`) is
     /// now a single `Float` token.
-    fn lex_number(&mut self, start: usize) {
+    fn lex_number(&mut self, start: usize) -> Result<(), LexError> {
         if self.peek() == Some('-') {
             self.pos += 1;
         }
@@ -585,12 +585,31 @@ impl<'s> Lexer<'s> {
         } else {
             TokenKind::Int
         };
+        // Round-79 fix: reject a number immediately followed by an identifier
+        // character. `1e`, `1x`, and `1_billion` previously lexed as
+        // `Int(1)` + `Ident("e"/"x"/"_billion")`; the parser silently
+        // accepted the trailing identifier as a separate block item, so a
+        // typo like `1e` (intended as `1e10`) became `Float(1.0)` with no
+        // error — a silent miscompile. Python's tokenizer rejects the same
+        // class. Users who want `1` followed by an identifier write `1 e`
+        // (with whitespace), which still works because a space is not
+        // alphanumeric.
+        if let Some(ch) = self.peek() {
+            if ch.is_ascii_alphabetic() || ch == '_' {
+                let end = self.cur_byte() + ch.len_utf8();
+                return Err(LexError::new(
+                    format!("invalid number literal: unexpected `{ch}` immediately after a number"),
+                    Span::new(self.file_id, start as u32, end as u32),
+                ));
+            }
+        }
         self.out.push(Token {
             kind,
             start,
             end: self.cur_byte(),
         });
         self.prev_can_end_value = true;
+        Ok(())
     }
 
     fn lex_ident(&mut self, start: usize) {
@@ -735,6 +754,24 @@ mod tests {
         }
         let toks = lex("e10", 0).expect("e10");
         assert_eq!(toks[0].kind, TokenKind::Ident);
+    }
+
+    /// Round-79 regression: a number immediately followed by an identifier
+    /// character is a syntax error, not `Int + Ident`. Before the fix, `1e`
+    /// (typo for `1e10`) lexed as `Int(1)` + `Ident("e")`, and the parser
+    /// silently accepted the two as separate items — a silent miscompile.
+    #[test]
+    fn number_followed_by_ident_char_is_an_error() {
+        for bad in ["1e", "1x", "1_000", "1.5e", "42abc"] {
+            assert!(
+                lex(bad, 0).is_err(),
+                "{bad}: must be rejected (number followed by ident char)"
+            );
+        }
+        // Legitimate uses still lex.
+        assert_eq!(lex("1e10", 0).unwrap()[0].kind, TokenKind::Float);
+        assert_eq!(lex("1..2", 0).unwrap().len(), 5); // Int Dot Dot Int Eof
+        assert_eq!(lex("1.foo", 0).unwrap().len(), 4); // Int Dot Ident Eof
     }
 
     #[test]
