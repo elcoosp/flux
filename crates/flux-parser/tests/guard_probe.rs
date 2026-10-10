@@ -6,7 +6,7 @@
 
 #[test]
 fn guard_arm_parses_into_guard_pattern() {
-    use flux_parser::{ExprKind, MatchPatternKind, parse};
+    use flux_parser::{MatchPatternKind, parse};
     let src = "compo Score\n  state score: Int = 95\n  let grade = match score {\n    s if s > 90 => \"A\"\n    s if s > 80 => \"B\"\n    _ => \"C\"\n  }\n  Text(text: grade)\n";
     let ast = parse(src, 0, "score.flux").expect("guard syntax must parse");
     // Walk to the `match` expr and inspect the arms.
