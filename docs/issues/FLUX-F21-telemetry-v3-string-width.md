@@ -1,7 +1,43 @@
 # FLUX-F21 — telemetry strings are hard-coded u16, not widened by ADR-0059
 
-**Status:** open
+**Status:** CLOSED (round 63, 2026-10-10) — ADR-0059 amended; both sides widened atomically
 **Found:** round 49 (an attempt to widen was reverted because it broke round-trip tests)
+
+## Resolution (round 63)
+
+Design decision: **extend ADR-0059's "String content" rule to telemetry
+strings**. Rationale: `NetworkResponse.body` and `PerfRecord.json` are
+exactly the "user-plausible input over 64 KB" ADR-0059 was written for — a
+real HTTP body over the ceiling was silently truncated before this fix. The
+ADR-0059 amendment adds `telemetry::encode_str`/`decode_str` to the String
+content list.
+
+Implementation (both sides atomic):
+
+1. `Writer::set_version(self.version)` is called at the top of every
+   telemetry frame's `to_bytes` so the emitted prefix width matches the
+   frame's own version byte. `Writer::count_prefix` already did the
+   version dispatch internally.
+2. `Reader::with_version(bytes, version)` is used at every telemetry
+   `from_bytes` — the version byte is read from `bytes[4]` before the
+   reader is constructed, so the frame's own version threads through the
+   entire decode tree.
+3. `telemetry::encode_str` now uses `Writer::count_prefix` (u32 at v3,
+   u16 at v2) instead of `Writer::u16_len`.
+4. `telemetry::decode_str` now uses `Reader::count` (version-dispatched)
+   instead of `Reader::u16`.
+5. Nested inner-readers inside `TelemetryEvent::decode_from`,
+   `EnrichedTelemetryEvent::decode_from`, and `DebugCommandFrame::from_bytes`
+   inherit the outer reader's version via the new `Reader::version()`
+   accessor, so nested strings read at the same width the encoder wrote.
+6. A `> u16::MAX` string regression test
+   (`oversize_telemetry_string_round_trips_at_v3`) confirms the whole path.
+
+The prior revert (`9ef319b5` / `f38a32dc`) is superseded by this commit.
+
+---
+
+## Original filing — for context
 **Severity:** low (telemetry strings are all host-bounded today; the gap matters only if a future capability payload crosses 64 KB)
 
 ## Summary
