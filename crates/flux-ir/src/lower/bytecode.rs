@@ -1111,8 +1111,13 @@ impl<'a> Emitter<'a> {
     ///   JUMP L_end
     /// L_end:
     ///
-    /// `Wildcard` and `Guard` patterns match unconditionally: they have no test,
-    /// so the body is emitted inline (any unmatched value runs it).
+    /// `Wildcard` matches unconditionally (no test; the body is emitted inline).
+    /// `Guard` patterns are rejected by `match_test_for_pattern` with a
+    /// "unsupported match pattern in handler" error — the handler compiler has
+    /// no way yet to express a conditional arm test, so a `s if s > 90 => …`
+    /// arm must fail loudly rather than silently match every value. (A parser
+    /// fix in round 32 made the documented §18.5 guard syntax reachable; a
+    /// full guard-evaluation lowering is a follow-up.)
     fn compile_match(
         &mut self,
         scrutinee: &Expr,
