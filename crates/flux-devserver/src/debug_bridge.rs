@@ -260,6 +260,22 @@ pub async fn serve_devtools(
     token: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
+    serve_devtools_on(listener, router, token).await
+}
+
+/// Same as [`serve_devtools`] but takes a pre-bound listener, so a caller that
+/// needs to know the *actual* bound port (a test binding `:0`) can read it
+/// from [`tokio::net::TcpListener::local_addr`] before spawning. Round-44
+/// refactor: the integration tests previously hard-coded ports `17399`/`17400`,
+/// which raced with a previous run's listener (or with a concurrent
+/// invocation) and produced `ConnectionReset` flakes — the same class of bug
+/// closed for the kotlinc/swiftc temp-file writes in round 38.
+#[allow(clippy::result_large_err)]
+pub async fn serve_devtools_on(
+    listener: tokio::net::TcpListener,
+    router: std::sync::Arc<parking_lot::Mutex<DevToolsRouter>>,
+    token: Option<String>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     loop {
         let (stream, peer) = listener.accept().await?;
 
@@ -515,10 +531,15 @@ mod tests {
         use tokio_tungstenite::connect_async;
         use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
-        // Fixed ephemeral-range port for the test endpoint. A probe/rebind race
-        // with `serve_devtools` (which binds the same addr itself) would hang
-        // the clients, so we use a stable port and let the server own the bind.
-        let addr: std::net::SocketAddr = "127.0.0.1:17399".parse().unwrap();
+        // Round-44: bind on port `0` and read the actual port from the
+        // listener before spawning the accept loop. The previous version
+        // hard-coded `127.0.0.1:17399`, which raced with a prior test run's
+        // listener (or a concurrent invocation) and produced `ConnectionReset`
+        // flakes. Port-0 binding + `local_addr()` removes the collision.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind ephemeral port");
+        let addr = listener.local_addr().expect("resolve local addr");
 
         let (host_tx, _host_rx) = mpsc::channel(1024);
         let source_map = SourceMap::default();
@@ -526,9 +547,9 @@ mod tests {
             source_map, host_tx,
         )));
         let router_for_spawn = test_router.clone();
-        tokio::spawn(async move { serve_devtools(addr, router_for_spawn, None).await });
-        // Give the accept loop a moment to bind.
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        tokio::spawn(async move { serve_devtools_on(listener, router_for_spawn, None).await });
+        // Yield so the accept task is scheduled; the listener is already bound.
+        tokio::task::yield_now().await;
 
         // DevTools client subscribes (this is the ONLY thing a DevTools
         // client is allowed to do from the trust model's perspective).
@@ -573,7 +594,11 @@ mod tests {
         use tokio_tungstenite::tungstenite::client::IntoClientRequest;
         use tokio_tungstenite::{connect_async, tungstenite::Message};
 
-        let addr: std::net::SocketAddr = "127.0.0.1:17400".parse().unwrap();
+        // Round-44: ephemeral port binding (see `host_telemetry_reaches_devtools_client`).
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind ephemeral port");
+        let addr = listener.local_addr().expect("resolve local addr");
         let (host_tx, _host_rx) = mpsc::channel(1024);
         let test_router = std::sync::Arc::new(parking_lot::Mutex::new(DevToolsRouter::new(
             SourceMap::default(),
@@ -581,9 +606,9 @@ mod tests {
         )));
         tokio::spawn({
             let r = test_router.clone();
-            async move { serve_devtools(addr, r, None).await }
+            async move { serve_devtools_on(listener, r, None).await }
         });
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        tokio::task::yield_now().await;
 
         // Host announces BEFORE any DevTools client connects.
         let announce = HostAnnounceFrame {
