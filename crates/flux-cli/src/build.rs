@@ -182,6 +182,14 @@ pub(crate) fn run_with(
         std::fs::write(&out, code)
             .with_context(|| format!("writing generated source {}", out.display()))?;
         tracing::info!(source = %path.display(), target = %out.display(), "codegen");
+
+        // FLUX-F17: write the sidecar source map. The release-mode crash
+        // reporter resolves a native stack frame back to its originating
+        // `.flux` component by looking up the leading symbol of each frame
+        // against this map. The map is a pure function of the AST the CLI
+        // already has in hand — no emitter change required.
+        write_source_map(ast, path, &out_dir, &stem)
+            .with_context(|| format!("writing source map for {}", path.display()))?;
     }
 
     println!(
@@ -376,6 +384,52 @@ fn which(name: &str) -> bool {
     std::env::var_os("PATH")
         .map(|paths| std::env::split_paths(&paths).any(|dir| dir.join(name).exists()))
         .unwrap_or(false)
+}
+
+
+/// FLUX-F17: writes the `<stem>.flux.map.json` sidecar next to the generated
+/// native source at `out`. The map carries one entry per component declared
+/// in `ast`, with the native symbol name (identical to the Flux name today;
+/// a future monomorphisation split would append the specialised suffix), the
+/// `.flux` file path, and the 1-based line/column of the component
+/// declaration in that file.
+///
+/// The crash reporter (Swift `CrashReporter`, Kotlin `CrashReporter`) loads
+/// the bundled sidecar in release builds and resolves the leading token of
+/// each native stack frame against `native_symbol`.
+fn write_source_map(
+    ast: &flux_parser::Ast,
+    source_path: &std::path::Path,
+    out_dir: &std::path::Path,
+    stem: &str,
+) -> anyhow::Result<()> {
+    let source_text = std::fs::read_to_string(source_path)
+        .with_context(|| format!("reading {}", source_path.display()))?;
+    let source_display = source_path.display().to_string();
+
+    let mut map = flux_codegen_core::SourceMap::new(source_display.clone());
+    let bridge = flux_codegen_core::Bridge::build(ast);
+    let mut comps: Vec<_> = bridge.components().collect();
+    // Deterministic (source-ordered) so the sidecar is stable across runs.
+    comps.sort_by_key(|(_, c)| c.span.start);
+    for (_, comp) in comps {
+        let (line, col) = flux_syntax::Span::line_col_of(&source_text, comp.span.start);
+        map.record(flux_codegen_core::SourceMapEntry {
+            native_symbol: comp.name.name.clone(),
+            component_name: comp.name.name.clone(),
+            source_file: source_display.clone(),
+            line: u32::from(line),
+            col: u32::from(col),
+        });
+    }
+    let json = map
+        .to_json()
+        .context("serializing the source map to JSON")?;
+    let map_path = out_dir.join(format!("{stem}.flux.map.json"));
+    std::fs::write(&map_path, json)
+        .with_context(|| format!("writing source map {}", map_path.display()))?;
+    tracing::info!(target = %map_path.display(), "source map written");
+    Ok(())
 }
 
 #[cfg(test)]
