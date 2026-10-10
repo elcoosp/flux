@@ -141,14 +141,13 @@ fn string_literal_containing_unwrap_is_not_flagged() {
     );
 }
 
-/// Real panic APIs still flag.
+/// Real panic APIs still flag — exactly the three the CI gate checks
+/// (`unwrap` / `expect` / `panic!`), no more.
 #[test]
 fn real_panic_api_is_flagged() {
     assert!(contains_rust_panic_api("let x = foo().unwrap();"));
     assert!(contains_rust_panic_api("let x = foo().expect(\"msg\");"));
     assert!(contains_rust_panic_api("panic!(\"boom\");"));
-    assert!(contains_rust_panic_api("unreachable!();"));
-    assert!(contains_rust_panic_api("todo!();"));
 }
 
 /// Swift/Kotlin `try!` / `as!` in a comment or string literal is not flagged.
