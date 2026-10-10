@@ -168,7 +168,13 @@ fn pattern_label(pattern: &flux_parser::MatchPattern) -> String {
         flux_parser::MatchPatternKind::Wildcard => "_".to_owned(),
         flux_parser::MatchPatternKind::Variant { name, .. } => name.name.clone(),
         flux_parser::MatchPatternKind::Literal(expr) => canonicalize_expr(&render_expr(expr)),
-        flux_parser::MatchPatternKind::Guard { name, .. } => name.name.clone(),
+        // Round 33: mirror the fix in `flux_codegen_core::view_tree` — keep
+        // the guard condition so two `s if …` arms with different conditions
+        // do not produce identical labels (which would hide a parity
+        // divergence behind a same-name coincidence).
+        flux_parser::MatchPatternKind::Guard { name, cond } => {
+            format!("{} if {}", name.name, canonicalize_expr(&render_expr(cond)))
+        }
         _ => "<pattern>".to_owned(),
     }
 }
