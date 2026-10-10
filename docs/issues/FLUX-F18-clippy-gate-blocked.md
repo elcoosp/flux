@@ -1,7 +1,52 @@
 # FLUX-F18 — F10 clippy lint gate blocked by pre-existing violations
 
-**Status:** open (follow-up to the audit plan's F10)
+**Status:** CLOSED (round 55, 2026-10-10) — the gate is landed in both crates
 **Filed:** 2026-10-09 (round 26 follow-up)
+
+## Resolution (round 55)
+
+The F18 gate — `#![warn(clippy::unwrap_used, clippy::expect_used, clippy::panic)]`
+with a test-only `#[cfg_attr(test, allow(…))]` — is now landed in both
+`flux-ir-serde/src/lib.rs` and `flux-devserver/src/lib.rs`. The workspace
+`cargo clippy --workspace --all-targets -j1 -- -D warnings` is clean.
+
+The remaining panicking sites, all annotated with scoped `#[allow]` and a
+rationale comment:
+
+**flux-ir-serde:**
+- `wire/patch.rs`, `wire/value.rs`, `wire/child.rs` — the three `unreachable!()`
+  sites replaced with `WireError::UnsupportedVariant { context, tag }`
+  (variants added by F18).
+- `wire/core.rs` — `validate_bytecode` now carries the opcode from pass 1
+  into pass 2, eliminating the `.expect("known opcode from pass 1")`.
+- `frame.rs` — the three `bytes[0..4].try_into().unwrap()` reads (magic,
+  heartbeat seq, string-interned id) replaced with direct byte indexing;
+  the infallible `u16::try_from(len).expect(...)` in `from_intern_string_bytes`
+  removed (the value came from a u16 prefix). The remaining public
+  `to_bytes` / `encode_into` / `intern_string` / `encode_str` shims carry
+  a scoped `#[allow(clippy::expect_used)]` and a "prefer `try_*`" note.
+- `resume.rs` — same shim annotation.
+- `wire/cursor.rs` — `u16_len` (the panicking wrapper of
+  `u16_len_checked`) carries `#[allow(clippy::panic)]`.
+- `telemetry.rs` — the two `encode_into` bodies and `encode_str` carry a
+  scoped allow; every `expect()` is an over-u16 field from a source the
+  host itself controls (capability names, feature lists, device strings).
+- `wire/value.rs::encode_value_blob` — the parity/storage public helper
+  carries a scoped allow.
+
+**flux-devserver:**
+- `debug_bridge.rs:299` — the 401 rejection response builder's `.unwrap()`
+  is provably safe (ASCII headers + `None` body); scoped allow.
+
+## Follow-up
+
+`docs/issues/FLUX-F21-telemetry-v3-string-width.md` documents a related
+gap: `telemetry::encode_str`/`decode_str` are hard-coded u16 even at v3
+(ADR-0059 lists only `frame::encode_str` and `StringEntry.text`).
+
+---
+
+## Original filing — for context
 
 ## Context
 
