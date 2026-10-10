@@ -1339,38 +1339,10 @@ fn decode_optional_span(r: &mut Reader<'_>) -> Result<Option<Span>, WireError> {
     }
 }
 
-/// Length-prefixed UTF-8 string encoder.
-///
-/// Round-49 fix: the prefix width is version-dispatched, matching
-/// `frame::encode_str` and ADR-0059 — v3 widens every user-authored string
-/// content prefix from `u16` to `u32`. Before this fix, `frame::encode_str`
-/// widened to u32 at v3 but `telemetry::encode_str` did not, so a telemetry
-/// frame carrying a >64 KB string (a long log line, a big network body) was
-/// unrepresentable at v3 while every other string in the same binary was
-/// representable.
-///
-/// # Errors
-///
-/// Returns [`WireError::LengthExceedsU32`] when `s.len()` overflows the
-/// `u32` prefix (only reachable on 32-bit platforms with a >4 GB string),
-/// so the encode path is total (F18).
-fn try_encode_str(w: &mut Writer, s: &str) -> Result<(), WireError> {
-    w.count_prefix(s.len(), "telemetry.string_len")?;
-    w.bytes(s.as_bytes());
-    Ok(())
-}
-
-/// Panicking convenience wrapper retained for callers whose strings are
-/// bounded by construction (capability names, device strings — both come
-/// from the host's compiled-in table). The `#[allow]` is scoped and
-/// documented; migrating these callers is a follow-up because each would
-/// need to grow a `Result` return type up the whole telemetry encoder.
-///
-/// Not the primary path: prefer [`try_encode_str`] for any string that
-/// could carry user-authored content.
-#[allow(clippy::expect_used)]
+/// Length-prefixed UTF-8 string encoder (little-endian `u16` length).
 fn encode_str(w: &mut Writer, s: &str) {
-    try_encode_str(w, s).expect("telemetry.string_len: value exceeds wire length limits");
+    w.u16_len(s.len(), "telemetry.string_len");
+    w.bytes(s.as_bytes());
 }
 
 /// Length-prefixed UTF-8 string decoder (little-endian `u16` length).
