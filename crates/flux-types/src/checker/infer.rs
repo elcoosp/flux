@@ -54,6 +54,21 @@ impl Checker {
                 Ok(TcType::Option(Box::new(self.fresh_ty())))
             }
             ExprKind::Ident(ident) => self.lookup_value(&ident.name, ident.span),
+            // `await <expr>` — the awaited operation suspends the handler and,
+            // on resume, deposits its resolved value into a register (ADR-0044
+            // §3, ADR-0045 §4). The language today has no way to declare an
+            // async operation's return type, so we infer the inner expression
+            // (to surface any errors *within* it) and return a fresh inference
+            // variable that the surrounding context pins. Returning `Unit`
+            // (the previous behavior — `Await` had no arm and fell into the
+            // `_ => Ok(TcType::Unit)` catch-all) made `(await Foo.bar()) + 1`
+            // fail with "operator Add requires a Numeric type, got Unit" —
+            // a spurious rejection of a program that awaits an Int-producing
+            // operation.
+            ExprKind::Await(inner) => {
+                let _ = self.infer(inner)?;
+                Ok(self.fresh_ty())
+            }
             ExprKind::Elided => Ok(TcType::Unit),
             ExprKind::Record { name, fields } => {
                 let _ = name;
