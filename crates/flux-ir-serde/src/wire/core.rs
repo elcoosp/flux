@@ -187,10 +187,17 @@ pub fn validate_bytecode(bytecode: &[u8]) -> Result<(), WireError> {
     // byte offset of the instruction that follows it. This mirrors the VM's own
     // `decode_program` layout checks (truncation + unknown opcode) but returns
     // the wire [`WireError`] instead of the VM's [`VmError`].
+    // F18: retain the decoded opcode from pass 1 so pass 2 does not have to
+    // re-decode `bytecode[decoded.offset]` and then `.expect()` the result.
+    // The previous version argued the expect was "provably safe" (pass 1
+    // already validated every offset), but a `.expect()` in a hot decoder
+    // still blocks the F10 lint gate (`clippy::expect_used`) — and passing the
+    // opcode directly removes the argument altogether.
     #[derive(Clone, Copy)]
     struct Decoded {
         offset: usize,
         next_offset: usize,
+        opcode: Opcode,
     }
     let mut instrs: Vec<Decoded> = Vec::with_capacity(len / 2);
     let mut ip = 0usize;
@@ -221,6 +228,7 @@ pub fn validate_bytecode(bytecode: &[u8]) -> Result<(), WireError> {
         instrs.push(Decoded {
             offset: ip,
             next_offset,
+            opcode,
         });
         ip = end;
     }
@@ -230,7 +238,7 @@ pub fn validate_bytecode(bytecode: &[u8]) -> Result<(), WireError> {
     // scan was O(n²)) so the inner lookup is constant-time.
     let instr_offsets: std::collections::HashSet<usize> = instrs.iter().map(|d| d.offset).collect();
     for decoded in &instrs {
-        let opcode = Opcode::from_byte(bytecode[decoded.offset]).expect("known opcode from pass 1");
+        let opcode = decoded.opcode;
         let jump = match opcode {
             Opcode::Jump => Some(read_i32(bytecode, decoded.offset + 1)),
             Opcode::CondJump | Opcode::CondJumpNot => Some(read_i32(bytecode, decoded.offset + 1)),
