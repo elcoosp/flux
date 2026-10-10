@@ -933,6 +933,20 @@ impl<'a> Emitter<'a> {
                 self.compile_call(expr)?;
                 Ok(())
             }
+            // A bare `await <expr>` as a statement (F19). The same shape
+            // already works as a *value* (`let x = await …` routes through
+            // `compile_value`), but the statement compiler had no arm for it,
+            // so a handler whose only content is `{ await Auth.login("u") }`
+            // failed with "unsupported handler expression" before codegen
+            // could run — making the entire ADR-0044/0045 first-class-`await`
+            // contract unreachable. Emit the AWAIT sequence into a fresh
+            // register and discard it: the handler's side effects (the
+            // resumption depositing the resolved value into the register)
+            // are what matter, not the register itself.
+            ExprKind::Await(_) => {
+                let _ = self.compile_value(expr)?;
+                Ok(())
+            }
             // `...` is the spec's elision marker (Appendix B.3.8). A handler body
             // that is deliberately elided compiles to a `NOP` so the lower pass
             // succeeds without inventing behaviour the source omitted.
