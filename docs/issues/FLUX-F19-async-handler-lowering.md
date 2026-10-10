@@ -1,6 +1,34 @@
 # FLUX-F19 — `await` in a handler is rejected by IR lowering (codegen's async path unreachable)
 
-**Status:** open
+**Status:** CLOSED (round 56, 2026-10-10) — fixed in `bytecode.rs` with an end-to-end regression test
+
+## Resolution (round 56)
+
+The gap was one missing arm: `compile_block_or_expr` had no case for a bare
+`ExprKind::Await(_)` statement. `let x = await …` already worked because it
+routes through `compile_value`, but a handler whose *only* content was
+`{ await Auth.login("u") }` failed with "unsupported handler expression" —
+making the codegen async path (which renders the call as `.await()` /
+`Task { }`) unreachable.
+
+Fix: added
+
+```rust
+ExprKind::Await(_) => { let _ = self.compile_value(expr)?; Ok(()) }
+```
+
+to `crates/flux-ir/src/lower/bytecode.rs::compile_block_or_expr`. The
+existing `compile_value` Await arm emits the AWAIT opcode sequence.
+
+Regression tests:
+
+- `crates/flux-codegen-kotlin/tests/handler_calls.rs::awaited_handler_renders_await_expression`
+- `crates/flux-codegen-swift/tests/handler_calls.rs::awaited_handler_renders_await_expression`
+
+---
+
+## Original filing — for context
+
 **Found:** round-34 bug hunt
 **Severity:** medium (the documented first-class `await` handler contract in
 ADR-0044/ADR-0045 cannot be reached end-to-end today)

@@ -32,3 +32,30 @@ fn capability_call_handler_survives_codegen() {
         "handler call collapsed to a placeholder:\n{out}"
     );
 }
+
+/// Regression (round 57): with F19's lowering fix in place, a bare
+/// `await Auth.login("u")` handler now reaches codegen and must be emitted
+/// with the backend's await syntax inside the coroutine wrapper.
+#[test]
+fn awaited_handler_renders_await_expression() {
+    // The IR lowering accepts this since round 56 (the bare `await` arm was
+    // added to `compile_block_or_expr`).
+    let out = emit("compo C\n  state n: Int = 0\n  Button(text: \"go\", onPress: { await Auth.login(\"u\") })\n");
+    // The awaited call itself survives.
+    assert!(
+        out.contains("Auth.login(\"u\")"),
+        "awaited call must appear in generated source:\n{out}"
+    );
+    // Both backends wrap an awaiting handler in a coroutine so the release
+    // path can suspend without blocking the UI thread (FLUX-064).
+    assert!(
+        out.contains("launch") || out.contains("Task {"),
+        "awaited handler must be wrapped in a coroutine:\n{out}"
+    );
+    // The placeholder never leaks.
+    assert!(
+        !out.contains("unsupported expr") && !out.contains("unsupported match"),
+        "awaited handler collapsed to a placeholder:\n{out}"
+    );
+}
+
