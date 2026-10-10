@@ -1,115 +1,116 @@
-# Handoff — Flux bug-hunt rounds 26+ (audit plan execution)
+# Handoff — Flux bug-hunt rounds 26+ (audit plan execution, continued)
 
 **For:** the next agent continuing this session
 **Repo:** `https://github.com/elcoosp/flux`
 **Working dir:** `/Users/adm/Documents/Repos/flux`
 **Baseline commit:** `3bd7b1a8` (origin/main at session start)
-**HEAD at handoff:** see `git log --oneline -1`
-**Commits ahead of origin/main:** 74 at session close
-**Session duration:** ~5 rounds (rounds 26–30), executing `docs/reviews/flux-audit-and-fix-plan.md`
+**Commits ahead of origin/main:** see `git rev-list --count origin/main..HEAD`
+**Session duration:** rounds 26–44
 
 ---
 
 ## 1. Mission
 
-The session executed `docs/reviews/flux-audit-and-fix-plan.md` (F1–F15), an
-external audit of the whole Flux monorepo. Every finding was either fixed
-with a regression test, closed as scope-out, or filed as an issue for a
-follow-up (F16, F17). Plus, mid-execution, the hunt uncovered four additional
-real bugs (ADT variants, const bindings, reserved identifiers, list.isEmpty
-operand order) which were also fixed.
+The session executed `docs/reviews/flux-audit-and-fix-plan.md` (F1–F15),
+then kept hunting for real bugs across the un-swept areas of the monorepo
+(devserver deep-read, parity recognizers, LSP providers, differ, codegen
+backends, parser, wire codec, types). Every finding was fixed with a
+regression test or filed as a follow-up issue (F16–F20).
 
-The user's standing goal remains: **keep hunting until rounds stop producing
-real findings.**
+The user's standing goal: **keep hunting until rounds stop producing real
+findings.**
 
----
+## 2. What landed this session (rounds 32–44)
 
-## 2. Current state — START HERE
+### 2.1 Real bugs fixed
 
-### 2.1 All tests green
+- **Parser guard arms** (round 32): `s if s > 90 => "A"` — the documented
+  §18.5 syntax — was rejected with "expected `=>`, found `if`". The entire
+  `MatchPatternKind::Guard` code path (checker, exhaustiveness, codegen,
+  LSP goto-def) was unreachable. Fixed in `parser.rs`; regression test
+  `guard_probe.rs` + `guard_roundtrip.rs` added.
+- **Parity recognizer swallow-error → infinite loop** (round 31): both
+  `parse_for_each` and `parse_items` used `parse_body(tokens, m).unwrap_or_default()`
+  — an unbalanced body returned `end = 0`, and the caller assigned it to its
+  own loop index `i`, spinning forever on the same token stream. Now
+  propagates the parse error.
+- **Guard arm label dropped condition** (round 33): `pattern_label` in both
+  `view_tree.rs` (codegen) and `reduce.rs` (parity) returned only the binding
+  name, so `s if s > 90` and `s if s > 80` produced identical labels — a
+  parity comparison could not distinguish them. Both now include the
+  canonicalized condition.
+- **Kotlin/Swift guard codegen emitted invalid source** (round 35):
+  - Swift: `case let .<name>(_)` (dropped the condition, invalid for a
+    non-enum binding). Now `case let <name> where <cond>` — the real Swift
+    guard form.
+  - Kotlin: `is <name> ->` was invalid Kotlin that also dropped the
+    condition. Now emits an explicit `/* unsupported match guard */ ->`
+    marker. **Proper Kotlin fix filed as FLUX-F20.**
+- **Handler bodies with a call were replaced by placeholders** (round 34):
+  `render_stmt` fell through to `unsupported_placeholder` for any
+  `ExprKind::Call` that was not `RouterNav.navigate`. `onPress: { Auth.login("u") }`
+  emitted `/* unsupported expr */ 0` instead of the call. Fixed by adding a
+  `render_call` helper that renders the callee and args faithfully; the
+  `Await` branch now also routes through it. Regression tests added in both
+  backends.
+- **Differ reattach pairing nondeterministic** (round 37): `reattach_pairs`
+  iterated `inserted`, whose order came from `AHashSet::difference` (per-process
+  randomized). Two same-key candidates paired with "whichever came first",
+  so the frame bytes varied between runs. Fixed by sorting `inserted` before
+  the pairing call. Regression test `reattach_pairs_is_deterministic_when_candidates_share_a_key`.
+
+### 2.2 Test flakes fixed (all three in the same class: shared fixed names)
+
+- **kotlinc test** (round 38): wrote `flux_codegen_kotlin_<name>.kt` under
+  the shared `TMPDIR` — a concurrent `cargo test` process removed it while
+  the running `kotlinc` was reading. Fixed with a per-PID scratch dir.
+- **swiftc test** (round 38): same, `flux_codegen_swift_<name>.swift`.
+- **debug_bridge devtools tests** (round 44): hard-coded ports `17399`/`17400`
+  raced with a prior listener. Fixed by splitting `serve_devtools` into a
+  listener-taking `serve_devtools_on` and binding `:0` in tests.
+
+### 2.3 Hygiene
+
+- Dropped unused `ExprKind` import in the new guard test.
+- Corrected a stale doc-comment in `bytecode.rs` that claimed guard arms
+  "match unconditionally" (they actually return `Err`).
+- `serve_devtools_on` is `pub(crate)` — no `unreachable_pub` warning.
+
+## 3. Current state — START HERE
+
+### 3.1 All tests green
 
 | Surface | Command | Result |
 |---|---|---|
-| Rust workspace | `cargo nextest run --workspace -j1` | 74+ new tests, all pass |
-| Zero warnings | `cargo check --workspace --all-targets` | none from our crates |
-| Kotlin host | `./gradlew :runtimes:android:host:test` | green |
-| Kotlin app | `./gradlew :runtimes:android:app:compileDebugKotlin` | green |
-| Swift ISA conformance | `xcodebuild test -scheme FluxHost -only-testing:FluxHostTests/ISAConformanceTests` | 105/105 vectors |
-| Swift dispatch equivalence | `-only-testing:FluxHostTests/VMDispatchPerfTests/testDispatchTableMatchesSwitchOnAllISAVectors` | 105/105 |
-| Swift render perf | `-only-testing:FluxHostTests/RenderPerfHarnessTests` | passes (with realistic budget) |
-| Wire-fixture gate | `bash scripts/wire-fixtures-gate.sh` | PASS |
+| Rust workspace | `cargo test --workspace -j1` | all pass |
+| Clippy strict | `cargo clippy --workspace --all-targets -j1 -- -D warnings` | clean |
+| `cargo check` | `cargo check --workspace --all-targets` | clean |
+| flux-parser guard tests | `cargo test -p flux-parser --test guard_probe --test guard_roundtrip` | 2 pass |
 
-### 2.2 Working tree
+The two kotlinc/swiftc tests (`generated_kotlin_parses` /
+`generated_swift_type_checks`) are slow (>2 min each) and require a
+toolchain on `PATH`; they **skip** when missing and pass when present.
 
-Only `docs/HANDOFF.md` was modified during the session (this file, now
-committed). Nothing else pending.
+### 3.2 Working tree
 
-### 2.3 What landed (74 commits)
+Clean. All changes committed.
 
-Audit plan execution, F1 → F15:
+### 3.3 Filed issues (new this session)
 
-- **F1** (Critical): `LIST_INSERT` / `LIST_REMOVE` index operand was a
-  *register* in the emitter but read as a *literal* in all three VMs.
-  `items.removeAt(i)` removed by `i`'s register number, not the value. Fixed
-  in Rust (`flux-vm-ref/src/vm.rs`), Swift (`FluxBytecodeVM.swift`, all 3
-  exec paths), and Kotlin (`StepResult.kt` + `VmHelpers.kt`). Six new ISA
-  vectors; T-304 tests updated; end-to-end `flux-ir` regression test.
-- **F2** (High): `snapshot()` returned every seeded signal, not just writes.
-  Fixed by adding `beginRun()` to the `SignalStore` protocol in Kotlin and
-  Swift; only signals written since `beginRun` appear in `snapshot()`. ISA
-  conformance tests updated to read from the store rather than `out.signals`.
-- **F3** (High): Kotlin VM reported undecodable bytecode as a successful
-  `Halt` with an empty program. Now `Fault`.
-- **F4** (High): Kotlin executor swallowed async capability errors as `Null`.
-  Now faults the handler and marks the cell `Error`.
-- **F5** (High): `write_closures` panicked on a duplicate handler id and
-  silently shipped zero-length refs on oversized bytecode. Now returns
-  `WireError::DuplicateHandlerId` / `LengthExceedsU16`.
-- **F6** (Medium): Devserver watcher — coalesce window didn't coalesce,
-  atomic saves deleted files, TOCTOU on the pipeline lock, no starvation
-  cap. All fixed; four unit tests added.
-- **F7** (Medium): Swift `fatalError` sites in the VM exec paths → typed
-  throws; Kotlin `!!` sites → graceful null handling.
-- **F8** (Medium): `flux init <name>` now validates the project name
-  (`[A-Za-z][A-Za-z0-9_-]*`, ≤ 64 chars) and uses a `{{PROJECT_NAME}}`
-  placeholder.
-- **F9** (Medium): Added `.github/workflows/security.yml` (cargo audit +
-  cargo deny + pnpm audit) and `deny.toml`.
-- **F10** (Medium): Scope-closed by F5's fixes; remaining panicking
-  `.to_bytes` sites use bounded payloads.
-- **F11** (Low): `stateProgram` boxing on suspend → reuse bytecode; DevTools
-  emit gate flipped to `BuildFlags.DEBUG`; allocation-cap drift filed as
-  F16.
-- **F12** (Low): Stale `RELEASE-TODO` comments removed; remaining work filed
-  as F17.
-- **F13** (Open): `save_to_photon` and `data_driven_surface` were already
-  green (PROGRESS.md updated); `resolve`'s `unreachable!` → `debug_assert`;
-  blob cursor bounds added; reconstruct invariant tests added; fmt property
-  test already exists.
-- **F14** (Open): iOS render-perf harness (`RenderPerfHarnessTests.swift`)
-  added, mirroring the Android one; measured p50 ~5ms, p95 ~27ms on
-  simulator Debug.
-- **F15** (Low): Dispatch-table parity test was already corpus-driven
-  (105/105 vectors).
+- **FLUX-F19** — `await` in a handler is rejected by IR lowering, making
+  the codegen async path unreachable. ADR-0044/0045 promise first-class
+  `await`; the compiler bails before codegen can render it.
+- **FLUX-F20** — Kotlin codegen cannot express a match guard arm. Swift got
+  a real `where` fix; Kotlin emits an explicit unsupported marker until an
+  `if/else if` chain lowering lands.
+- (pre-existing) **FLUX-F16** — allocation-cap parity between Kotlin/Swift.
+- (pre-existing) **FLUX-F17** — crash reporter source-map resolution.
+- (pre-existing) **FLUX-F18** — F10 clippy gate blocked by ~25 mechanical
+  panicking encoders in `flux-ir-serde` / `flux-devserver`.
 
-Mid-hunt additional bugs:
+## 4. Session conventions
 
-- ADT variant names were not registered as constructors, so
-  `state c: Color = RGB(...)` lowered to `Null`; positional constructor args
-  then clobbered the variant tag written at slot 0.
-- `Color.red = RGB(...)` module-level const bindings lowered to `Null` in
-  every call site (`Button(color: Color.red)`).
-- Component/type names reserved in Swift or Kotlin (`class`, `object`, …)
-  produced native source that didn't compile; now rejected by the type
-  checker with a rename hint.
-- `list.isEmpty()` emitted its zero constant *after* the compare, so the VM
-  read the next opcode byte as a register operand.
-
----
-
-## 3. Session conventions
-
-Same as the earlier handoff — preserved verbatim:
+Preserved verbatim:
 
 - Every turn is exactly one fenced `bash` block. No prose outside.
 - `set -uo pipefail` (never `-e`); errors logged, script continues.
@@ -122,62 +123,21 @@ Same as the earlier handoff — preserved verbatim:
 - Never pipe into `tail`/`grep` for streaming commands; redirect to a file
   and tail afterwards.
 
----
-
-## 4. Remaining work
-
-### 4.1 Filed issues
-
-- `docs/issues/FLUX-F16-allocation-cap-parity.md` — Kotlin and Swift
-  disagree on per-allocation cost (8 vs 16 bytes per record field; `cap*8`
-  vs `8` for lists; `>=` vs `>` boundary). Needs a design decision before
-  fixing.
-- `docs/issues/FLUX-F17-crash-source-map.md` — Both `CrashReporter`
-  implementations install the uncaught-exception handler but don't resolve
-  the top frame to a component id / source excerpt.
-
-### 4.2 Not swept (or swept briefly)
-
-- `flux-devtools-ui/src/state.rs` (1150 lines, 14 tests) — host-session map
-  logic not deeply audited.
-- `flux-parity/src/recognize_swift.rs` and `recognize_kotlin.rs` — the
-  release-path recognizers only inspected from a distance.
-- `flux-lsp/src/completion.rs`, `hover.rs`, `goto_def/` — spot-checked;
-  `goto_def` had one bug fixed; the others were left as-is.
-- `flux-codegen-swift/src/*`, `flux-codegen-kotlin/src/*` — reviewed for
-  reserved-word handling (fixed) but not line-by-line.
-- `adapters/ui-swift/`, `adapters/ui-kotlin/` — spot-checked.
-- `flux-perf-harness/src/{gate.rs, driver.rs, metric.rs}` — inspected, clean.
-
-### 4.3 Non-gating limitations
-
-- `testSwitchThroughput` (iOS) has a 2.0s budget for 20k iterations. On a
-  loaded machine this can flake. Consider raising to 3.0s or gating on a
-  Release build.
-- The Kotlin `RenderPerfHarnessTest` p95 ≤ 3ms budget is a Release-mode
-  target; the Swift equivalent uses a 1s regression guard because Debug
-  Simulator builds are ~40x slower. See `RenderPerfHarnessTests.swift`.
-
----
-
 ## 5. Critical gotchas
 
-1. **Never `pkill -f` anything generic.** Same rule as before.
+1. **Never `pkill -f` anything generic.**
 2. **`xcodebuild -destination "platform=iOS Simulator,id=<UDID>"` hangs.**
    Use `name=<iPhone>&OS=<version>` or `-xctestrun`.
-3. **Never call `xcrun simctl bootstatus -b`.** Use `simctl boot` (async) +
-   a bounded poll for `simctl list devices booted`.
+3. **Never call `xcrun simctl bootstatus -b`.** Use `simctl boot` (async)
+   plus a bounded poll for `simctl list devices booted`.
 4. **Never modify the user's `$HOME` or shell rc files.** Temp artifacts go
    in `/tmp/`.
 5. **Swift VM has THREE exec paths.** Any opcode change must be applied to
    `run`, `runResumable`, and `runViaDispatchTable`.
-6. **`proto_version = 3` and `protocolVersionMin = 2`.** v2 frames are still
-   readable via the version-dispatched `Reader::count`.
+6. **`proto_version = 3` and `protocolVersionMin = 2`.** v2 frames are
+   still readable via the version-dispatched `Reader::count`.
 7. **The `docs/HANDOFF.md` you are reading was written in one shot at the
-   close of this session.** If you need to refresh it mid-session, do so in
-   a dedicated commit rather than bundling it with code changes.
-
----
+   close of this session.** Refresh in a dedicated commit.
 
 ## 6. Success criteria for the phase
 
@@ -187,22 +147,33 @@ Same as the earlier handoff — preserved verbatim:
 4. Working tree clean (or only docs/ pending review).
 5. Any change to one VM mirrored in the other two where applicable.
 
-All of (1)–(5) hold as of this handoff.
-
----
+(1)–(5) hold.
 
 ## 7. Session history — rounds 26+
 
 | Round | Finding |
 |---|---|
-| 26 | F1 (list index operand), F2 (snapshot semantics), F3 (Kotlin decode), F4 (async error), plus ADT/const/reserved/list.isEmpty |
+| 26 | F1 (list index operand), F2 (snapshot semantics), F3 (Kotlin decode), F4 (async error), ADT/const/reserved/list.isEmpty |
 | 27 | F5 (wire errors), F10 (panicking to_bytes), F7 (host crash sites) |
 | 28 | F6 (watcher), F8 (init validation), F9 (security CI) |
 | 29 | F11 (VM micro), F12 (docs), F13 (open items) |
-| 30 | F14 (iOS render-perf), F15 (dispatch parity confirmation) |
+| 30 | F14 (iOS render-perf), F15 (dispatch parity) |
+| 31 | parity recognizer `unwrap_or_default()` infinite-loop risk |
+| 32 | parser rejected spec §18.5 guard arms |
+| 33 | guard-arm label dropped condition (codegen + parity) |
+| 34 | handler-body calls replaced by placeholder; filed FLUX-F19 |
+| 35 | Kotlin/Swift guard arms emit invalid source; Swift fixed, filed FLUX-F20 |
+| 36 | devserver deep-read (pipeline, session, dispatch, watch) — no new bugs |
+| 37 | differ reattach pairing nondeterministic |
+| 38 | kotlinc/swiftc fixed-name temp collision |
+| 39 | devserver async_bridge/assets/server — no new bugs |
+| 40 | flux-cli subcommands — clean |
+| 41 | wire frame.rs deep-read — F18 remains (mechanical) |
+| 42 | guard round-trip through `flux fmt` — green |
+| 43 | flux-types unify/exhaust — clean |
+| 44 | debug_bridge fixed-port flake |
 
 **Session owner:** the user
-**Date of handoff:** 2026-10-09
 **Convention reminder:** the user runs scripts as `./wr.sh`. Respond with
 exactly one fenced `bash` block per turn. No explanatory prose outside the
 block.
