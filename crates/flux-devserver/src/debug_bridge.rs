@@ -271,7 +271,7 @@ pub async fn serve_devtools(
 /// invocation) and produced `ConnectionReset` flakes — the same class of bug
 /// closed for the kotlinc/swiftc temp-file writes in round 38.
 #[allow(clippy::result_large_err)]
-pub async fn serve_devtools_on(
+pub(crate) async fn serve_devtools_on(
     listener: tokio::net::TcpListener,
     router: std::sync::Arc<parking_lot::Mutex<DevToolsRouter>>,
     token: Option<String>,
