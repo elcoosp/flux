@@ -116,3 +116,47 @@ fn swift_test_file_unwrap_skipped() {
     );
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+// ── F22 regression tests ────────────────────────────────────────────────
+
+/// A comment mentioning `.expect()` / `.unwrap()` must not be flagged.
+#[test]
+fn comment_mentioning_expect_is_not_flagged() {
+    let line = "    // Audit note: callers still `.expect()` at the frame boundary.";
+    assert!(
+        !contains_rust_panic_api(line),
+        "a comment mentioning .expect() must not be flagged"
+    );
+    let line = "// The `.unwrap()` here is only prose.";
+    assert!(!contains_rust_panic_api(line));
+}
+
+/// A string literal containing `.unwrap()` must not be flagged.
+#[test]
+fn string_literal_containing_unwrap_is_not_flagged() {
+    let line = r#"    line.contains(".unwrap()") || line.contains(".expect(")"#;
+    assert!(
+        !contains_rust_panic_api(line),
+        "a string literal mentioning .unwrap() must not be flagged"
+    );
+}
+
+/// Real panic APIs still flag.
+#[test]
+fn real_panic_api_is_flagged() {
+    assert!(contains_rust_panic_api("let x = foo().unwrap();"));
+    assert!(contains_rust_panic_api("let x = foo().expect(\"msg\");"));
+    assert!(contains_rust_panic_api("panic!(\"boom\");"));
+    assert!(contains_rust_panic_api("unreachable!();"));
+    assert!(contains_rust_panic_api("todo!();"));
+}
+
+/// Swift/Kotlin `try!` / `as!` in a comment or string literal is not flagged.
+#[test]
+fn swift_kotlin_comment_and_string_false_positives_are_filtered() {
+    assert!(!contains_force_unwrap("// was `try!` before"));
+    assert!(!contains_force_unwrap(r#"let s = "try! is bad""#));
+    assert!(contains_force_unwrap("let x = try! foo()"));
+    assert!(contains_force_unwrap("let x = y as! Int"));
+    assert!(contains_force_unwrap("val v = x!!"));
+}
