@@ -347,7 +347,7 @@ impl TelemetryEvent {
         // Bound the cursor to the declared body so a corrupt length cannot
         // read past this event into the next one.
         let body = r.take(body_len, "telemetry.event.body")?;
-        let mut inner = Reader::new(body);
+        let mut inner = Reader::with_version(body, r.version());
         let tag = inner.u8("telemetry.event.tag")?;
         match tag {
             EVENT_VM_STEP => {
@@ -520,7 +520,11 @@ impl TelemetryFrame {
     /// frame kind is not `0x10`.
     #[must_use]
     pub fn from_bytes(bytes: &[u8]) -> Option<TelemetryFrame> {
-        let mut r = Reader::new(bytes);
+        // Round-63 (FLUX-F21): build the reader with the frame's version so
+        // `Reader::count` reads telemetry string prefixes at the width the
+        // encoder actually wrote (u32 at v3, u16 at v2).
+        let version = *bytes.get(4)?;
+        let mut r = Reader::with_version(bytes, version);
         let magic = r.u32("telemetry.magic").ok()?;
         if magic != MAGIC {
             return None;
@@ -569,7 +573,11 @@ impl EnrichedTelemetryFrame {
     /// Decodes an enriched `Telemetry` frame, or `None` if malformed.
     #[must_use]
     pub fn from_bytes(bytes: &[u8]) -> Option<EnrichedTelemetryFrame> {
-        let mut r = Reader::new(bytes);
+        // Round-63 (FLUX-F21): build the reader with the frame's version so
+        // `Reader::count` reads telemetry string prefixes at the width the
+        // encoder actually wrote (u32 at v3, u16 at v2).
+        let version = *bytes.get(4)?;
+        let mut r = Reader::with_version(bytes, version);
         let magic = r.u32("telemetry.magic").ok()?;
         if magic != MAGIC {
             return None;
@@ -802,7 +810,11 @@ impl DebugCommandFrame {
     /// Decodes a `DebugCommand` frame, or `None` if malformed / wrong kind.
     #[must_use]
     pub fn from_bytes(bytes: &[u8]) -> Option<DebugCommandFrame> {
-        let mut r = Reader::new(bytes);
+        // Round-63 (FLUX-F21): build the reader with the frame's version so
+        // the payload's string prefix is decoded at the same width the
+        // encoder wrote.
+        let version = *bytes.get(4)?;
+        let mut r = Reader::with_version(bytes, version);
         let magic = r.u32("debugcmd.magic").ok()?;
         if magic != MAGIC {
             return None;
@@ -818,7 +830,7 @@ impl DebugCommandFrame {
         let command_id = r.u32("debugcmd.id").ok()?;
         let payload_len = r.u16("debugcmd.payload_len").ok()? as usize;
         let payload = r.take(payload_len, "debugcmd.payload").ok()?;
-        let mut inner = Reader::new(payload);
+        let mut inner = Reader::with_version(payload, version);
         let command = DebugCommand::decode_payload(&mut inner).ok()?;
         Some(DebugCommandFrame {
             version,
@@ -1092,7 +1104,7 @@ impl EnrichedTelemetryEvent {
     fn decode_from(r: &mut Reader<'_>) -> Result<EnrichedTelemetryEvent, WireError> {
         let body_len = r.u32("enriched.event.len")? as usize;
         let body = r.take(body_len, "enriched.event.body")?;
-        let mut inner = Reader::new(body);
+        let mut inner = Reader::with_version(body, r.version());
         let tag = inner.u8("enriched.event.tag")?;
         match tag {
             EVENT_VM_STEP => {
@@ -1349,17 +1361,35 @@ fn decode_optional_span(r: &mut Reader<'_>) -> Result<Option<Span>, WireError> {
     }
 }
 
-/// Length-prefixed UTF-8 string encoder (little-endian `u16` length).
+/// Length-prefixed UTF-8 string encoder.
+///
+/// Round-63 fix (FLUX-F21, ADR-0059 amendment): the prefix width is
+/// version-dispatched via `Writer::count_prefix` — v3 uses `u32`, v2 uses
+/// `u16`. Before this fix, `frame::encode_str` widened at v3 but
+/// `telemetry::encode_str` did not, so a telemetry frame carrying a >64 KB
+/// string (a real HTTP body, a large JSON payload) was silently
+/// truncated. Both sides are changed atomically here and in `decode_str`
+/// below, which is the whole point of the amendment.
 #[allow(clippy::expect_used)]
-// F18: legacy panicking string encoder — prefer `try_encode_str`.
+// F18: legacy panicking wrapper. Prefer `try_encode_str` for any string
+// whose source could be user-authored; the `expect` is a diagnostic on an
+// unreachable >4 GiB path.
 fn encode_str(w: &mut Writer, s: &str) {
-    w.u16_len(s.len(), "telemetry.string_len");
+    w.count_prefix(s.len(), "telemetry.string_len")
+        .expect("telemetry.string_len: exceeds wire length prefix width");
     w.bytes(s.as_bytes());
 }
 
 /// Length-prefixed UTF-8 string decoder (little-endian `u16` length).
+/// Length-prefixed UTF-8 string decoder.
+///
+/// Round-63 fix (FLUX-F21, ADR-0059 amendment): reads the width the
+/// encoder side writes — `u32` at v3, `u16` at v2 — via the version-aware
+/// `Reader::count`. Before this fix the decoder hard-coded `u16` while
+/// `frame::decode_str` already dispatched on version, so a v3 telemetry
+/// frame carrying a >64 KB string could not round-trip.
 fn decode_str(r: &mut Reader<'_>, ctx: &'static str) -> Result<String, WireError> {
-    let len = r.u16(ctx)?.into();
+    let len = r.count(ctx)? as usize;
     let raw = r.bytes(len, ctx)?;
     std::str::from_utf8(raw)
         .map(str::to_owned)
@@ -1425,4 +1455,41 @@ mod tests {
             other => panic!("expected PerfRecord after enrich, got {other:?}"),
         }
     }
+    /// Regression (round-63 / FLUX-F21): a telemetry string larger than
+    /// u16::MAX must round-trip on a v3 frame. Before this amendment
+    /// `telemetry::encode_str`/`decode_str` hard-coded u16 while
+    /// `frame::encode_str` was version-dispatched, so a real HTTP body over
+    /// 64 KB silently failed.
+    #[test]
+    fn oversize_telemetry_string_round_trips_at_v3() {
+        // 70 000 bytes: > u16::MAX, < u32::MAX. `x` repeated so the test
+        // does not depend on any unicode.
+        let big = "x".repeat(70_000);
+        let event = TelemetryEvent::NetworkRequest {
+            request_id: 1,
+            method: "POST".to_owned(),
+            url: "https://example.test/upload".to_owned(),
+            body: Some(big.clone()),
+            capability_id: 0,
+        };
+        let frame = TelemetryFrame {
+            version: PROTOCOL_VERSION,
+            event_count: 1,
+            events: vec![event],
+        };
+        let bytes = frame.to_bytes();
+        let decoded = TelemetryFrame::from_bytes(&bytes).expect("frame decodes");
+        assert_eq!(decoded.events.len(), 1);
+        match &decoded.events[0] {
+            TelemetryEvent::NetworkRequest { body, .. } => {
+                assert_eq!(
+                    body.as_deref().map(str::len),
+                    Some(70_000),
+                    "v3 telemetry string > u16::MAX must round-trip"
+                );
+            }
+            other => panic!("expected NetworkRequest, got {other:?}"),
+        }
+    }
+
 }

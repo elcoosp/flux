@@ -186,6 +186,13 @@ impl<'a> Reader<'a> {
     /// Reader for a frame at the given protocol version (from
     /// `read_frame_type`). Every length-prefix read in this cursor consults
     /// `version` to pick u16-vs-u32 semantics.
+    /// The protocol version this reader is decoding at (ADR-0059). Exposed
+    /// so nested sub-readers can inherit it — the sub-payload has no header
+    /// of its own, so the outer reader's version is the frame's version.
+    pub(crate) fn version(&self) -> u8 {
+        self.version
+    }
+
     pub(crate) fn with_version(bytes: &'a [u8], version: u8) -> Self {
         Self {
             bytes,
