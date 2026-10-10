@@ -513,10 +513,24 @@ impl<'s> Lexer<'s> {
         Ok(())
     }
 
+    /// Lexes an integer or float literal.
+    ///
+    /// Accepts three shapes (mirroring the grammar in `mlp-appendices.md` §B):
+    /// * `-?DIGIT+` — `Int`
+    /// * `-?DIGIT+ "." DIGIT+` — `Float`
+    /// * `-?DIGIT+ ("." DIGIT+)? [eE] [+-]? DIGIT+` — `Float`
+    ///
+    /// Round-77 fix: the previous version did not consume an exponent, so
+    /// `1e10` lexed as `Int(1)` followed by `Ident("e10")` — the parser saw
+    /// two unrelated tokens and the user got "expected Float, got Int" plus
+    /// "unbound name `e10`" for what is plainly one number. Any exponent
+    /// form (including `1.5e-10` and the integer-mantissa form `1e10`) is
+    /// now a single `Float` token.
     fn lex_number(&mut self, start: usize) {
         if self.peek() == Some('-') {
             self.pos += 1;
         }
+        // Integer part.
         while let Some(ch) = self.peek() {
             if ch.is_ascii_digit() {
                 self.pos += 1;
@@ -524,10 +538,12 @@ impl<'s> Lexer<'s> {
                 break;
             }
         }
-        let is_float =
-            self.peek() == Some('.') && self.peek_at(1).is_some_and(|c| c.is_ascii_digit());
-        if is_float {
+        // Optional fractional part. Note `is_float` is set here so an
+        // integer-mantissa exponent form (`1e10`) still lexes as a Float.
+        let mut is_float = false;
+        if self.peek() == Some('.') && self.peek_at(1).is_some_and(|c| c.is_ascii_digit()) {
             self.pos += 1; // '.'
+            is_float = true;
             while let Some(ch) = self.peek() {
                 if ch.is_ascii_digit() {
                     self.pos += 1;
@@ -535,18 +551,45 @@ impl<'s> Lexer<'s> {
                     break;
                 }
             }
-            self.out.push(Token {
-                kind: TokenKind::Float,
-                start,
-                end: self.cur_byte(),
-            });
-        } else {
-            self.out.push(Token {
-                kind: TokenKind::Int,
-                start,
-                end: self.cur_byte(),
-            });
         }
+        // Optional exponent: `[eE]` then an optional sign then 1+ digits.
+        // An `e` NOT followed by a digit or a sign+digit is left for the
+        // identifier lexer (`e10` in a hypothetical `1 e10` sequence is not
+        // a valid exponent if it's not immediately after a number). The
+        // lookahead ensures we never consume a bare `e` that starts an
+        // identifier.
+        if matches!(self.peek(), Some('e' | 'E')) {
+            let after_e = self.peek_at(1);
+            let exp_digits_start = match after_e {
+                Some('+' | '-') => self.peek_at(2).is_some_and(|c| c.is_ascii_digit()),
+                Some(c) if c.is_ascii_digit() => true,
+                _ => false,
+            };
+            if exp_digits_start {
+                is_float = true;
+                self.pos += 1; // 'e'/'E'
+                if matches!(self.peek(), Some('+' | '-')) {
+                    self.pos += 1;
+                }
+                while let Some(ch) = self.peek() {
+                    if ch.is_ascii_digit() {
+                        self.pos += 1;
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+        let kind = if is_float {
+            TokenKind::Float
+        } else {
+            TokenKind::Int
+        };
+        self.out.push(Token {
+            kind,
+            start,
+            end: self.cur_byte(),
+        });
         self.prev_can_end_value = true;
     }
 
@@ -679,6 +722,19 @@ mod tests {
             })
             .collect();
         assert_eq!(kinds, vec!["ident", "minus", "int", "eof"]);
+    }
+
+    /// Round-77 regression: exponent notation (`1e10`, `1.5e-10`, `1E10`) must
+    /// lex as a single `Float`, not `Int(1)` + `Ident("e10")`.
+    #[test]
+    fn exponent_literals_lex_as_float() {
+        for src in ["1e10", "1.5e10", "1.5e-10", "1E10", "1e-3", "1.5E+3"] {
+            let toks = lex(src, 0).expect(src);
+            assert_eq!(toks.len(), 2, "{src}: expected Float + Eof, got {toks:?}");
+            assert_eq!(toks[0].kind, TokenKind::Float, "{src}: must be a single Float");
+        }
+        let toks = lex("e10", 0).expect("e10");
+        assert_eq!(toks[0].kind, TokenKind::Ident);
     }
 
     #[test]

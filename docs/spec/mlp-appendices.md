@@ -971,8 +971,9 @@ ident = @{ !keyword ~ ASCII_ALPHA ~ (ASCII_ALPHANUMERIC | "_")* }
 path  = { ident ~ ("::" ~ ident)* }
 
 // Literals
-float_lit  = @{ "-" ? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ }
-int_lit    = @{ "-" ? ~ ASCII_DIGIT+ }
+float_lit  = @{ "-"? ~ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT+)? ~ ("e" | "E") ~ ("+" | "-")? ~ ASCII_DIGIT+ }
+           | @{ "-"? ~ ASCII_DIGIT+ ~ "." ~ ASCII_DIGIT+ }
+int_lit    = @{ "-"? ~ ASCII_DIGIT+ }
 bool_lit   = @{ ("true" | "false") ~ word_end }
 
 string_lit = ${ "\"" ~ str_part* ~ "\"" }
