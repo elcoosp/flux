@@ -1681,18 +1681,32 @@ impl<'s> Parser<'s> {
             ))
         } else if tok.kind == TokenKind::Ident {
             let name = self.ident()?;
-            let mut fields = Vec::new();
-            if self.at(TokenKind::LParen) {
-                self.eat(TokenKind::LParen)?;
-                while !self.at(TokenKind::RParen) {
-                    fields.push(self.pattern()?);
-                    if !self.try_eat(TokenKind::Comma) {
-                        break;
+            // Spec §18.5 documents guard arms: `s if s > 90 => "A"`.
+            // Before this fix, `match_pattern` returned immediately after the
+            // binding name, so the token stream at the `if` keyword failed the
+            // next `eat(FatArrow)` with "expected `=>`, found `if`" — every
+            // program that used the documented guard syntax was rejected at
+            // parse time, and the entire `MatchPatternKind::Guard` code path
+            // (type checker, exhaustiveness checker, both codegen backends,
+            // LSP go-to-definition) was unreachable.
+            if self.at(TokenKind::If) {
+                self.eat(TokenKind::If)?;
+                let cond = self.expr()?;
+                MatchPatternKind::Guard { name, cond }
+            } else {
+                let mut fields = Vec::new();
+                if self.at(TokenKind::LParen) {
+                    self.eat(TokenKind::LParen)?;
+                    while !self.at(TokenKind::RParen) {
+                        fields.push(self.pattern()?);
+                        if !self.try_eat(TokenKind::Comma) {
+                            break;
+                        }
                     }
+                    self.eat(TokenKind::RParen)?;
                 }
-                self.eat(TokenKind::RParen)?;
+                MatchPatternKind::Variant { name, fields }
             }
-            MatchPatternKind::Variant { name, fields }
         } else {
             return Err(self.error(tok, "expected a match pattern", None));
         };
