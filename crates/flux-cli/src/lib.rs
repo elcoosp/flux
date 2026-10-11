@@ -26,7 +26,7 @@ mod dev;
 mod doc;
 mod doctor;
 mod fmt;
-mod init;
+pub mod init;
 mod lsp;
 mod sources;
 
@@ -37,6 +37,10 @@ pub use doc::build_schema;
 /// Re-exported so the integration tests exercise the `flux lsp` core directly
 /// (the subcommand prints what this returns).
 pub use lsp::collect_lsp;
+
+/// Re-exported so the integration tests can validate the exact scaffold
+/// string `flux init` writes without invoking the CLI subcommand.
+pub use init::SAMPLE_ENTRY;
 
 use std::path::PathBuf;
 
