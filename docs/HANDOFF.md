@@ -1,22 +1,22 @@
-# Handoff — Flux bug-hunt rounds 86–104
+# Handoff — Flux bug-hunt rounds 86–105
 
 **For:** the next agent continuing this session
 **Repo:** `https://github.com/elcoosp/flux`
 **Working dir:** `/Users/adm/Documents/Repos/flux`
 **HEAD at handoff:** see `git log --oneline -1`
-**Session duration:** rounds 86–104 (nineteen deep rounds)
+**Session duration:** rounds 86–105 (twenty deep rounds)
 
 ---
 
 ## 1. Mission
 
 The user's standing goal remains: **keep hunting until rounds stop
-producing real findings.** Rounds 86–104 produced **17 real fixes with
-regression tests** and **33 documented gaps** filed as issues.
+producing real findings.** Rounds 86–105 produced **18 real fixes with
+regression tests** and **35 documented gaps** filed as issues.
 
 ---
 
-## 2. Real fixes landed (17)
+## 2. Real fixes landed (18)
 
 - **F22** — `alignment`/`color`/`label` props dropped by codegen emitters.
 - **F23** — `flux-lsp::semantic_tokens::comment_spans` did not track backslash escapes.
@@ -33,18 +33,16 @@ regression tests** and **33 documented gaps** filed as issues.
 - **F49** — `flux doctor`'s stdlib parse-check reported `[ok]` when the
   parse-check script was not found.
 - **F53** — `flux-parser`'s nesting pre-scan counted brackets inside `//`
-  line comments, rejecting any file with 17+ unmatched brackets in prose.
+  line comments.
 - **F57** — `wire/span.rs::encode_str` wrote a u16 length prefix while
-  `decode_str` read a version-dispatched (u32 at v3) prefix. Any
-  `ClosureRef` carrying a `SourceExcerpt` desynced the decoder on v3.
-  **Production wire path.**
-- Late follow-ups: closed the F24/F35/F58 test bodies (missing braces)
-  and fixed the F30 assertion.
+  `decode_str` read a version-dispatched prefix. **Production wire path.**
+- **F59** — `HostAnnounceFrame::from_bytes` ignored its own version byte,
+  so v2 HostAnnounce frames failed to decode. **Production wire path.**
 
-## 3. Documented gaps (~33)
+## 3. Documented gaps (~35)
 
-F16, F17, F25, F26, F28–F31, F33, F34, F38–F41, F43 (removed as fix),
-F44, F47, F48, F50–F52, F54–F56, F58.
+F16, F17, F25, F26, F28–F31, F33, F34, F38–F41, F43, F44, F47, F48,
+F50–F52, F54–F56, F58.
 
 Notable:
 
@@ -61,37 +59,27 @@ Notable:
 ## 4. Current state
 
 All workspace tests green. Working tree clean; `HEAD` at the last
-round-104 commit.
+round-105 commit.
 
 ---
 
-## 5. Corrections to earlier handoffs
+## 5. Remaining work
 
-- **`checker.rs` is 235 lines**, not "10k" as previously claimed. The
-  large surface is the `checker/` submodule directory.
-- **`flux-perf-harness` was never "unread"**; it was swept in round 89
-  and its `MetricRecord::mean()` overflow issue is filed as F44.
-
----
-
-## 6. Remaining work
-
-### 6.1 Still not swept
+### 5.1 Still not swept
 
 - `crates/flux-ir/src/lower/bytecode.rs` — many `compile_value` arms.
-- `crates/flux-ir-serde/src/telemetry.rs` — encode path sampled.
-- `crates/flux-devserver/src/pipeline.rs` — 1.6k lines; compile-tree path.
+- `crates/flux-devserver/src/pipeline.rs` — 1.6k lines.
 - `runtimes/ios/`, `runtimes/android/` — Swift / Kotlin sources.
 - `crates/flux-lsp/src/lib.rs::did_change` — partially swept.
 
-### 6.2 Non-gating limitations (unchanged)
+### 5.2 Non-gating limitations (unchanged)
 
 - `testSwitchThroughput` (iOS) 2.0s budget can flake.
 - Kotlin `RenderPerfHarnessTest` p95 ≤ 3ms budget is a Release-mode target.
 
 ---
 
-## 7. Critical gotchas
+## 6. Critical gotchas
 
 1. **Never `pkill -f` anything generic.**
 2. **`xcodebuild -destination "platform=iOS Simulator,id=<UDID>"` hangs.**
@@ -102,25 +90,20 @@ round-104 commit.
 7. **`docs/HANDOFF.md`** — refresh in a dedicated commit.
 8. **Brace-balance check after appending tests.** Rust warns
    `unnameable_test_items` but compiles silently on the wrong shape.
-   Always verify with a script after appending:
-   `python3 -c "..." # check brace balance and #[test]-at-depth-0`
 9. **Python heredocs via `python3 -` do NOT auto-import `sys`.**
 10. **`cargo test -p <crate>` runs doctests last.**
 11. **`git add` + `git commit`** — always confirm with `git status`
-    after a "committed" message; the add can silently no-op.
-12. **When a Python heredoc fails, the script continues with the OLD
-    state.** No rollback. Check the intermediate state before assuming
-    an atomic apply.
+    after a "committed" message.
 
 ---
 
-## 8. Session history — rounds 86–104
+## 7. Session history — rounds 86–105
 
 | Round | Finding |
 |---|---|
-| 86 | F22, F23, F24, F27, F32, F35 (fixes); F25, F26, F28–F31, F33, F34 (filed) |
+| 86 | F22–F24, F27, F32, F35 (fixes); F25, F26, F28–F31, F33, F34 (filed) |
 | 87 | **F36**, **F37** (fixes); F38 |
-| 88 | **F42** (fix); F39, F40, F41, F43 |
+| 88 | **F42** (fix); F39–F41, F43 |
 | 89 | **F45** (fix); F44 |
 | 90 | **F46** (fix; production `validate_bytecode` offset) |
 | 91 | F47 (build output collisions) |
@@ -134,9 +117,10 @@ round-104 commit.
 | 99 | — (probes only) |
 | 100 | F56 (XOR-fold cancels duplicate PropIdx) |
 | 101 | **F57** (fix; `wire/span.rs::encode_str` version mismatch) |
-| 102 | cross-check: no new asymmetries found |
+| 102 | cross-check: no new asymmetries |
 | 103 | F58 (named-record destructure binds whole record) |
-| 104 | env.rs / checker/tests.rs clean; no new findings |
+| 104 | env.rs / checker/tests.rs clean; no findings |
+| 105 | **F59** (fix; `HostAnnounceFrame` decoder ignored frame version) |
 
 **Session owner:** the user
 **Date of handoff:** 2026-10-11
