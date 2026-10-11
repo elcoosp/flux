@@ -1,7 +1,0 @@
-[project]
-name = "myapp"
-entry = "main.flux"
-
-[dev]
-ws_port = 7331
-http_port = 7332
