@@ -565,4 +565,21 @@ fn batch_inside_handler_is_a_known_gap() {
         "expected the F26 lowering gap, got: {msg}"
     );
 }
+
+/// FLUX-F28 (documented gap): a `match` arm that binds a payload field
+/// and uses it in the arm body currently fails at IR lowering with
+/// "`x` is not a state signal in scope". This test is `#[ignore]`d; it
+/// documents the current failure. When `compile_match` binds pattern
+/// fields into locals, un-ignore and assert parity.
+#[test]
+#[ignore = "FLUX-F28: match-arm pattern bindings not bound as locals"]
+fn match_arm_binding_is_a_known_gap() {
+    let src = "type Op =\n  | Add(Int)\n  | Sub(Int)\n\ncompo C\n  state n: Int = 0\n  Button(text: \"b\", onPress: {\n    let op = Add(1)\n    match op {\n      Add(x) => n = n + x\n      Sub(x) => n = n - x\n    }\n  })";
+    let err = check_parity(src, 9990).expect_err("must currently fail at lowering");
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("not a state signal"),
+        "expected the F28 lowering gap, got: {msg}"
+    );
+}
 }
