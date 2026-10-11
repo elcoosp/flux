@@ -716,4 +716,32 @@ fn gesture_wrapper_is_a_known_gap() {
     );
 }
 
+
+/// FLUX-F35 regression: the two codegen backends emit different native
+/// names for the Flux `Picker` and `DatePicker` primitives (Kotlin uses
+/// `DropdownMenu` / `DatePickerDialog`). Both must round-trip through
+/// `normalize_view_name` so `check_parity` holds for a Flux program
+/// that uses them.
+#[test]
+fn picker_date_picker_names_round_trip() {
+    let picker = "compo C\n  state v: Int = 0\n  Picker(value: v, onChange: { v = 1 })";
+    let r = check_parity(picker, 9999).expect("compiles");
+    assert!(
+        r.is_equivalent(),
+        "Picker parity diverged: dev={:#?}\nswift={:#?}\nkotlin={:#?}",
+        r.dev,
+        r.swift,
+        r.kotlin,
+    );
+
+    let date_picker = "compo C\n  state v: Int = 0\n  DatePicker(value: v, onChange: { v = 1 })";
+    let r = check_parity(date_picker, 10_000).expect("compiles");
+    assert!(
+        r.is_equivalent(),
+        "DatePicker parity diverged: dev={:#?}\nswift={:#?}\nkotlin={:#?}",
+        r.dev,
+        r.swift,
+        r.kotlin,
+    );
+}
 }
