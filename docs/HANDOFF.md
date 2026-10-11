@@ -1,22 +1,22 @@
-# Handoff — Flux bug-hunt rounds 86–95
+# Handoff — Flux bug-hunt rounds 86–102
 
 **For:** the next agent continuing this session
 **Repo:** `https://github.com/elcoosp/flux`
 **Working dir:** `/Users/adm/Documents/Repos/flux`
 **HEAD at handoff:** see `git log --oneline -1`
-**Session duration:** rounds 86–95 (ten deep rounds)
+**Session duration:** rounds 86–102 (seventeen deep rounds)
 
 ---
 
 ## 1. Mission
 
 The user's standing goal remains: **keep hunting until rounds stop
-producing real findings.** Rounds 86–95 produced **15 real fixes with
-regression tests** and **26 documented gaps** filed as issues.
+producing real findings.** Rounds 86–102 produced **16 real fixes with
+regression tests** and **30+ documented gaps** filed as issues.
 
 ---
 
-## 2. Real fixes landed (15)
+## 2. Real fixes landed (16)
 
 - **F22** — `alignment`/`color`/`label` props dropped by codegen emitters.
 - **F23** — `flux-lsp::semantic_tokens::comment_spans` did not track backslash escapes.
@@ -28,38 +28,41 @@ regression tests** and **26 documented gaps** filed as issues.
 - **F37** — Dead `field_indices` map built by the type checker but never read.
 - **F42** — `flux init` scaffold used Kotlin-style `${count}`.
 - **F45** — `flux-lsp::did_close` did not invalidate the in-flight debounced publish task.
-- **F46** — `validate_bytecode` read `COND_JUMP` target at the wrong offset
-  (`+1` instead of `+2`). **Production frame-decode path**: any handler
-  with an `if`/`when`/`match` was rejected with a spurious
-  `MalformedBytecode`. Highest-impact fix of the session.
+- **F46** — `validate_bytecode` read `COND_JUMP` target at the wrong offset.
+  **Production frame-decode path.**
 - **F49** — `flux doctor`'s stdlib parse-check reported `[ok]` when the
-  parse-check script was not found (it had not run at all).
+  parse-check script was not found.
+- **F53** — `flux-parser`'s nesting pre-scan counted brackets inside `//`
+  line comments, rejecting any file with 17+ unmatched brackets in prose.
+- **F57** — `wire/span.rs::encode_str` wrote a u16 length prefix while
+  `decode_str` read a version-dispatched (u32 at v3) prefix. Any
+  `ClosureRef` carrying a `SourceExcerpt` desynced the decoder on v3.
+  **Production wire path.**
 
-## 3. Documented gaps (26)
+## 3. Documented gaps (~30)
 
-F16, F17, F25, F26, F28, F29, F30, F31, F33, F34, F38, F39, F40, F41,
-F43 (removed as fix), F44, F47, F48, F50, F51.
+F16, F17, F25, F26, F28–F31, F33, F34, F38–F41, F43 (removed as fix),
+F44, F47, F48, F50–F52, F54–F56.
 
 Notable:
 
-- **F47** — `flux build` silently clobbers generated files on stem /
-  component-name collision.
-- **F48** — `flux doctor`'s `mod tests` detection is over-broad.
 - **F50** — `flux doctor`'s `req_major` mis-models `>=` / `=` semver.
 - **F51** — `ParseError::render` mis-aligns the caret for non-ASCII source.
-- **F41** — `set_signal_deps` only called from tests.
-- **F39** — Dev-server `AsyncBridge` is unused scaffolding.
+- **F52** — Generic-ADT field bindings do not substitute `T`.
+- **F54** — Nested string in `{…}` interpolation cannot contain braces.
+- **F55** — `flux fmt` silently drops every user comment (data loss).
+- **F56** — `hash_fields` XOR-fold cancels duplicate `PropIdx` entries.
 
 ---
 
 ## 4. Current state
 
 All workspace tests green. Working tree clean; `HEAD` at the last
-round-95 commit.
+round-102 commit.
 
 | Surface | Command | Result |
 |---|---|---|
-| Rust workspace | `cargo test --workspace` | green (119 test groups) |
+| Rust workspace | `cargo test --workspace` | green |
 | All crates tested individually | green |
 
 ---
@@ -91,21 +94,16 @@ round-95 commit.
 5. **Swift VM has THREE exec paths.**
 6. **`proto_version = 3` and `protocolVersionMin = 2`.**
 7. **`docs/HANDOFF.md`** — refresh in a dedicated commit.
-8. **Brace-balance check after appending tests.** When adding test
-   functions to an existing `mod tests { ... }` block, verify the
-   final `mod tests` closing brace and the last test's closing brace
-   are BOTH present. Rust warns `unnameable_test_items` but compiles
-   silently on the wrong shape.
+8. **Brace-balance check after appending tests.** Rust warns
+   `unnameable_test_items` but compiles silently on the wrong shape.
 9. **Python heredocs via `python3 -` do NOT auto-import `sys`.**
 10. **`cargo test -p <crate>` runs doctests last.**
-11. **`git add` + `git commit`** — when the add silently no-ops (e.g.
-    command substitution failure swallowed by `set -uo pipefail`),
-    the file ends up untracked. Always confirm with `git status` after
-    a "committed" message.
+11. **`git add` + `git commit`** — always confirm with `git status`
+    after a "committed" message; the add can silently no-op.
 
 ---
 
-## 7. Session history — rounds 86–95
+## 7. Session history — rounds 86–102
 
 | Round | Finding |
 |---|---|
@@ -119,6 +117,13 @@ round-95 commit.
 | 93 | **F49** (fix; doctor parse-check false [ok]) |
 | 94 | F50 (doctor `req_major` mis-models `>=`/`=`) |
 | 95 | F51 (parser caret misaligns for non-ASCII) |
+| 96 | F52 (generic ADT pattern fields not substituted) |
+| 97 | **F53** (fix; pre-scan counts comment brackets); F54 |
+| 98 | F55 (fmt drops every comment) |
+| 99 | — (probes only) |
+| 100 | F56 (XOR-fold cancels duplicate PropIdx) |
+| 101 | **F57** (fix; `wire/span.rs::encode_str` version mismatch) |
+| 102 | cross-check: no new asymmetries found |
 
 **Session owner:** the user
 **Date of handoff:** 2026-10-11
