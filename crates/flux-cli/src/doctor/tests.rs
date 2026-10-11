@@ -158,4 +158,67 @@ fn swift_kotlin_comment_and_string_false_positives_are_filtered() {
     assert!(contains_force_unwrap("let x = try! foo()"));
     assert!(contains_force_unwrap("let x = y as! Int"));
     assert!(contains_force_unwrap("val v = x!!"));
+
+    /// Round-92: the doctor's in-test-mod detection uses `line.starts_with("mod tests")`,
+    /// which matches `mod tests_impl { ... }` too — a production module whose
+    /// name happens to begin with `tests` incorrectly suppresses panic-API
+    /// detection for the rest of the file. This test pins the current
+    /// (over-broad) behavior so a later fix can flip it.
+    #[test]
+    fn mod_tests_prefix_suppresses_panic_api_in_sibling_modules() {
+        let tmp = test_dir("mod-tests-prefix");
+        std::fs::write(
+            tmp.join("lib.rs"),
+            "mod tests_impl {\n    fn real() {\n        let x = r().unwrap();\n    }\n}\n",
+        )
+        .expect("write fixture");
+        let findings = scan_sources(&tmp);
+        // Documented current behavior: no finding is produced because
+        // `mod tests_impl` matches the `starts_with("mod tests")` prefix
+        // and the depth tracking never closes the "test mod" scope.
+        let has_panic_finding = findings.iter().any(|f| f.message.contains("unwrap"));
+        assert!(
+            !has_panic_finding,
+            "documented current behavior: `mod tests_impl` suppresses panic findings; got {findings:?}"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// Round-92: `mod tests;` (an external test file declaration, no braces)
+    /// sets the in-test-mod flag but no `}` ever closes it, permanently
+    /// suppressing panic-API detection for the rest of the file. This test
+    /// pins the current behavior.
+    #[test]
+    fn external_mod_tests_suppresses_panic_api_for_rest_of_file() {
+        let tmp = test_dir("external-mod-tests");
+        std::fs::write(
+            tmp.join("lib.rs"),
+            "mod tests;\n\nfn real() {\n    let x = r().unwrap();\n}\n",
+        )
+        .expect("write fixture");
+        let findings = scan_sources(&tmp);
+        let has_panic_finding = findings.iter().any(|f| f.message.contains("unwrap"));
+        assert!(
+            !has_panic_finding,
+            "documented current behavior: `mod tests;` suppresses panic findings for the rest of the file; got {findings:?}"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// Helper mirroring the other tests in this file — creates a unique temp
+    /// directory for the fixture.
+    fn test_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "flux-doctor-{}-{}-{}",
+            std::process::id(),
+            tag,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0),
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create test dir");
+        dir
+    }
 }
