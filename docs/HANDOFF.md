@@ -1,10 +1,10 @@
-# Handoff — Flux bug-hunt rounds 86–88 (full sweep)
+# Handoff — Flux bug-hunt rounds 86–89 (full sweep)
 
 **For:** the next agent continuing this session
 **Repo:** `https://github.com/elcoosp/flux`
 **Working dir:** `/Users/adm/Documents/Repos/flux`
 **HEAD at handoff:** see `git log --oneline -1`
-**Session duration:** rounds 86, 87, 88 (three deep rounds)
+**Session duration:** rounds 86, 87, 88, 89 (four deep rounds)
 
 ---
 
@@ -15,13 +15,14 @@ producing real findings.**
 
 Round 86 was a whole-audit sweep across parity, LSP, devtools, differ,
 VM. Round 87 focused on the differ and telemetry. Round 88 swept the
-dev-server and CLI. Between them, the sessions produced **8 real fixes
-with regression tests** and **14 documented gaps** filed as issues with
-`#[ignore]`d regression tests.
+dev-server and CLI. Round 89 focused on `flux-perf-harness` and
+`flux-lsp` deep reads. Between them, the sessions produced **11 real
+fixes with regression tests** and **19 documented gaps** filed as
+issues with `#[ignore]`d regression tests (where a test is meaningful).
 
 ---
 
-## 2. Real fixes landed (8)
+## 2. Real fixes landed (11)
 
 - **F22** — `alignment`/`color`/`label` props dropped by codegen
   emitters. Fix: emptied the dev reducer's `RECOGNISED` list.
@@ -40,10 +41,14 @@ with regression tests** and **14 documented gaps** filed as issues with
 - **F37** — Dead `field_indices` map built by the type checker but
   never read by the emitter; removed entirely.
 - **F42** — `flux init` scaffold used Kotlin-style `${count}` instead
-  of Flux `{count}`, shipping a sample that renders with a literal `$`.
+  of Flux `{count}`.
+- **F45** — `flux-lsp::did_close` did not invalidate an in-flight
+  debounced publish task; stale non-empty diagnostics could arrive
+  after close.
 
-## 3. Documented gaps (14, all with `#[ignore]`d regression tests)
+## 3. Documented gaps (19, all with `#[ignore]`d regression tests unless noted)
 
+- **F16**, **F17** — from earlier rounds (allocation cap, crash map).
 - **F25** — parity recognizers cannot recover a `match` node.
 - **F26** — `batch { … }` / `untrack { … }` in a handler rejected at IR lowering.
 - **F28** — `match`-arm bindings not in scope in the arm body.
@@ -55,12 +60,15 @@ with regression tests** and **14 documented gaps** filed as issues with
 - **F38** — lowercase `null` / Swift `nil` give a confusing "unbound
   name" error (should say `Null`).
 - **F39** — dev-server `AsyncBridge::resume` has no production caller
-  (hosts implement their own local resolver; this is unused scaffolding).
+  (hosts implement their own local resolver; unused scaffolding).
 - **F40** — dispatch-report degradation is silent; `UnknownNode` is
   swallowed.
 - **F41** — `set_signal_deps` only called from tests; the
   minimal-patch mechanism is a production no-op.
-- **F43** — stale `crates/flux-cli/main.flux/` fixture removed.
+- **F43** — stale `crates/flux-cli/main.flux/` fixture removed (no
+  test added; the deletion is the fix).
+- **F44** — `MetricRecord::mean()` panics on sum overflow; no test
+  added because the fix shape is a design call.
 
 ---
 
@@ -70,39 +78,27 @@ with regression tests** and **14 documented gaps** filed as issues with
 
 | Surface | Command | Result |
 |---|---|---|
-| Rust workspace | `cargo test --workspace` | green |
+| Rust workspace | `cargo test --workspace` | green (EXIT=0, 119 groups) |
 | Parity | `cargo test -p flux-parity` | green (21 passed, ~14 ignored) |
 | Differ | `cargo test -p flux-differ` | green |
 | Types | `cargo test -p flux-types` | green |
 | Devserver | `cargo test -p flux-devserver` | green |
 | CLI | `cargo test -p flux-cli` | green |
+| LSP | `cargo test -p flux-lsp` | green |
+| Perf | `cargo test -p flux-perf-harness` | green |
 | Zero warnings | `cargo check --workspace` | none from our crates |
 
 ### 4.2 Working tree
 
-Clean; `HEAD` at the last round-88 commit.
-
-### 4.3 Files touched
-
-Full list available from `git log --name-only origin/main..HEAD`. Key
-directories:
-
-- `crates/flux-parity/` (reduce, bridge, recognizers, parity tests)
-- `crates/flux-lsp/src/semantic_tokens.rs`
-- `crates/flux-types/src/checker/`
-- `crates/flux-codegen-{core,swift,kotlin}/src/`
-- `crates/flux-differ/src/diff/`
-- `crates/flux-ir/src/lower/`
-- `crates/flux-devserver/src/` + tests
-- `crates/flux-cli/src/` + tests
+Clean; `HEAD` at the last round-89 commit.
 
 ---
 
 ## 5. Remaining work
 
-### 5.1 Filed issues (all have `#[ignore]`d regression tests)
+### 5.1 Filed issues
 
-F16, F17 (from earlier rounds), and F22–F43 as listed in §2 and §3.
+F16, F17, F22–F45 (see §2 and §3).
 
 ### 5.2 Still not swept (or swept briefly)
 
@@ -110,16 +106,18 @@ F16, F17 (from earlier rounds), and F22–F43 as listed in §2 and §3.
   `tests.rs` not line-by-line.
 - `crates/flux-types/src/checker.rs` — 10k lines; only `new()` and
   `CalleeShape` read in depth.
-- `crates/flux-ir/src/lower/bytecode.rs` — compile_value arms beyond
-  the ones touched.
+- `crates/flux-ir/src/lower/bytecode.rs` — many `compile_value` arms
+  not read line-by-line.
 - `crates/flux-ir-serde/src/telemetry.rs` — encode path sampled;
-  decode path is complete but not exhaustively fuzzed here.
+  decode path complete but not exhaustively fuzzed.
 - `crates/flux-devserver/src/pipeline.rs` — 1.6k lines; the
-  compile tree path is worth a focused line-by-line read.
-- `crates/flux-cli/src/build.rs` — 807 lines; test assertions read but
-  the toolchain-invocation paths deserve a security-focused review.
+  compile tree path deserves a focused line-by-line read.
+- `crates/flux-cli/src/build.rs` — 807 lines; test assertions read
+  but toolchain-invocation paths deserve a security review.
 - `crates/flux-cli/src/doctor/` — 1.2k lines; spot-read.
-- `crates/flux-perf-harness/src/*` — never read.
+- `runtimes/ios/` and `runtimes/android/` — never read this session
+  (Swift / Kotlin surfaces). The iOS `AsyncResolver` protocol was
+  inspected enough to correct F39, but not fully.
 
 ### 5.3 Non-gating limitations (unchanged)
 
@@ -167,18 +165,18 @@ All of (1)–(5) hold as of this handoff.
 
 ---
 
-## 8. Session history — rounds 86–88
+## 8. Session history — rounds 86–89
 
 | Round | Finding |
 |---|---|
-| 86a–86n | F22, F23, F24, F27, F32, F35 (fixes); F25, F26, F28, F29, F30, F31, F33, F34 (filed) |
+| 86a–86n | F22, F23, F24, F27, F32, F35 (fixes); F25, F26, F28–F31, F33, F34 (filed) |
 | 86o–86p | F24 test body closure + F30 assertion recalibration |
-| 87a–87f | **F36** (differ quadratic); F37 (dead field_indices); F38 (lowercase null) |
-| 88a | Probes: form controls, primitives, routers — all pass |
-| 88b | F39 (async bridge unused) — filed, then corrected |
-| 88c | F40 (silent dispatch degradation) + F41 (signal_deps unwired) — filed |
-| 88d | **F42** (scaffold \${count} → {count}) — fixed |
-| 88e | F43 (stale main.flux fixture) — removed |
+| 87a–87f | **F36** (differ quadratic); **F37** (dead field_indices); F38 (lowercase null) |
+| 88a–88c | F39 (async bridge unused); F40 (silent dispatch degradation); F41 (signal_deps unwired) |
+| 88d | **F42** (scaffold \${count} → {count}) |
+| 88e | F43 (stale main.flux fixture removed) |
+| 89a | **F44** (filed; `mean()` overflow panic) |
+| 89b | **F45** (real fix; LSP `did_close` invalidates debounced publish) |
 
 **Session owner:** the user
 **Date of handoff:** 2026-10-11
