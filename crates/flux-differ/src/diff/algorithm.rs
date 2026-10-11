@@ -221,11 +221,6 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
             // so new top-level components were silently dropped on hot reload.
             // Emit the insert against the stable synthetic wrapper id the
             // devserver's tree.rs uses for the multi-root Init (§D.12.2).
-            //
-            // FLUX-F36: `idx` is the position in `new_roots`, computed once
-            // above; narrowed to u16 via `try_from` so a >65k-root arena
-            // surfaces as a real error instead of a silently-truncated wire
-            // index.
             // FLUX-F36: `idx` is the position in `new_roots`, computed
             // once above. A >65k-root arena is astronomically unlikely
             // (real apps have single-digit top-level components), but
