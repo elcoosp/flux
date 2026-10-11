@@ -1,43 +1,37 @@
-# Handoff — Flux bug-hunt rounds 86+ (extended audit)
+# Handoff — Flux bug-hunt round 86 (extended audit, F22-F29)
 
 **For:** the next agent continuing this session
 **Repo:** `https://github.com/elcoosp/flux`
 **Working dir:** `/Users/adm/Documents/Repos/flux`
 **HEAD at handoff:** see `git log --oneline -1`
-**Session duration:** round 86, following on from the earlier rounds 26–85
+**Session duration:** round 86 (a single deep round, following the earlier
+rounds 26–85 documented in the previous handoff)
 
 ---
 
 ## 1. Mission
 
 The user's standing goal remains: **keep hunting until rounds stop
-producing real findings.** This round (86) swept areas flagged as
-under-audited in earlier handoffs plus a fresh probe of the parity
-pipeline:
+producing real findings.** Round 86 swept the areas the previous handoff
+flagged as under-audited (the parity recognizers, `flux-lsp`,
+`flux-devtools-ui`, `flux-differ`, `flux-vm-ref`) plus a fresh probe of
+the whole `check_parity` pipeline.
 
-- `crates/flux-parity/src/recognize_swift.rs` / `recognize_kotlin.rs` and
-  their `swift_views.rs` / `kotlin_views.rs` helpers
-- `crates/flux-lsp/src/completion.rs`, `hover.rs`, `semantic_tokens.rs`,
-  `goto_def/`, `util.rs`, `lib.rs`
-- `crates/flux-devtools-ui/src/state.rs`, `app.rs`, `time_travel/`,
-  `views/`, `perf_record.rs`, `wire_client.rs`
-- `crates/flux-differ/src/diff/*`
-- `crates/flux-vm-ref/src/vm.rs`
+The round produced **four real fixes with regression tests** and **six
+documented gaps** filed as issues with `#[ignore]`d regression tests.
 
 ---
 
 ## 2. What landed this round (round 86)
-
-All changes are committed. `git log --oneline -15` shows the round-86
-commits.
 
 ### 2.1 Fixed with regression tests
 
 - **F22** — `alignment`/`color`/`label` props were tracked by the dev
   reducer but silently dropped by the codegen emitters. Fix: emptied
   the dev reducer's `RECOGNISED` list so the reduced trees agree on
-  "no props" (parity restored), filed F22 for the codegen-emission gap.
+  "no props" (parity restored); filed F22 for the codegen-emission gap.
   Regression test: `container_props_do_not_break_parity`.
+  Also renamed the `props_compare.rs` tests to match.
 - **F23** — `flux-lsp::semantic_tokens::comment_spans` toggled its
   `in_string` flag on any `"` not preceded by `\`, so a string ending
   in an escaped backslash (`"C:\\"`) left `in_string == true` for the
@@ -50,36 +44,51 @@ commits.
   content (`\$`, `\\`) in the reduced tree, while the dev reducer held
   the logical characters. Fix: added
   `flux-parity::bridge::canonicalize_release_expr`, an escape-aware
-  walker that unescapes embedded string literals in a composite
-  fragment (the recognizer feeds `( n == "a$b" )`, not a bare literal),
-  rewrites `\(…)` / `${…}` interpolations to `{…}`, and applies the
-  `unsupported` placeholder collapse to the surrounding fragment.
-  Regression tests:
-  `string_escapes_in_condition_do_not_break_parity`,
+  walker that unescapes embedded string literals **inside a composite
+  fragment** (the recognizer feeds `( n == "a$b" )`, not a bare
+  literal), rewrites `\(…)` / `${…}` interpolations to `{…}`, and
+  applies the `unsupported` placeholder collapse. Landed over three
+  follow-up commits as the walker's edge cases surfaced. Regression
+  tests: `string_escapes_in_condition_do_not_break_parity`,
   `composite_condition_with_embedded_string_escapes`,
   `release_canonicalizer_*` in `bridge.rs`.
+- **F27** — A `_` wildcard in a `match` over an ADT was rejected by the
+  type checker with the misleading "variant `_` does not belong to
+  `Color`". The parser spells `_` as `Variant { name: "_" }` (not
+  `Wildcard`); `exhaust.rs::has_catch_all` handled it, but the field
+  binder (`scope.rs::bind_pattern_ty`) and both codegen emitters did
+  not. Fix: treat `Variant { name: "_" }` as a wildcard in all three;
+  the Swift emitter writes `default:`, the Kotlin emitter writes
+  `else ->`. Regression tests added on both backends.
 
-### 2.2 Filed as issues (documented but not fixed)
+### 2.2 Filed as issues (documented, not fixed)
 
-- **F25** — Parity recognizers cannot recover a `match` node from the
+Each of these has an `#[ignore]`d regression test in
+`crates/flux-parity/tests/parity.rs` that documents the current
+(failing) behavior. When the fix lands, un-ignore and flip the
+assertion.
+
+- **F25** — Parity recognizers cannot recover a `match` node in the
   view body. The dev reducer produces `ViewNode::Match`; the Swift
   recognizer emits a spurious `Primitive { name: "where" }` for each
   guard arm; the Kotlin recognizer flattens the arms into siblings.
-  Filed at `docs/issues/FLUX-F25-parity-match-node-unrecoverable.md`
-  with an `#[ignore]`d regression test
-  (`match_node_in_view_body_is_a_known_divergence`) that documents the
-  current divergent behavior.
-
-### 2.3 Probes that found nothing wrong
-
-- `probe_nonascii` — a condition string with a multi-byte character
-  (`"café"`) round-trips through dev/Swift/Kotlin identically.
-- `probe_dollar` — a literal `$` inside `Text("…")` does not diverge
-  (the prop subset does not compare the primary positional argument).
-- `probe_misc` (12 cases) — `useContext`, `resource`, nested/else-if
-  chains, `ForEach` with a nested `if`, string interpolation with and
-  without sub-expressions, multiple top-level components, negative and
-  zero floats: all pass.
+  Test: `match_node_in_view_body_is_a_known_divergence`.
+- **F26** — `batch { … }` / `untrack { … }` inside a handler are
+  rejected at IR lowering with "unsupported handler expression". The
+  parser produces `ExprKind::Lifecycle { kind: Batch | Untrack, … }`;
+  `bytecode.rs::compile_expr_stmt` has no `Lifecycle` arm (the F19
+  `Await` fix added the `Await` arm but not `Lifecycle`). Test:
+  `batch_inside_handler_is_a_known_gap`.
+- **F28** — `match`-arm pattern bindings are not in scope in the arm
+  body. `bytecode.rs::compile_match` never binds the pattern's payload
+  fields as locals, so a body reference to the bound name falls
+  through to `signal_of` and errors with "`x` is not a state signal in
+  scope". Test: `match_arm_binding_is_a_known_gap`.
+- **F29** — Assignment to a lambda parameter (or any non-signal
+  binding) is rejected by IR lowering with the misleading "`x` is not
+  a state signal in scope", even though the type checker accepted the
+  expression and the *read* path (`x + 1`) works. Test:
+  `assign_to_lambda_param_is_a_known_gap`.
 
 ---
 
@@ -89,12 +98,13 @@ commits.
 
 | Surface | Command | Result |
 |---|---|---|
-| Rust workspace | `cargo test --workspace` | green (see log) |
+| Rust workspace | `cargo test --workspace` | green |
+| Parity | `cargo test -p flux-parity` | green (all `#[ignore]`d gaps skipped) |
+| LSP | `cargo test -p flux-lsp` | green |
 | Zero warnings | `cargo check --workspace` | none from our crates |
-| Parity | `cargo test -p flux-parity` | 100% green |
 
-Note: the Swift/Kotlin/Gradle surfaces were not re-run this round; no
-code changed in those directories.
+The Swift/Kotlin/Gradle surfaces were not re-run this round; no code
+changed in those directories.
 
 ### 3.2 Working tree
 
@@ -109,42 +119,45 @@ Clean; `HEAD` at the last round-86 commit.
 - `crates/flux-parity/tests/parity.rs`
 - `crates/flux-parity/tests/props_compare.rs`
 - `crates/flux-lsp/src/semantic_tokens.rs`
-- New issues: `docs/issues/FLUX-F22…md` … `docs/issues/FLUX-F25…md`
+- `crates/flux-types/src/checker/scope.rs`
+- `crates/flux-codegen-swift/src/backend_impl.rs`
+- `crates/flux-codegen-kotlin/src/backend_impl.rs`
+- New issues: `docs/issues/FLUX-F22…md` through `FLUX-F29…md`
 
 ---
 
 ## 4. Remaining work
 
-### 4.1 Filed issues
+### 4.1 Filed issues (all have `#[ignore]`d regression tests)
 
 - `docs/issues/FLUX-F16-allocation-cap-parity.md` — Kotlin/Swift
-  disagree on per-allocation cost.
+  disagree on per-allocation cost. Needs a design decision.
 - `docs/issues/FLUX-F17-crash-source-map.md` — `CrashReporter` does
   not resolve the top frame to a component id / source excerpt.
 - `docs/issues/FLUX-F22-container-props-dropped.md` — codegen does
   not emit `alignment`/`color`/`label`.
-- `docs/issues/FLUX-F23-comment-spans-escape-bug.md` — closed by the
-  round-86 fix.
-- `docs/issues/FLUX-F24-release-string-escapes.md` — closed by the
-  round-86 fix.
-- `docs/issues/FLUX-F25-parity-match-node-unrecoverable.md` — the
-  recognizers cannot recover a `match` node.
+- `docs/issues/FLUX-F25-parity-match-node-unrecoverable.md`.
+- `docs/issues/FLUX-F26-batch-untrack-handler-lowering.md`.
+- `docs/issues/FLUX-F28-match-arm-binding-not-in-scope.md`.
+- `docs/issues/FLUX-F29-assignment-to-non-signal.md`.
 
 ### 4.2 Still not swept (or swept briefly)
 
-- `crates/flux-types/src/checker/*` — type checker internals
-  (`checker.rs` is 10k lines; `exhaust.rs`, `unify.rs`, `prelude.rs`
-  spot-checked).
-- `crates/flux-ir/src/lower/bytecode.rs` — 2.8k lines, read at a high
-  level but not line-by-line.
-- `crates/flux-ir-serde/src/telemetry.rs` — 1.3k lines.
-- `crates/flux-devtools-ui/src/app.rs` render loop (`render` at
-  line 391 onwards, 300 lines).
+- `crates/flux-types/src/checker/` — 2000 lines; `infer.rs`,
+  `use_resolution.rs`, `apply_callee.rs` read but not line-by-line.
+- `crates/flux-types/src/checker.rs` — 10k lines; only `new()` and
+  `CalleeShape` read this round.
+- `crates/flux-ir/src/lower/bytecode.rs` — 2.8k lines; the F28/F29
+  bugs are documented here, but the file has more `compile_value` arms
+  not yet inspected line-by-line (e.g. `compile_str`, `compile_call`,
+  `emit_call_cap`).
+- `crates/flux-ir-serde/src/telemetry.rs` — 1.3k lines; not read.
+- `crates/flux-devtools-ui/src/app.rs` render loop — not read
+  line-by-line.
 - `crates/flux-devserver/src/*` — partially swept in earlier rounds.
 - `crates/flux-codegen-swift/src/backend_impl.rs` and
   `crates/flux-codegen-kotlin/src/backend_impl.rs` — many small
-  emitters; reserved-word handling fixed earlier but not reviewed
-  line-by-line.
+  emitters; each is a candidate for a per-emitter parity probe.
 
 ### 4.3 Non-gating limitations (unchanged)
 
@@ -194,7 +207,13 @@ All of (1)–(5) hold as of this handoff.
 | 86c | F24 (release-side string escapes not unescaped) |
 | 86d | F24 follow-up (composite-expression walker; placeholder collapse) |
 | 86e | F25 (filed; `match` recognizer gap with `#[ignore]`d regression) |
-| 86f | Probes: unicode, `$`, misc parity cases — all clean |
+| 86f | F26 (filed; `batch`/`untrack` in handler) |
+| 86g | **F27** (real fix; `_` wildcard over ADTs) |
+| 86h | F28 (filed; match-arm bindings) |
+| 86i | F29 (filed; assignment to non-signal) |
+
+Numerous probes (unicode, `$`, misc parity, exhaustiveness, reserved
+words, handler internals) found nothing more.
 
 **Session owner:** the user
 **Date of handoff:** 2026-10-11
