@@ -138,6 +138,13 @@ pub fn normalize_view_name(name: &str) -> String {
         // writes `OutlinedTextField(value = …, singleLine = false)`. Fold
         // both back to `TextArea` so a Flux `TextArea(...)` round-trips.
         "TextEditor" | "OutlinedTextField" => "TextArea",
+        // FLUX-F35: same class — the two backends use different native
+        // names for the Flux `Picker` and `DatePicker` primitives (Swift
+        // keeps the Flux spelling; Kotlin emits Compose's
+        // `DropdownMenu` / `DatePickerDialog`). Fold both back so a
+        // Flux `Picker(...)` / `DatePicker(...)` round-trips.
+        "DropdownMenu" => "Picker",
+        "DatePickerDialog" => "DatePicker",
         other => other,
     }
     .to_owned()
