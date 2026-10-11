@@ -225,11 +225,16 @@ fn screen_route_from_args(args: &[flux_parser::Arg]) -> String {
 /// format matches what the release recognizers produce.
 fn props_from_args(args: &[flux_parser::Arg]) -> Vec<(String, String)> {
     // Recognised prop subset that survives as a named argument in both backends'
-    // generated source. `text` is excluded because the codegen renders it either
-    // positionally (Text/Image) or as a child `Text(...)` node (Button) — it never
-    // appears as a `text:` named arg in generated code, so comparing it would
-    // produce dev-vs-release drift rather than parity.
-    const RECOGNISED: &[&str] = &["label", "color", "alignment"];
+    // generated source. **Currently empty** — see FLUX-F22. The codegen
+    // emitters (`flux-codegen-core::emitter`) read only `gap` from the props
+    // map; `label`, `color`, and `alignment` are collected then silently
+    // dropped, so the release recognizers cannot recover them. Tracking them
+    // on the dev side (as they were before round 86) made the reduced dev tree
+    // carry props the release trees could never have, and parity failed for
+    // any program using one of them. Once the emitters actually emit these
+    // props (FLUX-F22), restore the list here AND in
+    // `recognize_swift::swift_views::extract_swift_props`.
+    const RECOGNISED: &[&str] = &[];
     args.iter()
         .filter_map(|arg| match arg {
             flux_parser::Arg::Named { name, value } if RECOGNISED.contains(&name.name.as_str()) => {

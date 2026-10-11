@@ -466,3 +466,23 @@ fn flux_056_scrollview_pins_dev_release_mapping() {
     );
     insta::assert_snapshot!("parity_flux_056_scrollview", serialized);
 }
+
+/// FLUX-F22 regression: a Flux program that sets one of the historically
+/// tracked container/leaf props (`alignment`/`color`/`label`) must not
+/// diverge across the three reduced trees. Before round 86, the dev reducer
+/// kept these as props while the codegen backends silently dropped them, so
+/// `check_parity` reported `is_equivalent() == false`. The fix emptied the
+/// dev reducer's RECOGNISED list (restoring parity) and filed FLUX-F22 for
+/// the codegen-emission gap. This test locks in the parity invariant.
+#[test]
+fn container_props_do_not_break_parity() {
+    let src = "compo C\n  Column(alignment: \"center\", color: \"red\", label: \"hi\") { Text(\"x\") }";
+    let report = check_parity(src, 9980).expect("compiles");
+    assert!(
+        report.is_equivalent(),
+        "dev and release must agree on container props: dev={:#?}\nswift={:#?}\nkotlin={:#?}",
+        report.dev,
+        report.swift,
+        report.kotlin,
+    );
+}
