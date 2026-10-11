@@ -750,4 +750,21 @@ fn picker_date_picker_names_round_trip() {
         r.swift,
         r.kotlin,
     );
+
+/// FLUX-F38 (documented gap): lowercase `null` (Kotlin-style) and Swift
+/// `nil` are not recognized as the Flux `Null` literal. Users get a
+/// confusing "unbound name `null`" error. This test is `#[ignore]`d and
+/// asserts the current failure; when the parser accepts the aliases
+/// (or the checker adds a hint), un-ignore and assert the new behavior.
+#[test]
+#[ignore = "FLUX-F38: lowercase null/nil not recognized as the Null literal"]
+fn lowercase_null_is_a_known_gap() {
+    let src = "compo C\n  state o: Option[Int] = null\n  Text(\"x\")";
+    let err = check_parity(src, 60_001).expect_err("must currently fail");
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("unbound name `null`"),
+        "expected the F38 unbound-name error, got: {msg}"
+    );
+}
 }
