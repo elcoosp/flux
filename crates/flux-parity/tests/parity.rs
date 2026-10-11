@@ -767,4 +767,29 @@ fn lowercase_null_is_a_known_gap() {
         "expected the F38 unbound-name error, got: {msg}"
     );
 }
+
+/// FLUX-F52 (documented gap): a generic ADT whose payload is used after
+/// pattern-matching fails to type-check because the field binding stays
+/// at the declared type parameter `T` rather than the concrete
+/// instantiation.
+///
+///     type Box[T] = | Box(T)
+///     fn unbox(b: Box[Int]) -> Int { match b { Box(x) => x } }
+///
+/// The scrutinee is `Box[Int]`; the arm binds `x` (should be `Int`); the
+/// compiler instead sees `x : T` and rejects the return. This test is
+/// `#[ignore]`d and pins the current failure. When substitution lands,
+/// un-ignore and assert successful compilation.
+#[test]
+#[ignore = "FLUX-F52: generic-ADT field bindings do not substitute T"]
+fn generic_adt_payload_binding_is_a_known_gap() {
+    let src = "type Box[T] =\n  | Box(T)\n\nfn unbox(b: Box[Int]) -> Int {\n  match b {\n    Box(x) => x\n  }\n}\n\ncompo C\n  Text(\"x\")";
+    let err = check_parity(src, 99_000).expect_err("must currently fail at type check");
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("expected `Int`, got `T`") || msg.contains("expected Int, got T"),
+        "expected the F52 substitution gap, got: {msg}"
+    );
+}
+
 }
