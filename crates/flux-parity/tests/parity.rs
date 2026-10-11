@@ -582,4 +582,23 @@ fn match_arm_binding_is_a_known_gap() {
         "expected the F28 lowering gap, got: {msg}"
     );
 }
+
+/// FLUX-F29 (documented gap): assigning to a lambda parameter (or any
+/// non-signal binding) reaches IR lowering and fails with the misleading
+/// "`x` is not a state signal in scope" — even though the type checker
+/// accepted the same expression and the read path (`x + 1`) works.
+/// This test is `#[ignore]`d; it documents the current failure. When the
+/// semantics are decided (see the issue) un-ignore and assert either
+/// successful compilation or the new diagnostic.
+#[test]
+#[ignore = "FLUX-F29: assignment to a lambda parameter rejected at lowering"]
+fn assign_to_lambda_param_is_a_known_gap() {
+    let src = "compo C\n  Button(text: \"b\", onPress: fn(x) { x = 1 })";
+    let err = check_parity(src, 9991).expect_err("must currently fail at lowering");
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("not a state signal"),
+        "expected the F29 lowering gap, got: {msg}"
+    );
+}
 }
