@@ -485,6 +485,7 @@ fn container_props_do_not_break_parity() {
         report.swift,
         report.kotlin,
     );
+}
 
 /// FLUX-F24 regression: a Flux program whose preserved string value (here, a
 /// condition) contains a `$` or a `\\` must reduce to the same canonical
@@ -523,5 +524,4 @@ fn composite_condition_with_embedded_string_escapes() {
         report.swift,
         report.kotlin,
     );
-}
 }

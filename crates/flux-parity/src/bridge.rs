@@ -172,13 +172,59 @@ pub(crate) fn canonicalize_expr(text: &str) -> String {
 /// literals, the placeholder collapse) delegate to [`canonicalize_expr`].
 #[must_use]
 pub(crate) fn canonicalize_release_expr(text: &str) -> String {
-    let t = text.trim();
-    if t.starts_with('"') && t.ends_with('"') && t.len() >= 2 {
-        let inner = &t[1..t.len() - 1];
-        let inner = canonicalize_release_string_content(inner);
-        return format!("\"{inner}\"");
+    // Walk the fragment; every embedded string literal has its content
+    // unescaped via `canonicalize_release_string_content`. This handles the
+    // composite-expression form the recognizers actually produce — e.g.
+    // `(n == "a\\$b")` — where the literal is only one token among operators.
+    // A pure-literal input is a special case (the whole string is one body).
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    let mut saw_string = false;
+    while let Some(ch) = chars.next() {
+        if ch != '"' {
+            out.push(ch);
+            continue;
+        }
+        saw_string = true;
+        out.push('"');
+        let mut body = String::new();
+        let mut escaped = false;
+        for c in chars.by_ref() {
+            if escaped {
+                body.push('\\');
+                body.push(c);
+                escaped = false;
+                continue;
+            }
+            match c {
+                '\\' => escaped = true,
+                '"' => break,
+                _ => body.push(c),
+            }
+        }
+        out.push_str(&canonicalize_release_string_content(&body));
+        out.push('"');
     }
-    canonicalize_expr(text)
+    if !saw_string {
+        // No embedded literal — key path, numeric literal, `null`, or the
+        // `unsupported` placeholder. Delegate to the base normalizer.
+        return canonicalize_expr(text);
+    }
+    // String contents are now canonical. The surrounding fragment may still
+    // carry the codegen's `unsupported` placeholder (e.g. a Flux call the
+    // lowerer could not model renders as `0 /* unsupported */`), which the
+    // base normalizer collapses to `0`. Apply that collapse here without
+    // re-running the string-literal branch: the previous version passed
+    // `out` through `canonicalize_expr`, which re-interpreted a canonical
+    // single `\` before `(` as a Swift interpolation opener and corrupted
+    // the literal backslash. Checking the placeholder substring directly
+    // (case/space-insensitive, matching `canonicalize_expr`) preserves the
+    // non-string behaviour without touching string content.
+    let lowered = out.to_ascii_lowercase();
+    if lowered.contains("unsupported") {
+        return "0".to_owned();
+    }
+    out
 }
 
 /// Walks the content of an emitted string literal (between the quotes) and:
