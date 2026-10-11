@@ -70,12 +70,6 @@ pub struct Checker {
     pub types: HashMap<NodeId, TcType>,
     /// Every generic instantiation encountered.
     pub instantiations: Vec<GenericInstantiation>,
-    /// Resolved field position (0-based, declaration order) for each
-    /// `base.field` expression, keyed by the expression's `NodeId`. Mirrors the
-    /// `types` map but for the positional index the VM expects when emitting
-    /// `GET_FIELD`/`SET_FIELD` over a record stored as a positional
-    /// `Vec<(PropIdx, Value)>` (FLUX-072).
-    pub field_indices: HashMap<NodeId, u16>,
     /// Primitive scalar names.
     prims: std::collections::HashSet<String>,
     /// Generic parameter names in scope, mapped to their unification variable.
@@ -119,7 +113,6 @@ impl Checker {
             subst: HashMap::new(),
             types: HashMap::new(),
             instantiations: Vec::new(),
-            field_indices: HashMap::new(),
             prims,
             generics: HashMap::new(),
             module_loader: None,

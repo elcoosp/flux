@@ -42,12 +42,18 @@ type SignalScope = Vec<(String, SignalId)>;
 /// lowering→emitter hand-off in one opaque bundle.
 #[derive(Clone, Copy, Debug)]
 pub struct IrMetadata<'a> {
-    /// Resolved field positions for `base.field` expressions, keyed by the
-    /// expression's [`NodeId`].
-    pub field_indices: &'a std::collections::HashMap<flux_syntax::NodeId, u16>,
     /// Inferred types from the type checker (T-103), keyed by `NodeId` as
     /// derived by [`expr_node_id`]. Drives typed opcode selection in
     /// [`Emitter::compile_binary`].
+    ///
+    /// FLUX-F37: this struct previously also carried a
+    /// `field_indices: &HashMap<NodeId, u16>` populated by the type
+    /// checker's positional record-field indexer. It was never read —
+    /// the emitter keys `GET_FIELD`/`SET_FIELD` slots by
+    /// `prop_index_for_name` (FNV-1a of the field name), matching the
+    /// wire's `PropIdx` keying. Keeping the map around would have been a
+    /// trap for a future contributor who mistook it for the canonical
+    /// slot source; it is removed.
     pub expr_types: &'a std::collections::HashMap<flux_syntax::NodeId, TypeKind>,
 }
 
@@ -2143,7 +2149,6 @@ mod tests {
             &count_scope(),
             &std::collections::HashSet::new(),
             &IrMetadata {
-                field_indices: &std::collections::HashMap::new(),
                 expr_types: &std::collections::HashMap::new(),
             },
             &mut std::collections::HashMap::new(),
@@ -2245,7 +2250,6 @@ mod tests {
             &scope,
             &std::collections::HashSet::new(),
             &IrMetadata {
-                field_indices: &std::collections::HashMap::new(),
                 expr_types: &std::collections::HashMap::new(),
             },
             &mut std::collections::HashMap::new(),
@@ -2309,7 +2313,6 @@ mod tests {
         let (bytecode, deps, layout) = compile_prop_thunk(
             &[(prop_idx, &literal)],
             &IrMetadata {
-                field_indices: &std::collections::HashMap::new(),
                 expr_types: &std::collections::HashMap::new(),
             },
             &count_scope(),
@@ -2368,7 +2371,6 @@ mod tests {
         let (bytecode, deps, _) = compile_prop_thunk(
             &[(flux_syntax::PropIdx::from(0u16), &literal)],
             &IrMetadata {
-                field_indices: &std::collections::HashMap::new(),
                 expr_types: &std::collections::HashMap::new(),
             },
             &count_scope(),
@@ -2421,7 +2423,6 @@ mod tests {
             &count_scope(),
             &std::collections::HashSet::new(),
             &IrMetadata {
-                field_indices: &std::collections::HashMap::new(),
                 expr_types: &std::collections::HashMap::new(),
             },
             &mut std::collections::HashMap::new(),
@@ -2489,7 +2490,6 @@ mod tests {
             &scope,
             &std::collections::HashSet::new(),
             &IrMetadata {
-                field_indices: &std::collections::HashMap::new(),
                 expr_types: &std::collections::HashMap::new(),
             },
             &mut std::collections::HashMap::new(),
@@ -2529,7 +2529,6 @@ mod tests {
             &scope,
             &HashSet::new(),
             &IrMetadata {
-                field_indices: &HashMap::new(),
                 expr_types: &HashMap::new(),
             },
             &mut std::collections::HashMap::new(),
@@ -2594,7 +2593,6 @@ mod tests {
             &scope,
             &HashSet::new(),
             &IrMetadata {
-                field_indices: &HashMap::new(),
                 expr_types: &HashMap::new(),
             },
             &mut std::collections::HashMap::new(),
@@ -2643,7 +2641,6 @@ mod tests {
             &count_scope(),
             &std::collections::HashSet::new(),
             &IrMetadata {
-                field_indices: &std::collections::HashMap::new(),
                 expr_types: &expr_types,
             },
             &mut std::collections::HashMap::new(),
@@ -2695,7 +2692,6 @@ mod tests {
             &count_scope(),
             &std::collections::HashSet::new(),
             &IrMetadata {
-                field_indices: &std::collections::HashMap::new(),
                 expr_types: &expr_types,
             },
             &mut std::collections::HashMap::new(),
@@ -2760,7 +2756,6 @@ mod tests {
             &count_scope(),
             &std::collections::HashSet::new(),
             &IrMetadata {
-                field_indices: &std::collections::HashMap::new(),
                 expr_types: &expr_types,
             },
             &mut std::collections::HashMap::new(),
@@ -2805,7 +2800,6 @@ mod tests {
             &count_scope(),
             &std::collections::HashSet::new(),
             &IrMetadata {
-                field_indices: &std::collections::HashMap::new(),
                 expr_types: &std::collections::HashMap::new(),
             },
             &mut std::collections::HashMap::new(),

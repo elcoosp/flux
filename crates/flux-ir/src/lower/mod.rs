@@ -359,7 +359,6 @@ impl<'a> Lowerer<'a> {
             match compile_prop_thunk(
                 prop_exprs,
                 &IrMetadata {
-                    field_indices: &self.typed.field_indices,
                     expr_types: &self.typed.types,
                 },
                 scope,
@@ -1007,7 +1006,6 @@ impl<'a> Lowerer<'a> {
                     &self.signal_scope,
                     &self.record_ctors,
                     &IrMetadata {
-                        field_indices: &self.typed.field_indices,
                         expr_types: &self.typed.types,
                     },
                     &mut self.prop_indices,

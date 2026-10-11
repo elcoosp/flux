@@ -171,7 +171,7 @@ mod tests {
                 },
             ],
             constructors: std::collections::HashSet::new(),
-            field_indices: std::collections::HashMap::new(),
+
         };
 
         let mut mono = MonoTable::new(&typed);
