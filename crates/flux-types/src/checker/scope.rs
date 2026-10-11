@@ -170,6 +170,16 @@ impl Checker {
         match kind {
             flux_parser::MatchPatternKind::Wildcard => Ok(()),
             flux_parser::MatchPatternKind::Variant { name, fields } => {
+                // FLUX-F27: `_` is a wildcard spelled as an identifier (the
+                // parser produces `Variant { name: "_", fields: [] }`, not
+                // `Wildcard` — see `match_pattern`). `exhaust::has_catch_all`
+                // already treats this spelling as a catch-all; this binder
+                // must do the same or `match shape { Circle(r) => r, _ => 0 }`
+                // fails with a misleading "variant `_` does not belong to
+                // `Shape`" error before exhaustiveness is even reached.
+                if name.name == "_" {
+                    return Ok(());
+                }
                 // Find the variant in the ADT of scr_ty.
                 let adt_name = match scr_ty {
                     TcType::Variant(n, _) | TcType::Named(n, _) => n.clone(),

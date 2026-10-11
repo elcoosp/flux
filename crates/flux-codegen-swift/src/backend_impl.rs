@@ -439,6 +439,16 @@ impl Backend for Swift {
                     em.emit_expr_body(&arm.body, indent + 2 * step);
                 }
                 flux_parser::MatchPatternKind::Variant { name, fields } => {
+                    // FLUX-F27: `_` is spelled as a `Variant { name: "_" }` by
+                    // the parser (not `Wildcard`). Emit the same `default:`
+                    // the `Wildcard` arm would — otherwise a Flux program
+                    // `match c { RGB(r) => r, _ => 0 }` emits Swift
+                    // `case let ._():` (invalid).
+                    if name.name == "_" {
+                        em.line(indent + step, "default:");
+                        em.emit_expr_body(&arm.body, indent + 2 * step);
+                        continue;
+                    }
                     let binds: Vec<String> = fields
                         .iter()
                         .filter_map(|f| match f {

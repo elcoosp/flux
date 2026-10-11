@@ -484,6 +484,17 @@ import kotlinx.coroutines.launch\n\n"
                     em.emit_expr_body(&arm.body, indent + 2 * step);
                 }
                 flux_parser::MatchPatternKind::Variant { name, fields } => {
+                    // FLUX-F27: `_` is spelled as a `Variant { name: "_" }` by
+                    // the parser (not `Wildcard`). Emit the same `else ->` the
+                    // `Wildcard` arm would — otherwise a Flux program
+                    // `match c { RGB(r) => r, _ => 0 }` emits Kotlin
+                    // `is _ ->` (invalid). `emit_match_with_guards` already
+                    // has this check; the non-guard path did not.
+                    if name.name == "_" {
+                        em.line(indent + step, "else ->");
+                        em.emit_expr_body(&arm.body, indent + 2 * step);
+                        continue;
+                    }
                     // Round-16: Kotlin `when` arms accept either a single
                     // expression or a `{ … }` block after `->`. When the
                     // pattern binds fields, we emit `val r = shape.field0`
