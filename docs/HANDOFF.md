@@ -1,23 +1,23 @@
-# Handoff — Flux bug-hunt rounds 86–90
+# Handoff — Flux bug-hunt rounds 86–92
 
 **For:** the next agent continuing this session
 **Repo:** `https://github.com/elcoosp/flux`
 **Working dir:** `/Users/adm/Documents/Repos/flux`
 **HEAD at handoff:** see `git log --oneline -1`
-**Session duration:** rounds 86, 87, 88, 89, 90 (five deep rounds)
+**Session duration:** rounds 86–92 (seven deep rounds)
 
 ---
 
 ## 1. Mission
 
 The user's standing goal remains: **keep hunting until rounds stop
-producing real findings.** Rounds 86–90 produced **13 real fixes with
-regression tests** and **20 documented gaps** filed as issues with
-`#[ignore]`d regression tests (where a test is meaningful).
+producing real findings.** Rounds 86–92 produced **14 real fixes with
+regression tests** and **24 documented gaps** filed as issues with
+`#[ignore]`d or pin-the-current-behavior regression tests.
 
 ---
 
-## 2. Real fixes landed (13)
+## 2. Real fixes landed (14)
 
 - **F22** — `alignment`/`color`/`label` props dropped by codegen emitters.
 - **F23** — `flux-lsp::semantic_tokens::comment_spans` did not track backslash escapes.
@@ -30,56 +30,49 @@ regression tests** and **20 documented gaps** filed as issues with
 - **F42** — `flux init` scaffold used Kotlin-style `${count}`.
 - **F45** — `flux-lsp::did_close` did not invalidate the in-flight debounced publish task.
 - **F46** — `validate_bytecode` read `COND_JUMP` target at the wrong offset
-  (`offset + 1` instead of `offset + 2`) on every **production frame
-  decode** — any handler with an `if`/`when`/`match` would have been
-  rejected with a spurious `MalformedBytecode`.
+  (`+1` instead of `+2`) — this is on the **production frame-decode path**,
+  so any handler with an `if`/`when`/`match` was rejected with a spurious
+  `MalformedBytecode`. Highest-impact fix of the session.
 
-## 3. Documented gaps (20, all with `#[ignore]`d regression tests unless noted)
+## 3. Documented gaps (24)
 
-F16, F17 (earlier rounds), F25, F26, F28, F29, F30, F31, F33, F34,
-F38, F39, F40, F41, F43 (removed as fix), F44.
+F16, F17, F25, F26, F28, F29, F30, F31, F33, F34, F38, F39, F40, F41,
+F43 (removed as fix), F44, F47, F48.
 
-See `docs/issues/` for the full set.
+See `docs/issues/` for the full set. Notable ones:
+
+- **F47** — `flux build` silently clobbers generated files on stem / component-name collision.
+- **F48** — `flux doctor`'s `mod tests` detection is over-broad (`mod tests_impl`,
+  `mod tests;` both suppress findings).
+- **F41** — `set_signal_deps` only called from tests; minimal-patch mechanism is a prod no-op.
+- **F39** — Dev-server `AsyncBridge` is unused scaffolding (hosts have their own resolver).
 
 ---
 
-## 4. Current state — START HERE
+## 4. Current state
 
-### 4.1 All tests green
+All crates and workspace tests green. `cargo test --workspace` reports
+119 `test result: ok` groups and 0 failures. `cargo check --workspace`
+clean.
 
-| Surface | Command | Result |
-|---|---|---|
-| Rust workspace | `cargo test --workspace` | green |
-| All crates tested individually | green |
-| Zero warnings | `cargo check --workspace` | none from our crates |
-
-The Swift/Kotlin/Gradle surfaces were not re-run this session; no code
-changed there.
-
-### 4.2 Working tree
-
-Clean; `HEAD` at the last round-90 commit.
+Working tree clean; `HEAD` at the last round-92 commit.
 
 ---
 
 ## 5. Remaining work
 
-### 5.1 Filed issues
-
-F16, F17, F25, F26, F28–F31, F33, F34, F38–F41, F44 (see `docs/issues/`).
-
-### 5.2 Still not swept (or swept briefly)
+### 5.1 Still not swept (or swept briefly)
 
 - `crates/flux-types/src/checker/generics.rs`, `scope.rs` (partial), `tests.rs`.
 - `crates/flux-types/src/checker.rs` — 10k lines; only `new()` + `CalleeShape`.
-- `crates/flux-ir/src/lower/bytecode.rs` — many `compile_value` arms.
+- `crates/flux-ir/src/lower/bytecode.rs` — many `compile_value` arms unread.
 - `crates/flux-ir-serde/src/telemetry.rs` — encode path sampled.
 - `crates/flux-devserver/src/pipeline.rs` — 1.6k lines; compile-tree path.
-- `crates/flux-cli/src/build.rs`, `doctor/`.
-- `crates/flux-lsp/src/lib.rs::did_change` (partially swept; F45 fixed there).
+- `crates/flux-cli/src/doctor/dependency_drift.rs` — not deeply read.
+- `crates/flux-cli/src/doctor/probe.rs` — not deeply read.
 - `runtimes/ios/`, `runtimes/android/` — Swift / Kotlin sources.
 
-### 5.3 Non-gating limitations (unchanged)
+### 5.2 Non-gating limitations (unchanged)
 
 - `testSwitchThroughput` (iOS) 2.0s budget can flake.
 - Kotlin `RenderPerfHarnessTest` p95 ≤ 3ms budget is a Release-mode target.
@@ -91,31 +84,31 @@ F16, F17, F25, F26, F28–F31, F33, F34, F38–F41, F44 (see `docs/issues/`).
 1. **Never `pkill -f` anything generic.**
 2. **`xcodebuild -destination "platform=iOS Simulator,id=<UDID>"` hangs.**
 3. **Never call `xcrun simctl bootstatus -b`.**
-4. **Never modify the user's `$HOME` or shell rc files.** Temp artifacts → `/tmp/`.
+4. **Never modify the user's `$HOME` or shell rc files.**
 5. **Swift VM has THREE exec paths.**
 6. **`proto_version = 3` and `protocolVersionMin = 2`.**
 7. **`docs/HANDOFF.md`** — refresh in a dedicated commit.
 8. **Appending to `crates/flux-parity/tests/parity.rs`**: verify the F24
-   test's closing `}` is present. It has been missing once (round 86o),
-   silently nesting every subsequent test. Rust warns but compiles.
+   test's closing `}` is present (missed once in round 86o, silently
+   nesting every subsequent test).
 9. **Python heredocs via `python3 -` do NOT auto-import `sys`.**
-10. **`cargo test -p <crate>` runs doctests last.** Misspelled test file
-    names silently run 0 tests and exit 0.
-11. **Verify assertion tests once with `--ignored`** to make sure they
-    still describe the *current* behavior; when a fix lands, remove the
-    `#[ignore]` and flip the assertion.
+10. **`cargo test -p <crate>` runs doctests last.**
+11. **Assertion tests must be run with `--ignored` once** to verify they
+    describe the *current* behavior; when a fix lands, flip them.
 
 ---
 
-## 7. Session history — rounds 86–90
+## 7. Session history — rounds 86–92
 
 | Round | Finding |
 |---|---|
 | 86 | F22, F23, F24, F27, F32, F35 (fixes); F25, F26, F28–F31, F33, F34 (filed) |
-| 87 | F36, F37 (fixes); F38 (filed) |
-| 88 | F42 (fix); F39, F40, F41, F43 (filed/removed) |
-| 89 | F45 (fix); F44 (filed) |
-| 90 | **F46** (fix — production-impacting `validate_bytecode` offset bug) |
+| 87 | **F36**, **F37** (fixes); F38 (filed) |
+| 88 | **F42** (fix); F39, F40, F41, F43 |
+| 89 | **F45** (fix); F44 |
+| 90 | **F46** (fix; production `validate_bytecode` offset bug) |
+| 91 | F47 (build output collisions, filed with pins) |
+| 92 | F48 (doctor mod-tests prefix over-broad, filed with pins) |
 
 **Session owner:** the user
 **Date of handoff:** 2026-10-11
