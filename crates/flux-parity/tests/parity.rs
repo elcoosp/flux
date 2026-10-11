@@ -681,4 +681,38 @@ fn form_control_primitive_names_round_trip() {
         r.kotlin,
     );
 }
+
+/// FLUX-F33 (documented gap): `Theme { … }` is elided by both codegen
+/// backends, so the recognizer never sees a `Theme` node while the dev
+/// reducer keeps one. This test is `#[ignore]`d; it documents the
+/// divergence. When the emitters either keep the wrapper or the dev
+/// reducer elides it (via `equivalence::elide_wrappers`), un-ignore and
+/// assert parity.
+#[test]
+#[ignore = "FLUX-F33: Theme wrapper is flattened by both codegen backends"]
+fn theme_wrapper_is_a_known_gap() {
+    let src = "compo C\n  Theme {\n    Text(\"x\")\n  }";
+    let r = check_parity(src, 9997).expect("compiles");
+    assert!(
+        !r.is_equivalent(),
+        "documented current behavior: Theme parity diverges; if this now passes, un-ignore"
+    );
+}
+
+/// FLUX-F34 (documented gap): `Gesture { … }` yields `Gesture` on dev,
+/// `Column` on Swift, `Stack` on Kotlin — three different view names, so
+/// `check_parity` reports a divergence. This test is `#[ignore]`d; it
+/// documents the current failure. When both backends emit the same
+/// wrapper name and the recognizer folds it back, un-ignore and assert
+/// parity.
+#[test]
+#[ignore = "FLUX-F34: Gesture wrapper shape differs on Swift and Kotlin"]
+fn gesture_wrapper_is_a_known_gap() {
+    let src = "compo C\n  Gesture(onTap: { }) {\n    Text(\"x\")\n  }";
+    let r = check_parity(src, 9998).expect("compiles");
+    assert!(
+        !r.is_equivalent(),
+        "documented current behavior: Gesture parity diverges; if this now passes, un-ignore"
+    );
+}
 }
