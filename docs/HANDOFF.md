@@ -1,60 +1,83 @@
-# Handoff — Flux bug-hunt round 87 (differ sweep + probes)
+# Handoff — Flux bug-hunt rounds 86–87 (audit + differ/telemetry sweeps)
 
 **For:** the next agent continuing this session
 **Repo:** `https://github.com/elcoosp/flux`
 **Working dir:** `/Users/adm/Documents/Repos/flux`
 **HEAD at handoff:** see `git log --oneline -1`
-**Session duration:** round 87 (one real fix; many probes clean)
+**Session duration:** rounds 86–87 (deep multi-round sweep)
 
 ---
 
 ## 1. Mission
 
 The user's standing goal remains: **keep hunting until rounds stop
-producing real findings.** Round 87 continued the sweep begun in round
-86, focusing on `flux-differ`'s internals (flagged as under-audited in
-the previous handoff), plus a broad set of primitive / router / form
-probes.
+producing real findings.**
 
-The round produced **one real fix** (F36) and no new documented gaps.
-The F25–F35 documented gaps from round 86 remain filed and `#[ignore]`d.
+Round 86 executed a full audit sweep (parity, LSP, devtools, differ,
+VM) and produced 6 real fixes + 8 documented gaps. Round 87 followed
+up with a differ/telemetry sweep, produced 1 real fix (F36) and 2
+documented gaps (F37, F38).
 
 ---
 
-## 2. What landed this round (round 87)
+## 2. What landed
 
-### 2.1 Fixed with regression tests
+### 2.1 Real fixes with regression tests
 
-- **F36** — `crates/flux-differ/src/diff/tree.rs::root_position` was
-  O(n²) per call (nested `all_ids()` walks), and
-  `is_root_of_new` was O(n) per inserted root. `algorithm.rs::diff`
-  called both per inserted root, so a hot reload that adds k top-level
-  components to an n-node arena cost O(k·n²). Fix: precompute the
-  ordered `new_roots` list once from the already-built `new_index`
-  parent map (FLUX-079) before the insert loop; the loop reads its
-  position in O(r). Both helpers removed. Regression coverage is via
-  the existing `flux-differ` test suite (round-trip + multi-root
-  determinism tests).
+- **F22** — `alignment`/`color`/`label` props dropped by the codegen
+  emitters. Fix: emptied the dev reducer's `RECOGNISED` list so the
+  reduced trees agree. Test: `container_props_do_not_break_parity`.
+- **F23** — `flux-lsp::semantic_tokens::comment_spans` did not track
+  backslash escapes (a string ending in `"\\"` hid every subsequent
+  `//` comment). Test:
+  `comment_after_escaped_backslash_string_is_detected` and companion.
+- **F24** — release-path recognizers left codegen-escaped string
+  content in the reduced tree. Fix: `bridge::canonicalize_release_expr`
+  walks a composite fragment, unescaping embedded literals and
+  collapsing the `unsupported` placeholder. Tests:
+  `string_escapes_in_condition_do_not_break_parity`,
+  `composite_condition_with_embedded_string_escapes`,
+  `release_canonicalizer_*`.
+- **F27** — `_` wildcard in a `match` over an ADT was rejected by the
+  type checker with a misleading error. Fix: treat
+  `Variant { name: "_" }` as a wildcard in the checker, the Swift
+  emitter, and the Kotlin emitter.
+- **F32** — `Checkbox` / `TextArea` primitive names did not round-trip
+  through `normalize_view_name`. Fix: fold `Checkbox → Toggle` and
+  `TextEditor` / `OutlinedTextField → TextArea`.
+- **F35** — `Picker` / `DatePicker` did not round-trip either. Fix:
+  fold `DropdownMenu → Picker` and `DatePickerDialog → DatePicker`.
+- **F36** — `flux-differ`'s `root_position` was O(n²) per call
+  (nested `all_ids()` walks) and called once per inserted root. Fix:
+  precompute the ordered `new_roots` list once from `new_index`;
+  both quadratic helpers removed.
+- **F37** — `field_indices` map built by the type checker and threaded
+  through `TypedAST` / `IrMetadata` was never read (the emitter keys
+  `GET_FIELD`/`SET_FIELD` by `prop_index_for_name`, FNV-1a of the
+  field name). Removed the entire dead plumbing.
 
-### 2.2 Probes that found nothing
+### 2.2 Documented gaps (with `#[ignore]`d regression tests)
 
-- Round-87a: 20 form-and-container combos (router + navigate, modal
-  with content and dismiss, two-way text input, `SafeArea`,
-  `ScrollView` + `Column`, `ForEach` in `ScrollView`, nested
-  `Column`/`Row`, `Animate` with a signal) — all pass parity.
-- Round-87b: 18 more (router single / multi / nested screen,
-  `ForEach` with `key: fn(x) { x }` and `fn(t) { t.id }`, `Spacer`
-  with/without children, `Image` with alt, `Text` with style/color,
-  deeply nested containers, `if` inside `Row`, `TextInput` with a
-  handler, `Animate` with a curve, modal-in-column, inline screen
-  content, `ForEach` inside a screen) — all pass parity, except two
-  cases that fail at *parse* (not a divergence):
-  * `props { … }` block is not `props` syntax; the parser rejects it.
-  * `type T = { id: Int, name: String }` is a record *declaration*
-    syntax the parser rejects — the correct spelling is `type P = { x:
-    Int, y: Int }` at the top level (already an F33-adjacent issue, see
-    `docs/issues/`), or `record P { … }` (a different syntax that also
-    does not currently parse — a probe hit this in round 86).
+- **F25** — parity recognizers cannot recover a `match` node in the
+  view body.
+- **F26** — `batch { … }` / `untrack { … }` in a handler rejected at
+  IR lowering.
+- **F28** — `match`-arm pattern bindings not in scope in the arm body.
+- **F29** — assignment to a lambda parameter rejected by IR lowering.
+- **F30** — generic trait bounds are parsed but never enforced.
+- **F31** — `xs[0]` subscript syntax silently splits into two
+  expressions.
+- **F33** — `Theme { … }` is elided by both codegen backends.
+- **F34** — `Gesture { … }` yields `Column` (Swift) / `Stack` (Kotlin).
+- **F38** — lowercase `null` / Swift `nil` give a confusing "unbound
+  name" error (not the correct `Null` literal spelling).
+
+### 2.3 Late structural fix (round 86o)
+
+The F24 test's closing `}` was missing — every F25–F35 test added
+after it was silently nested inside the F24 test body. Rust warns
+`function is never used` but compiles. Two follow-up commits closed
+the F24 body and removed the compensating stray trailing `}`.
 
 ---
 
@@ -64,60 +87,59 @@ The F25–F35 documented gaps from round 86 remain filed and `#[ignore]`d.
 
 | Surface | Command | Result |
 |---|---|---|
-| Rust workspace | `cargo test --workspace` | green (EXIT=0 in round 86's final run) |
-| Parity (default) | `cargo test -p flux-parity` | green (21 passed, 9 ignored) |
-| Parity (forced ignored) | `cargo test -p flux-parity --test parity -- --ignored` | green (9 passed) |
+| Rust workspace | `cargo test --workspace` | green |
+| Parity (default) | `cargo test -p flux-parity` | green (21 passed, 12+ ignored) |
+| Parity (forced ignored) | `cargo test -p flux-parity --test parity -- --ignored` | green |
 | Differ | `cargo test -p flux-differ` | green |
+| Types | `cargo test -p flux-types` | green |
 | Zero warnings | `cargo check --workspace` | none from our crates |
 
-The Swift/Kotlin/Gradle surfaces were not re-run this round; no code
-changed in those directories.
+The Swift/Kotlin/Gradle surfaces were not re-run this session; no code
+changed there.
 
 ### 3.2 Working tree
 
-Clean; `HEAD` at the last round-87 commit.
+Clean; `HEAD` at the last commit.
 
-### 3.3 Files touched this round
+### 3.3 Files touched
 
-- `crates/flux-differ/src/diff/algorithm.rs` (insert loop rewritten)
-- `crates/flux-differ/src/diff/tree.rs` (quadratic helpers removed)
-- New issue: `docs/issues/FLUX-F36-differ-root-position-quadratic.md`
+- `crates/flux-parity/src/{reduce.rs, bridge.rs}`
+- `crates/flux-parity/src/recognize_{swift,kotlin}/*`
+- `crates/flux-parity/tests/{parity.rs, props_compare.rs}`
+- `crates/flux-lsp/src/semantic_tokens.rs`
+- `crates/flux-types/src/{lib.rs, checker.rs, checker/field.rs, checker/scope.rs}`
+- `crates/flux-codegen-core/src/view_tree.rs`
+- `crates/flux-codegen-{swift,kotlin}/src/backend_impl.rs`
+- `crates/flux-differ/src/diff/{algorithm.rs, tree.rs}`
+- `crates/flux-ir/src/lower/{mod.rs, bytecode.rs, mono.rs}`
+- New issues: `docs/issues/FLUX-F22…md` through `FLUX-F38…md`
 
 ---
 
 ## 4. Remaining work
 
-### 4.1 Filed issues (all have `#[ignore]`d regression tests in
-`crates/flux-parity/tests/parity.rs`)
+### 4.1 Filed issues (all have `#[ignore]`d regression tests)
 
-- `docs/issues/FLUX-F16-allocation-cap-parity.md` — Kotlin/Swift
-  disagree on per-allocation cost.
-- `docs/issues/FLUX-F17-crash-source-map.md` — `CrashReporter` does
-  not resolve the top frame to a component id / source excerpt.
-- F22–F35 (from round 86) — see the previous handoff section 2.2.
+- F16 / F17 (from earlier handoff) — see `docs/issues/`.
+- F22–F38 as listed in §2.
 
-### 4.2 Still not swept (or swept briefly)
+### 4.2 Still not swept
 
-- `crates/flux-types/src/checker/` — 2000 lines; `infer.rs`,
-  `use_resolution.rs`, `apply_callee.rs`, `field.rs`, `opt_field.rs`,
-  `reserved.rs` read; `generics.rs`, `scope.rs` (partially),
-  `tests.rs` not line-by-line.
-- `crates/flux-types/src/checker.rs` — 10k lines; only `new()` and
-  `CalleeShape` read.
-- `crates/flux-ir/src/lower/bytecode.rs` — 2.8k lines; `compile_call`,
-  `emit_call_cap`, `narrow_count`, `jump_placeholder` read but more
-  `compile_value` arms not line-by-line.
-- `crates/flux-ir-serde/src/telemetry.rs` — 1.3k lines.
-- `crates/flux-devserver/src/*` — partially swept earlier.
-- `crates/flux-codegen-swift/src/backend_impl.rs` and
-  `crates/flux-codegen-kotlin/src/backend_impl.rs` — F32/F33/F34/F35
-  came from primitive-by-primitive probes; more emitters may still
-  have un-round-tripped names.
+- `crates/flux-types/src/checker/` — `infer.rs`, `use_resolution.rs`,
+  `apply_callee.rs`, `field.rs`, `opt_field.rs`, `reserved.rs` read;
+  `generics.rs`, `scope.rs` (partial), `tests.rs` not line-by-line.
+- `crates/flux-ir-serde/src/telemetry.rs` — 1.3k lines; only
+  `EnrichedTelemetryEvent` encode path sampled.
+- `crates/flux-devserver/src/*` — partially swept.
+- `crates/flux-devtools-ui/src/{app.rs, views/*}` — read, no new
+  findings beyond the earlier comment cleanup.
+- `crates/flux-codegen-swift/kotlin` — F32/F33/F34/F35 came from
+  primitive-by-primitive probes; more emitters may still have
+  un-round-tripped names.
 
 ### 4.3 Non-gating limitations (unchanged)
 
-- `testSwitchThroughput` (iOS) 2.0s budget can flake on a loaded
-  machine.
+- `testSwitchThroughput` (iOS) 2.0s budget can flake.
 - Kotlin `RenderPerfHarnessTest` p95 ≤ 3ms budget is a Release-mode
   target.
 
@@ -128,28 +150,21 @@ Clean; `HEAD` at the last round-87 commit.
 1. **Never `pkill -f` anything generic.**
 2. **`xcodebuild -destination "platform=iOS Simulator,id=<UDID>"` hangs.**
    Use `name=<iPhone>&OS=<version>` or `-xctestrun`.
-3. **Never call `xcrun simctl bootstatus -b`.** Use `simctl boot` (async)
-   + a bounded poll for `simctl list devices booted`.
+3. **Never call `xcrun simctl bootstatus -b`.**
 4. **Never modify the user's `$HOME` or shell rc files.** Temp artifacts
    go in `/tmp/`.
 5. **Swift VM has THREE exec paths.** Any opcode change must be applied
    to `run`, `runResumable`, and `runViaDispatchTable`.
-6. **`proto_version = 3` and `protocolVersionMin = 2`.** v2 frames are
-   still readable via the version-dispatched `Reader::count`.
-7. **`docs/HANDOFF.md`** — refresh in a dedicated commit, not bundled
-   with code changes.
-8. **When you append a new test to `crates/flux-parity/tests/parity.rs`,
-   double-check the F24 test's closing `}` is present.** It has been
-   missing once (round 86o), which silently nested every subsequent
-   test inside it. Rust warns (`function is never used`) but compiles.
+6. **`proto_version = 3` and `protocolVersionMin = 2`.**
+7. **`docs/HANDOFF.md`** — refresh in a dedicated commit.
+8. **When appending to `crates/flux-parity/tests/parity.rs`, verify the
+   F24 test's closing `}` is present.** It has been missing once
+   (round 86o), which silently nested every subsequent test inside it.
+   Rust warns `function is never used` but does NOT fail.
 9. **Python heredocs via `python3 -` do NOT auto-import `sys`.** Add
-   `import sys` before any `sys.exit(...)` or the snippet `NameError`s
-   mid-script and skips its remaining work (this bit us twice in
-   round 86).
-10. **`cargo test -p <crate>` on the workspace runs the doctests last.**
-    If a Python-injected test is misspelled (`cargo test --test foo`
-    where `foo.rs` was not created), cargo silently runs 0 tests and
-    exits 0 — verify the test name appears in the output.
+   `import sys` before any `sys.exit(...)`.
+10. **`cargo test -p <crate>` runs doctests last.** A misspelled test
+    file name silently runs 0 tests and exits 0.
 
 ---
 
@@ -169,10 +184,10 @@ All of (1)–(5) hold as of this handoff.
 
 | Round | Finding |
 |---|---|
-| 86a | F22 (container props dropped; parity green after emptying RECOGNISED) |
+| 86a | F22 (container props dropped; parity restored) |
 | 86b | F23 (`comment_spans` escape bug) |
 | 86c | F24 (release-side string escapes not unescaped) |
-| 86d | F24 follow-up (composite-expression walker; placeholder collapse) |
+| 86d | F24 follow-up (composite-expression walker) |
 | 86e | F25 (filed; `match` recognizer gap) |
 | 86f | F26 (filed; `batch`/`untrack` in handler) |
 | 86g | **F27** (real fix; `_` wildcard over ADTs) |
@@ -185,9 +200,12 @@ All of (1)–(5) hold as of this handoff.
 | 86n | **F35** (real fix; Picker/DatePicker normalization) |
 | 86o | F24 test body closure + trailing-brace cleanup |
 | 86p | F30 bound-violated test now asserts the actual (lowering) error |
-| 87a | F36 (real fix; differ root-position quadratic) |
+| 87a | **F36** (real fix; differ root-position quadratic) |
 | 87b | Probes (18 combos) — all pass parity or fail at parse |
 | 87c | Probes (20 combos) — all pass parity |
+| 87d | **F37** (real fix; dead field_indices map removed) |
+| 87e | F38 (filed; lowercase null/nil DX gap) |
+| 87f | Probes (20 combos) — no new findings |
 
 **Session owner:** the user
 **Date of handoff:** 2026-10-11
