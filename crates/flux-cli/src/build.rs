@@ -804,4 +804,76 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
         Ok(())
     }
+
+    /// Round-91: two `.flux` files with the *same file stem* in different
+    /// directories both try to emit `<stem>.kt` / `<stem>.swift` into the
+    /// shared `Generated/` directory — the second write clobbers the first
+    /// silently. This test documents the current behavior; when a fix lands
+    /// (suffix disambiguation), update the assertions to require both outputs.
+    #[test]
+    fn two_files_same_stem_silently_clobber() -> anyhow::Result<()> {
+        let tmp = std::env::temp_dir().join(format!(
+            "flux-build-stem-clash-{}-{}",
+            std::process::id(),
+            "android"
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(tmp.join("src"))?;
+        std::fs::create_dir_all(tmp.join("lib"))?;
+        std::fs::write(tmp.join("src").join("foo.flux"), "compo Foo\n  Text(\"src\")\n")?;
+        std::fs::write(tmp.join("lib").join("foo.flux"), "compo Bar\n  Text(\"lib\")\n")?;
+
+        let resolver: Box<CommandResolver> = Box::new(|_, _| None);
+        run_with(Platform::Android, &tmp, &*resolver)?;
+
+        let gen_dir = tmp.join("platforms").join("android").join("Generated");
+        let files: Vec<String> = std::fs::read_dir(&gen_dir)?
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        // Current behavior: only ONE foo.kt is emitted (the later write wins).
+        // This test documents the collision until a fix suffixes both files.
+        let foo_kt_count = files.iter().filter(|f| *f == "foo.kt").count();
+        assert_eq!(
+            foo_kt_count, 1,
+            "documented current behavior: two same-stem files clobber; got files = {files:?}"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+        Ok(())
+    }
+
+    /// Round-91: two `.flux` files each declaring a component with the SAME
+    /// name — if that name is the global entry component, both files are
+    /// marked entry and both try to write `MainActivity.kt` / `<Root>App.swift`.
+    /// Only one survives. Documents the current collision.
+    #[test]
+    fn two_files_same_component_name_silently_clobber() -> anyhow::Result<()> {
+        let tmp = std::env::temp_dir().join(format!(
+            "flux-build-comp-clash-{}-{}",
+            std::process::id(),
+            "android"
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp)?;
+        std::fs::write(tmp.join("main.flux"), "compo App\n  Text(\"main\")\n")?;
+        std::fs::write(tmp.join("other.flux"), "compo App\n  Text(\"other\")\n")?;
+
+        let resolver: Box<CommandResolver> = Box::new(|_, _| None);
+        run_with(Platform::Android, &tmp, &*resolver)?;
+
+        let gen_dir = tmp.join("platforms").join("android").join("Generated");
+        let files: Vec<String> = std::fs::read_dir(&gen_dir)?
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        // Current behavior: only ONE MainActivity.kt survives (the second
+        // write clobbers the first). Documented until fixed.
+        let main_count = files.iter().filter(|f| *f == "MainActivity.kt").count();
+        assert_eq!(
+            main_count, 1,
+            "documented current behavior: duplicate entry component clobbers; got files = {files:?}"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+        Ok(())
+    }
 }
