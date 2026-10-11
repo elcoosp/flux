@@ -572,9 +572,17 @@ impl<'s> Parser<'s> {
                 span: field_span,
             });
             self.skip_layout();
-            if !self.try_eat(TokenKind::Comma) {
-                break;
-            }
+            // FLUX-F60: the comma between record fields is **optional**.
+            // The `while !self.at(RBrace)` guard above terminates the loop
+            // when the closing brace is reached, and `self.ident()` at the
+            // top of the next iteration reports a useful error when the
+            // next token is neither a `}` nor a valid field name. The
+            // previous `if !self.try_eat(Comma) { break; }` rejected the
+            // layout-separated multi-line form (`record R { x: Int\n y: Int }`),
+            // which every other block-bodied declaration accepts — and
+            // which the `skip_layout()` calls in this very function were
+            // written to support.
+            let _ = self.try_eat(TokenKind::Comma);
             self.skip_layout();
         }
         self.eat(TokenKind::RBrace)?;
