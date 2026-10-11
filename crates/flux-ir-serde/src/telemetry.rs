@@ -650,7 +650,17 @@ impl HostAnnounceFrame {
     /// Decodes a `HostAnnounce` frame, or `None` if malformed / wrong kind.
     #[must_use]
     pub fn from_bytes(bytes: &[u8]) -> Option<HostAnnounceFrame> {
-        let mut r = Reader::new(bytes);
+        // FLUX-F59: read the frame's own version byte before constructing
+        // the reader, so every `decode_str` inside dispatches on the
+        // frame's actual version (`u32` prefix at v3, `u16` at v2) rather
+        // than the process's `PROTOCOL_VERSION`. The encoder already
+        // honors the frame's version (`w.set_version`); the decoder was
+        // the outlier, so a v2 HostAnnounce frame failed to decode — the
+        // DevTools never learned the host's identity. Same class as
+        // `EnrichedTelemetryFrame::from_bytes`, which was fixed the same
+        // way in round 63.
+        let version = *bytes.get(4)?;
+        let mut r = Reader::with_version(bytes, version);
         let magic = r.u32("host_announce.magic").ok()?;
         if magic != MAGIC {
             return None;
