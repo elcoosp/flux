@@ -601,4 +601,35 @@ fn assign_to_lambda_param_is_a_known_gap() {
         "expected the F29 lowering gap, got: {msg}"
     );
 }
+
+/// FLUX-F30 (documented gap): a component declaring `[T: Foo]` where `Foo`
+/// is not a declared trait is accepted today — the bound is parsed into
+/// the AST but no pass ever consults it. This test is `#[ignore]`d and
+/// asserts the current (silently-OK) behavior. When `Checker` registers
+/// bounds, un-ignore and assert an "unknown trait" error instead.
+#[test]
+#[ignore = "FLUX-F30: generic trait bounds are parsed but never enforced"]
+fn undeclared_trait_bound_is_a_known_gap() {
+    let src = "compo Counter[T: Foo]\n  state n: Int = 0\n  Text(\"x\")";
+    let r = check_parity(src, 9992);
+    assert!(
+        r.is_ok(),
+        "documented current behavior: undeclared trait bound is accepted; got {r:?}"
+    );
+}
+
+/// FLUX-F30 (documented gap): a `[T: Numeric]` component instantiated with
+/// `Bool` is accepted today. This test is `#[ignore]`d and asserts the
+/// current (silently-OK) behavior. When instantiation checks bounds,
+/// un-ignore and assert a trait-satisfaction error instead.
+#[test]
+#[ignore = "FLUX-F30: generic trait bounds are parsed but never enforced"]
+fn bound_violated_at_instantiation_is_a_known_gap() {
+    let src = "trait Numeric[T] {\n  fn zero() -> T\n}\n\ncompo Counter[T: Numeric]\n  state count: T = Numeric.zero()\n  Text(\"x\")\n\ncompo App\n  Counter[Bool]()";
+    let r = check_parity(src, 9993);
+    assert!(
+        r.is_ok(),
+        "documented current behavior: bound-violating instantiation is accepted; got {r:?}"
+    );
+}
 }
