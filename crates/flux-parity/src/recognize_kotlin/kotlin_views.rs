@@ -4,7 +4,7 @@
 //! These helpers are invoked by [`super::parse_body`] while walking a `@Composable
 //! fun`'s body block. They are private to the Kotlin recognizer.
 
-use crate::bridge::canonicalize_expr;
+use crate::bridge::canonicalize_release_expr;
 use crate::model::{ViewNode, is_container, normalize_view_name};
 use crate::tokenize::{Token, match_brace, match_paren};
 
@@ -56,7 +56,7 @@ pub(crate) fn parse_if(
     }
     Ok((
         ViewNode::If {
-            cond: canonicalize_expr(cond.trim()),
+            cond: canonicalize_release_expr(cond.trim()),
             then_branch,
             else_branch,
         },
@@ -105,7 +105,7 @@ pub(crate) fn parse_items(
     }
     let collection = args
         .first()
-        .map(|s| canonicalize_expr(s.trim()))
+        .map(|s| canonicalize_release_expr(s.trim()))
         .unwrap_or_default();
     let key_path = args
         .iter()
@@ -115,7 +115,7 @@ pub(crate) fn parse_items(
                 .and_then(|r| r.strip_prefix('='))
                 .map(str::trim)
         })
-        .map(canonicalize_expr)
+        .map(canonicalize_release_expr)
         .unwrap_or_default();
     let mut m = k + 1;
     while m < tokens.len() && tokens[m].text != "{" {
@@ -184,7 +184,7 @@ pub(crate) fn parse_composable_dest(
         arg.push_str(t);
         k += 1;
     }
-    let route = canonicalize_expr(arg.trim());
+    let route = canonicalize_release_expr(arg.trim());
     let mut m = k + 1;
     while m < tokens.len() && tokens[m].text != "{" {
         m += 1;

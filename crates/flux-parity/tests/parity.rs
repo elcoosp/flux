@@ -485,4 +485,24 @@ fn container_props_do_not_break_parity() {
         report.swift,
         report.kotlin,
     );
+
+/// FLUX-F24 regression: a Flux program whose preserved string value (here, a
+/// condition) contains a `$` or a `\\` must reduce to the same canonical
+/// form on dev, Swift, and Kotlin. Before the fix the recognizer left the
+/// release-side escape (`\\$`, `\\\\`) in place while the dev side held the
+/// logical character, so `check_parity` diverged.
+#[test]
+fn string_escapes_in_condition_do_not_break_parity() {
+    // Flux source: a `$` in a condition string (no escape in Flux), and a
+    // backslash that the Flux source escapes as `\\`.
+    let src = "compo C\n  state n: String = \"x\"\n  if n == \"a$b\" { Text(\"y\") }\n  if n == \"c\\\\d\" { Text(\"z\") }";
+    let report = check_parity(src, 9985).expect("compiles");
+    assert!(
+        report.is_equivalent(),
+        "escaped-string parity diverged: dev={:#?}\nswift={:#?}\nkotlin={:#?}",
+        report.dev,
+        report.swift,
+        report.kotlin,
+    );
+}
 }

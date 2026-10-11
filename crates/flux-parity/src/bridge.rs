@@ -159,6 +159,93 @@ pub(crate) fn canonicalize_expr(text: &str) -> String {
     t
 }
 
+/// Release-path counterpart to [`canonicalize_expr`]: accepts the *emitted*
+/// Swift/Kotlin string content (where `\`, `"`, and `$` are backslash-escaped
+/// by the codegen's `escape_text`) and normalizes it to the same canonical
+/// form the dev-path reducer produces from the parsed AST.
+///
+/// The dev path's `render_expr` operates on already-unescaped AST text; the
+/// codegen's `escape_text` re-escapes it for the emitted source. Without this
+/// inverse, a Flux program whose preserved string value — a condition, a
+/// screen route, a `ForEach` collection — contains `$` or `\` diverges
+/// between dev and release (FLUX-F24). Non-string tokens (key paths, numeric
+/// literals, the placeholder collapse) delegate to [`canonicalize_expr`].
+#[must_use]
+pub(crate) fn canonicalize_release_expr(text: &str) -> String {
+    let t = text.trim();
+    if t.starts_with('"') && t.ends_with('"') && t.len() >= 2 {
+        let inner = &t[1..t.len() - 1];
+        let inner = canonicalize_release_string_content(inner);
+        return format!("\"{inner}\"");
+    }
+    canonicalize_expr(text)
+}
+
+/// Walks the content of an emitted string literal (between the quotes) and:
+/// * unescapes `\n`/`\t`/`\r`/`\\`/`\"`/`\$` back to their logical chars;
+/// * rewrites Swift `\(expr)` and Kotlin `${expr}` interpolations to the
+///   dev-side `{expr}` form, tracking paren depth so a nested call survives;
+/// * keeps any other `\X` (an unknown escape) as-is.
+///
+/// Backslash-aware, so an escaped backslash followed by `(` (bytes `\` `\`
+/// `(`) is treated as a literal backslash then a literal paren, not as a
+/// Swift interpolation opener — a case the previous escape-unaware
+/// `canonicalize_interp` misread.
+fn canonicalize_release_string_content(inner: &str) -> String {
+    let mut out = String::with_capacity(inner.len());
+    let mut chars = inner.chars().peekable();
+    let mut interp_depth: Vec<i32> = Vec::new();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\\' => match chars.next() {
+                Some('(') => {
+                    out.push('{');
+                    interp_depth.push(0);
+                }
+                Some('n') => out.push('\n'),
+                Some('t') => out.push('\t'),
+                Some('r') => out.push('\r'),
+                Some('\\') => out.push('\\'),
+                Some('"') => out.push('"'),
+                Some('$') => out.push('$'),
+                Some(other) => {
+                    out.push('\\');
+                    out.push(other);
+                }
+                None => out.push('\\'),
+            },
+            '$' if chars.peek() == Some(&'{') => {
+                chars.next();
+                out.push('{');
+                interp_depth.push(0);
+            }
+            '(' => {
+                if let Some(d) = interp_depth.last_mut() {
+                    *d += 1;
+                }
+                out.push('(');
+            }
+            ')' => match interp_depth.last_mut() {
+                Some(0) => {
+                    out.push('}');
+                    interp_depth.pop();
+                }
+                Some(d) => {
+                    *d -= 1;
+                    out.push(')');
+                }
+                None => out.push(')'),
+            },
+            '}' if !interp_depth.is_empty() => {
+                out.push('}');
+                interp_depth.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
 /// Canonicalizes the body of a Swift/Kotlin string literal (without the outer
 /// quotes) so that both backends produce the same `{…}` interpolation form.
 ///
@@ -259,5 +346,38 @@ mod interp_tests {
     #[test]
     fn plain_string_without_interpolation_is_unchanged() {
         assert_eq!(canonicalize_expr(r#""hello""#), r#""hello""#);
+    }
+
+    /// FLUX-F24: a Kotlin-emitted string carrying an escaped `$` must
+    /// canonicalize to the same logical char the dev path holds.
+    #[test]
+    fn release_canonicalizer_unescapes_dollar() {
+        assert_eq!(canonicalize_release_expr("\"a\\$b\""), "\"a$b\"");
+    }
+
+    /// FLUX-F24: a Swift/Kotlin-emitted string carrying `\\` must canonicalize
+    /// to a single literal backslash (matching the dev path's AST text).
+    #[test]
+    fn release_canonicalizer_unescapes_backslash() {
+        assert_eq!(canonicalize_release_expr("\"a\\\\b\""), "\"a\\b\"");
+    }
+
+    /// FLUX-F24: Swift `\\(x)` is an interpolation, but `\\\\` followed by
+    /// `(` is an escaped backslash then a literal paren. The canonicalizer
+    /// must tell them apart.
+    #[test]
+    fn release_canonicalizer_distinguishes_interp_from_escaped_backslash() {
+        // Swift interpolation opener.
+        assert_eq!(canonicalize_release_expr("\"x\\(a + b)y\""), "\"x{a + b}y\"");
+        // Escaped backslash followed by a literal paren.
+        assert_eq!(canonicalize_release_expr("\"x\\\\(y\""), "\"x\\(y\"");
+    }
+
+    /// FLUX-F24: non-string tokens keep their existing behavior (delegate to
+    /// `canonicalize_expr`).
+    #[test]
+    fn release_canonicalizer_delegates_non_strings() {
+        assert_eq!(canonicalize_release_expr("\\.id"), "key:.id");
+        assert_eq!(canonicalize_release_expr("null"), "key:.self");
     }
 }
