@@ -750,6 +750,7 @@ fn picker_date_picker_names_round_trip() {
         r.swift,
         r.kotlin,
     );
+}
 
 /// FLUX-F38 (documented gap): lowercase `null` (Kotlin-style) and Swift
 /// `nil` are not recognized as the Flux `Null` literal. Users get a
@@ -811,4 +812,3 @@ fn named_record_destructure_is_a_known_gap() {
     );
 }
 
-}
