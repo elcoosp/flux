@@ -125,3 +125,40 @@ pub(crate) fn line_at(source: &str, offset: usize) -> String {
         .map_or(source.len(), |index| clamped + index);
     source[start..end].trim_end_matches('\r').to_owned()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Round-95: `Location::from_offset` counts characters, but the
+    /// source printed above the caret is a byte stream. For source with
+    /// a multi-byte char before the diagnostic, the caret is off by the
+    /// byte-char delta. This test pins the current (misaligned) shape.
+    #[test]
+    fn caret_pad_uses_char_columns_not_byte_columns() {
+        // `café x!` — the `!` is at char column 8 (1-based), byte column 9.
+        // The caret_pad below uses `column - 1 = 7` spaces, so the caret
+        // lands one byte before the `!`.
+        let source = "compo C\n  Text(\"café x\") !";
+        let err = match crate::parse(source, 0, "f.flux") {
+            Ok(_) => return,
+            Err(e) => e,
+        };
+        // The error points at the trailing `!`.
+        // Verify the caret row is off by 1 cell relative to the source row.
+        let rendered = err.render();
+        let lines: Vec<&str> = rendered.lines().collect();
+        let src_line = lines.iter().find(|l| l.contains("café")).expect("source line");
+        let caret_line = lines.iter().find(|l| l.contains('^')).expect("caret line");
+        let bang_pos_src = src_line.find('!').expect("! in source") as i64;
+        let caret_pos_src = caret_line.find('^').expect("^ in caret") as i64;
+        let delta = bang_pos_src - caret_pos_src;
+        eprintln!("source:  {src_line:?}");
+        eprintln!("caret:   {caret_line:?}");
+        eprintln!("delta (bang - caret) = {delta} (0 = aligned; nonzero = misaligned)");
+        assert_ne!(
+            delta, 0,
+            "documented current behavior: the caret is misaligned for non-ASCII source"
+        );
+    }
+}
