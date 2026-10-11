@@ -524,4 +524,28 @@ fn composite_condition_with_embedded_string_escapes() {
         report.swift,
         report.kotlin,
     );
+
+/// FLUX-F25 (documented gap): a `match` node in a component's view body is
+/// lowered to `ViewNode::Match` by the dev reducer, but neither release
+/// recognizer has a `switch`/`when` dispatcher, so both flatten the arms'
+/// view children into the enclosing level. This test is `#[ignore]`d — it
+/// currently *asserts* the divergence (both release trees lose the Match
+/// node). When the recognizers gain switch/when support, un-ignore and
+/// flip the assertion to `report.is_equivalent()`.
+#[test]
+#[ignore = "FLUX-F25: recognizers cannot recover a match node in the view body"]
+fn match_node_in_view_body_is_a_known_divergence() {
+    let src = "compo C\n  state score: Int = 0\n  match score {\n    s if s > 90 => Text(\"A\")\n    s if s > 80 => Text(\"B\")\n    _ => Text(\"F\")\n  }";
+    let report = check_parity(src, 9988).expect("compiles");
+    // Dev side keeps a Match node…
+    let dev_has_match = format!("{:?}", report.dev).contains("Match {");
+    assert!(dev_has_match, "dev reducer must lower a match into ViewNode::Match");
+    // …release side does not (the known gap).
+    let swift_has_match = format!("{:?}", report.swift).contains("Match {");
+    let kotlin_has_match = format!("{:?}", report.kotlin).contains("Match {");
+    assert!(
+        !swift_has_match && !kotlin_has_match,
+        "if either recognizer now recovers Match, remove the `#[ignore]` and flip the assertion"
+    );
+}
 }
