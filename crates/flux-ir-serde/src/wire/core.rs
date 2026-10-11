@@ -239,9 +239,19 @@ pub fn validate_bytecode(bytecode: &[u8]) -> Result<(), WireError> {
     let instr_offsets: std::collections::HashSet<usize> = instrs.iter().map(|d| d.offset).collect();
     for decoded in &instrs {
         let opcode = decoded.opcode;
+        // FLUX-F46: the operand layout differs by opcode.
+        // * `JUMP` is `I32` — `op(1) + i32(4)`, target at offset+1.
+        // * `COND_JUMP(_NOT)` is `REG_U32` — `op(1) + reg(1) + i32(4)`,
+        //   target at offset+2. The previous code read both at +1, so a
+        //   COND_JUMP was validated against `[reg_byte, t0, t1, t2]` as
+        //   i32 rather than the real `[t0, t1, t2, t3]` — real programs
+        //   could be rejected and malformed ones accepted depending on
+        //   the immediate byte after the opcode.
         let jump = match opcode {
             Opcode::Jump => Some(read_i32(bytecode, decoded.offset + 1)),
-            Opcode::CondJump | Opcode::CondJumpNot => Some(read_i32(bytecode, decoded.offset + 1)),
+            Opcode::CondJump | Opcode::CondJumpNot => {
+                Some(read_i32(bytecode, decoded.offset + 2))
+            }
             _ => None,
         };
         let Some(relative) = jump else { continue };
