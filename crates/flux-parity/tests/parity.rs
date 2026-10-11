@@ -632,4 +632,23 @@ fn bound_violated_at_instantiation_is_a_known_gap() {
         "documented current behavior: bound-violating instantiation is accepted; got {r:?}"
     );
 }
+
+/// FLUX-F31 (documented gap): `xs[0]` in a state initializer is silently
+/// parsed as two separate items — `state first = xs` (truncated at the
+/// `[`) plus a stray list literal. The type checker then rejects the
+/// truncated expression with a misleading "expected Int, got List[Int]"
+/// error. This test is `#[ignore]`d; it documents the current failure.
+/// When the parser either supports subscripts or rejects them with a
+/// clear error, un-ignore and flip the assertion.
+#[test]
+#[ignore = "FLUX-F31: subscript syntax is silently split into two expressions"]
+fn subscript_index_is_a_known_gap() {
+    let src = "compo C\n  state xs: List[Int] = [1, 2]\n  state first: Int = xs[0]\n  Text(\"x\")";
+    let err = check_parity(src, 9994).expect_err("must currently fail with a type error");
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("expected `Int`, got `List[Int]`"),
+        "expected the F31 subscript-split error, got: {msg}"
+    );
+}
 }
