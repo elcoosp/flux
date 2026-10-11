@@ -1,4 +1,4 @@
-# Handoff — Flux bug-hunt round 86 (extended audit, F22-F34)
+# Handoff — Flux bug-hunt round 86 (extended audit, F22-F35)
 
 **For:** the next agent continuing this session
 **Repo:** `https://github.com/elcoosp/flux`
@@ -17,9 +17,10 @@ flagged as under-audited (the parity recognizers, `flux-lsp`,
 `flux-devtools-ui`, `flux-differ`, `flux-vm-ref`) plus a fresh probe of
 the whole `check_parity` pipeline.
 
-The round produced **five real fixes with regression tests** and
+The round produced **six real fixes with regression tests** and
 **eight documented gaps** filed as issues with `#[ignore]`d regression
-tests.
+tests (which now actually run and pass in their documented-divergence
+form).
 
 ---
 
@@ -47,8 +48,8 @@ tests.
   fragment** (the recognizer feeds `( n == "a$b" )`, not a bare
   literal), rewrites `\(…)` / `${…}` interpolations to `{…}`, and
   applies the `unsupported` placeholder collapse. Landed over three
-  follow-up commits. Regression tests:
-  `string_escapes_in_condition_do_not_break_parity`,
+  follow-up commits as the walker's edge cases surfaced. Regression
+  tests: `string_escapes_in_condition_do_not_break_parity`,
   `composite_condition_with_embedded_string_escapes`,
   `release_canonicalizer_*` in `bridge.rs`.
 - **F27** — A `_` wildcard in a `match` over an ADT was rejected by the
@@ -64,13 +65,18 @@ tests.
   `OutlinedTextField`. Fix: fold those names in
   `flux-codegen-core::view_tree::normalize_view_name`. Regression test:
   `form_control_primitive_names_round_trip`.
+- **F35** — `Picker` and `DatePicker` did not round-trip either: Swift
+  keeps the Flux spelling, Kotlin emits `DropdownMenu` /
+  `DatePickerDialog`. Fix: fold both Kotlin names back in
+  `normalize_view_name`. Regression test:
+  `picker_date_picker_names_round_trip`.
 
 ### 2.2 Filed as issues (documented, not fixed)
 
-Each of these has an `#[ignore]`d regression test in
-`crates/flux-parity/tests/parity.rs` that documents the current
-(failing) behavior. When the fix lands, un-ignore and flip the
-assertion.
+Each has an `#[ignore]`d regression test in
+`crates/flux-parity/tests/parity.rs` that asserts the *current*
+(divergent/erroring) behavior. When the fix lands, un-ignore the test
+and flip the assertion.
 
 - **F25** — Parity recognizers cannot recover a `match` node in the
   view body. Test: `match_node_in_view_body_is_a_known_divergence`.
@@ -84,8 +90,9 @@ assertion.
   a state signal in scope". Test:
   `assign_to_lambda_param_is_a_known_gap`.
 - **F30** — Generic trait bounds on components are parsed but never
-  enforced. `compo Counter[T: Foo]` where `Foo` is undeclared still
-  type-checks. Tests: `undeclared_trait_bound_is_a_known_gap`,
+  enforced. Currently the bound-violating program fails *earlier* at
+  generic-application lowering (`List[?7]` is not a function or
+  constructor). Tests: `undeclared_trait_bound_is_a_known_gap`,
   `bound_violated_at_instantiation_is_a_known_gap`.
 - **F31** — `xs[0]` in a state initializer is silently parsed as two
   sibling expressions (subscript syntax is not supported and is not
@@ -97,6 +104,15 @@ assertion.
 - **F34** — `Gesture { … }` yields `Gesture` on dev, `Column` on Swift,
   `Stack` on Kotlin. Test: `gesture_wrapper_is_a_known_gap`.
 
+### 2.3 A late structural fix
+
+The F24 test's closing `}` was missing — all the F25–F35 tests added
+after it were silently nested inside the F24 test body (Rust warns
+`function is never used` but compiles). Two follow-up commits closed
+the F24 body and removed the compensating stray trailing `}`. All
+`#[ignore]`d tests now actually run: `cargo test -p flux-parity --test
+parity -- --ignored` reports `9 passed`.
+
 ---
 
 ## 3. Current state — START HERE
@@ -105,9 +121,9 @@ assertion.
 
 | Surface | Command | Result |
 |---|---|---|
-| Rust workspace | `cargo test --workspace` | green |
-| Parity | `cargo test -p flux-parity` | green (all `#[ignore]`d gaps skipped) |
-| LSP | `cargo test -p flux-lsp` | green |
+| Rust workspace | `cargo test --workspace` | green (EXIT=0) |
+| Parity (default) | `cargo test -p flux-parity` | green (21 passed, 9 ignored) |
+| Parity (forced ignored) | `cargo test -p flux-parity --test parity -- --ignored` | green (9 passed) |
 | Zero warnings | `cargo check --workspace` | none from our crates |
 
 The Swift/Kotlin/Gradle surfaces were not re-run this round; no code
@@ -130,7 +146,7 @@ Clean; `HEAD` at the last round-86 commit.
 - `crates/flux-codegen-swift/src/backend_impl.rs`
 - `crates/flux-codegen-kotlin/src/backend_impl.rs`
 - `crates/flux-codegen-core/src/view_tree.rs`
-- New issues: `docs/issues/FLUX-F22…md` through `FLUX-F34…md`
+- New issues: `docs/issues/FLUX-F22…md` through `FLUX-F35…md`
 
 ---
 
@@ -142,7 +158,7 @@ Clean; `HEAD` at the last round-86 commit.
   disagree on per-allocation cost.
 - `docs/issues/FLUX-F17-crash-source-map.md` — `CrashReporter` does
   not resolve the top frame to a component id / source excerpt.
-- F22–F34 as listed in §2.2.
+- F22–F35 as listed in §2.
 
 ### 4.2 Still not swept (or swept briefly)
 
@@ -160,7 +176,7 @@ Clean; `HEAD` at the last round-86 commit.
 - `crates/flux-codegen-swift/src/backend_impl.rs` and
   `crates/flux-codegen-kotlin/src/backend_impl.rs` — many small
   emitters; each is a candidate for a per-emitter parity probe
-  (F32/F33/F34 came from exactly this kind of probe).
+  (F32/F33/F34/F35 all came from exactly this kind of probe).
 
 ### 4.3 Non-gating limitations (unchanged)
 
@@ -186,6 +202,10 @@ Clean; `HEAD` at the last round-86 commit.
    still readable via the version-dispatched `Reader::count`.
 7. **`docs/HANDOFF.md`** — refresh in a dedicated commit, not bundled
    with code changes.
+8. **Python heredocs in this session's pattern rely on `import sys` being
+   explicit** — a bare `sys.exit(...)` after an in-line heredoc will
+   `NameError` mid-script and silently skip the rest. When a `python3 -`
+   snippet uses `sys.exit`, `import sys` first.
 
 ---
 
@@ -218,6 +238,9 @@ All of (1)–(5) hold as of this handoff.
 | 86k | F31 (filed; subscript silently splits) |
 | 86l | **F32** (real fix; Checkbox/TextArea normalization) |
 | 86m | F33, F34 (filed; Theme flatten, Gesture divergence) |
+| 86n | **F35** (real fix; Picker/DatePicker normalization) |
+| 86o | F24 test body closure + trailing-brace cleanup (all F25–F35 tests were nested) |
+| 86p | F30 bound-violated test now asserts the actual (lowering) error |
 
 Numerous probes (unicode, `$`, misc parity, exhaustiveness, reserved
 words, handler internals, primitive emitters, list access, form
