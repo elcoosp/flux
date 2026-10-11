@@ -792,4 +792,23 @@ fn generic_adt_payload_binding_is_a_known_gap() {
     );
 }
 
+
+/// FLUX-F58 (documented gap): `let { x, y } = p` where `p` is a *nominal*
+/// record (`record R { … }`) binds every destructured name to the whole
+/// record type, not to the field's type. Any arithmetic on the bound
+/// names fails with a misleading message. This test is `#[ignore]`d and
+/// pins the current failure. When the fix lands, un-ignore and assert
+/// successful compilation.
+#[test]
+#[ignore = "FLUX-F58: named-record destructuring binds the whole record"]
+fn named_record_destructure_is_a_known_gap() {
+    let src = "record R { x: Int, y: Int }\n\nfn make() -> R { R { x: 1, y: 2 } }\n\ncompo C\n  let { x, y } = make()\n  state total: Int = x + y\n  Text(\"x\")";
+    let err = check_parity(src, 99_001).expect_err("must currently fail at type check");
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("Numeric") && msg.contains("R"),
+        "expected the F58 'requires Numeric, got R' error, got: {msg}"
+    );
+}
+
 }
