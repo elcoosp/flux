@@ -1,7 +1,9 @@
-//! FLUX-F39 — pins the current fact that the async bridge's `resume` half
-//! has no production caller. When a capability-completion driver lands
-//! (see the issue), this test should be replaced with an end-to-end test
-//! that verifies the frame flow through the driver.
+//! FLUX-F39 — pins the current fact that the dev-server's async bridge
+//! `resume` half has no production caller. The hosts implement their own
+//! local resolver (`FluxExecutor.AsyncResolver` on iOS) and never send
+//! `AwaitSuspend` over the wire, so the server-side bridge is unused.
+//! When the code is either deleted or finished (see the issue), this
+//! test should be removed or replaced accordingly.
 //!
 //! Why a source-text scan rather than a compile-time check: Rust has no
 //! language-level way to assert "this function is never called outside
@@ -10,7 +12,7 @@
 //! honest way to pin the current state until the driver exists.
 
 #[test]
-#[ignore = "FLUX-F39: AsyncBridge::resume has no production caller; parked handlers deadlock"]
+#[ignore = "FLUX-F39: AsyncBridge::resume has no production caller (unused server-side bridge)"]
 fn async_bridge_resume_has_no_production_caller() {
     // Verify the current state: nothing under crates/flux-devserver/src calls
     // `AsyncBridge::resume` (other than tests). If a driver lands, this
