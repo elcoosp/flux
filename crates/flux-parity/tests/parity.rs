@@ -524,6 +524,7 @@ fn composite_condition_with_embedded_string_escapes() {
         report.swift,
         report.kotlin,
     );
+}
 
 /// FLUX-F25 (documented gap): a `match` node in a component's view body is
 /// lowered to `ViewNode::Match` by the dev reducer, but neither release
@@ -743,5 +744,4 @@ fn picker_date_picker_names_round_trip() {
         r.swift,
         r.kotlin,
     );
-}
 }
