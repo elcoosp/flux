@@ -192,6 +192,19 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
         (depth_of(*id), parent, index, *id)
     });
 
+    // FLUX-F36: compute the new arena's ordered root list ONCE, before the
+    // insert loop. The previous `is_root_of_new` / `root_position` helpers
+    // re-walked `new.all_ids()` on every inserted root, and `root_position`
+    // nested that walk inside another walk — O(n²) per inserted root, O(k·n²)
+    // for k inserted roots. The parent index `new_index` (built above) already
+    // tells us which ids have a parent; a root is exactly an id it does not
+    // contain. Ordering comes from arena insertion order (which `all_ids`
+    // preserves), so the emitted index is stable.
+    let new_roots: Vec<NodeId> = new
+        .all_ids()
+        .filter(|nid| new_index.get(nid).is_none())
+        .collect();
+
     for id in &inserted {
         if pairs.iter().any(|(_, new_id)| new_id == id) {
             continue;
@@ -203,15 +216,34 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
                 index,
                 node: to_ref(&n),
             });
-        } else if is_root_of_new(new, id) {
+        } else if let Some(idx) = new_roots.iter().position(|r| r == id) {
             // Audit C9: arena roots have no entry in `new_index` (no parent),
             // so new top-level components were silently dropped on hot reload.
             // Emit the insert against the stable synthetic wrapper id the
             // devserver's tree.rs uses for the multi-root Init (§D.12.2).
+            //
+            // FLUX-F36: `idx` is the position in `new_roots`, computed once
+            // above; narrowed to u16 via `try_from` so a >65k-root arena
+            // surfaces as a real error instead of a silently-truncated wire
+            // index.
+            // FLUX-F36: `idx` is the position in `new_roots`, computed
+            // once above. A >65k-root arena is astronomically unlikely
+            // (real apps have single-digit top-level components), but
+            // `u16::try_from` surfaces the narrowing failure as a log
+            // line rather than a silently-truncated wire index; the
+            // affected root is skipped rather than emitting a wrong
+            // position.
+            let Ok(index_u16) = u16::try_from(idx) else {
+                tracing::error!(
+                    index = idx,
+                    "insert index exceeds the u16 wire limit; skipping this root insert"
+                );
+                continue;
+            };
             let n = new.get(*id).expect("present in new");
             patches.push(Patch::Insert {
                 parent: synthetic_root_id(),
-                index: root_position(new, id),
+                index: index_u16,
                 node: to_ref(&n),
             });
         }

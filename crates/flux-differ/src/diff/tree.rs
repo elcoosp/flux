@@ -97,35 +97,14 @@ pub(crate) fn reattach_pairs(
     pairs
 }
 
-/// Audit C9: true when `id` is a root of `new` (no parent in the arena).
-pub(crate) fn is_root_of_new(new: &IRArena, id: &NodeId) -> bool {
-    !new.all_ids().any(|nid| {
-        new.get(nid).is_some_and(|n| {
-            n.children()
-                .iter()
-                .any(|c| matches!(c, Child::Node(n) if *n == *id))
-        })
-    })
-}
-
 /// Audit C9: the stable synthetic wrapper id for multi-root Init frames.
+///
+/// The per-root index and root-membership tests are computed inline in the
+/// diff's insert loop (`algorithm::diff`) from the already-built
+/// `new_index` parent map; the previous `is_root_of_new` / `root_position`
+/// helpers re-walked the arena per root — `root_position` nested two arena
+/// walks inside each other, O(n²) per call and O(k·n²) for k inserted
+/// roots (FLUX-F36).
 pub(crate) fn synthetic_root_id() -> NodeId {
     flux_ir::compute_node_id(0, NodeKind::Component, Span::new(0, 0, 0), None)
-}
-
-/// Audit C9: the index of `id` among the new tree's roots.
-pub(crate) fn root_position(new: &IRArena, id: &NodeId) -> u16 {
-    let roots: Vec<_> = new
-        .all_ids()
-        .filter(|nid| {
-            !new.all_ids().any(|pid| {
-                new.get(pid).is_some_and(|p| {
-                    p.children()
-                        .iter()
-                        .any(|c| matches!(c, Child::Node(n) if *n == *nid))
-                })
-            })
-        })
-        .collect();
-    roots.iter().position(|nid| *nid == *id).unwrap_or(0) as u16
 }
