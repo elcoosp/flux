@@ -124,6 +124,20 @@ pub fn normalize_view_name(name: &str) -> String {
         "LazyVerticalGrid" => "Grid",
         "Scaffold" => "SafeArea",
         "Switch" => "Toggle",
+        // FLUX-F32: SwiftUI has no distinct Checkbox control, so the
+        // Swift emitter folds `Switch | Checkbox | Toggle` all onto
+        // `Toggle(isOn:)`. Kotlin keeps `Checkbox` distinct. Without this
+        // entry the dev tree (`Checkbox`) and the Swift tree (`Toggle`)
+        // diverge for any Flux `Checkbox(...)`. Matches the existing
+        // `Switch` → `Toggle` collapse — the loss is already in the
+        // emitted Swift, the normalizer only makes it visible on all sides.
+        "Checkbox" => "Toggle",
+        // FLUX-F32: `TextEditor` (Swift) and `OutlinedTextField` (Kotlin)
+        // are emitted *uniquely* for the Flux `TextArea` primitive — the
+        // Swift emitter writes `TextEditor(text:)`, the Kotlin emitter
+        // writes `OutlinedTextField(value = …, singleLine = false)`. Fold
+        // both back to `TextArea` so a Flux `TextArea(...)` round-trips.
+        "TextEditor" | "OutlinedTextField" => "TextArea",
         other => other,
     }
     .to_owned()

@@ -651,4 +651,34 @@ fn subscript_index_is_a_known_gap() {
         "expected the F31 subscript-split error, got: {msg}"
     );
 }
+
+/// FLUX-F32 regression: Flux form-control primitives whose emitted names
+/// differ across the two codegen backends must round-trip through
+/// `normalize_view_name` so the reduced trees compare equal. Before the
+/// fix, `Checkbox` diverged (Swift emits `Toggle`), and `TextArea`
+/// diverged (Swift emits `TextEditor`, Kotlin emits `OutlinedTextField`).
+#[test]
+fn form_control_primitive_names_round_trip() {
+    // `Checkbox`: Swift folds it to `Toggle`, Kotlin keeps `Checkbox`.
+    let checkbox = "compo C\n  state on: Bool = false\n  Checkbox(value: on, onChange: { on = !on })";
+    let r = check_parity(checkbox, 9995).expect("compiles");
+    assert!(
+        r.is_equivalent(),
+        "Checkbox parity diverged: dev={:#?}\nswift={:#?}\nkotlin={:#?}",
+        r.dev,
+        r.swift,
+        r.kotlin,
+    );
+
+    // `TextArea`: Swift emits `TextEditor`, Kotlin emits `OutlinedTextField`.
+    let text_area = "compo C\n  state text: String = \"\"\n  TextArea(value: text, onChange: { text = \"x\" })";
+    let r = check_parity(text_area, 9996).expect("compiles");
+    assert!(
+        r.is_equivalent(),
+        "TextArea parity diverged: dev={:#?}\nswift={:#?}\nkotlin={:#?}",
+        r.dev,
+        r.swift,
+        r.kotlin,
+    );
+}
 }
