@@ -620,17 +620,23 @@ fn undeclared_trait_bound_is_a_known_gap() {
 }
 
 /// FLUX-F30 (documented gap): a `[T: Numeric]` component instantiated with
-/// `Bool` is accepted today. This test is `#[ignore]`d and asserts the
-/// current (silently-OK) behavior. When instantiation checks bounds,
-/// un-ignore and assert a trait-satisfaction error instead.
+/// `Bool` is *not* rejected for the trait-bound reason the spec intends —
+/// today it fails earlier with a generic-application lowering error
+/// (`List[?7]` is not a function or constructor) because the generic
+/// application `Counter[Bool]()` is itself not lowered. This test is
+/// `#[ignore]`d and asserts the current behavior. When generic applications
+/// lower (and their bounds are checked), un-ignore and assert a
+/// trait-satisfaction error specifically.
 #[test]
 #[ignore = "FLUX-F30: generic trait bounds are parsed but never enforced"]
 fn bound_violated_at_instantiation_is_a_known_gap() {
     let src = "trait Numeric[T] {\n  fn zero() -> T\n}\n\ncompo Counter[T: Numeric]\n  state count: T = Numeric.zero()\n  Text(\"x\")\n\ncompo App\n  Counter[Bool]()";
-    let r = check_parity(src, 9993);
+    let err = check_parity(src, 9993)
+        .expect_err("documented current behavior: generic application fails at lowering");
+    let msg = format!("{err:?}");
     assert!(
-        r.is_ok(),
-        "documented current behavior: bound-violating instantiation is accepted; got {r:?}"
+        msg.contains("is not a function or constructor"),
+        "expected the generic-application lowering gap, got: {msg}"
     );
 }
 
