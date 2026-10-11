@@ -1,10 +1,10 @@
-# Handoff — Flux bug-hunt rounds 86–87 (audit + differ/telemetry sweeps)
+# Handoff — Flux bug-hunt rounds 86–88 (full sweep)
 
 **For:** the next agent continuing this session
 **Repo:** `https://github.com/elcoosp/flux`
 **Working dir:** `/Users/adm/Documents/Repos/flux`
 **HEAD at handoff:** see `git log --oneline -1`
-**Session duration:** rounds 86–87 (deep multi-round sweep)
+**Session duration:** rounds 86, 87, 88 (three deep rounds)
 
 ---
 
@@ -13,131 +13,115 @@
 The user's standing goal remains: **keep hunting until rounds stop
 producing real findings.**
 
-Round 86 executed a full audit sweep (parity, LSP, devtools, differ,
-VM) and produced 6 real fixes + 8 documented gaps. Round 87 followed
-up with a differ/telemetry sweep, produced 1 real fix (F36) and 2
-documented gaps (F37, F38).
+Round 86 was a whole-audit sweep across parity, LSP, devtools, differ,
+VM. Round 87 focused on the differ and telemetry. Round 88 swept the
+dev-server and CLI. Between them, the sessions produced **8 real fixes
+with regression tests** and **14 documented gaps** filed as issues with
+`#[ignore]`d regression tests.
 
 ---
 
-## 2. What landed
+## 2. Real fixes landed (8)
 
-### 2.1 Real fixes with regression tests
-
-- **F22** — `alignment`/`color`/`label` props dropped by the codegen
-  emitters. Fix: emptied the dev reducer's `RECOGNISED` list so the
-  reduced trees agree. Test: `container_props_do_not_break_parity`.
+- **F22** — `alignment`/`color`/`label` props dropped by codegen
+  emitters. Fix: emptied the dev reducer's `RECOGNISED` list.
 - **F23** — `flux-lsp::semantic_tokens::comment_spans` did not track
-  backslash escapes (a string ending in `"\\"` hid every subsequent
-  `//` comment). Test:
-  `comment_after_escaped_backslash_string_is_detected` and companion.
-- **F24** — release-path recognizers left codegen-escaped string
-  content in the reduced tree. Fix: `bridge::canonicalize_release_expr`
-  walks a composite fragment, unescaping embedded literals and
-  collapsing the `unsupported` placeholder. Tests:
-  `string_escapes_in_condition_do_not_break_parity`,
-  `composite_condition_with_embedded_string_escapes`,
-  `release_canonicalizer_*`.
-- **F27** — `_` wildcard in a `match` over an ADT was rejected by the
-  type checker with a misleading error. Fix: treat
-  `Variant { name: "_" }` as a wildcard in the checker, the Swift
-  emitter, and the Kotlin emitter.
-- **F32** — `Checkbox` / `TextArea` primitive names did not round-trip
-  through `normalize_view_name`. Fix: fold `Checkbox → Toggle` and
-  `TextEditor` / `OutlinedTextField → TextArea`.
-- **F35** — `Picker` / `DatePicker` did not round-trip either. Fix:
-  fold `DropdownMenu → Picker` and `DatePickerDialog → DatePicker`.
-- **F36** — `flux-differ`'s `root_position` was O(n²) per call
-  (nested `all_ids()` walks) and called once per inserted root. Fix:
-  precompute the ordered `new_roots` list once from `new_index`;
-  both quadratic helpers removed.
-- **F37** — `field_indices` map built by the type checker and threaded
-  through `TypedAST` / `IrMetadata` was never read (the emitter keys
-  `GET_FIELD`/`SET_FIELD` by `prop_index_for_name`, FNV-1a of the
-  field name). Removed the entire dead plumbing.
+  escapes (a string ending in `"\\"` hid every following `//` comment).
+- **F24** — Release-path recognizers left codegen-escaped string
+  content in the reduced tree; added
+  `bridge::canonicalize_release_expr`.
+- **F27** — `_` wildcard in `match` over ADT rejected by the type
+  checker. Fix: treat `Variant { name: "_" }` as a wildcard in all
+  three passes.
+- **F32** — `Checkbox`/`TextArea` names did not round-trip through
+  `normalize_view_name`.
+- **F35** — `Picker`/`DatePicker` names did not round-trip either.
+- **F36** — `flux-differ`'s `root_position` was O(n²) per call.
+- **F37** — Dead `field_indices` map built by the type checker but
+  never read by the emitter; removed entirely.
+- **F42** — `flux init` scaffold used Kotlin-style `${count}` instead
+  of Flux `{count}`, shipping a sample that renders with a literal `$`.
 
-### 2.2 Documented gaps (with `#[ignore]`d regression tests)
+## 3. Documented gaps (14, all with `#[ignore]`d regression tests)
 
-- **F25** — parity recognizers cannot recover a `match` node in the
-  view body.
-- **F26** — `batch { … }` / `untrack { … }` in a handler rejected at
-  IR lowering.
-- **F28** — `match`-arm pattern bindings not in scope in the arm body.
-- **F29** — assignment to a lambda parameter rejected by IR lowering.
-- **F30** — generic trait bounds are parsed but never enforced.
-- **F31** — `xs[0]` subscript syntax silently splits into two
-  expressions.
-- **F33** — `Theme { … }` is elided by both codegen backends.
+- **F25** — parity recognizers cannot recover a `match` node.
+- **F26** — `batch { … }` / `untrack { … }` in a handler rejected at IR lowering.
+- **F28** — `match`-arm bindings not in scope in the arm body.
+- **F29** — assignment to a lambda parameter rejected at IR lowering.
+- **F30** — generic trait bounds parsed but never enforced.
+- **F31** — `xs[0]` subscript syntax silently splits into two exprs.
+- **F33** — `Theme { … }` elided by both codegen backends.
 - **F34** — `Gesture { … }` yields `Column` (Swift) / `Stack` (Kotlin).
 - **F38** — lowercase `null` / Swift `nil` give a confusing "unbound
-  name" error (not the correct `Null` literal spelling).
-
-### 2.3 Late structural fix (round 86o)
-
-The F24 test's closing `}` was missing — every F25–F35 test added
-after it was silently nested inside the F24 test body. Rust warns
-`function is never used` but compiles. Two follow-up commits closed
-the F24 body and removed the compensating stray trailing `}`.
+  name" error (should say `Null`).
+- **F39** — dev-server `AsyncBridge::resume` has no production caller
+  (hosts implement their own local resolver; this is unused scaffolding).
+- **F40** — dispatch-report degradation is silent; `UnknownNode` is
+  swallowed.
+- **F41** — `set_signal_deps` only called from tests; the
+  minimal-patch mechanism is a production no-op.
+- **F43** — stale `crates/flux-cli/main.flux/` fixture removed.
 
 ---
 
-## 3. Current state — START HERE
+## 4. Current state — START HERE
 
-### 3.1 All tests green
+### 4.1 All tests green
 
 | Surface | Command | Result |
 |---|---|---|
 | Rust workspace | `cargo test --workspace` | green |
-| Parity (default) | `cargo test -p flux-parity` | green (21 passed, 12+ ignored) |
-| Parity (forced ignored) | `cargo test -p flux-parity --test parity -- --ignored` | green |
+| Parity | `cargo test -p flux-parity` | green (21 passed, ~14 ignored) |
 | Differ | `cargo test -p flux-differ` | green |
 | Types | `cargo test -p flux-types` | green |
+| Devserver | `cargo test -p flux-devserver` | green |
+| CLI | `cargo test -p flux-cli` | green |
 | Zero warnings | `cargo check --workspace` | none from our crates |
 
-The Swift/Kotlin/Gradle surfaces were not re-run this session; no code
-changed there.
+### 4.2 Working tree
 
-### 3.2 Working tree
+Clean; `HEAD` at the last round-88 commit.
 
-Clean; `HEAD` at the last commit.
+### 4.3 Files touched
 
-### 3.3 Files touched
+Full list available from `git log --name-only origin/main..HEAD`. Key
+directories:
 
-- `crates/flux-parity/src/{reduce.rs, bridge.rs}`
-- `crates/flux-parity/src/recognize_{swift,kotlin}/*`
-- `crates/flux-parity/tests/{parity.rs, props_compare.rs}`
+- `crates/flux-parity/` (reduce, bridge, recognizers, parity tests)
 - `crates/flux-lsp/src/semantic_tokens.rs`
-- `crates/flux-types/src/{lib.rs, checker.rs, checker/field.rs, checker/scope.rs}`
-- `crates/flux-codegen-core/src/view_tree.rs`
-- `crates/flux-codegen-{swift,kotlin}/src/backend_impl.rs`
-- `crates/flux-differ/src/diff/{algorithm.rs, tree.rs}`
-- `crates/flux-ir/src/lower/{mod.rs, bytecode.rs, mono.rs}`
-- New issues: `docs/issues/FLUX-F22…md` through `FLUX-F38…md`
+- `crates/flux-types/src/checker/`
+- `crates/flux-codegen-{core,swift,kotlin}/src/`
+- `crates/flux-differ/src/diff/`
+- `crates/flux-ir/src/lower/`
+- `crates/flux-devserver/src/` + tests
+- `crates/flux-cli/src/` + tests
 
 ---
 
-## 4. Remaining work
+## 5. Remaining work
 
-### 4.1 Filed issues (all have `#[ignore]`d regression tests)
+### 5.1 Filed issues (all have `#[ignore]`d regression tests)
 
-- F16 / F17 (from earlier handoff) — see `docs/issues/`.
-- F22–F38 as listed in §2.
+F16, F17 (from earlier rounds), and F22–F43 as listed in §2 and §3.
 
-### 4.2 Still not swept
+### 5.2 Still not swept (or swept briefly)
 
-- `crates/flux-types/src/checker/` — `infer.rs`, `use_resolution.rs`,
-  `apply_callee.rs`, `field.rs`, `opt_field.rs`, `reserved.rs` read;
-  `generics.rs`, `scope.rs` (partial), `tests.rs` not line-by-line.
-- `crates/flux-ir-serde/src/telemetry.rs` — 1.3k lines; only
-  `EnrichedTelemetryEvent` encode path sampled.
-- `crates/flux-devserver/src/*` — partially swept.
-- `crates/flux-devtools-ui/src/{app.rs, views/*}` — read, no new
-  findings beyond the earlier comment cleanup.
-- `crates/flux-codegen-swift/kotlin` — F32/F33/F34/F35 came from
-  primitive-by-primitive probes; more emitters may still have
-  un-round-tripped names.
+- `crates/flux-types/src/checker/generics.rs`, `scope.rs` (partial),
+  `tests.rs` not line-by-line.
+- `crates/flux-types/src/checker.rs` — 10k lines; only `new()` and
+  `CalleeShape` read in depth.
+- `crates/flux-ir/src/lower/bytecode.rs` — compile_value arms beyond
+  the ones touched.
+- `crates/flux-ir-serde/src/telemetry.rs` — encode path sampled;
+  decode path is complete but not exhaustively fuzzed here.
+- `crates/flux-devserver/src/pipeline.rs` — 1.6k lines; the
+  compile tree path is worth a focused line-by-line read.
+- `crates/flux-cli/src/build.rs` — 807 lines; test assertions read but
+  the toolchain-invocation paths deserve a security-focused review.
+- `crates/flux-cli/src/doctor/` — 1.2k lines; spot-read.
+- `crates/flux-perf-harness/src/*` — never read.
 
-### 4.3 Non-gating limitations (unchanged)
+### 5.3 Non-gating limitations (unchanged)
 
 - `testSwitchThroughput` (iOS) 2.0s budget can flake.
 - Kotlin `RenderPerfHarnessTest` p95 ≤ 3ms budget is a Release-mode
@@ -145,7 +129,7 @@ Clean; `HEAD` at the last commit.
 
 ---
 
-## 5. Critical gotchas
+## 6. Critical gotchas
 
 1. **Never `pkill -f` anything generic.**
 2. **`xcodebuild -destination "platform=iOS Simulator,id=<UDID>"` hangs.**
@@ -157,18 +141,21 @@ Clean; `HEAD` at the last commit.
    to `run`, `runResumable`, and `runViaDispatchTable`.
 6. **`proto_version = 3` and `protocolVersionMin = 2`.**
 7. **`docs/HANDOFF.md`** — refresh in a dedicated commit.
-8. **When appending to `crates/flux-parity/tests/parity.rs`, verify the
-   F24 test's closing `}` is present.** It has been missing once
-   (round 86o), which silently nested every subsequent test inside it.
-   Rust warns `function is never used` but does NOT fail.
+8. **Appending to `crates/flux-parity/tests/parity.rs`**: verify the
+   F24 test's closing `}` is present. It has been missing once (round
+   86o), which silently nested every subsequent test inside it. Rust
+   warns `function is never used` but compiles.
 9. **Python heredocs via `python3 -` do NOT auto-import `sys`.** Add
    `import sys` before any `sys.exit(...)`.
 10. **`cargo test -p <crate>` runs doctests last.** A misspelled test
     file name silently runs 0 tests and exits 0.
+11. **Assertion tests must be run with `--ignored`** once to verify
+    they still describe the *current* behavior; when a fix lands, the
+    `#[ignore]` is removed and the assertion flipped.
 
 ---
 
-## 6. Success criteria for the phase
+## 7. Success criteria for the phase
 
 1. All three VMs green.
 2. Wire-fixture gate green.
@@ -180,32 +167,18 @@ All of (1)–(5) hold as of this handoff.
 
 ---
 
-## 7. Session history — rounds 86–87
+## 8. Session history — rounds 86–88
 
 | Round | Finding |
 |---|---|
-| 86a | F22 (container props dropped; parity restored) |
-| 86b | F23 (`comment_spans` escape bug) |
-| 86c | F24 (release-side string escapes not unescaped) |
-| 86d | F24 follow-up (composite-expression walker) |
-| 86e | F25 (filed; `match` recognizer gap) |
-| 86f | F26 (filed; `batch`/`untrack` in handler) |
-| 86g | **F27** (real fix; `_` wildcard over ADTs) |
-| 86h | F28 (filed; match-arm bindings) |
-| 86i | F29 (filed; assignment to non-signal) |
-| 86j | F30 (filed; trait bounds unenforced) |
-| 86k | F31 (filed; subscript silently splits) |
-| 86l | **F32** (real fix; Checkbox/TextArea normalization) |
-| 86m | F33, F34 (filed; Theme flatten, Gesture divergence) |
-| 86n | **F35** (real fix; Picker/DatePicker normalization) |
-| 86o | F24 test body closure + trailing-brace cleanup |
-| 86p | F30 bound-violated test now asserts the actual (lowering) error |
-| 87a | **F36** (real fix; differ root-position quadratic) |
-| 87b | Probes (18 combos) — all pass parity or fail at parse |
-| 87c | Probes (20 combos) — all pass parity |
-| 87d | **F37** (real fix; dead field_indices map removed) |
-| 87e | F38 (filed; lowercase null/nil DX gap) |
-| 87f | Probes (20 combos) — no new findings |
+| 86a–86n | F22, F23, F24, F27, F32, F35 (fixes); F25, F26, F28, F29, F30, F31, F33, F34 (filed) |
+| 86o–86p | F24 test body closure + F30 assertion recalibration |
+| 87a–87f | **F36** (differ quadratic); F37 (dead field_indices); F38 (lowercase null) |
+| 88a | Probes: form controls, primitives, routers — all pass |
+| 88b | F39 (async bridge unused) — filed, then corrected |
+| 88c | F40 (silent dispatch degradation) + F41 (signal_deps unwired) — filed |
+| 88d | **F42** (scaffold \${count} → {count}) — fixed |
+| 88e | F43 (stale main.flux fixture) — removed |
 
 **Session owner:** the user
 **Date of handoff:** 2026-10-11
