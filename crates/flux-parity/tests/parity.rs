@@ -505,4 +505,23 @@ fn string_escapes_in_condition_do_not_break_parity() {
         report.kotlin,
     );
 }
+
+/// FLUX-F24 regression (composite-expression form): a condition that embeds a
+/// string literal with a `$` or backslash must canonicalize the embedded
+/// literal on the release side, matching the dev side's already-unescaped
+/// AST text. The recognizer feeds `canonicalize_release_expr` a composite
+/// fragment like `( n == "a$b" )`, not a bare literal, so this test pins the
+/// character-level walker (round 86 follow-up).
+#[test]
+fn composite_condition_with_embedded_string_escapes() {
+    let src = "compo C\n  state n: String = \"x\"\n  if n == \"a$b\" { Text(\"y\") }\n  if n == \"c\\\\d\" { Text(\"z\") }";
+    let report = check_parity(src, 9987).expect("compiles");
+    assert!(
+        report.is_equivalent(),
+        "composite condition parity diverged: dev={:#?}\nswift={:#?}\nkotlin={:#?}",
+        report.dev,
+        report.swift,
+        report.kotlin,
+    );
+}
 }
