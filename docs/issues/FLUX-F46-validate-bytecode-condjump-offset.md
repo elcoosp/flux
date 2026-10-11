@@ -2,11 +2,12 @@
 
 **Status:** OPEN (fix landed in same commit)
 **Found:** round-90 bug hunt (`flux-ir-serde/wire` sweep)
-**Severity:** medium (a malformed `COND_JUMP` whose real target is out
-of range may still validate, and a well-formed one may be rejected
-based on the byte immediately after the opcode — but the blast radius
-is bounded: only the `wire` decoder's LANE-D validation path is
-affected, and today no production caller exercises it)
+**Severity:** high (every frame whose closure bytecode contains a
+`COND_JUMP` — i.e. every handler with an `if`/`when`/`match` — is
+decoded through `frame.rs::validate_bytecode`, and would be rejected
+with a spurious `MalformedBytecode` because the validator reads the
+jump target at the wrong offset. The bug was masked only because no
+wire round-trip test fixture shipped a conditional handler body.
 
 ## Summary
 
@@ -77,9 +78,19 @@ commit):
 
 ## Where it matters
 
-Today only `crates/flux-ir-serde/tests/round_trip.rs` calls the
-validator; the production decode path has not yet been switched to
-use it (LANE-D is scaffolded). The bug is latent — a future switch to
-call `validate_bytecode` on every decoded frame will surface it as
-either false positives (real programs rejected) or false negatives
-(malformed programs accepted). Fixing it now removes the trap.
+`crates/flux-ir-serde/src/frame.rs:738` calls `validate_bytecode(&blob)?`
+on the closure bytecode blob **during every frame decode**. This is a
+production path — the Swift/Kotlin hosts go through it, and so does the
+Rust reference decoder.
+
+Impact concretely: a Flux program whose handler body contains an
+`if … { … } else { … }` (or `when`, or `match`) emits a `COND_JUMP`
+instruction into its closure bytecode. When a frame carrying that
+closure is decoded, `validate_bytecode` reads the wrong 4 bytes for
+the cond-jump target and rejects the frame with
+`MalformedBytecode { detail: "jump-out-of-range" }`.
+
+The bug was latent only because no existing test fixture ships a
+handler *with a conditional* through the wire path (the round-trip
+tests use simple assignments). Any user who writes an `if` in an
+`onPress` handler and reloads would have hit it.
