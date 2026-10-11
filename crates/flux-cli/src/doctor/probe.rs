@@ -71,9 +71,17 @@ pub(crate) fn stdlib_parse_check() -> Check {
             };
         }
     }
-    Check::ok(
+    // FLUX-F49: the previous version returned `Check::ok` here, claiming
+    // the check passed when it had not run at all. That is a lie — the
+    // doctor's contract is "each probe is real … reports a Check rather
+    // than guessing". Report the honest state: a `[missing]` line whose
+    // detail names the missing script and where to run from. The env
+    // checks are advisory (never fatal by default), so this does not
+    // change exit status — it only stops the user from seeing a false
+    // green checkmark.
+    Check::fail(
         "Stdlib parse-check",
-        "script not in CWD (run from repo root); modules registered",
+        "script not in CWD — run `flux doctor` from the repo root to enable",
     )
 }
 
