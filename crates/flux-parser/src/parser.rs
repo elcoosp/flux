@@ -96,6 +96,21 @@ fn check_nesting_depth(source: &str, file_id: u32, path: &str) -> Option<ParseEr
                     }
                 }
             }
+            // FLUX-F53: skip `//` line comments so brackets that appear in
+            // prose (a TODO, a code sample, a URL) do not count toward the
+            // nesting ceiling. Before this fix, any comment with more than
+            // 16 unmatched open brackets rejected the whole file with a
+            // "nesting exceeds" error pointing inside the comment.
+            // Flux has no block-comment syntax (see `lexer.rs`), so the
+            // `//`-to-newline skip is exhaustive.
+            '/' if matches!(chars.peek().map(|(_, c)| *c), Some('/')) => {
+                chars.next(); // consume the second '/'
+                while let Some((_, ch)) = chars.next() {
+                    if ch == '\n' {
+                        break;
+                    }
+                }
+            }
             '{' | '[' | '(' => {
                 depth += 1;
                 if depth > MAX_NESTING_DEPTH {
