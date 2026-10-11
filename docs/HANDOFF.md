@@ -1,4 +1,4 @@
-# Handoff — Flux bug-hunt round 86 (extended audit, F22-F29)
+# Handoff — Flux bug-hunt round 86 (extended audit, F22-F34)
 
 **For:** the next agent continuing this session
 **Repo:** `https://github.com/elcoosp/flux`
@@ -17,8 +17,9 @@ flagged as under-audited (the parity recognizers, `flux-lsp`,
 `flux-devtools-ui`, `flux-differ`, `flux-vm-ref`) plus a fresh probe of
 the whole `check_parity` pipeline.
 
-The round produced **four real fixes with regression tests** and **six
-documented gaps** filed as issues with `#[ignore]`d regression tests.
+The round produced **five real fixes with regression tests** and
+**eight documented gaps** filed as issues with `#[ignore]`d regression
+tests.
 
 ---
 
@@ -31,13 +32,11 @@ documented gaps** filed as issues with `#[ignore]`d regression tests.
   the dev reducer's `RECOGNISED` list so the reduced trees agree on
   "no props" (parity restored); filed F22 for the codegen-emission gap.
   Regression test: `container_props_do_not_break_parity`.
-  Also renamed the `props_compare.rs` tests to match.
 - **F23** — `flux-lsp::semantic_tokens::comment_spans` toggled its
   `in_string` flag on any `"` not preceded by `\`, so a string ending
   in an escaped backslash (`"C:\\"`) left `in_string == true` for the
   rest of the file and hid every following `//` comment. Fix: walk the
-  string body with an escape-aware scan (same rule as the Swift
-  recognizer's tokenizer). Regression tests:
+  string body with an escape-aware scan. Regression tests:
   `comment_after_escaped_backslash_string_is_detected`,
   `comment_after_string_with_escaped_quote_is_detected`.
 - **F24** — The release-path recognizers left codegen-escaped string
@@ -48,8 +47,8 @@ documented gaps** filed as issues with `#[ignore]`d regression tests.
   fragment** (the recognizer feeds `( n == "a$b" )`, not a bare
   literal), rewrites `\(…)` / `${…}` interpolations to `{…}`, and
   applies the `unsupported` placeholder collapse. Landed over three
-  follow-up commits as the walker's edge cases surfaced. Regression
-  tests: `string_escapes_in_condition_do_not_break_parity`,
+  follow-up commits. Regression tests:
+  `string_escapes_in_condition_do_not_break_parity`,
   `composite_condition_with_embedded_string_escapes`,
   `release_canonicalizer_*` in `bridge.rs`.
 - **F27** — A `_` wildcard in a `match` over an ADT was rejected by the
@@ -57,9 +56,14 @@ documented gaps** filed as issues with `#[ignore]`d regression tests.
   `Color`". The parser spells `_` as `Variant { name: "_" }` (not
   `Wildcard`); `exhaust.rs::has_catch_all` handled it, but the field
   binder (`scope.rs::bind_pattern_ty`) and both codegen emitters did
-  not. Fix: treat `Variant { name: "_" }` as a wildcard in all three;
-  the Swift emitter writes `default:`, the Kotlin emitter writes
-  `else ->`. Regression tests added on both backends.
+  not. Fix: treat `Variant { name: "_" }` as a wildcard in all three.
+  Regression tests added on both backends.
+- **F32** — `Checkbox` and `TextArea` primitive names did not round-trip
+  through `normalize_view_name`. Swift emits `Toggle` for `Checkbox`
+  and `TextEditor` for `TextArea`; Kotlin emits `Checkbox` and
+  `OutlinedTextField`. Fix: fold those names in
+  `flux-codegen-core::view_tree::normalize_view_name`. Regression test:
+  `form_control_primitive_names_round_trip`.
 
 ### 2.2 Filed as issues (documented, not fixed)
 
@@ -69,26 +73,29 @@ Each of these has an `#[ignore]`d regression test in
 assertion.
 
 - **F25** — Parity recognizers cannot recover a `match` node in the
-  view body. The dev reducer produces `ViewNode::Match`; the Swift
-  recognizer emits a spurious `Primitive { name: "where" }` for each
-  guard arm; the Kotlin recognizer flattens the arms into siblings.
-  Test: `match_node_in_view_body_is_a_known_divergence`.
+  view body. Test: `match_node_in_view_body_is_a_known_divergence`.
 - **F26** — `batch { … }` / `untrack { … }` inside a handler are
-  rejected at IR lowering with "unsupported handler expression". The
-  parser produces `ExprKind::Lifecycle { kind: Batch | Untrack, … }`;
-  `bytecode.rs::compile_expr_stmt` has no `Lifecycle` arm (the F19
-  `Await` fix added the `Await` arm but not `Lifecycle`). Test:
+  rejected at IR lowering with "unsupported handler expression". Test:
   `batch_inside_handler_is_a_known_gap`.
 - **F28** — `match`-arm pattern bindings are not in scope in the arm
-  body. `bytecode.rs::compile_match` never binds the pattern's payload
-  fields as locals, so a body reference to the bound name falls
-  through to `signal_of` and errors with "`x` is not a state signal in
-  scope". Test: `match_arm_binding_is_a_known_gap`.
+  body. Test: `match_arm_binding_is_a_known_gap`.
 - **F29** — Assignment to a lambda parameter (or any non-signal
   binding) is rejected by IR lowering with the misleading "`x` is not
-  a state signal in scope", even though the type checker accepted the
-  expression and the *read* path (`x + 1`) works. Test:
+  a state signal in scope". Test:
   `assign_to_lambda_param_is_a_known_gap`.
+- **F30** — Generic trait bounds on components are parsed but never
+  enforced. `compo Counter[T: Foo]` where `Foo` is undeclared still
+  type-checks. Tests: `undeclared_trait_bound_is_a_known_gap`,
+  `bound_violated_at_instantiation_is_a_known_gap`.
+- **F31** — `xs[0]` in a state initializer is silently parsed as two
+  sibling expressions (subscript syntax is not supported and is not
+  rejected with a clear error). Test:
+  `subscript_index_is_a_known_gap`.
+- **F33** — `Theme { … }` is elided by both codegen backends while the
+  dev reducer keeps the node. Test:
+  `theme_wrapper_is_a_known_gap`.
+- **F34** — `Gesture { … }` yields `Gesture` on dev, `Column` on Swift,
+  `Stack` on Kotlin. Test: `gesture_wrapper_is_a_known_gap`.
 
 ---
 
@@ -122,7 +129,8 @@ Clean; `HEAD` at the last round-86 commit.
 - `crates/flux-types/src/checker/scope.rs`
 - `crates/flux-codegen-swift/src/backend_impl.rs`
 - `crates/flux-codegen-kotlin/src/backend_impl.rs`
-- New issues: `docs/issues/FLUX-F22…md` through `FLUX-F29…md`
+- `crates/flux-codegen-core/src/view_tree.rs`
+- New issues: `docs/issues/FLUX-F22…md` through `FLUX-F34…md`
 
 ---
 
@@ -131,15 +139,10 @@ Clean; `HEAD` at the last round-86 commit.
 ### 4.1 Filed issues (all have `#[ignore]`d regression tests)
 
 - `docs/issues/FLUX-F16-allocation-cap-parity.md` — Kotlin/Swift
-  disagree on per-allocation cost. Needs a design decision.
+  disagree on per-allocation cost.
 - `docs/issues/FLUX-F17-crash-source-map.md` — `CrashReporter` does
   not resolve the top frame to a component id / source excerpt.
-- `docs/issues/FLUX-F22-container-props-dropped.md` — codegen does
-  not emit `alignment`/`color`/`label`.
-- `docs/issues/FLUX-F25-parity-match-node-unrecoverable.md`.
-- `docs/issues/FLUX-F26-batch-untrack-handler-lowering.md`.
-- `docs/issues/FLUX-F28-match-arm-binding-not-in-scope.md`.
-- `docs/issues/FLUX-F29-assignment-to-non-signal.md`.
+- F22–F34 as listed in §2.2.
 
 ### 4.2 Still not swept (or swept briefly)
 
@@ -148,16 +151,16 @@ Clean; `HEAD` at the last round-86 commit.
 - `crates/flux-types/src/checker.rs` — 10k lines; only `new()` and
   `CalleeShape` read this round.
 - `crates/flux-ir/src/lower/bytecode.rs` — 2.8k lines; the F28/F29
-  bugs are documented here, but the file has more `compile_value` arms
-  not yet inspected line-by-line (e.g. `compile_str`, `compile_call`,
+  bugs are documented here, but more `compile_value` arms not yet
+  inspected line-by-line (`compile_str`, `compile_call`,
   `emit_call_cap`).
-- `crates/flux-ir-serde/src/telemetry.rs` — 1.3k lines; not read.
-- `crates/flux-devtools-ui/src/app.rs` render loop — not read
-  line-by-line.
-- `crates/flux-devserver/src/*` — partially swept in earlier rounds.
+- `crates/flux-ir-serde/src/telemetry.rs` — 1.3k lines.
+- `crates/flux-devtools-ui/src/app.rs` render loop.
+- `crates/flux-devserver/src/*` — partially swept earlier.
 - `crates/flux-codegen-swift/src/backend_impl.rs` and
   `crates/flux-codegen-kotlin/src/backend_impl.rs` — many small
-  emitters; each is a candidate for a per-emitter parity probe.
+  emitters; each is a candidate for a per-emitter parity probe
+  (F32/F33/F34 came from exactly this kind of probe).
 
 ### 4.3 Non-gating limitations (unchanged)
 
@@ -206,14 +209,19 @@ All of (1)–(5) hold as of this handoff.
 | 86b | F23 (`comment_spans` escape bug) |
 | 86c | F24 (release-side string escapes not unescaped) |
 | 86d | F24 follow-up (composite-expression walker; placeholder collapse) |
-| 86e | F25 (filed; `match` recognizer gap with `#[ignore]`d regression) |
+| 86e | F25 (filed; `match` recognizer gap) |
 | 86f | F26 (filed; `batch`/`untrack` in handler) |
 | 86g | **F27** (real fix; `_` wildcard over ADTs) |
 | 86h | F28 (filed; match-arm bindings) |
 | 86i | F29 (filed; assignment to non-signal) |
+| 86j | F30 (filed; trait bounds unenforced) |
+| 86k | F31 (filed; subscript silently splits) |
+| 86l | **F32** (real fix; Checkbox/TextArea normalization) |
+| 86m | F33, F34 (filed; Theme flatten, Gesture divergence) |
 
 Numerous probes (unicode, `$`, misc parity, exhaustiveness, reserved
-words, handler internals) found nothing more.
+words, handler internals, primitive emitters, list access, form
+controls, type checker edge cases) found nothing more beyond these.
 
 **Session owner:** the user
 **Date of handoff:** 2026-10-11
