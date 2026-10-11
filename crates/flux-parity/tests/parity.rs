@@ -548,4 +548,21 @@ fn match_node_in_view_body_is_a_known_divergence() {
         "if either recognizer now recovers Match, remove the `#[ignore]` and flip the assertion"
     );
 }
+
+/// FLUX-F26 (documented gap): a handler containing `batch { … }` or
+/// `untrack { … }` currently fails at IR lowering with "unsupported handler
+/// expression". This test is `#[ignore]`d; it documents the current failure.
+/// When the IR lowerer + codegen gain `ExprKind::Lifecycle` arms, un-ignore
+/// and assert `report.is_equivalent()`.
+#[test]
+#[ignore = "FLUX-F26: batch/untrack in a handler are rejected by IR lowering"]
+fn batch_inside_handler_is_a_known_gap() {
+    let src = "compo C\n  state n: Int = 0\n  Button(text: \"x\", onPress: { batch { n = n + 1 } })";
+    let err = check_parity(src, 9989).expect_err("must currently fail at lowering");
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("unsupported handler expression"),
+        "expected the F26 lowering gap, got: {msg}"
+    );
+}
 }
