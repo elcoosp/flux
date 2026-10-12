@@ -810,5 +810,22 @@ fn named_record_destructure_is_a_known_gap() {
         msg.contains("Numeric") && msg.contains("R"),
         "expected the F58 'requires Numeric, got R' error, got: {msg}"
     );
+
+/// FLUX-F62 (documented gap): a nominal `record P { … }` declaration
+/// cannot be initialized with the structural literal `{ … }`, because
+/// the two forms have distinct types (`Named("P")` vs `Record([…])`).
+/// This test is `#[ignore]`d and pins the current failure. When the
+/// coercion lands, un-ignore and assert successful compilation.
+#[test]
+#[ignore = "FLUX-F62: nominal record cannot be initialized from a `{ … }` literal"]
+fn nominal_record_literal_init_is_a_known_gap() {
+    let src = "record P { x: Int, y: Int }\n\ncompo C\n  state p: P = { x: 0, y: 0 }\n  Text(\"x\")";
+    let err = check_parity(src, 99_002).expect_err("must currently fail at type check");
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("expected `P`") && msg.contains("x: Int, y: Int"),
+        "expected the F62 nominal/structural mismatch, got: {msg}"
+    );
 }
 
+}
