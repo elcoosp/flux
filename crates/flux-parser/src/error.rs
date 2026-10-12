@@ -128,8 +128,9 @@ pub(crate) fn line_at(source: &str, offset: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
+    // The F51 caret test accesses `Location` and `ParseError` through the
+    // crate path (`crate::parse`) and does not need the glob re-export;
+    // removing the unused import keeps `cargo check --all-targets` clean.
     /// Round-95: `Location::from_offset` counts characters, but the
     /// source printed above the caret is a byte stream. For source with
     /// a multi-byte char before the diagnostic, the caret is off by the
