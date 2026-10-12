@@ -71,9 +71,16 @@ pub(crate) fn check_agents_rules() -> Vec<AgentsFinding> {
 
 /// Directory names that are never source we own.
 fn is_skipped_dir(name: &str) -> bool {
+    // FLUX-F69: `.build` is Swift Package Manager's build directory.
+    // Without it in the skip set, `flux doctor` descends into
+    // `runtimes/ios/FluxHost/.build/...` and reports violations on
+    // generated SwiftPM artifacts (`runner.swift` and friends) that
+    // are not project source. The rest of the list predates this fix;
+    // any further tool-output dirs (`DerivedData`, `Pods`, `.gradle`,
+    // `dist`) can be added as they prove noisy.
     matches!(
         name,
-        "target" | "Generated" | ".git" | "node_modules" | "build"
+        "target" | "Generated" | ".git" | "node_modules" | "build" | ".build"
     )
 }
 
