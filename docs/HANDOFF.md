@@ -19,25 +19,27 @@ regression tests** and **42 documented gaps** filed as issues.
 ## 2. Real fixes landed (22)
 
 - **F22** — `alignment`/`color`/`label` props dropped by codegen emitters.
-- **F23** — `flux-lsp::semantic_tokens::comment_spans` did not track backslash escapes.
-- **F24** — Release-path recognizers left codegen-escaped string content in the reduced tree.
+- **F23** — `flux-lsp::semantic_tokens::comment_spans` did not track escapes.
+- **F24** — Release-path recognizers left codegen-escaped string content.
 - **F27** — `_` wildcard in `match` over ADT rejected by the type checker.
-- **F32** — `Checkbox`/`TextArea` names did not round-trip through `normalize_view_name`.
+- **F32** — `Checkbox`/`TextArea` names did not round-trip.
 - **F35** — `Picker`/`DatePicker` names did not round-trip either.
 - **F36** — `flux-differ`'s `root_position` was O(n²) per call.
-- **F37** — Dead `field_indices` map built by the type checker but never read.
+- **F37** — Dead `field_indices` map removed.
 - **F42** — `flux init` scaffold used Kotlin-style `${count}`.
-- **F45** — `flux-lsp::did_close` did not invalidate the in-flight debounced publish task.
-- **F46** — `validate_bytecode` read `COND_JUMP` target at the wrong offset.
-- **F49** — `flux doctor`'s stdlib parse-check reported `[ok]` when the script was not found.
-- **F53** — Parser pre-scan counted brackets inside `//` line comments.
+- **F45** — `flux-lsp::did_close` did not invalidate the debounced publish.
+- **F46** — `validate_bytecode` read `COND_JUMP` target at wrong offset.
+- **F49** — `flux doctor`'s stdlib parse-check reported `[ok]` when script missing.
+- **F53** — Parser pre-scan counted brackets inside `//` comments.
 - **F57** — `wire/span.rs::encode_str` u16 vs version-dispatched prefix.
 - **F59** — `HostAnnounceFrame::from_bytes` ignored its own version byte.
 - **F60** — `record R { }` multi-line without commas rejected.
 - **F63** — Handler-call codegen dropped named-arg labels (`f(n: 1)` → `f(1)`).
 - **F65** — Nested call inside an outer call collapsed to the placeholder.
-- Plus late follow-ups closing test bodies missing their closing braces
-  (F24/F35/F58) and fixing the F30 assertion recalibration.
+- Late follow-ups: closed missing test-body braces (F24/F35/F58), fixed the
+  F30 assertion recalibration, and landed the F65 follow-up in
+  `flux-codegen-core::view_tree::render_expr` +
+  `flux-parity::bridge::render_expr` so all three reducers agree on `Call`.
 
 ## 3. Documented gaps (~42)
 
@@ -62,8 +64,8 @@ Notable:
 
 ## 4. Current state
 
-All workspace tests green. Working tree clean; `HEAD` at the last
-round-111 commit.
+All workspace tests green (131 groups passed, 0 failed). Working tree
+clean; `HEAD` at the last round-111 commit.
 
 ---
 
@@ -94,12 +96,14 @@ round-111 commit.
 7. **`docs/HANDOFF.md`** — refresh in a dedicated commit.
 8. **Brace-balance check after appending tests.** Rust warns
    `unnameable_test_items` but compiles silently on the wrong shape.
-   Always verify with a script after appending:
-   `python3 -c '...' # check brace balance and #[test]-at-depth-0`
 9. **Python heredocs via `python3 -` do NOT auto-import `sys`.**
 10. **`cargo test -p <crate>` runs doctests last.**
 11. **`git add` + `git commit`** — always confirm with `git status`
     after a "committed" message.
+12. **THREE `render_expr` implementations exist** and must stay in sync:
+    - `crates/flux-codegen-core/src/expressions.rs` (codegen path)
+    - `crates/flux-codegen-core/src/view_tree.rs` (release walker)
+    - `crates/flux-parity/src/bridge.rs` (dev reducer)
 
 ---
 
@@ -132,7 +136,7 @@ round-111 commit.
 | 108 | bytecode.rs list-method paths clean |
 | 109 | F62 |
 | 110 | **F63** (fix); F64 |
-| 111 | **F65** (fix) |
+| 111 | **F65** (fix); F65 follow-up (bridge.rs + view_tree.rs) |
 
 **Session owner:** the user
 **Date of handoff:** 2026-10-12
