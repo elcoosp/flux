@@ -43,10 +43,19 @@ pub(crate) fn render_expr<B: Backend>(expr: &Expr) -> String {
         ExprKind::Binary { op, lhs, rhs, .. } => render_binary::<B>(*op, lhs, rhs),
         ExprKind::Field { base, field, .. } => format!("{}.{}", render_expr::<B>(base), field.name),
         ExprKind::List(items) => render_list::<B>(items),
+        // FLUX-F65: a nested call inside an outer call's argument list —
+        // `f(g(1))` — previously fell through to the unsupported
+        // placeholder, so the inner call was silently replaced with
+        // `0 /* unsupported */`. Route `Call` through `render_call` so
+        // nested calls render as real native calls. The recursion
+        // `render_expr → render_call → render_expr` terminates because
+        // each step visits a strictly smaller sub-expression.
+        ExprKind::Call { callee, args, .. } => render_call::<B>(callee, args),
         _ => {
-            // Calls, records, and other forms that the MLP does not model as a
-            // plain value render as their source spelling in a comment so the
-            // generated code still parses and is honest about the gap.
+            // Records, lambdas, and other forms the MLP does not model as
+            // a plain value render as their source spelling in a comment
+            // so the generated code still parses and is honest about the
+            // gap.
             B::unsupported_placeholder()
         }
     }
