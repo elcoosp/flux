@@ -827,5 +827,24 @@ fn nominal_record_literal_init_is_a_known_gap() {
         msg.contains("expected `P`") && msg.contains("x: Int, y: Int"),
         "expected the F62 nominal/structural mismatch, got: {msg}"
     );
+
+/// FLUX-F68 (documented gap): a generic top-level `fn` is registered
+/// with `Binding::Mono` in `collect_adts`, so its type variables are
+/// shared across every call site. Using `id[T]` at two different
+/// concrete types in the same program fails with "expected A, got B"
+/// on the second use. This test is `#[ignore]`d and pins the current
+/// failure; when the binding is changed to `Poly`, un-ignore and assert
+/// successful compilation.
+#[test]
+#[ignore = "FLUX-F68: generic top-level fn is monomorphic across call sites"]
+fn generic_fn_two_uses_is_a_known_gap() {
+    let src = "fn id[T](x: T) -> T { x }\n\ncompo C\n  state a: Int = id(1)\n  state b: String = id(\"hi\")\n  Text(\"x\")";
+    let err = check_parity(src, 99_003).expect_err("must currently fail at type check");
+    let msg = format!("{err:?}");
+    assert!(
+        msg.contains("expected `Int`, got `String`") || msg.contains("expected `String`, got `Int`"),
+        "expected the F68 monomorphic-generic-fn error, got: {msg}"
+    );
 }
 
+}
