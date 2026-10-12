@@ -810,6 +810,7 @@ fn named_record_destructure_is_a_known_gap() {
         msg.contains("Numeric") && msg.contains("R"),
         "expected the F58 'requires Numeric, got R' error, got: {msg}"
     );
+}
 
 /// FLUX-F62 (documented gap): a nominal `record P { … }` declaration
 /// cannot be initialized with the structural literal `{ … }`, because
@@ -828,4 +829,3 @@ fn nominal_record_literal_init_is_a_known_gap() {
     );
 }
 
-}
