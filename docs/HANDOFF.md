@@ -1,22 +1,22 @@
-# Handoff — Flux bug-hunt rounds 86–105
+# Handoff — Flux bug-hunt rounds 86–107
 
 **For:** the next agent continuing this session
 **Repo:** `https://github.com/elcoosp/flux`
 **Working dir:** `/Users/adm/Documents/Repos/flux`
 **HEAD at handoff:** see `git log --oneline -1`
-**Session duration:** rounds 86–105 (twenty deep rounds)
+**Session duration:** rounds 86–107 (twenty-two deep rounds)
 
 ---
 
 ## 1. Mission
 
 The user's standing goal remains: **keep hunting until rounds stop
-producing real findings.** Rounds 86–105 produced **18 real fixes with
-regression tests** and **35 documented gaps** filed as issues.
+producing real findings.** Rounds 86–107 produced **19 real fixes with
+regression tests** and **37 documented gaps** filed as issues.
 
 ---
 
-## 2. Real fixes landed (18)
+## 2. Real fixes landed (19)
 
 - **F22** — `alignment`/`color`/`label` props dropped by codegen emitters.
 - **F23** — `flux-lsp::semantic_tokens::comment_spans` did not track backslash escapes.
@@ -29,37 +29,41 @@ regression tests** and **35 documented gaps** filed as issues.
 - **F42** — `flux init` scaffold used Kotlin-style `${count}`.
 - **F45** — `flux-lsp::did_close` did not invalidate the in-flight debounced publish task.
 - **F46** — `validate_bytecode` read `COND_JUMP` target at the wrong offset.
-  **Production frame-decode path.**
 - **F49** — `flux doctor`'s stdlib parse-check reported `[ok]` when the
   parse-check script was not found.
 - **F53** — `flux-parser`'s nesting pre-scan counted brackets inside `//`
   line comments.
-- **F57** — `wire/span.rs::encode_str` wrote a u16 length prefix while
-  `decode_str` read a version-dispatched prefix. **Production wire path.**
-- **F59** — `HostAnnounceFrame::from_bytes` ignored its own version byte,
-  so v2 HostAnnounce frames failed to decode. **Production wire path.**
+- **F57** — `wire/span.rs::encode_str` u16 vs version-dispatched prefix.
+- **F59** — `HostAnnounceFrame::from_bytes` ignored its own version byte.
+- **F60** — `record R { }` multi-line without commas rejected; comma is
+  now optional between fields.
+- Plus late follow-ups closing F24/F35/F58 test bodies (missing braces)
+  and fixing the F30 assertion recalibration.
 
-## 3. Documented gaps (~35)
+## 3. Documented gaps (~37)
 
 F16, F17, F25, F26, F28–F31, F33, F34, F38–F41, F43, F44, F47, F48,
-F50–F52, F54–F56, F58.
+F50–F52, F54–F56, F58, F61.
 
 Notable:
 
 - **F50** — `flux doctor`'s `req_major` mis-models `>=` / `=` semver.
-- **F51** — `ParseError::render` mis-aligns the caret for non-ASCII source.
+- **F51** — `ParseError::render` mis-aligns the caret for non-ASCII.
 - **F52** — Generic-ADT field bindings do not substitute `T`.
 - **F54** — Nested string in `{…}` interpolation cannot contain braces.
 - **F55** — `flux fmt` silently drops every user comment (data loss).
 - **F56** — `hash_fields` XOR-fold cancels duplicate `PropIdx` entries.
 - **F58** — `let { x, y } = p` binds the whole record for named records.
+- **F61** — List-separator grammar is inconsistent across productions
+  (`record` commas optional; `fn` params require commas; ADT variants
+  forbid commas).
 
 ---
 
 ## 4. Current state
 
 All workspace tests green. Working tree clean; `HEAD` at the last
-round-105 commit.
+round-107 commit.
 
 ---
 
@@ -97,11 +101,11 @@ round-105 commit.
 
 ---
 
-## 7. Session history — rounds 86–105
+## 7. Session history — rounds 86–107
 
 | Round | Finding |
 |---|---|
-| 86 | F22–F24, F27, F32, F35 (fixes); F25, F26, F28–F31, F33, F34 (filed) |
+| 86 | F22–F24, F27, F32, F35 (fixes); F25, F26, F28–F31, F33, F34 |
 | 87 | **F36**, **F37** (fixes); F38 |
 | 88 | **F42** (fix); F39–F41, F43 |
 | 89 | **F45** (fix); F44 |
@@ -121,9 +125,11 @@ round-105 commit.
 | 103 | F58 (named-record destructure binds whole record) |
 | 104 | env.rs / checker/tests.rs clean; no findings |
 | 105 | **F59** (fix; `HostAnnounceFrame` decoder ignored frame version) |
+| 106 | **F60** (fix; record fields comma optional); F61 (grammar inconsistency) |
+| 107 | emitter.rs clean; no new findings |
 
 **Session owner:** the user
-**Date of handoff:** 2026-10-11
+**Date of handoff:** 2026-10-12
 **Convention reminder:** the user runs scripts as `./wr.sh`. Respond
 with exactly one fenced `bash` block per turn. No explanatory prose
 outside the block.
