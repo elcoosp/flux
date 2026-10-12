@@ -827,6 +827,7 @@ fn nominal_record_literal_init_is_a_known_gap() {
         msg.contains("expected `P`") && msg.contains("x: Int, y: Int"),
         "expected the F62 nominal/structural mismatch, got: {msg}"
     );
+}
 
 /// FLUX-F68 (documented gap): a generic top-level `fn` is registered
 /// with `Binding::Mono` in `collect_adts`, so its type variables are
@@ -847,4 +848,3 @@ fn generic_fn_two_uses_is_a_known_gap() {
     );
 }
 
-}
