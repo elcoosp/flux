@@ -147,7 +147,24 @@ fn render_call<B: Backend>(callee: &Expr, args: &[flux_parser::Arg]) -> String {
         }
         _ => return B::unsupported_placeholder(),
     };
-    let arg_texts: Vec<String> = args.iter().map(|a| render_expr::<B>(a.value())).collect();
+    // FLUX-F63: preserve the arg's name for `Named` args, using the
+    // backend's `named_arg` helper (the same one `render_args` already
+    // uses). The previous version dropped the name unconditionally —
+    // a Swift `f(n: Int)` called as `f(n: 1)` in Flux emitted `f(1)`,
+    // which does not type-check on Swift (parameter labels are part of
+    // the call syntax). Kotlin tolerates positional calls to a function
+    // with named parameters, but preserving the name is correct there
+    // too and matches what the user wrote.
+    let arg_texts: Vec<String> = args
+        .iter()
+        .map(|a| match a {
+            flux_parser::Arg::Named { name, value } => {
+                B::named_arg(&name.name, &render_expr::<B>(value))
+            }
+            flux_parser::Arg::Positional(value) => render_expr::<B>(value),
+            _ => B::unsupported_placeholder(),
+        })
+        .collect();
     format!("{}({})", callee_text, arg_texts.join(", "))
 }
 
