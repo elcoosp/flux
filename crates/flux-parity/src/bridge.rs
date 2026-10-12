@@ -64,6 +64,18 @@ pub(crate) fn render_expr(expr: &Expr) -> String {
             let rendered: Vec<String> = items.iter().map(render_expr).collect();
             format!("[{}]", rendered.join(", "))
         }
+        // FLUX-F65 follow-up: render calls so the dev-path reducer matches
+        // the release recognizers, which now render `Call` faithfully (the
+        // same class of fix landed in
+        // `flux-codegen-core::expressions::render_expr`). Before this, a
+        // condition like `platform() == "ios"` produced `0` on the dev
+        // side but `platform() == "ios"` in the emitted Swift/Kotlin, so
+        // any program with a call in a condition failed parity.
+        ExprKind::Call { callee, args, .. } => {
+            let callee_text = render_expr(callee);
+            let arg_texts: Vec<String> = args.iter().map(|a| render_expr(a.value())).collect();
+            format!("{}({})", callee_text, arg_texts.join(", "))
+        }
         _ => "/* unsupported expr */ 0".to_owned(),
     }
 }

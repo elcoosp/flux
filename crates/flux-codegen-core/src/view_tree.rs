@@ -495,6 +495,15 @@ fn render_expr(expr: &Expr) -> String {
             let rendered: Vec<String> = items.iter().map(render_expr).collect();
             format!("[{}]", rendered.join(", "))
         }
+        // FLUX-F65 follow-up: render `Call` faithfully so the release-path
+        // `view_tree` reducer (used by the JSON-parity test) matches the
+        // dev-path AST reducer. Matches the same fix in
+        // `expressions::render_expr` and `flux_parity::bridge::render_expr`.
+        ExprKind::Call { callee, args, .. } => {
+            let callee_text = render_expr(callee);
+            let arg_texts: Vec<String> = args.iter().map(|a| render_expr(a.value())).collect();
+            format!("{}({})", callee_text, arg_texts.join(", "))
+        }
         _ => "/* unsupported expr */ 0".to_owned(),
     }
 }
