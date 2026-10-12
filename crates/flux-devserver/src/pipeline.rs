@@ -199,7 +199,18 @@ fn referenced_strings_and_handlers(
     let mut handlers = std::collections::HashSet::new();
     for p in patches {
         match p {
-            Patch::Replace { node, .. } | Patch::Insert { node, .. } => {
+            // FLUX-F66: `Reattach` also carries a `NodeRef` whose props
+            // may include string references and whose `handlers` list is a
+            // set of `HandlerId`s — the same shape as `Replace`/`Insert`.
+            // The walker's doc claims it is total over every `Patch`
+            // variant; the wildcard arm that previously caught `Reattach`
+            // made that claim false. No current caller hits this (the
+            // dispatch path emits only `Update`), but a future caller
+            // sharing the walker for a Reattach-bearing stream would ship
+            // a delta missing those references.
+            Patch::Replace { node, .. }
+            | Patch::Insert { node, .. }
+            | Patch::Reattach { node, .. } => {
                 walk_node(node, &mut strings, &mut handlers);
             }
             Patch::Update { props_diff, .. } => {
