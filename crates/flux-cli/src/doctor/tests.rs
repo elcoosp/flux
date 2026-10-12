@@ -250,12 +250,13 @@ fn stdlib_parse_check_reports_failure_when_script_missing() {
         !check.ok,
         "the parse-check must not report [ok] when the script is missing; got: {check:?}"
     );
+}
 
-    /// FLUX-F69: a `.build/` directory (Swift Package Manager's build
-    /// output) must not be scanned — its contents are generated SwiftPM
-    /// artifacts, not project source.
-    #[test]
-    fn dot_build_directory_is_skipped() {
+/// FLUX-F69: a `.build/` directory (Swift Package Manager's build
+/// output) must not be scanned — its contents are generated SwiftPM
+/// artifacts, not project source.
+#[test]
+fn dot_build_directory_is_skipped() {
         let tmp = test_dir("dot-build");
         std::fs::write(
             tmp.join(".build").join("runner.swift"),
@@ -280,5 +281,4 @@ fn stdlib_parse_check_reports_failure_when_script_missing() {
             "doctor must skip .build/; got {findings:?}"
         );
         let _ = std::fs::remove_dir_all(&tmp);
-    }
 }
