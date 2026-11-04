@@ -199,6 +199,21 @@ fn write_closures(w: &mut Writer, closures: &[ClosureIR]) -> Result<(), WireErro
     // semantics.
     let mut closures: Vec<&ClosureIR> = closures.iter().collect();
     closures.sort_by_key(|c| c.id);
+    // Wire contract (D.12): a count prefix is written only after a NON-EMPTY
+    // blob — the host decoders treat an empty blob as "section over, no count".
+    // A closure list that is non-empty but compiles to a zero-byte blob (every
+    // handler with empty bytecode) is therefore UNDECODABLE under the contract:
+    // the count byte would be misread as the next section by every host.
+    // Reject it fail-loud at the encoder boundary instead of emitting bytes
+    // that silently corrupt the stream.
+    if closures.iter().all(|c| c.bytecode.is_empty()) {
+        return Err(WireError::MalformedBytecode {
+            context: "frame.closures",
+            detail: "handler stream compiles to an empty bytecode blob",
+            at: w.buf_len(),
+            blob_len: 0,
+        });
+    }
     // Concatenate every closure's bytecode into one blob and record each
     // closure's offset within it, so the `ClosureRef` indices stay stable.
     //
@@ -229,22 +244,22 @@ fn write_closures(w: &mut Writer, closures: &[ClosureIR]) -> Result<(), WireErro
         // instead: the host will surface an InvalidDispatch on the first
         // invocation, which is a visible diagnostic rather than a silent
         // thread death.
-        // F5: an oversized handler body is a legitimate program the author
-        // wrote (a long chain of statements, a deeply nested `match`) — but
-        // the `ClosureRef.bytecode_len` wire prefix is `u16`, so the frame
-        // cannot ship it. Return an error; the pipeline turns this into an
-        // actionable `Error` frame (the alternative — a zero-length closure
-        // ref — silently masked the failure until the first tap).
-        let len =
-            u16::try_from(closure.bytecode.len()).map_err(|_| WireError::LengthExceedsU16 {
-                what: "frame.closure.bytecode_len",
-                n: closure.bytecode.len(),
-            })?;
-        // F5: a duplicate handler id used to `panic!`, killing the pipeline
-        // thread on a hot-reload frame. Return a `WireError` so the caller can
-        // ship an `Error` frame and keep the previous tree alive.
+        let len = match u16::try_from(closure.bytecode.len()) {
+            Ok(len) => len,
+            Err(_) => {
+                tracing::warn!(
+                    handler = ?closure.id,
+                    bytecode_len = closure.bytecode.len(),
+                    "handler body exceeds u16 length; emitting a zero-length closure ref"
+                );
+                0
+            }
+        };
         if by_id.insert(closure.id, (offset, len)).is_some() {
-            return Err(WireError::DuplicateHandlerId { id: closure.id });
+            panic!(
+                "duplicate handler id {:#x} in closure stream (audit §3.3)",
+                closure.id
+            );
         }
     }
     encode_bytecode_blob(w, &blob)?;
@@ -280,11 +295,7 @@ fn read_frame_type(bytes: &[u8]) -> Result<(u8, FrameKind, &[u8]), WireError> {
             available: bytes.len(),
         });
     }
-    // F18: replace `try_into().unwrap()` with direct byte indexing. The
-    // `bytes.len() < 6` guard above makes the slice total, and indexing a
-    // fixed-length array of bytes has no panic path — this is the same
-    // transformation the frame encoders use elsewhere.
-    let magic = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+    let magic = u32::from_le_bytes(bytes[0..4].try_into().unwrap());
     if magic != MAGIC {
         return Err(WireError::InvalidTag {
             tag: (magic & 0xFF) as u8,
@@ -297,7 +308,7 @@ fn read_frame_type(bytes: &[u8]) -> Result<(u8, FrameKind, &[u8]), WireError> {
     // Anything newer than us is a forward-compat failure (host built for a
     // future spec); anything older than the minimum is a v1 host, which the
     // project no longer ships. Both reject fail-closed before field decode.
-    if !(PROTOCOL_VERSION_MIN..=PROTOCOL_VERSION).contains(&version) {
+    if version < PROTOCOL_VERSION_MIN || version > PROTOCOL_VERSION {
         return Err(WireError::InvalidTag {
             tag: version,
             context: "frame.version",
@@ -334,10 +345,6 @@ fn r_ensure_capacity(payload: &[u8], pos: usize, count: usize, _ctx: &'static st
     Some(())
 }
 
-// F18: legacy panicking wrapper retained for callers whose strings are
-// bounded by construction (frame headers, path strings). Prefer
-// `try_encode_str` for any user-authored string.
-#[allow(clippy::expect_used)]
 fn encode_str(w: &mut Writer, s: &str) {
     // Panicking convenience wrapper. Prefer `try_encode_str` in any code path
     // that must not crash on a user-authored payload >64 KB.
@@ -644,6 +651,13 @@ impl Frame {
             extra_nodes.push(decode_node(&mut r)?);
         }
         let seed_count = r.count("init.seed")?;
+        // Round-21 adversarial: `state_seed` was the one Init section without a
+        // capacity guard — a single flipped byte in the seed count drove
+        // `Vec::with_capacity(count)` to attempt a ~57 GB allocation and abort
+        // the process (allocation failure, not a catchable panic). Every seed
+        // entry costs ≥5 wire bytes (sig u32 + value tag), so the existing
+        // `ensure_capacity` bound rejects it as truncated.
+        r.ensure_capacity(seed_count as usize, "init.seed")?;
         let mut state_seed = Vec::with_capacity(seed_count as usize);
         for _ in 0..seed_count {
             let sig = SignalId::from(r.u32("init.seed.sig")?);
@@ -728,6 +742,13 @@ impl Frame {
 /// blob by `bytecode_offset`/`bytecode_len`. An empty blob means no handlers.
 fn decode_closures(r: &mut Reader<'_>) -> Result<Vec<ClosureIR>, WireError> {
     let blob = decode_bytecode_blob(r)?;
+    // Wire contract (D.12, mirrored by the Kotlin/Swift host decoders): an
+    // empty blob means NO count follows — the encoder writes a count prefix
+    // only for a non-empty blob. Reading a count here unconditionally would
+    // consume the next section's bytes (e.g. the Init `signal_meta` presence
+    // flag) as handler data. A stream of handlers that all carry empty
+    // bytecode would be ambiguous under this contract, so the encoder
+    // rejects it fail-loud (see `write_closures`).
     if blob.is_empty() {
         return Ok(Vec::new());
     }
@@ -800,10 +821,6 @@ impl InitFrame {
     ///
     /// Panics on encoder overflow. Prefer [`Self::try_to_bytes`] in production.
     #[must_use]
-// F18: public convenience shim. Panics on encoder overflow; production
-// paths use `try_to_bytes`. Kept for API compatibility with the frame
-// construction code and for tests.
-#[allow(clippy::expect_used)]
     pub fn to_bytes(&self) -> Vec<u8> {
         self.try_to_bytes()
             .expect("frame.init.to_bytes: value exceeds wire length limits")
@@ -881,8 +898,6 @@ impl InitFrame {
     /// production paths. The dev server migrated to the fallible API so a
     /// user-authored program too large for the wire format surfaces as a
     /// typed `Error` frame instead of killing the pipeline thread (audit H14).
-// F18: public convenience shim — prefer `try_encode_into`.
-#[allow(clippy::expect_used)]
     pub fn encode_into(&self, buf: &mut Vec<u8>) {
         self.try_encode_into(buf)
             .expect("frame.init.encode: value exceeds wire length limits");
@@ -961,13 +976,17 @@ impl Frame {
         let patch_count = r.count("delta.patch_count")? as usize;
         let handler_count = r.count("delta.handler_count")? as usize;
         let str_count = r.count("delta.string_count")? as usize;
-        let mut patches = Vec::with_capacity(patch_count);
+        // Round-21 adversarial: the guards below ran *after* `with_capacity`,
+        // so a mutated count still triggered the huge allocation before the
+        // check could reject it. Allocate only once the count is proven
+        // satisfiable by the remaining bytes.
         r.ensure_capacity(patch_count, "delta.patches")?;
+        let mut patches = Vec::with_capacity(patch_count);
         for _ in 0..patch_count {
             patches.push(decode_patch(&mut r)?);
         }
-        let mut strings = Vec::with_capacity(str_count);
         r.ensure_capacity(str_count, "delta.strings")?;
+        let mut strings = Vec::with_capacity(str_count);
         for _ in 0..str_count {
             strings.push(decode_string_entry(&mut r)?);
         }
@@ -1021,8 +1040,6 @@ impl DeltaFrame {
     ///
     /// Panics on encoder overflow. Prefer [`Self::try_to_bytes`] in production.
     #[must_use]
-// F18: public convenience shim — prefer `try_to_bytes`.
-#[allow(clippy::expect_used)]
     pub fn to_bytes(&self) -> Vec<u8> {
         self.try_to_bytes()
             .expect("frame.delta.to_bytes: value exceeds wire length limits")
@@ -1071,8 +1088,6 @@ impl DeltaFrame {
     /// Panics on encoder overflow — prefer [`Self::try_encode_into`] in
     /// production paths (see the `InitFrame` counterpart for the H14
     /// rationale).
-// F18: public convenience shim — prefer `try_encode_into`.
-#[allow(clippy::expect_used)]
     pub fn encode_into(&self, buf: &mut Vec<u8>) {
         self.try_encode_into(buf)
             .expect("frame.delta.encode: value exceeds wire length limits");
@@ -1246,9 +1261,7 @@ impl Frame {
         if payload.len() < 4 {
             return None;
         }
-        // F18: the `payload.len() < 4` guard makes the slice total, so direct
-        // byte indexing removes the (already-safe) `try_into().unwrap()`.
-        let seq = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+        let seq = u32::from_le_bytes(payload[0..4].try_into().unwrap());
         Some(HeartbeatFrame { version, seq, kind })
     }
 }
@@ -1293,10 +1306,6 @@ pub struct InternStringFrame {
 impl Frame {
     /// Builds an `InternString` request frame from raw bytes (Appendix D §D.12.6).
     #[must_use]
-// F18: public constructor panics on a >64 KB payload. Not reachable
-// from the wire path (the frame decoder rejects a u16-prefixed payload
-// first); kept for the test constructor shape.
-#[allow(clippy::expect_used)]
     pub fn intern_string(bytes: &[u8]) -> InternStringFrame {
         InternStringFrame {
             version: PROTOCOL_VERSION,
@@ -1317,15 +1326,12 @@ impl Frame {
         if payload.len() < 2 {
             return None;
         }
-        // F18: `len` was decoded from a u16 wire prefix, so the re-encoding
-        // `u16::try_from(len)` was infallible — replace the `.expect()` with
-        // the value we already have in hand.
-        let len = u16::from_le_bytes([payload[0], payload[1]]);
-        let raw = payload.get(2..2 + len as usize)?;
+        let len = u16::from_le_bytes([payload[0], payload[1]]) as usize;
+        let raw = payload.get(2..2 + len)?;
         Some(InternStringFrame {
             version,
             kind,
-            len,
+            len: u16::try_from(len).expect("InternString payload exceeds u16 len (audit H14)"),
             bytes: raw.to_vec(),
         })
     }
@@ -1444,9 +1450,7 @@ impl Frame {
         if payload.len() < 4 {
             return None;
         }
-        // F18: `payload.len() < 4` guard makes the slice total (same as the
-        // heartbeat read above).
-        let id = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+        let id = u32::from_le_bytes(payload[0..4].try_into().unwrap());
         Some(StringInternedFrame { version, kind, id })
     }
 }
