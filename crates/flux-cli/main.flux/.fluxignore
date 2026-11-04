@@ -1,0 +1,8 @@
+# Flux build output
+platforms/
+
+# VCS / editor noise
+.git/
+.gitignore
+*.swp
+.DS_Store
