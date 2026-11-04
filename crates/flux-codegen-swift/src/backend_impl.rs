@@ -11,7 +11,7 @@ use flux_codegen_core::backend::Backend;
 use flux_codegen_core::emitter::Emitter;
 use flux_codegen_core::model::{ComponentMeta, native_type};
 use flux_codegen_core::primitives::PrimitiveSpec;
-use flux_parser::{Expr, ExprKind, TypeDecl};
+use flux_parser::{Expr, ExprKind, RecordDecl, TypeDecl};
 
 /// The SwiftUI backend.
 #[derive(Debug)]
@@ -217,6 +217,12 @@ impl Backend for Swift {
         format!("[{}]", element)
     }
 
+    fn map_type(key: &str, value: &str) -> String {
+        // Audit fix: `Map[K, V]` rendered as `Map<K, V>` — valid Kotlin but not
+        // Swift, whose dictionary literal spelling is `[K: V]`.
+        format!("[{key}: {value}]")
+    }
+
     fn unsupported_placeholder() -> String {
         "0 /* unsupported */".to_owned()
     }
@@ -398,6 +404,25 @@ impl Backend for Swift {
         em.append_line(&format!("    @State private var {name}: {ty} = {init}"));
     }
 
+    /// FLUX-077: keep the shared emitter's `struct` spelling for Swift. This
+    /// used to live inline in `Emitter::emit_sum_types`, which hardcoded it
+    /// for BOTH backends — Kotlin got `struct Name { let f: T }`, which does
+    /// not compile. The field indent (4 spaces) matches the component
+    /// header's prop lines.
+    fn emit_record_type(em: &mut Emitter<'_, Self>, record: &RecordDecl) {
+        let name = &record.name.name;
+        let fields: Vec<String> = record
+            .fields
+            .iter()
+            .map(|field| {
+                let ty = native_type::<Self>(&field.ty, &HashMap::new());
+                format!("let {}: {}", field.name.name, ty)
+            })
+            .collect();
+        let fields_str = fields.join("\n    ");
+        em.append_line(&format!("struct {name} {{\n    {fields_str}\n}}"));
+    }
+
     fn emit_sum_type(em: &mut Emitter<'_, Self>, sum: &TypeDecl) {
         let name = &sum.name.name;
         em.append_line(&format!("enum {name} {{"));
@@ -439,16 +464,6 @@ impl Backend for Swift {
                     em.emit_expr_body(&arm.body, indent + 2 * step);
                 }
                 flux_parser::MatchPatternKind::Variant { name, fields } => {
-                    // FLUX-F27: `_` is spelled as a `Variant { name: "_" }` by
-                    // the parser (not `Wildcard`). Emit the same `default:`
-                    // the `Wildcard` arm would — otherwise a Flux program
-                    // `match c { RGB(r) => r, _ => 0 }` emits Swift
-                    // `case let ._():` (invalid).
-                    if name.name == "_" {
-                        em.line(indent + step, "default:");
-                        em.emit_expr_body(&arm.body, indent + 2 * step);
-                        continue;
-                    }
                     let binds: Vec<String> = fields
                         .iter()
                         .filter_map(|f| match f {
@@ -466,19 +481,9 @@ impl Backend for Swift {
                     em.line(indent + step, &format!("case {}:", em.render(lit)));
                     em.emit_expr_body(&arm.body, indent + 2 * step);
                 }
-                // A `s if s > 90 => …` guard arm. Swift expresses this as
-                // `case let s where <cond>:`. Round 35: the previous emission
-                // was `case let .<name>(_):`, which (a) dropped the guard
-                // condition entirely and (b) produced invalid Swift whenever
-                // `<name>` was not an ADT case (which is the common case —
-                // a guard arm binds a value, it does not match an enum case).
-                // The `where` clause is the language's real guard form.
-                flux_parser::MatchPatternKind::Guard { name, cond } => {
-                    let cond_text = em.render(cond);
-                    em.line(
-                        indent + step,
-                        &format!("case let {} where {}:", name.name, cond_text),
-                    );
+                // Audit T-403.5: Guard pattern emits exact-type test (not default).
+                flux_parser::MatchPatternKind::Guard { name, .. } => {
+                    em.line(indent + step, &format!("case let .{}(_):", name.name));
                     em.emit_expr_body(&arm.body, indent + 2 * step);
                 }
                 _ => {
