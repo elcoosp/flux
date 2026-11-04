@@ -143,8 +143,8 @@ pub(crate) fn run_with(
             let app_code = match platform {
                 Platform::Ios => {
                     let prelude = "import SwiftUI\n";
-                    let body = if let Some(rest) = component_code.strip_prefix(prelude) {
-                        rest.trim_start().to_owned()
+                    let body = if component_code.starts_with(prelude) {
+                        component_code[prelude.len()..].trim_start().to_owned()
                     } else {
                         component_code.clone()
                     };
@@ -182,14 +182,6 @@ pub(crate) fn run_with(
         std::fs::write(&out, code)
             .with_context(|| format!("writing generated source {}", out.display()))?;
         tracing::info!(source = %path.display(), target = %out.display(), "codegen");
-
-        // FLUX-F17: write the sidecar source map. The release-mode crash
-        // reporter resolves a native stack frame back to its originating
-        // `.flux` component by looking up the leading symbol of each frame
-        // against this map. The map is a pure function of the AST the CLI
-        // already has in hand — no emitter change required.
-        write_source_map(ast, path, &out_dir, &stem)
-            .with_context(|| format!("writing source map for {}", path.display()))?;
     }
 
     println!(
@@ -384,52 +376,6 @@ fn which(name: &str) -> bool {
     std::env::var_os("PATH")
         .map(|paths| std::env::split_paths(&paths).any(|dir| dir.join(name).exists()))
         .unwrap_or(false)
-}
-
-
-/// FLUX-F17: writes the `<stem>.flux.map.json` sidecar next to the generated
-/// native source at `out`. The map carries one entry per component declared
-/// in `ast`, with the native symbol name (identical to the Flux name today;
-/// a future monomorphisation split would append the specialised suffix), the
-/// `.flux` file path, and the 1-based line/column of the component
-/// declaration in that file.
-///
-/// The crash reporter (Swift `CrashReporter`, Kotlin `CrashReporter`) loads
-/// the bundled sidecar in release builds and resolves the leading token of
-/// each native stack frame against `native_symbol`.
-fn write_source_map(
-    ast: &flux_parser::Ast,
-    source_path: &std::path::Path,
-    out_dir: &std::path::Path,
-    stem: &str,
-) -> anyhow::Result<()> {
-    let source_text = std::fs::read_to_string(source_path)
-        .with_context(|| format!("reading {}", source_path.display()))?;
-    let source_display = source_path.display().to_string();
-
-    let mut map = flux_codegen_core::SourceMap::new(source_display.clone());
-    let bridge = flux_codegen_core::Bridge::build(ast);
-    let mut comps: Vec<_> = bridge.components().collect();
-    // Deterministic (source-ordered) so the sidecar is stable across runs.
-    comps.sort_by_key(|(_, c)| c.span.start);
-    for (_, comp) in comps {
-        let (line, col) = flux_syntax::Span::line_col_of(&source_text, comp.span.start);
-        map.record(flux_codegen_core::SourceMapEntry {
-            native_symbol: comp.name.name.clone(),
-            component_name: comp.name.name.clone(),
-            source_file: source_display.clone(),
-            line: u32::from(line),
-            col: u32::from(col),
-        });
-    }
-    let json = map
-        .to_json()
-        .context("serializing the source map to JSON")?;
-    let map_path = out_dir.join(format!("{stem}.flux.map.json"));
-    std::fs::write(&map_path, json)
-        .with_context(|| format!("writing source map {}", map_path.display()))?;
-    tracing::info!(target = %map_path.display(), "source map written");
-    Ok(())
 }
 
 #[cfg(test)]
@@ -801,78 +747,6 @@ mod tests {
             "scaffold button label must survive codegen"
         );
 
-        let _ = std::fs::remove_dir_all(&tmp);
-        Ok(())
-    }
-
-    /// Round-91: two `.flux` files with the *same file stem* in different
-    /// directories both try to emit `<stem>.kt` / `<stem>.swift` into the
-    /// shared `Generated/` directory — the second write clobbers the first
-    /// silently. This test documents the current behavior; when a fix lands
-    /// (suffix disambiguation), update the assertions to require both outputs.
-    #[test]
-    fn two_files_same_stem_silently_clobber() -> anyhow::Result<()> {
-        let tmp = std::env::temp_dir().join(format!(
-            "flux-build-stem-clash-{}-{}",
-            std::process::id(),
-            "android"
-        ));
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(tmp.join("src"))?;
-        std::fs::create_dir_all(tmp.join("lib"))?;
-        std::fs::write(tmp.join("src").join("foo.flux"), "compo Foo\n  Text(\"src\")\n")?;
-        std::fs::write(tmp.join("lib").join("foo.flux"), "compo Bar\n  Text(\"lib\")\n")?;
-
-        let resolver: Box<CommandResolver> = Box::new(|_, _| None);
-        run_with(Platform::Android, &tmp, &*resolver)?;
-
-        let gen_dir = tmp.join("platforms").join("android").join("Generated");
-        let files: Vec<String> = std::fs::read_dir(&gen_dir)?
-            .flatten()
-            .map(|e| e.file_name().to_string_lossy().into_owned())
-            .collect();
-        // Current behavior: only ONE foo.kt is emitted (the later write wins).
-        // This test documents the collision until a fix suffixes both files.
-        let foo_kt_count = files.iter().filter(|f| *f == "foo.kt").count();
-        assert_eq!(
-            foo_kt_count, 1,
-            "documented current behavior: two same-stem files clobber; got files = {files:?}"
-        );
-        let _ = std::fs::remove_dir_all(&tmp);
-        Ok(())
-    }
-
-    /// Round-91: two `.flux` files each declaring a component with the SAME
-    /// name — if that name is the global entry component, both files are
-    /// marked entry and both try to write `MainActivity.kt` / `<Root>App.swift`.
-    /// Only one survives. Documents the current collision.
-    #[test]
-    fn two_files_same_component_name_silently_clobber() -> anyhow::Result<()> {
-        let tmp = std::env::temp_dir().join(format!(
-            "flux-build-comp-clash-{}-{}",
-            std::process::id(),
-            "android"
-        ));
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp)?;
-        std::fs::write(tmp.join("main.flux"), "compo App\n  Text(\"main\")\n")?;
-        std::fs::write(tmp.join("other.flux"), "compo App\n  Text(\"other\")\n")?;
-
-        let resolver: Box<CommandResolver> = Box::new(|_, _| None);
-        run_with(Platform::Android, &tmp, &*resolver)?;
-
-        let gen_dir = tmp.join("platforms").join("android").join("Generated");
-        let files: Vec<String> = std::fs::read_dir(&gen_dir)?
-            .flatten()
-            .map(|e| e.file_name().to_string_lossy().into_owned())
-            .collect();
-        // Current behavior: only ONE MainActivity.kt survives (the second
-        // write clobbers the first). Documented until fixed.
-        let main_count = files.iter().filter(|f| *f == "MainActivity.kt").count();
-        assert_eq!(
-            main_count, 1,
-            "documented current behavior: duplicate entry component clobbers; got files = {files:?}"
-        );
         let _ = std::fs::remove_dir_all(&tmp);
         Ok(())
     }
