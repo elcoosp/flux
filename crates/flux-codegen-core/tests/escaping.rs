@@ -13,7 +13,7 @@ use flux_codegen_core::expressions::render_string;
 use flux_codegen_core::{
     Backend, Emitter, PrimitiveSpec, model::ComponentMeta, primitives::DesignToken,
 };
-use flux_parser::{Expr, StrPart, TypeDecl};
+use flux_parser::{Expr, RecordDecl, StrPart, TypeDecl};
 use flux_syntax::NodeId;
 use std::collections::HashMap;
 
@@ -148,6 +148,7 @@ impl Backend for SwiftBackend {
     ) {
     }
     fn emit_sum_type(_: &mut Emitter<'_, Self>, _: &TypeDecl) {}
+    fn emit_record_type(_: &mut Emitter<'_, Self>, _: &RecordDecl) {}
     fn emit_match(_: &mut Emitter<'_, Self>, _: NodeId, _: usize) {}
 
     fn escape_text(s: &str) -> String {
@@ -296,6 +297,7 @@ impl Backend for KotlinBackend {
     ) {
     }
     fn emit_sum_type(_: &mut Emitter<'_, Self>, _: &TypeDecl) {}
+    fn emit_record_type(_: &mut Emitter<'_, Self>, _: &RecordDecl) {}
     fn emit_match(_: &mut Emitter<'_, Self>, _: NodeId, _: usize) {}
 
     fn escape_text(s: &str) -> String {
