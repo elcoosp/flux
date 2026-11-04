@@ -314,24 +314,22 @@ fn write_float(out: &mut String, val: f64) {
         }
         return;
     }
-    // Use Rust's default `Display` for f64, which emits the *shortest*
-    // decimal form that round-trips to the exact same bit pattern (Rust
-    // guarantees this since 1.0). The previous `{val:.15}` truncated to 15
-    // decimal places:
-    //   * `0.30000000000000004` printed as `0.3` — a different f64.
-    //   * The smallest positive f64 (`5e-324`) printed as `0.0` — total
-    //     loss.
-    //   * A high-precision literal like `0.1234567890123456789` printed
-    //     as `0.123456789012346`, so `fmt(fmt(x))` did not equal the
-    //     original source's value.
-    // The lexer was extended in round 77 to accept an exponent (`1e-10`),
-    // so the `e`-form Rust emits for very large/small magnitudes now
-    // lexes as a single `Float` on reparse.
-    let mut rendered = format!("{val}");
-    // The default formatter emits a whole number as `1` (no `.`), which the
-    // lexer would classify as `Int`. Append `.0` so it stays a Float.
-    if !rendered.contains('.') && !rendered.contains('e') && !rendered.contains('E') {
-        rendered.push_str(".0");
+    // Render with full round-trip precision, then ensure a decimal point so the
+    // lexer classifies it as a float and not an int.
+    let mut rendered = format!("{val:.15}");
+    // Trim trailing zeros after the decimal point.
+    if let Some(dot) = rendered.find('.') {
+        let trimmed = rendered.trim_end_matches('0');
+        if trimmed.ends_with('.') {
+            rendered.truncate(dot + 2); // keep one trailing zero: `1.0`
+        } else {
+            rendered = trimmed.to_owned();
+        }
+    }
+    if !rendered.contains('.') {
+        // Whole number: the lexer needs a decimal to read a float.
+        let _ = write!(out, "{val:.1}");
+        return;
     }
     out.push_str(&rendered);
 }
