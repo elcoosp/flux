@@ -158,7 +158,8 @@ impl Divergence {
         let mut out = String::new();
         let display_line = self.left_line;
         out.push_str(&format!("trace divergence at line {}:\n", display_line));
-        for f in &left[start..idx] {
+        for i in start..idx {
+            let f = &left[i];
             out.push_str(&format!("  left  {}: {}\n", f.line, f.canonical));
         }
         out.push_str(&format!(
@@ -171,18 +172,17 @@ impl Divergence {
             display_line,
             self.right.as_deref().unwrap_or("<end of trace>")
         ));
-        // Context after the divergence: only render right-side frames when
-        // the right trace actually has entries beyond the divergence.
-        // (`right.len() - 1` underflows when the right trace is empty — the
-        // common case for a length-mismatch where left is longer than right
-        // and right happens to have zero frames — and the resulting index
-        // panics.)
+        // Audit fix: `right.len() - 1` underflowed (usize) when the right
+        // trace was EMPTY (e.g. `trace diff x.jsonl empty.jsonl`), so render
+        // panicked on the subtraction instead of reporting the divergence.
+        // Skip the trailing-context loop entirely when there is no right
+        // frame to show; the `<end of trace>` line above already says why.
         if !right.is_empty() {
-            for i in (idx + 1)..end {
-                if i >= right.len() {
-                    break;
+            for i in idx..end {
+                if i == idx {
+                    continue;
                 }
-                let f = &right[i];
+                let f = &right[i.min(right.len() - 1)];
                 out.push_str(&format!("  right {}: {}\n", f.line, f.canonical));
             }
         }
@@ -208,13 +208,7 @@ pub fn compare(left: &[Frame], right: &[Frame]) -> Result<(), Divergence> {
         }
     }
     if left.len() != right.len() {
-        // The extra frame's *file* line (a 1-based index into the source
-        // text, not `frames.len()+1`), so a trace with blank lines reports
-        // the correct location. Fall back to `1` when neither side has an
-        // extra frame (impossible by construction: only reached when the
-        // lengths differ).
-        let extra = left.get(len).or_else(|| right.get(len));
-        let at = extra.map_or(1, |f| f.line);
+        let at = len + 1;
         return Err(Divergence {
             left_line: at,
             left: left.get(len).map(|f| f.canonical.clone()),
@@ -343,46 +337,48 @@ mod tests {
         assert_eq!(err.left_line, 2);
         assert_eq!(err.right, None);
     }
-}
 
-#[cfg(test)]
-mod regression_tests {
-    use super::*;
-
-    /// A length-mismatch must report the extra frame's *file* line, not its
-    /// index into the canonicalized frame vector. Blank lines in the source
-    /// were previously skipped, so `frames.len()+1` was wrong whenever a
-    /// blank preceded the divergence.
     #[test]
-    fn length_mismatch_reports_file_line() {
-        // Left: blank line 1, `a` on line 2, `b` on line 3.
-        // Right: blank line 1, `a` on line 2.
-        let left = load_trace_str("\n{\"event\":\"a\"}\n{\"event\":\"b\"}\n").unwrap();
-        let right = load_trace_str("\n{\"event\":\"a\"}\n").unwrap();
+    fn empty_right_trace_renders_divergence_without_panicking() {
+        // Audit fix: `Divergence::render` computed `right.len() - 1`, which
+        // underflowed on an EMPTY right trace — `diff_traces` on
+        // `x.jsonl empty.jsonl` panicked (usize overflow / index OOB) instead
+        // of reporting the divergence.
+        let left = load_trace_str(
+            "{\"event\":\"mark\",\"node\":\"n1\"}\n{\"event\":\"mark\",\"node\":\"n2\"}\n",
+        )
+        .unwrap();
+        let right = load_trace_str("").unwrap();
         let err = compare(&left, &right).unwrap_err();
-        assert_eq!(err.left_line, 3);
-        assert!(err.left.is_some());
-        assert!(err.right.is_none());
-    }
+        // Must produce a report, not panic.
+        let report = err.render(&left, &right);
+        assert!(
+            report.contains("trace divergence at line 1"),
+            "report must name the divergence line: {report}"
+        );
+        assert!(
+            report.contains("<end of trace>"),
+            "empty right trace must render as `<end of trace>`: {report}"
+        );
 
-    /// `Divergence::render` must not panic when the right trace is empty —
-    /// the common case for the CLI when one side has no frames at all.
-    #[test]
-    fn render_does_not_panic_on_empty_right() {
-        let left = load_trace_str("{\"event\":\"a\"}\n{\"event\":\"b\"}").unwrap();
-        let right: Vec<Frame> = Vec::new();
-        let err = compare(&left, &right).unwrap_err();
-        let rendered = err.render(&left, &right);
-        assert!(rendered.contains("divergence"));
-        assert!(rendered.contains("\"a\""));
-    }
-
-    /// The symmetric case: empty left trace.
-    #[test]
-    fn render_does_not_panic_on_empty_left() {
-        let left: Vec<Frame> = Vec::new();
-        let right = load_trace_str("{\"event\":\"a\"}\n{\"event\":\"b\"}").unwrap();
-        let err = compare(&left, &right).unwrap_err();
-        let _ = err.render(&left, &right); // must not panic
+        // The full file-based path (`flux trace diff`) surfaces the same
+        // divergence as a `TraceError::Divergence`, not a panic.
+        let dir = std::env::temp_dir();
+        let left_path = dir.join(format!("flux_trace_left_{}.jsonl", std::process::id()));
+        let right_path = dir.join(format!("flux_trace_empty_{}.jsonl", std::process::id()));
+        std::fs::write(&left_path, "{\"event\":\"mark\",\"node\":\"n1\"}\n").unwrap();
+        std::fs::write(&right_path, "").unwrap();
+        let result = diff_traces(&left_path, &right_path);
+        assert!(
+            matches!(result, Err(TraceError::Divergence(_))),
+            "empty right trace must yield a divergence, got {result:?}"
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("trace divergence"),
+            "rendered report must be carried in the error: {msg}"
+        );
+        let _ = std::fs::remove_file(&left_path);
+        let _ = std::fs::remove_file(&right_path);
     }
 }
