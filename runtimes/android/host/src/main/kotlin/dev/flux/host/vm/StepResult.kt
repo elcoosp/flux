@@ -286,8 +286,7 @@ internal fun executeInstruction(
         // --- FLUX-072: dynamic-list mutation (mirror flux-vm-ref semantics). ---
         Opcode.LIST_INSERT -> {
             val list = instr.u8(0)
-            // The index operand is a *register* holding an Int (audit F1).
-            val idx = requireIndexReg(regs[instr.u8(1)], instr.offset)
+            val idx = instr.u8(1)
             val valReg = instr.u8(2)
             val items = requireList(regs[list], instr.offset).toMutableList()
             if (idx > items.size) {
@@ -299,8 +298,7 @@ internal fun executeInstruction(
         }
         Opcode.LIST_REMOVE -> {
             val list = instr.u8(0)
-            // The index operand is a *register* holding an Int (audit F1).
-            val idx = requireIndexReg(regs[instr.u8(1)], instr.offset)
+            val idx = instr.u8(1)
             val items = requireList(regs[list], instr.offset).toMutableList()
             if (idx >= items.size) {
                 throw VmError(VmErrorKind.INDEX_OUT_OF_BOUNDS, instr.offset)
