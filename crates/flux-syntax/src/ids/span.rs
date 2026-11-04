@@ -74,34 +74,6 @@ pub struct SourceExcerpt {
     pub snippet: String,
 }
 
-/// Returns the largest index `i <= index` that is a UTF-8 char boundary in `s`.
-///
-/// Local reimplementation of the unstable-in-1.86 `str::floor_char_boundary`
-/// (stabilised in 1.91). Avoids bumping the workspace MSRV (`Cargo.toml`
-/// `rust-version = "1.86"`) or adding `#[allow(clippy::incompatible_msrv)]`.
-fn floor_char_boundary(s: &str, index: usize) -> usize {
-    if index >= s.len() {
-        return s.len();
-    }
-    let mut i = index;
-    while i > 0 && !s.is_char_boundary(i) {
-        i -= 1;
-    }
-    i
-}
-
-/// Returns the smallest index `i >= index` that is a UTF-8 char boundary in `s`.
-fn ceil_char_boundary(s: &str, index: usize) -> usize {
-    if index >= s.len() {
-        return s.len();
-    }
-    let mut i = index;
-    while i < s.len() && !s.is_char_boundary(i) {
-        i += 1;
-    }
-    i
-}
-
 impl SourceExcerpt {
     /// Builds an excerpt from a [`Span`] and the source text it points into.
     ///
@@ -119,12 +91,13 @@ impl SourceExcerpt {
         let start = span.start as usize;
         let safe_start = start.min(source.len());
         // Clamp to char boundaries so a mid-UTF-8 span never panics (T-604.11).
-        let floor = floor_char_boundary(source, safe_start);
-        let ceil = ceil_char_boundary(source, safe_start);
-        let line_start = source[..floor].rfind('\n').map(|i| i + 1).unwrap_or(0);
-        let line_end = source[ceil..]
+        let line_start = source[..source.floor_char_boundary(safe_start)]
+            .rfind('\n')
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        let line_end = source[source.ceil_char_boundary(safe_start)..]
             .find('\n')
-            .map(|i| ceil + i)
+            .map(|i| source.ceil_char_boundary(safe_start) + i)
             .unwrap_or(source.len());
         let snippet = source[line_start..line_end.min(source.len())]
             .trim()
