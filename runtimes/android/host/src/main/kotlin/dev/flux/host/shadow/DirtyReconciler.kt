@@ -1,7 +1,5 @@
 package dev.flux.host.shadow
 
-import dev.flux.host.BuildFlags
-
 import dev.flux.host.vm.debug.TelemetryBridge
 import dev.flux.host.vm.debug.TelemetryEvent
 
@@ -112,7 +110,7 @@ public fun ShadowTree.reconcileDirty(
         // live node graph. Geometry is unavailable in the Android-free host
         // crate; the platform shell fills it (ADR-0048). `null` still records
         // node presence in the DevTools state.
-        if (BuildFlags.DEBUG && TelemetryBridge.sink != null) {
+        if (TelemetryBridge.sink != null) {
             TelemetryBridge.emit(
                 TelemetryEvent.ViewMutation(
                     nodeId = id,
