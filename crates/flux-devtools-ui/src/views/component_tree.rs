@@ -332,11 +332,10 @@ impl ComponentTreeView {
                     });
                 }),
         );
-        let content: Vec<AnyElement> = vec![
-            into_any(search_box),
-            into_any(header),
-            into_any(rows_column(rows)),
-        ];
+        let mut content: Vec<AnyElement> = Vec::new();
+        content.push(into_any(search_box));
+        content.push(into_any(header));
+        content.push(into_any(rows_column(rows)));
         // Background color and overflow clipping for clean pane isolation.
         gpui::div()
             .flex()
