@@ -42,16 +42,10 @@ pub(crate) fn encode_value(w: &mut Writer, value: &Value) -> Result<(), WireErro
         }
         // `Value` is `#[non_exhaustive]` (flux-syntax): all variants from the
         // type checker are handled above. An unknown variant means a new
-        // `Value` variant was added without an encoder (audit P2.25). Return
-        // a typed error (F18) instead of panicking; the caller drops the
-        // buffer on `Err`, so the already-written tag byte is discarded with
-        // it.
-        _ => {
-            return Err(WireError::UnsupportedVariant {
-                context: "value.encode",
-                tag: value.tag(),
-            });
-        }
+        // `Value` variant was added without an encoder (audit P2.25). The tag
+        // byte is already on the wire, so silencing this desyncs every
+        // downstream frame.
+        _ => unreachable!("unknown Value variant — add an encoder arm for it (audit P2.25)"),
     }
     Ok(())
 }
@@ -63,11 +57,6 @@ pub(crate) fn encode_value(w: &mut Writer, value: &Value) -> Result<(), WireErro
 /// uses it to drive the persistence-parity trace (FLUX-082) without inventing a
 /// second codec.
 #[must_use]
-// F18: parity/storage public helper. Its inputs are storage values the
-// host itself produced, so an over-u16 blob is not reachable in the
-// current wire model. A future migration to `try_encode_value_blob`
-// would remove this allow.
-#[allow(clippy::expect_used)]
 pub fn encode_value_blob(value: &Value) -> Vec<u8> {
     let mut w = Writer::new();
     // Scaffold: `encode_value_blob` is used by the parity persistence tests
