@@ -18,20 +18,17 @@ pub fn decode_span(r: &mut Reader<'_>) -> Result<Span, WireError> {
     Ok(Span::new(file_id, start, end))
 }
 
-/// Writes a length-prefixed UTF-8 string (u16 byte length + bytes), matching the
-/// layout `frame::encode_str` uses for `Error`/`Hello` payloads.
+/// Writes a length-prefixed UTF-8 string, matching the layout
+/// [`decode_str`] reads: the prefix width follows the writer's protocol
+/// version (v3 `u32`, v2 `u16`, ADR-0059).
+///
+/// A fixed `u16` prefix here desynced every v3 frame carrying a non-empty
+/// string: the decoder read a `u32` assembled from the `u16` length and the
+/// first two payload bytes (round-21, ADR-0057 ClosureRef excerpts).
 pub(crate) fn encode_str(w: &mut Writer, s: &str) -> Result<(), WireError> {
-    // FLUX-F57: use the version-dispatched length prefix, matching
-    // `decode_str` below. The previous encoder wrote a u16 length
-    // unconditionally while `decode_str` reads u32 at v3 (via
-    // `Reader::count`), so any `ClosureRef.excerpt.snippet` on a v3
-    // frame desynced the decoder — it interpreted the 2-byte length
-    // plus the first two snippet bytes as a 4-byte u32 and failed with
-    // a "truncated frame" error far past the actual buffer end.
-    //
-    // The frame encoders in `frame.rs` already use the
-    // version-dispatched `Writer::count_prefix`; this helper was the
-    // one outlier.
+    // Fallible length prefix so an oversized excerpt surfaces as a
+    // recoverable `WireError` at this encoder's boundary, not a panic
+    // (audit H14).
     w.count_prefix(s.len(), "span.len")?;
     w.bytes(s.as_bytes());
     Ok(())
