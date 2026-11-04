@@ -124,27 +124,6 @@ pub fn normalize_view_name(name: &str) -> String {
         "LazyVerticalGrid" => "Grid",
         "Scaffold" => "SafeArea",
         "Switch" => "Toggle",
-        // FLUX-F32: SwiftUI has no distinct Checkbox control, so the
-        // Swift emitter folds `Switch | Checkbox | Toggle` all onto
-        // `Toggle(isOn:)`. Kotlin keeps `Checkbox` distinct. Without this
-        // entry the dev tree (`Checkbox`) and the Swift tree (`Toggle`)
-        // diverge for any Flux `Checkbox(...)`. Matches the existing
-        // `Switch` → `Toggle` collapse — the loss is already in the
-        // emitted Swift, the normalizer only makes it visible on all sides.
-        "Checkbox" => "Toggle",
-        // FLUX-F32: `TextEditor` (Swift) and `OutlinedTextField` (Kotlin)
-        // are emitted *uniquely* for the Flux `TextArea` primitive — the
-        // Swift emitter writes `TextEditor(text:)`, the Kotlin emitter
-        // writes `OutlinedTextField(value = …, singleLine = false)`. Fold
-        // both back to `TextArea` so a Flux `TextArea(...)` round-trips.
-        "TextEditor" | "OutlinedTextField" => "TextArea",
-        // FLUX-F35: same class — the two backends use different native
-        // names for the Flux `Picker` and `DatePicker` primitives (Swift
-        // keeps the Flux spelling; Kotlin emits Compose's
-        // `DropdownMenu` / `DatePickerDialog`). Fold both back so a
-        // Flux `Picker(...)` / `DatePicker(...)` round-trips.
-        "DropdownMenu" => "Picker",
-        "DatePickerDialog" => "DatePicker",
         other => other,
     }
     .to_owned()
@@ -393,15 +372,7 @@ fn pattern_label(pattern: &MatchPattern) -> String {
         MatchPatternKind::Wildcard => "_".to_owned(),
         MatchPatternKind::Variant { name, .. } => name.name.clone(),
         MatchPatternKind::Literal(expr) => canonicalize_expr(&render_expr(expr)),
-        // Round 33: keep the guard condition in the label. Before this
-        // change, the label was just the binding name, so
-        // `s if s > 90` and `s if s > 80` produced the same tree label —
-        // the release-vs-dev parity comparison could not distinguish two
-        // guarded arms with different conditions. The condition is
-        // canonicalized so Swift/Kotlin spellings compare equal.
-        MatchPatternKind::Guard { name, cond } => {
-            format!("{} if {}", name.name, canonicalize_expr(&render_expr(cond)))
-        }
+        MatchPatternKind::Guard { name, .. } => name.name.clone(),
         _ => "<pattern>".to_owned(),
     }
 }
@@ -494,15 +465,6 @@ fn render_expr(expr: &Expr) -> String {
         ExprKind::List(items) => {
             let rendered: Vec<String> = items.iter().map(render_expr).collect();
             format!("[{}]", rendered.join(", "))
-        }
-        // FLUX-F65 follow-up: render `Call` faithfully so the release-path
-        // `view_tree` reducer (used by the JSON-parity test) matches the
-        // dev-path AST reducer. Matches the same fix in
-        // `expressions::render_expr` and `flux_parity::bridge::render_expr`.
-        ExprKind::Call { callee, args, .. } => {
-            let callee_text = render_expr(callee);
-            let arg_texts: Vec<String> = args.iter().map(|a| render_expr(a.value())).collect();
-            format!("{}({})", callee_text, arg_texts.join(", "))
         }
         _ => "/* unsupported expr */ 0".to_owned(),
     }
