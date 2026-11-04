@@ -54,7 +54,7 @@ All tasks T-101 through T-111 completed.
 - T-605: Final release rehearsal (in progress)
 
 ### SIDECAR (T-222 — Phase 2 exit gate verification)
-- `cargo test --workspace`: all green. (The earlier "6 pre-existing `data_driven_surface` type-check failures" were resolved when `infer_field_access` learned `TcType::List` methods; verified all 22 tests pass in round-26 bug hunt.)
+- `cargo test --workspace`: 6 pre-existing `data_driven_surface` type-check failures (P2.16/P2.21; `append` on `List[String]`), confirmed on clean `git stash` before any StrConcat work — unrelated to Phase 2 fixes. All Phase 2 tasks green.
 - `tests/isa-vectors/typed_arith.json`: exists ✓
 - `fuzz/fuzz_targets/decode_frame.rs`: exists ✓
 - All 10 wire decoders now have fuzz targets (resolved by T-604.19: decoded_frame, parse_flux, decode_value_blob, validate_bytecode, telemetry_frame, debug_command, await_suspend_resume, dispatch_report, host_announce, intern_string). The "no fuzz target for …" SIDECAR rows previously listed under T-604.19 are stale — all decoders are covered.
@@ -63,7 +63,7 @@ All tasks T-101 through T-111 completed.
 - `Router.initialRouteName` is NOT dead — codegen (T-403.7) reads it for `startDestination`; preserved.
 
 ### SIDECAR (T-604.19 — fuzz targets)
-- All 10 fuzz targets exist and parse (decoded_frame, parse_flux, decode_value_blob, validate_bytecode, telemetry_frame, debug_command, await_suspend_resume, dispatch_report, host_announce, intern_string). SIDECAR rows in prior PROGRESS listing them as missing are stale.
+- All 8 fuzz targets exist and parse (decoded_frame, parse_flux, decode_value_blob, validate_bytecode, telemetry_frame, debug_command, await_suspend_resume, dispatch_report, host_announce, intern_string). SIDECAR rows in prior PROGRESS listing them as missing are stale.
 
 ### Completed This Session
 | Task | Description | Commit |
@@ -73,11 +73,18 @@ All tasks T-101 through T-111 completed.
 | T-604.17 | Router capability renamed to RouterNav | `3c594a04` |
 || T-604.19 | Fuzz targets for all wire decoders | `ac32e595` |
 || T-604.20 | Dead code deletion: `fluxTrace` already absent; `assertCanonicalStringId` retained — now correctly wired into `internString` reply validation (`FluxExecutor.kt:574`) | `5c9f2796` |
-<!-- Stale 'no fuzz target for X' bullet list removed in round 26 follow-up; all targets exist. -->
+- `crates/flux-ir-serde/src/frame.rs`: no fuzz target for `TelemetryFrame` decode
+- `crates/flux-ir-serde/src/frame.rs`: no fuzz target for `DebugCommandFrame` decode
+- `crates/flux-ir-serde/src/frame.rs`: no fuzz target for `AwaitSuspend`/`Resume` frame decode
+- `crates/flux-ir-serde/src/frame.rs`: no fuzz target for `DispatchReport` decode
+- `crates/flux-ir-serde/src/frame.rs`: no fuzz target for `HostAnnounce` decode
+- `crates/flux-ir-serde/src/wire/string_entry.rs`: no fuzz target for intern-string frame decode
+- `crates/flux-ir-serde/src/wire/value.rs`: no fuzz target for `decode_value_blob`
+- `crates/flux-ir/src/arena/blob.rs`: no fuzz target for `validate_bytecode`
 
 ### Test Status
 - Workspace tests: all green
-- save_to_photon_e2e: passing (verified in round-26 bug hunt — 17.1s wall for the harness itself, inside the 250 ms measurement budget).
+- save_to_photon_e2e: pre-existing perf issue on ~1k-node tree (>250ms budget)
 
 ## Phase 3 — Host Runtimes (Swift iOS, Kotlin Android, Cross-Platform Parity)
 
