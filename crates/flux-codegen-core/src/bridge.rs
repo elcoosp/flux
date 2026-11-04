@@ -87,6 +87,7 @@ impl Bridge {
     }
 
     /// Returns all component declarations in insertion order.
+    #[must_use]
     pub fn components(&self) -> impl Iterator<Item = (NodeId, &ComponentDecl)> + '_ {
         self.components.iter().map(|(k, v)| (*k, v))
     }
