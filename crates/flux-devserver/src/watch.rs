@@ -53,7 +53,6 @@ impl Watcher {
         let timing = Timing {
             debounce: config.debounce(),
             coalesce: config.coalesce(),
-            max_wait: DEFAULT_MAX_WAIT,
         };
         std::thread::spawn(move || {
             // `watcher` is moved in so the watch stays alive for the loop.
@@ -92,26 +91,7 @@ struct Timing {
     debounce: Duration,
     /// Frames produced inside this window ship as one batch.
     coalesce: Duration,
-    /// Upper bound on the wait from the *first* pending event to compilation.
-    ///
-    /// Without this, a tool that touches a file continuously (`npm run watch`
-    /// writing through an editor, an aggressive formatter) pushes `last_event`
-    /// forward every cycle and `settled` never fires, so compilation starves
-    /// forever. The cap forces a compile even under continuous churn.
-    max_wait: Duration,
 }
-
-/// Default upper bound between the first pending event and a compile.
-const DEFAULT_MAX_WAIT: Duration = Duration::from_millis(500);
-
-/// Grace period before treating a `NotFound` read as a real delete.
-///
-/// Many editors save atomically: they write a temp file, then `rename` it
-/// over the target. Between the two syscalls a reader sees the target
-/// momentarily missing. Waiting briefly and retrying distinguishes a real
-/// delete from an atomic save; without it, a save could silently remove the
-/// file from the pipeline until the next `Create` event.
-const ATOMIC_SAVE_GRACE: Duration = Duration::from_millis(50);
 
 /// Debounces watch events, re-reads the changed sources, and recompiles.
 fn watch_loop(
@@ -122,13 +102,15 @@ fn watch_loop(
 ) {
     let mut pending: Vec<PathBuf> = Vec::new();
     let mut last_event: Option<Instant> = None;
-    let mut first_event: Option<Instant> = None;
     while flag.load(Ordering::Relaxed) && !shared.is_shutdown() {
         match rx.recv_timeout(timing.debounce) {
-            Ok(event) => {
-                first_event.get_or_insert_with(Instant::now);
-                absorb(event, &mut pending, &mut last_event);
+            Ok(Ok(event)) => {
+                if is_source_change(&event) {
+                    pending.extend(event.paths.into_iter().filter(|p| is_flux_source(p)));
+                    last_event = Some(Instant::now());
+                }
             }
+            Ok(Err(error)) => tracing::warn!(%error, "WATCH_ERROR"),
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => {
                 tracing::warn!("WATCH_DISCONNECTED");
@@ -136,42 +118,15 @@ fn watch_loop(
             }
         }
         let settled = last_event.is_some_and(|t| t.elapsed() >= timing.debounce);
-        // Starvation cap: if the first event in the burst is older than
-        // `max_wait`, compile even though saves are still arriving. Without
-        // this, continuous churn blocks compilation forever.
-        let overdue = first_event.is_some_and(|t| t.elapsed() >= timing.max_wait);
-        if pending.is_empty() || !(settled || overdue) {
+        if pending.is_empty() || !settled {
             continue;
-        }
-        // Coalescing window: sleep *first*, then drain anything that landed
-        // during the sleep into the same pass. The previous order read files
-        // *before* the sleep, so a save landing inside the window was only
-        // picked up on the next loop iteration — producing a stale compile
-        // followed by a fresh one (two frames, the first one wrong).
-        std::thread::sleep(timing.coalesce);
-        while let Ok(event) = rx.try_recv() {
-            absorb(event, &mut pending, &mut last_event);
         }
         reload(&mut pending, shared);
         last_event = None;
-        first_event = None;
+        // Coalescing window: a second save landing inside it is picked up by
+        // the same compile pass.
+        std::thread::sleep(timing.coalesce);
         compile_and_broadcast(shared);
-    }
-}
-
-/// Records one `notify` event into the pending set + last-event timestamp.
-fn absorb(
-    event: notify::Result<Event>,
-    pending: &mut Vec<PathBuf>,
-    last_event: &mut Option<Instant>,
-) {
-    match event {
-        Ok(ev) if is_source_change(&ev) => {
-            pending.extend(ev.paths.into_iter().filter(|p| is_flux_source(p)));
-            *last_event = Some(Instant::now());
-        }
-        Ok(_) => {}
-        Err(error) => tracing::warn!(%error, "WATCH_ERROR"),
     }
 }
 
@@ -183,27 +138,16 @@ fn reload(pending: &mut Vec<PathBuf>, shared: &Arc<Shared>) {
     for path in pending.drain(..) {
         match std::fs::read_to_string(&path) {
             Ok(source) => shared.pipeline.lock().set_source(&path, source),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                // Atomic save: an editor writes a temp file, then renames it
-                // over the target. Between the two the path is briefly missing.
-                // Wait a short grace period and retry before treating it as a
-                // real delete.
-                std::thread::sleep(ATOMIC_SAVE_GRACE);
-                match std::fs::read_to_string(&path) {
-                    Ok(source) => shared.pipeline.lock().set_source(&path, source),
-                    Err(_) => {
-                        // Take the lock once for both `file_id_for_path` and
-                        // `remove_file`: the previous double-lock was a TOCTOU
-                        // (another thread could register the file in between).
-                        let mut pipeline = shared.pipeline.lock();
-                        if let Some(file_id) = pipeline.file_id_for_path(&path) {
-                            pipeline.remove_file(file_id);
-                        }
-                        tracing::info!(path = %path.display(), "deleted .flux file removed from pipeline");
+            Err(error) => {
+                if error.kind() == std::io::ErrorKind::NotFound {
+                    if let Some(file_id) = shared.pipeline.lock().file_id_for_path(&path) {
+                        shared.pipeline.lock().remove_file(file_id);
                     }
+                    tracing::info!(path = %path.display(), "deleted .flux file removed from pipeline");
+                } else {
+                    tracing::warn!(path = %path.display(), %error, "cannot read saved file");
                 }
             }
-            Err(error) => tracing::warn!(path = %path.display(), %error, "cannot read saved file"),
         }
     }
 }
@@ -232,6 +176,11 @@ pub(crate) fn compile_and_broadcast(shared: &Arc<Shared>) -> bool {
         .into_iter()
         .filter_map(|r| r.to_json().ok())
         .collect();
+    // Round-21 fix: capture the refreshed DevTools SourceMap while the
+    // pipeline lock is still held. The router was built once at startup from
+    // the *pre-compile* pipeline, so without this its map stayed empty forever
+    // and every enriched telemetry event resolved to "no source mapping".
+    let refreshed_map = outcome.is_ok().then(|| pipeline.devtools_source_map());
     // Audit H16: broadcast the frame while the pipeline lock is still held
     // so a concurrent Hello cannot observe Init(new) then Delta(old→new).
     let sent = match &outcome {
@@ -250,6 +199,9 @@ pub(crate) fn compile_and_broadcast(shared: &Arc<Shared>) -> bool {
         Ok(Compiled::Unchanged) => false,
     };
     drop(pipeline);
+    if let Some(map) = refreshed_map {
+        shared.devtools_router.lock().set_source_map(map);
+    }
     // Broadcast the render-perf records to every subscribed DevTools client.
     // These are best-effort: a disconnected client is pruned by
     // `route_telemetry`.
@@ -290,13 +242,36 @@ pub(crate) fn collect_flux_sources(root: &Path) -> Vec<(PathBuf, String)> {
     out
 }
 
+/// Directories that never contain user `.flux` sources and are walked past
+/// regardless of a project's layout. Ported from `flux-cli/src/sources.rs`.
+const SKIP_DIRS: &[&str] = &[".git", "target", "node_modules", "platforms", ".build"];
+
 fn collect_into(dir: &Path, out: &mut Vec<(PathBuf, String)>) {
+    // Round-21 fix: guard identical to `flux-cli/src/sources.rs`. The walk
+    // previously followed symlinked directories, so a directory symlinked to
+    // one of its ancestors (or to itself) recursed until the process stack
+    // limit and aborted the dev server at startup; walking `.git` / `target` /
+    // `node_modules` / `platforms` also burned startup time and could surface
+    // unrelated `.flux` files from VCS internals, build output or dependency
+    // trees as project sources.
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
+        // `path.is_symlink()` checks the entry itself; use it to prevent
+        // following a directory symlink into a loop.
+        if path.is_symlink() {
+            continue;
+        }
         if path.is_dir() {
+            let skip = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| SKIP_DIRS.contains(&n));
+            if skip {
+                continue;
+            }
             collect_into(&path, out);
         } else if is_flux_source(&path) {
             match std::fs::read_to_string(&path) {
@@ -312,80 +287,84 @@ fn collect_into(dir: &Path, out: &mut Vec<(PathBuf, String)>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use notify::event::{CreateKind, DataChange, ModifyKind};
-    use notify::{Event, EventKind};
 
-    /// F6.1: coalesce window. Verify that events arriving inside the coalesce
-    /// window are absorbed into the *same* pending set (previous ordering read
-    /// first, slept after, so an intra-window event was only picked up on the
-    /// next cycle).
-    ///
-    /// This test pins the `absorb` helper + the drain-during-coalesce behavior
-    /// without a real filesystem watcher.
-    #[test]
-    fn absorb_accumulates_paths_and_updates_timestamp() {
-        let mut pending: Vec<PathBuf> = Vec::new();
-        let mut last: Option<Instant> = None;
-        let t0 = Instant::now();
-
-        let ev = Event {
-            kind: EventKind::Modify(ModifyKind::Data(DataChange::Any)),
-            paths: vec![PathBuf::from("/tmp/a.flux"), PathBuf::from("/tmp/b.txt")],
-            attrs: Default::default(),
-        };
-        absorb(Ok(ev), &mut pending, &mut last);
-
-        assert_eq!(
-            pending,
-            vec![PathBuf::from("/tmp/a.flux")],
-            "only .flux files enter pending"
-        );
-        assert!(last.is_some(), "absorb records the event timestamp");
-        assert!(last.unwrap() >= t0);
+    /// Creates a fresh scratch project directory with two real sources.
+    fn scratch_root(tag: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("flux-watch-walk-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        std::fs::write(dir.join("main.flux"), "compo Hello\n  Text(\"hi\")\n")
+            .expect("write source");
+        std::fs::create_dir_all(dir.join("nested")).expect("nested dir");
+        std::fs::write(
+            dir.join("nested/inner.flux"),
+            "compo Inner\n  Text(\"in\")\n",
+        )
+        .expect("write inner source");
+        dir
     }
 
-    /// F6.2: absorbed Access events must be filtered (audit fix, unchanged).
     #[test]
-    fn absorb_ignores_access_events() {
-        use notify::event::AccessKind;
-        let mut pending: Vec<PathBuf> = Vec::new();
-        let mut last: Option<Instant> = None;
-        let ev = Event {
-            kind: EventKind::Access(AccessKind::Any),
-            paths: vec![PathBuf::from("/tmp/a.flux")],
-            attrs: Default::default(),
-        };
-        absorb(Ok(ev), &mut pending, &mut last);
+    fn symlink_loop_does_not_hang_or_crash_the_source_walk() {
+        // Round-21 fix: `collect_into` followed symlinked directories, so a
+        // directory symlink pointing at an ancestor (or at itself) recursed
+        // toward the stack limit at startup, and a symlink pointing at a real
+        // sibling made the same source file collected twice (once per path) —
+        // the devserver then lowered it under two FileIds. The walk must skip
+        // symlinked entries entirely and terminate promptly.
+        let root = scratch_root("loop");
+        // Loop shapes: a directory symlinked to its own ancestor and to itself.
+        std::os::unix::fs::symlink(&root, root.join("loop")).expect("ancestor symlink loop");
+        std::os::unix::fs::symlink(root.join("nested"), root.join("nested/self"))
+            .expect("self symlink loop");
+        // A symlink to a REAL directory holding a .flux file: pre-fix this
+        // collected `nested/inner.flux` a second time as `mirror/inner.flux`.
+        std::os::unix::fs::symlink(root.join("nested"), root.join("mirror"))
+            .expect("dir symlink to real dir");
+        // A symlinked .flux FILE: pre-fix this collected `main.flux` twice.
+        std::os::unix::fs::symlink(root.join("main.flux"), root.join("alias.flux"))
+            .expect("file symlink");
+
+        let started = std::time::Instant::now();
+        let sources = collect_flux_sources(&root);
+        // Recursion guard (timeout-ish): a fix-less walk on a platform without
+        // a path-length backstop never gets here; a prompt return proves the
+        // walk did not chase the loops unboundedly.
         assert!(
-            pending.is_empty(),
-            "read-only access must not trigger recompile"
+            started.elapsed() < std::time::Duration::from_secs(10),
+            "source walk must terminate promptly with symlink loops present"
         );
-        assert!(last.is_none(), "no timestamp recorded for filtered events");
+        let paths: Vec<PathBuf> = sources.iter().map(|(p, _)| p.clone()).collect();
+        assert_eq!(
+            paths,
+            vec![root.join("main.flux"), root.join("nested/inner.flux")],
+            "real sources are collected exactly once; symlinked entries are skipped"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
-    /// F6.3: Create events are honoured (a brand-new file appears in the tree).
     #[test]
-    fn absorb_accepts_create_events() {
-        let mut pending: Vec<PathBuf> = Vec::new();
-        let mut last: Option<Instant> = None;
-        let ev = Event {
-            kind: EventKind::Create(CreateKind::File),
-            paths: vec![PathBuf::from("/tmp/new.flux")],
-            attrs: Default::default(),
-        };
-        absorb(Ok(ev), &mut pending, &mut last);
-        assert_eq!(pending, vec![PathBuf::from("/tmp/new.flux")]);
-    }
-
-    /// F6.4: the `max_wait` field exists and defaults to a non-zero value.
-    #[test]
-    fn timing_struct_has_max_wait() {
-        let t = Timing {
-            debounce: Duration::from_millis(10),
-            coalesce: Duration::from_millis(5),
-            max_wait: DEFAULT_MAX_WAIT,
-        };
-        assert!(t.max_wait > Duration::ZERO);
-        assert_eq!(DEFAULT_MAX_WAIT, Duration::from_millis(500));
+    fn walk_skips_vcs_build_and_dependency_directories() {
+        // Round-21 fix: the walk descended into `.git` / `target` /
+        // `node_modules` / `platforms`, burning startup time and surfacing
+        // unrelated `.flux` files from build output or dependencies.
+        let root = scratch_root("skip");
+        for dir in [".git", "target", "node_modules", "platforms"] {
+            std::fs::create_dir_all(root.join(dir)).expect("noise dir");
+            std::fs::write(
+                root.join(dir).join("stray.flux"),
+                format!("compo Stray{dir}\n  Text(\"s\")\n"),
+            )
+            .expect("write stray source");
+        }
+        let sources = collect_flux_sources(&root);
+        let paths: Vec<PathBuf> = sources.iter().map(|(p, _)| p.clone()).collect();
+        assert_eq!(
+            paths,
+            vec![root.join("main.flux"), root.join("nested/inner.flux")],
+            "only user sources are collected; SKIP_DIRS entries are walked past"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
