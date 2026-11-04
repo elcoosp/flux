@@ -358,12 +358,12 @@ impl DevToolsRoot {
                 let state = state.clone();
                 let this = this.clone();
                 let mut col = gpui::div().flex().flex_col();
-                for k in &keys {
+                for k in keys.iter().cloned() {
                     let k_label = k.label();
                     let k_clone = k.clone();
                     let state = state.clone();
                     let this = this.clone();
-                    let is_selected = state.selected_host_key().as_ref() == Some(k);
+                    let is_selected = state.selected_host_key().as_ref() == Some(&k);
                     col = col.child(
                         Button::new(gpui::ElementId::from(format!("host-{}", k_label)))
                             .label(format!(
