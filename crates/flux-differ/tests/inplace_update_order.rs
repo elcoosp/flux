@@ -54,7 +54,7 @@ fn multi_node_update_order_is_deterministic() {
         let sig: Vec<u32> = patches
             .iter()
             .filter_map(|p| match p {
-                flux_syntax::Patch::Update { id, .. } => Some(*id),
+                flux_syntax::Patch::Update { id, .. } => Some(u32::from(*id)),
                 _ => None,
             })
             .collect();
