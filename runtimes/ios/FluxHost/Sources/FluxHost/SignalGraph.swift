@@ -44,10 +44,6 @@ public struct SignalGraph: SignalStore {
     private var cellStates: [SignalId: CellState]
     /// Audit D7: pending notifications batched for ordered flush.
     private var pendingNotifications: Set<SignalId> = []
-    /// Signals explicitly `write`-ten since the last `beginRun` (F2). Only
-    /// these appear in `snapshot()`; seeds and `resolveCell` results do not,
-    /// matching the Rust oracle's `written` set.
-    private var writtenSinceRun: [SignalId: FluxValue] = [:]
 
     /// Creates an empty graph.
     public init(values: [SignalId: FluxValue] = [:]) {
@@ -85,7 +81,6 @@ public struct SignalGraph: SignalStore {
         values[id] = value
         cellStates[id] = .ready
         pendingNotifications.insert(id)
-        writtenSinceRun[id] = value
         #if DEBUG
         fluxDevtoolsEmit(.signalWrite(signalId: id, oldValue: .null, newValue: value, triggeredEffectIds: []))
         #endif
@@ -139,17 +134,8 @@ public struct SignalGraph: SignalStore {
         }
     }
 
-    /// Signals **written since the last `beginRun`**, sorted by id (F2).
-    ///
-    /// Returns only explicit `write`s — not seeded cells and not resolved
-    /// result cells — so a dispatch's reported write set matches the Rust
-    /// oracle and drives the reconciler's dirty subset correctly.
+    /// Every written signal as a sorted `(id, value)` list.
     public func snapshot() -> [(UInt32, FluxValue)] {
-        writtenSinceRun.map { ($0.key, $0.value) }.sorted { $0.0 < $1.0 }
-    }
-
-    /// Starts a new handler run: `snapshot()` reports only writes after this call.
-    public mutating func beginRun() {
-        writtenSinceRun.removeAll(keepingCapacity: true)
+        values.map { ($0.key, $0.value) }.sorted { $0.0 < $1.0 }
     }
 }
