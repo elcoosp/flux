@@ -25,19 +25,9 @@ pub(crate) fn encode_child(w: &mut Writer, child: &Child) -> Result<(), WireErro
         }
         // `Child` is `#[non_exhaustive]` (flux-syntax): all variants are
         // handled above. An unknown variant means a new `Child` slot kind
-        // was added without an encoder (audit P2.25). Return a typed error
-        // (F18) instead of panicking; the caller drops the buffer on `Err`,
-        // so the already-written tag byte is discarded with it.
-        _ => {
-            // `Child` does not expose a numeric tag helper (only its two
-            // variants carry hand-written bytes 0x01 / 0x02 above); pass 0
-            // as an "unknown" sentinel for the diagnostic — the context
-            // string is the actionable part.
-            return Err(WireError::UnsupportedVariant {
-                context: "child.encode",
-                tag: 0,
-            });
-        }
+        // was added without an encoder (audit P2.25). The parent's item-count
+        // prefix is already written, so skipping desyncs the reader.
+        _ => unreachable!("unknown Child variant — add an encoder arm for it (audit P2.25)"),
     }
     Ok(())
 }
