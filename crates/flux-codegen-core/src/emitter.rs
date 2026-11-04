@@ -80,7 +80,7 @@ impl<'a, B: Backend> Emitter<'a, B> {
     pub fn emit_program(&mut self) {
         // FLUX-047: emit the backend's prelude (imports / package decl) first,
         // so generated sources are self-contained and compile standalone.
-        self.push_raw(B::prelude());
+        self.push_raw(&B::prelude());
         self.emit_sum_types();
         // FLUX-043: emit the native design-token theme extension once, before
         // the components, so every component can reference tokens by name
@@ -241,7 +241,13 @@ impl<'a, B: Backend> Emitter<'a, B> {
                     self.line(indent, &format!("{resolved}()"));
                 } else if let Some(node) = self.lowered.arena.get(id) {
                     // Component call site: resolve the name from the interned
-                    // component_names table keyed by ComponentId.
+                    // component_names table keyed by ComponentId, and render
+                    // the call's arguments. The args previously went missing
+                    // here: generic user components used to lower as
+                    // `NodeKind::Primitive` (kind-tag bug), which routed them
+                    // through the primitive fallback that does render args —
+                    // once the kind was fixed the call site degraded to
+                    // `Counter_Int()` with no props (round-21).
                     let resolved = self
                         .lowered
                         .component_names
@@ -249,7 +255,17 @@ impl<'a, B: Backend> Emitter<'a, B> {
                         .find(|(cid, _)| *cid == node.component_id())
                         .map(|(_, n)| n.clone())
                         .unwrap_or_else(|| format!("FluxComponent_{}", id));
-                    self.line(indent, &format!("{resolved}()"));
+                    let args = self
+                        .bridge
+                        .expr(id)
+                        .and_then(|expr| match &expr.kind {
+                            flux_parser::ExprKind::Call { args, .. } => {
+                                Some(Self::render_args(args))
+                            }
+                            _ => None,
+                        })
+                        .unwrap_or_default();
+                    self.line(indent, &format!("{resolved}({args})"));
                 }
             }
             flux_syntax::NodeKind::Primitive => self.emit_primitive(id, indent),
@@ -382,24 +398,18 @@ impl<'a, B: Backend> Emitter<'a, B> {
     /// Emits every algebraic type preceding the components.
     fn emit_sum_types(&mut self) {
         let mut first = true;
-        // FLUX-077: emit record (product type) declarations as native structs
-        // so they can be referenced by name in state/prop types.
+        // FLUX-077: emit record (product type) declarations so they can be
+        // referenced by name in state/prop types. The native product-type
+        // spelling differs per language, so this delegates to
+        // `Backend::emit_record_type` — the old code hardcoded the Swift
+        // `struct Name { let f: T }` form here and spliced it into Kotlin
+        // output, where `struct`/`let` are syntax errors.
         for rec in self.bridge.records() {
             if !first {
                 self.push_raw("\n");
             }
             first = false;
-            let name = &rec.name.name;
-            let fields: Vec<String> = rec
-                .fields
-                .iter()
-                .map(|field| {
-                    let ty = native_type::<B>(&field.ty, &HashMap::new());
-                    format!("let {}: {}", field.name.name, ty)
-                })
-                .collect();
-            let fields_str = fields.join("\n    ");
-            self.append_line(&format!("struct {name} {{\n    {fields_str}\n}}"));
+            B::emit_record_type(self, rec);
         }
         for sum in self.bridge.types() {
             if !first {
@@ -525,7 +535,7 @@ impl<'a, B: Backend> Emitter<'a, B> {
                     // `handler_prop`, so the branch below catches it),
                     // matching `Switch`/`Checkbox`/`Slider` and removing the
                     // special case.
-                    self.line(indent, B::spacer());
+                    self.line(indent, &B::spacer());
                 } else if spec.handler_prop.is_some() {
                     // Form-family primitive (Switch, Checkbox, Slider,
                     // Picker, DatePicker, TextArea): the bare `{native}({value})`
@@ -726,7 +736,7 @@ impl<'a, B: Backend> Emitter<'a, B> {
                 // produced broken (or injectable) Kotlin/Swift.
                 let route = n
                     .props()
-                    .get_str(route_idx, self.lowered.arena.string_table())
+                    .get_str(route_idx, &self.lowered.arena.string_table())
                     .unwrap_or("home");
                 format!("\"{}\"", B::escape_text(route))
             }
@@ -928,9 +938,9 @@ impl<'a, B: Backend> Emitter<'a, B> {
             "                ",
         ];
         let table: &[&str] = if B::INDENT_UNIT == 4 {
-            KOTLIN_TABLE
+            &KOTLIN_TABLE
         } else {
-            SWIFT_TABLE
+            &SWIFT_TABLE
         };
         if let Some(s) = table.get(indent).copied() {
             return s;
