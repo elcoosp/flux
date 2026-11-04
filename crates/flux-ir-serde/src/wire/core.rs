@@ -88,19 +88,6 @@ pub enum WireError {
         n: usize,
     },
 
-    /// Two closures in one frame share a `HandlerId`.
-    ///
-    /// Audit §3.3 / F5: `write_closures` used to `panic!` on a duplicate id,
-    /// which killed the pipeline thread during a valid hot-reload (a
-    /// user-authored rename that reintroduced an id). The frame-level encoder
-    /// now returns this error, and the dev server converts it into a
-    /// diagnostic `Error` frame instead of crashing the session.
-    #[error("wire encode: duplicate handler id {id:#x} in closure stream")]
-    DuplicateHandlerId {
-        /// The duplicated handler id.
-        id: flux_syntax::HandlerId,
-    },
-
     /// A length-prefixed collection or string exceeded the `u32` width used
     /// by protocol v3 for user-authored collections (ADR-0059). In practice
     /// unreachable on 64-bit platforms (< 4 billion items), but the encode
@@ -125,22 +112,6 @@ pub enum WireError {
         expected: u32,
         /// The count decoded from the handler section.
         actual: u32,
-    },
-    /// The encoder encountered a `#[non_exhaustive]` variant it has no arm
-    /// for. The tag byte is written before the match, so this is only reached
-    /// when a new variant was added to `flux-syntax` without a matching
-    /// encoder (audit P2.25). Returning a typed error instead of panicking
-    /// keeps the pipeline thread alive and surfaces the gap as an Error frame
-    /// (F18).
-    #[error(
-        "wire encode: {context}: variant tag {tag:#04x} has no encoder arm \
-         (flux-syntax added a #[non_exhaustive] variant without a matching codec)"
-    )]
-    UnsupportedVariant {
-        /// Encoder site (e.g. `"patch.encode"`).
-        context: &'static str,
-        /// The variant's tag byte as written to the wire before the match.
-        tag: u8,
     },
 }
 
@@ -187,17 +158,10 @@ pub fn validate_bytecode(bytecode: &[u8]) -> Result<(), WireError> {
     // byte offset of the instruction that follows it. This mirrors the VM's own
     // `decode_program` layout checks (truncation + unknown opcode) but returns
     // the wire [`WireError`] instead of the VM's [`VmError`].
-    // F18: retain the decoded opcode from pass 1 so pass 2 does not have to
-    // re-decode `bytecode[decoded.offset]` and then `.expect()` the result.
-    // The previous version argued the expect was "provably safe" (pass 1
-    // already validated every offset), but a `.expect()` in a hot decoder
-    // still blocks the F10 lint gate (`clippy::expect_used`) — and passing the
-    // opcode directly removes the argument altogether.
     #[derive(Clone, Copy)]
     struct Decoded {
         offset: usize,
         next_offset: usize,
-        opcode: Opcode,
     }
     let mut instrs: Vec<Decoded> = Vec::with_capacity(len / 2);
     let mut ip = 0usize;
@@ -228,7 +192,6 @@ pub fn validate_bytecode(bytecode: &[u8]) -> Result<(), WireError> {
         instrs.push(Decoded {
             offset: ip,
             next_offset,
-            opcode,
         });
         ip = end;
     }
@@ -238,20 +201,10 @@ pub fn validate_bytecode(bytecode: &[u8]) -> Result<(), WireError> {
     // scan was O(n²)) so the inner lookup is constant-time.
     let instr_offsets: std::collections::HashSet<usize> = instrs.iter().map(|d| d.offset).collect();
     for decoded in &instrs {
-        let opcode = decoded.opcode;
-        // FLUX-F46: the operand layout differs by opcode.
-        // * `JUMP` is `I32` — `op(1) + i32(4)`, target at offset+1.
-        // * `COND_JUMP(_NOT)` is `REG_U32` — `op(1) + reg(1) + i32(4)`,
-        //   target at offset+2. The previous code read both at +1, so a
-        //   COND_JUMP was validated against `[reg_byte, t0, t1, t2]` as
-        //   i32 rather than the real `[t0, t1, t2, t3]` — real programs
-        //   could be rejected and malformed ones accepted depending on
-        //   the immediate byte after the opcode.
+        let opcode = Opcode::from_byte(bytecode[decoded.offset]).expect("known opcode from pass 1");
         let jump = match opcode {
             Opcode::Jump => Some(read_i32(bytecode, decoded.offset + 1)),
-            Opcode::CondJump | Opcode::CondJumpNot => {
-                Some(read_i32(bytecode, decoded.offset + 2))
-            }
+            Opcode::CondJump | Opcode::CondJumpNot => Some(read_i32(bytecode, decoded.offset + 1)),
             _ => None,
         };
         let Some(relative) = jump else { continue };
