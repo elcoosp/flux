@@ -50,11 +50,6 @@ pub struct SuspendState {
     pub gas_remaining: u32,
     /// Signal cells written before the suspend, replayed into the graph on resume.
     pub signals: Vec<(SignalId, Value)>,
-    /// Per-dispatch allocation counter at the point of suspension (§E.3.1).
-    /// The resumed handler continues against the same counter, so a
-    /// suspend/resume cycle that allocated near the ceiling faults on resume
-    /// with `MemoryExhausted` (matching the sync path).
-    pub allocated_bytes: u64,
     /// The register holding the awaited future handle at the point of suspension.
     /// The executor reads `registers[future_reg]` to obtain the future it must
     /// resolve, then resumes with the resolved value written to
@@ -316,12 +311,6 @@ fn async_deferred(
 }
 
 const ENTRY_GAS: u32 = 100_000;
-
-/// Per-dispatch allocation ceiling (spec §NFR-SEC-003, mlp-appendices §E.3.1).
-/// Canonical cost model: 8 bytes per record field, 8 bytes per list backing
-/// slot (charged on ALLOC_LIST), 8 bytes per LIST_PUSH. Fault fires when
-/// allocated >= MEMORY_CAP_BYTES. Mirrored in the Swift + Kotlin VMs.
-pub(crate) const MEMORY_CAP_BYTES: u64 = 16_000_000;
 /// Returns the byte offset of the instruction that follows `instr` in the program.
 #[must_use]
 fn next_offset(instr: &Instruction) -> u32 {
@@ -370,10 +359,9 @@ pub fn run_resumable_with_registry(
     regs[0] = payload;
     regs[15] = Value::Int(i64::from(ENTRY_GAS));
     let mut gas: u32 = ENTRY_GAS;
-    let mut allocated: u64 = 0;
 
     match exec_tail(
-        &program, &offsets, 0, &mut regs, &mut gas, &mut allocated, signals, strings, registry,
+        &program, &offsets, 0, &mut regs, &mut gas, signals, strings, registry,
     )? {
         ControlFlow::Halt => Ok(finish(regs, gas, signals)),
         ControlFlow::Suspend {
@@ -388,7 +376,6 @@ pub fn run_resumable_with_registry(
                 registers: regs,
                 gas_remaining: gas,
                 signals: written,
-                allocated_bytes: allocated,
                 future_reg,
                 result_reg,
             }))
@@ -436,9 +423,20 @@ pub fn resume_with_registry(
     let program = decode_program(&state.program)?;
     let offsets: Vec<u32> = program.iter().map(|i| i.offset).collect();
     let mut regs = state.registers;
+    // `SuspendState` has public fields, so a host-crafted state can name any
+    // byte as `result_reg`; writing it unvalidated would panic on the register
+    // file instead of surfacing a fault (same class as the `resume_ip` check
+    // inside `exec_tail`).
+    if usize::from(state.result_reg) >= 16 {
+        return Err(VmError::at(VmErrorKind::IndexOutOfBounds, state.resume_ip));
+    }
     regs[usize::from(state.result_reg)] = value;
+    // A crafted state claiming more remaining gas than a fresh entry could
+    // ever hold would later underflow `ENTRY_GAS - gas` in `finish`.
+    if state.gas_remaining > ENTRY_GAS {
+        return Err(VmError::at(VmErrorKind::GasExhausted, state.resume_ip));
+    }
     let mut gas = state.gas_remaining;
-    let mut allocated: u64 = state.allocated_bytes;
 
     match exec_tail(
         &program,
@@ -446,7 +444,6 @@ pub fn resume_with_registry(
         state.resume_ip,
         &mut regs,
         &mut gas,
-        &mut allocated,
         signals,
         strings,
         registry,
@@ -464,7 +461,6 @@ pub fn resume_with_registry(
                 registers: regs,
                 gas_remaining: gas,
                 signals: written,
-                allocated_bytes: allocated,
                 future_reg,
                 result_reg,
             }))
@@ -504,7 +500,6 @@ fn exec_tail(
     start_offset: u32,
     regs: &mut [Value; 16],
     gas: &mut u32,
-    allocated: &mut u64,
     signals: &mut impl SignalStore,
     strings: &StringTable,
     registry: &CapabilityRegistry,
@@ -742,11 +737,6 @@ fn exec_tail(
             Opcode::AllocRecord => {
                 let dst = instr.u8(0);
                 let count = usize::from(instr.u16(1));
-                // §E.3.1: 8 bytes per record field.
-                *allocated = allocated.saturating_add((count as u64) * 8);
-                if *allocated >= MEMORY_CAP_BYTES {
-                    return Err(VmError::at(VmErrorKind::MemoryExhausted, instr.offset));
-                }
                 // Reserve capacity only; fields are upserted by canonical
                 // `PropIdx` via `SET_FIELD` (see `set_field`). Records are
                 // keyed by `PropIdx`, not position, matching the wire layout.
@@ -772,21 +762,11 @@ fn exec_tail(
             }
             Opcode::AllocList => {
                 let cap = instr.u16(1);
-                // §E.3.1: 8 bytes per backing slot, charged on allocation.
-                *allocated = allocated.saturating_add(u64::from(cap) * 8);
-                if *allocated >= MEMORY_CAP_BYTES {
-                    return Err(VmError::at(VmErrorKind::MemoryExhausted, instr.offset));
-                }
                 regs[usize::from(instr.u8(0))] = Value::List(Vec::with_capacity(usize::from(cap)));
             }
             Opcode::ListPush => {
                 let list = instr.u8(0);
                 let val = reg!(instr.u8(1));
-                // §E.3.1: 8 bytes per pushed slot.
-                *allocated = allocated.saturating_add(8);
-                if *allocated >= MEMORY_CAP_BYTES {
-                    return Err(VmError::at(VmErrorKind::MemoryExhausted, instr.offset));
-                }
                 match &mut regs[usize::from(list)] {
                     Value::List(items) => items.push(val),
                     _ => return Err(VmError::at(VmErrorKind::TypeMismatch, instr.offset)),
@@ -808,10 +788,10 @@ fn exec_tail(
                 regs[usize::from(instr.u8(0))] = Value::List(items);
             }
             Opcode::ListInsert => {
-                // LIST_INSERT list(u8), idx_reg(u8), val_reg(u8): the index is
-                // a *register* holding an `Int`, matching LIST_GET and the
-                // emitter's `compile_list_method` (audit F1).
-                let idx = list_index(reg!(instr.u8(1)), instr.offset)?;
+                // LIST_INSERT list(u8), idx(u8), val(u8) — audit C11: the
+                // oracle read positions 2/3/1, one past the 3-byte operand
+                // window, panicking on any compiled insert.
+                let idx = usize::from(instr.u8(1));
                 let val = reg!(instr.u8(2));
                 let list = instr.u8(0);
                 match &mut regs[usize::from(list)] {
@@ -825,10 +805,8 @@ fn exec_tail(
                 }
             }
             Opcode::ListRemove => {
-                // LIST_REMOVE list(u8), idx_reg(u8): the index is a *register*
-                // holding an `Int`, matching LIST_GET and the emitter's
-                // `compile_list_method` (audit F1).
-                let idx = list_index(reg!(instr.u8(1)), instr.offset)?;
+                // LIST_REMOVE list(u8), idx(u8) — audit C11 (same off-by-one).
+                let idx = usize::from(instr.u8(1));
                 let list = instr.u8(0);
                 match &mut regs[usize::from(list)] {
                     Value::List(items) => {
@@ -946,7 +924,9 @@ fn finish(regs: [Value; 16], gas: u32, signals: &mut impl SignalStore) -> RunRes
     RunResult::Halt(VmOutcome {
         signals: out_signals,
         registers: regs,
-        gas_used: ENTRY_GAS - gas,
+        // `saturating_sub`: `resume` validates gas up front, but a defense in
+        // depth here keeps a future caller from underflowing in debug builds.
+        gas_used: ENTRY_GAS.saturating_sub(gas),
     })
 }
 
@@ -1006,10 +986,9 @@ pub fn run_with_registry(
     regs[0] = payload;
     regs[15] = Value::Int(i64::from(ENTRY_GAS));
     let mut gas: u32 = ENTRY_GAS;
-    let mut allocated: u64 = 0;
 
     match exec_tail(
-        &program, &offsets, 0, &mut regs, &mut gas, &mut allocated, signals, strings, registry,
+        &program, &offsets, 0, &mut regs, &mut gas, signals, strings, registry,
     )? {
         ControlFlow::Halt => {
             let out_signals = signals.snapshot();
@@ -1168,24 +1147,6 @@ fn expect_list_index(list: Value, idx: u8, off: u32) -> Result<(Vec<Value>, usiz
         return Err(VmError::at(VmErrorKind::IndexOutOfBounds, off));
     }
     Ok((items, i))
-}
-
-/// Reads a list index from a register: a non-negative `Int` that fits `usize`.
-///
-/// `LIST_INSERT` / `LIST_REMOVE` take the index from a register, not a
-/// literal — this mirrors `LIST_GET` (which has always used a register)
-/// and the bytecode emitter, whose `compile_list_method` passes the
-/// register holding the index value. Audit C11 got the *operand layout*
-/// right but kept the emitter's value semantics on the register number;
-/// this helper restores the intended meaning. A negative or oversized Int
-/// is `IndexOutOfBounds`; a non-Int is `TypeMismatch`.
-fn list_index(v: Value, off: u32) -> Result<usize, VmError> {
-    match v {
-        Value::Int(i) => {
-            usize::try_from(i).map_err(|_| VmError::at(VmErrorKind::IndexOutOfBounds, off))
-        }
-        _ => Err(VmError::at(VmErrorKind::TypeMismatch, off)),
-    }
 }
 
 /// Resolves a relative jump offset (relative to the *next* instruction) to a
