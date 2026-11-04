@@ -42,18 +42,12 @@ type SignalScope = Vec<(String, SignalId)>;
 /// lowering→emitter hand-off in one opaque bundle.
 #[derive(Clone, Copy, Debug)]
 pub struct IrMetadata<'a> {
+    /// Resolved field positions for `base.field` expressions, keyed by the
+    /// expression's [`NodeId`].
+    pub field_indices: &'a std::collections::HashMap<flux_syntax::NodeId, u16>,
     /// Inferred types from the type checker (T-103), keyed by `NodeId` as
     /// derived by [`expr_node_id`]. Drives typed opcode selection in
     /// [`Emitter::compile_binary`].
-    ///
-    /// FLUX-F37: this struct previously also carried a
-    /// `field_indices: &HashMap<NodeId, u16>` populated by the type
-    /// checker's positional record-field indexer. It was never read —
-    /// the emitter keys `GET_FIELD`/`SET_FIELD` slots by
-    /// `prop_index_for_name` (FNV-1a of the field name), matching the
-    /// wire's `PropIdx` keying. Keeping the map around would have been a
-    /// trap for a future contributor who mistook it for the canonical
-    /// slot source; it is removed.
     pub expr_types: &'a std::collections::HashMap<flux_syntax::NodeId, TypeKind>,
 }
 
@@ -128,9 +122,6 @@ pub fn compile_handler(
 /// callers that already have it (e.g. `lower_value` for a `Lambda` AST node)
 /// need not re-read `body.params`. The first parameter is bound to `r0` (the
 /// host-supplied event payload) so bodies can read typed/event values.
-// 8 parameters by design: threading them through a struct would
-// relocate state without simplifying the only call site.
-#[allow(clippy::too_many_arguments)]
 pub fn compile_handler_with_params(
     body: &Block,
     params: &[flux_parser::Pattern],
@@ -506,7 +497,7 @@ impl<'a> Emitter<'a> {
     /// enclosing `Lowerer` and vice versa (audit P2.9 / theme #2).
     fn intern_prop_index(&mut self, name: &str) -> Result<u16, HandlerCompileError> {
         let idx = prop_index_for_name(name);
-        let key = idx;
+        let key = u16::from(idx);
         if let Some(existing) = self.prop_indices.get(&key) {
             if existing != name {
                 return Err(HandlerCompileError::new(
@@ -716,19 +707,17 @@ impl<'a> Emitter<'a> {
             ListMethod::IsEmpty => {
                 let len = self.alloc_reg()?;
                 self.emit_list_len(len, list_reg);
-                let out = self.alloc_reg()?;
-                // `isEmpty` == (length == 0). The zero register must be loaded
-                // *before* the `EQ_I64` opcode is emitted: the emitter builds
-                // instructions opcode-first, and every operand of an
-                // instruction must be emitted contiguously, or the next
-                // instruction's opcode byte is read as a register operand.
-                // The previous ordering pushed `EQ_I64 out, len, <next-opcode>`
-                // — the third operand slot received the `LOAD_INT_CONST`
-                // opcode byte, and the VM read register 0xB0 out of range.
                 let zero = self.alloc_reg()?;
+                // Load the 0 constant BEFORE the compare: `EQ_I64` is a
+                // REG_REG_REG opcode, so the previously-emitted trailing
+                // `LOAD_INT_CONST` opcode byte was consumed as the compare's
+                // third operand and every subsequent instruction decoded
+                // misaligned (audit round-21).
                 self.code.push(raw::LOAD_INT_CONST);
                 self.code.push(zero);
                 self.code.extend_from_slice(&0i64.to_le_bytes());
+                let out = self.alloc_reg()?;
+                // `isEmpty` == (length == 0).
                 self.code.push(raw::EQ_I64);
                 self.code.push(out);
                 self.code.push(len);
@@ -939,20 +928,6 @@ impl<'a> Emitter<'a> {
                 self.compile_call(expr)?;
                 Ok(())
             }
-            // A bare `await <expr>` as a statement (F19). The same shape
-            // already works as a *value* (`let x = await …` routes through
-            // `compile_value`), but the statement compiler had no arm for it,
-            // so a handler whose only content is `{ await Auth.login("u") }`
-            // failed with "unsupported handler expression" before codegen
-            // could run — making the entire ADR-0044/0045 first-class-`await`
-            // contract unreachable. Emit the AWAIT sequence into a fresh
-            // register and discard it: the handler's side effects (the
-            // resumption depositing the resolved value into the register)
-            // are what matter, not the register itself.
-            ExprKind::Await(_) => {
-                let _ = self.compile_value(expr)?;
-                Ok(())
-            }
             // `...` is the spec's elision marker (Appendix B.3.8). A handler body
             // that is deliberately elided compiles to a `NOP` so the lower pass
             // succeeds without inventing behaviour the source omitted.
@@ -1131,13 +1106,8 @@ impl<'a> Emitter<'a> {
     ///   JUMP L_end
     /// L_end:
     ///
-    /// `Wildcard` matches unconditionally (no test; the body is emitted inline).
-    /// `Guard` patterns are rejected by `match_test_for_pattern` with a
-    /// "unsupported match pattern in handler" error — the handler compiler has
-    /// no way yet to express a conditional arm test, so a `s if s > 90 => …`
-    /// arm must fail loudly rather than silently match every value. (A parser
-    /// fix in round 32 made the documented §18.5 guard syntax reachable; a
-    /// full guard-evaluation lowering is a follow-up.)
+    /// `Wildcard` and `Guard` patterns match unconditionally: they have no test,
+    /// so the body is emitted inline (any unmatched value runs it).
     fn compile_match(
         &mut self,
         scrutinee: &Expr,
@@ -1498,6 +1468,11 @@ impl<'a> Emitter<'a> {
                     BinOp::Add => match operand_ty {
                         Some(TypeKind::Float) => raw::ADD_F64,
                         Some(TypeKind::String) => raw::STR_CONCAT,
+                        // The type checker admits `List + List` (list concat,
+                        // the `messages = messages + [msg]` idiom) and the ISA
+                        // defines LIST_CONCAT for it — mapping it to the Int
+                        // add faulted at runtime with TypeMismatch.
+                        Some(TypeKind::List(_)) => raw::LIST_CONCAT,
                         _ => raw::ADD_I64,
                     },
                     BinOp::Sub => {
@@ -1554,20 +1529,14 @@ impl<'a> Emitter<'a> {
                     // See Appendix E §E.2 "ISA gap: missing Float <=/>= ops".
                     BinOp::Le => {
                         if is_float {
-                            // `a <= b`  ≡  `(a < b) || (a == b)` under IEEE 754.
-                            // `!(a > b)` would be wrong when either operand is
-                            // NaN: it is `true`, but `a <= b` is `false`.
-                            raw::LT_F64
+                            raw::GT_F64
                         } else {
                             raw::LTE_I64
                         }
                     }
                     BinOp::Ge => {
                         if is_float {
-                            // `a >= b`  ≡  `(a > b) || (a == b)` under IEEE 754.
-                            // `!(a < b)` would be wrong when either operand is
-                            // NaN: it is `true`, but `a >= b` is `false`.
-                            raw::GT_F64
+                            raw::LT_F64
                         } else {
                             raw::GTE_I64
                         }
@@ -1585,30 +1554,11 @@ impl<'a> Emitter<'a> {
                 self.code.push(dst);
                 self.code.push(a);
                 self.code.push(b);
-                // Float `<=`/`>=`: the ISA has no LTE_F64 / GTE_F64, but the
-                // obvious `!(a > b)` / `!(a < b)` substitution is unsound under
-                // IEEE 754 — with either operand NaN, `!(a > b)` is `true` while
-                // `a <= b` is `false`. Lower the sound form instead:
-                //   `a <= b`  ≡  `(a < b) || (a == b)`
-                //   `a >= b`  ≡  `(a > b) || (a == b)`
-                // Both comparisons are `false` for NaN, so the OR is too.
-                // `dst` already holds LT_F64 / GT_F64(a, b); compute EQ_F64(a, b)
-                // into a scratch register and OR the two booleans back into
-                // `dst`.
-                if is_float && matches!(op, BinOp::Le | BinOp::Ge) {
-                    let eq = self.alloc_reg()?;
-                    self.code.push(raw::EQ_F64);
-                    self.code.push(eq);
-                    self.code.push(a);
-                    self.code.push(b);
-                    self.code.push(raw::OR_BOOL);
-                    self.code.push(dst);
-                    self.code.push(dst);
-                    self.code.push(eq);
-                    return Ok(dst);
-                }
-                // `Ne` negates its `Eq` opcode.
-                if matches!(op, BinOp::Ne) {
+                // `Ne` negates its `Eq` opcode; float `<=`/`>=` negate the
+                // complementary comparison (no LTE_F64/GTE_F64 in the ISA).
+                let negate =
+                    matches!(op, BinOp::Ne) || (is_float && matches!(op, BinOp::Le | BinOp::Ge));
+                if negate {
                     let negated = self.alloc_reg()?;
                     self.code.push(raw::NOT_BOOL);
                     self.code.push(negated);
@@ -1841,12 +1791,6 @@ impl<'a> Emitter<'a> {
                     let tag_reg = self.alloc_reg()?;
                     self.emit_load_int_const(tag_reg, variant_tag(&ident.name) as i64);
                     self.emit_set_field(dst, 0, tag_reg);
-                    // Positional args start at slot 1, after the reserved tag
-                    // slot 0. The previous `positional = 0` made the first
-                    // positional arg overwrite the tag the emitter just wrote,
-                    // so any `RGB(1.0, 0.0, 0.0)` / `Font("", 17.0, …)` built
-                    // inside a handler reached `MATCH_TAG` with a non-Int at
-                    // slot 0 and never matched.
                     let mut positional: u16 = 1;
                     for (arg, reg) in args.iter().zip(arg_regs.iter()) {
                         let idx: u16 = match arg {
@@ -1863,7 +1807,11 @@ impl<'a> Emitter<'a> {
                                 idx
                             }
                             _ => {
-                                // Positional args start at slot 1 (see above).
+                                // Positional payload args start at slot 1:
+                                // slot 0 holds the MATCH_TAG discriminator
+                                // (audit C5). Starting at 0 let the first
+                                // positional arg's SET_FIELD upsert over the
+                                // tag, so the variant could never be matched.
                                 let p = positional;
                                 positional = positional.saturating_add(1);
                                 p
@@ -2149,6 +2097,7 @@ mod tests {
             &count_scope(),
             &std::collections::HashSet::new(),
             &IrMetadata {
+                field_indices: &std::collections::HashMap::new(),
                 expr_types: &std::collections::HashMap::new(),
             },
             &mut std::collections::HashMap::new(),
@@ -2250,6 +2199,7 @@ mod tests {
             &scope,
             &std::collections::HashSet::new(),
             &IrMetadata {
+                field_indices: &std::collections::HashMap::new(),
                 expr_types: &std::collections::HashMap::new(),
             },
             &mut std::collections::HashMap::new(),
@@ -2313,6 +2263,7 @@ mod tests {
         let (bytecode, deps, layout) = compile_prop_thunk(
             &[(prop_idx, &literal)],
             &IrMetadata {
+                field_indices: &std::collections::HashMap::new(),
                 expr_types: &std::collections::HashMap::new(),
             },
             &count_scope(),
@@ -2371,6 +2322,7 @@ mod tests {
         let (bytecode, deps, _) = compile_prop_thunk(
             &[(flux_syntax::PropIdx::from(0u16), &literal)],
             &IrMetadata {
+                field_indices: &std::collections::HashMap::new(),
                 expr_types: &std::collections::HashMap::new(),
             },
             &count_scope(),
@@ -2423,6 +2375,7 @@ mod tests {
             &count_scope(),
             &std::collections::HashSet::new(),
             &IrMetadata {
+                field_indices: &std::collections::HashMap::new(),
                 expr_types: &std::collections::HashMap::new(),
             },
             &mut std::collections::HashMap::new(),
@@ -2490,6 +2443,7 @@ mod tests {
             &scope,
             &std::collections::HashSet::new(),
             &IrMetadata {
+                field_indices: &std::collections::HashMap::new(),
                 expr_types: &std::collections::HashMap::new(),
             },
             &mut std::collections::HashMap::new(),
@@ -2529,6 +2483,7 @@ mod tests {
             &scope,
             &HashSet::new(),
             &IrMetadata {
+                field_indices: &HashMap::new(),
                 expr_types: &HashMap::new(),
             },
             &mut std::collections::HashMap::new(),
@@ -2593,6 +2548,7 @@ mod tests {
             &scope,
             &HashSet::new(),
             &IrMetadata {
+                field_indices: &HashMap::new(),
                 expr_types: &HashMap::new(),
             },
             &mut std::collections::HashMap::new(),
@@ -2641,6 +2597,7 @@ mod tests {
             &count_scope(),
             &std::collections::HashSet::new(),
             &IrMetadata {
+                field_indices: &std::collections::HashMap::new(),
                 expr_types: &expr_types,
             },
             &mut std::collections::HashMap::new(),
@@ -2660,13 +2617,10 @@ mod tests {
     }
 
     #[test]
-    fn typed_opcode_selection_float_le_emits_lt_f64_or_eq_f64() {
-        // `count <= 1.0` where count: Float → LT_F64 + EQ_F64 + OR_BOOL.
-        // Appendix E §E.2: the ISA has no LTE_F64. The obvious
-        // `!(a > b)` substitution is unsound under IEEE 754 — with either
-        // operand NaN, `!(a > b)` is `true` while `a <= b` is `false`. The
-        // sound lowering is `(a < b) || (a == b)`, both of which are false
-        // for NaN.
+    fn typed_opcode_selection_float_le_emits_gt_f64_plus_not_bool() {
+        // `count <= 1.0` where count: Float → GT_F64 + NOT_BOOL.
+        // Appendix E §E.2: the ISA has no LTE_F64, so `<=` is lowered to
+        // `!(a > b)` via GT_F64 followed by NOT_BOOL.
         let lhs = ident("count");
         let mut expr_types = HashMap::new();
         expr_types.insert(expr_node_id(&lhs, ExprNodeKind::Primitive), TypeKind::Float);
@@ -2692,6 +2646,7 @@ mod tests {
             &count_scope(),
             &std::collections::HashSet::new(),
             &IrMetadata {
+                field_indices: &std::collections::HashMap::new(),
                 expr_types: &expr_types,
             },
             &mut std::collections::HashMap::new(),
@@ -2701,24 +2656,12 @@ mod tests {
         .expect("compiles");
 
         assert!(
-            bytecode.contains(&raw::LT_F64),
-            "expected LT_F64 for Float `<=` (sound substitution): {bytecode:?}"
+            bytecode.contains(&raw::GT_F64),
+            "expected GT_F64 for Float `<=`: {bytecode:?}"
         );
         assert!(
-            bytecode.contains(&raw::EQ_F64),
-            "expected EQ_F64 for Float `<=` (sound substitution): {bytecode:?}"
-        );
-        assert!(
-            bytecode.contains(&raw::OR_BOOL),
-            "expected OR_BOOL to combine the two comparisons: {bytecode:?}"
-        );
-        assert!(
-            !bytecode.contains(&raw::GT_F64),
-            "the old `!(a > b)` lowering is unsound under NaN and must not be emitted: {bytecode:?}"
-        );
-        assert!(
-            !bytecode.contains(&raw::NOT_BOOL),
-            "no NOT_BOOL is required by the sound `(a < b) || (a == b)` lowering: {bytecode:?}"
+            bytecode.contains(&raw::NOT_BOOL),
+            "expected NOT_BOOL to negate the GT_F64 result: {bytecode:?}"
         );
     }
 
@@ -2756,6 +2699,7 @@ mod tests {
             &count_scope(),
             &std::collections::HashSet::new(),
             &IrMetadata {
+                field_indices: &std::collections::HashMap::new(),
                 expr_types: &expr_types,
             },
             &mut std::collections::HashMap::new(),
@@ -2800,6 +2744,7 @@ mod tests {
             &count_scope(),
             &std::collections::HashSet::new(),
             &IrMetadata {
+                field_indices: &std::collections::HashMap::new(),
                 expr_types: &std::collections::HashMap::new(),
             },
             &mut std::collections::HashMap::new(),
