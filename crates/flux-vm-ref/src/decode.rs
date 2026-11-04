@@ -93,13 +93,95 @@ impl Instruction {
     }
 }
 
+/// Size of the register file (`[Value; 16]`, Appendix E §E.1). Register
+/// operand bytes must index below this or every handler's `regs[usize::from(..)]`
+/// would panic with an index-out-of-bounds instead of surfacing a `VmError`.
+const REGISTER_FILE_SIZE: u8 = 16;
+
+/// Returns the operand-byte positions that hold register indices for `opcode`.
+///
+/// Every position listed here is read as `regs[usize::from(instr.u8(pos))]` by
+/// the interpreter. Most opcodes keep registers in their leading `u8`s; the
+/// exceptions are the `REG_U16_REG` shapes (`GET_FIELD`/`SET_FIELD`/
+/// `EXTRACT_FIELD`: trailing source register at position 3), `CALL_CAP`
+/// (`reg, u32, u16, reg`: trailing args register at position 7) and
+/// `WRITE_SIGNAL` (`u32 signal id, u8 src`: register at position 4).
+fn register_operand_positions(opcode: Opcode) -> &'static [usize] {
+    match opcode {
+        Opcode::Halt | Opcode::Nop | Opcode::Jump | Opcode::GasCheck => &[],
+        Opcode::LoadNull
+        | Opcode::AllocRecord
+        | Opcode::AllocList
+        | Opcode::LoadBoolConst
+        | Opcode::LoadIntConst
+        | Opcode::LoadFloatConst
+        | Opcode::LoadStrConst
+        | Opcode::StrIntern
+        | Opcode::ListClear
+        | Opcode::ReadSignal
+        | Opcode::CondJump
+        | Opcode::CondJumpNot
+        | Opcode::MatchTag => &[0],
+        Opcode::NegI64
+        | Opcode::NegF64
+        | Opcode::I64ToF64
+        | Opcode::F64ToI64
+        | Opcode::NotBool
+        | Opcode::StrLen
+        | Opcode::Mov
+        | Opcode::ToString
+        | Opcode::ListLen
+        | Opcode::ListRemove
+        | Opcode::ListRemoveItem
+        | Opcode::IsNull
+        | Opcode::ListPush
+        | Opcode::Await => &[0, 1],
+        Opcode::AddI64
+        | Opcode::SubI64
+        | Opcode::MulI64
+        | Opcode::DivI64
+        | Opcode::ModI64
+        | Opcode::EqI64
+        | Opcode::LtI64
+        | Opcode::GtI64
+        | Opcode::LteI64
+        | Opcode::GteI64
+        | Opcode::AddF64
+        | Opcode::SubF64
+        | Opcode::MulF64
+        | Opcode::DivF64
+        | Opcode::EqF64
+        | Opcode::LtF64
+        | Opcode::GtF64
+        | Opcode::AndBool
+        | Opcode::OrBool
+        | Opcode::StrConcat
+        | Opcode::StrEq
+        | Opcode::RecordEq
+        | Opcode::ListGet
+        | Opcode::ListConcat
+        | Opcode::ListInsert
+        | Opcode::BoolEq => &[0, 1, 2],
+        Opcode::WriteSignal => &[4],
+        Opcode::GetField | Opcode::SetField | Opcode::ExtractField => &[0, 3],
+        Opcode::CallCap => &[0, 7],
+        // `Opcode` is `#[non_exhaustive]` in `flux-syntax`, so a foreign match
+        // needs a wildcard arm even with every current variant covered.
+        // Unreachable in practice: `Opcode::from_byte` only yields known
+        // variants, and any *new* opcode must update this table with its real
+        // register positions.
+        _ => &[],
+    }
+}
+
 /// Decodes a whole program into a vector of instructions.
 ///
 /// # Errors
 ///
 /// Returns [`VmErrorKind::InvalidDispatch`] at the first byte that is not a valid
-/// opcode, or [`VmErrorKind::IndexOutOfBounds`] if the program is truncated
-/// (an instruction's operand bytes run past the end of the buffer).
+/// opcode, [`VmErrorKind::IndexOutOfBounds`] if the program is truncated
+/// (an instruction's operand bytes run past the end of the buffer) or if a
+/// register operand indexes at or beyond the 16-register file.
 pub fn decode_program(bytes: &[u8]) -> Result<Vec<Instruction>, VmError> {
     let mut instrs = Vec::with_capacity(bytes.len() / 2);
     let mut ip = 0usize;
@@ -117,6 +199,14 @@ pub fn decode_program(bytes: &[u8]) -> Result<Vec<Instruction>, VmError> {
         }
         let mut operands = [0u8; 9];
         operands[..n].copy_from_slice(&bytes[start..end]);
+        // Validate register operands up front so `exec_tail` can index `regs`
+        // without re-checking: a crafted or corrupted bytecode blob must fault
+        // with a `VmError`, never panic the interpreter (fuzz charter).
+        for &pos in register_operand_positions(opcode) {
+            if operands[pos] >= REGISTER_FILE_SIZE {
+                return Err(VmError::at(VmErrorKind::IndexOutOfBounds, offset));
+            }
+        }
         instrs.push(Instruction {
             opcode,
             offset,
