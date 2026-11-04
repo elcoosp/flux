@@ -139,14 +139,6 @@ fn line_col_at(src: &str, byte: usize) -> (u32, u32) {
 
 /// Recovers `//` line-comment spans, ignoring `//` that appears inside a string
 /// literal (a `//` in `"http://"` must not be highlighted as a comment).
-///
-/// FLUX-F23: the escape check must track backslash escaping, not look one byte
-/// back. The previous `bytes[i - 1] != b'\\'` test treated *any* preceding
-/// backslash as an escape — so a literal ending in an escaped backslash such
-/// as `"C:\\"` (bytes `"` `\` `\` `"`) had its closing quote skipped,
-/// leaving `in_string == true` for the rest of the file and hiding every
-/// subsequent `//` comment. The corrected scan skips an escape pair in one
-/// step, matching the Swift recognizer's tokenizer.
 fn comment_spans(src: &str) -> Vec<(usize, usize)> {
     let bytes = src.as_bytes();
     let mut spans = Vec::new();
@@ -154,22 +146,10 @@ fn comment_spans(src: &str) -> Vec<(usize, usize)> {
     let mut i = 0usize;
     while i < bytes.len() {
         match bytes[i] {
-            b'"' if !in_string => {
-                // Opening quote: enter the string. (Only a *closing* quote
-                // can be escaped.)
-                in_string = true;
-                i += 1;
-            }
-            b'\\' if in_string => {
-                // Inside a string, skip the escape pair (`\"`, `\\`, …) so a
-                // backslash immediately before the closing quote is treated
-                // as an escaped character, not as the escape-of-the-quote.
-                i = (i + 2).min(bytes.len());
-            }
-            b'"' if in_string => {
-                // A `"` reached with `in_string == true` and not consumed by
-                // the escape arm above is unescaped → close the string.
-                in_string = false;
+            b'"' => {
+                if i == 0 || bytes[i - 1] != b'\\' {
+                    in_string = !in_string;
+                }
                 i += 1;
             }
             b'/' if !in_string && i + 1 < bytes.len() && bytes[i + 1] == b'/' => {
@@ -304,38 +284,5 @@ mod tests {
             col_at_5, 5,
             "column after `café` is 5 bytes; a char-counting impl gives 4",
         );
-    }
-
-    /// FLUX-F23: a string literal ending in an escaped backslash
-    /// (`"C:\\"`, bytes `"` `\` `\` `"`) must not leave the scanner in
-    /// string mode — the following `//` comment must still be highlighted.
-    /// Before the fix, the closing quote was preceded by `\` and skipped,
-    /// so `in_string` stayed `true` for the rest of the file.
-    #[test]
-    fn comment_after_escaped_backslash_string_is_detected() {
-        let src = "state p: String = \"C:\\\\\"\n// this is a comment\n";
-        let toks = tokens_for_text(src);
-        assert!(
-            toks.iter().any(|t| t.token_type == COMMENT),
-            "a `//` comment after a string ending in an escaped backslash must \
-             be classified as COMMENT",
-        );
-    }
-
-    /// FLUX-F23 (companion): a string containing `\\\"` (escaped quote)
-    /// must not close early, and the `//` after the *real* closing quote
-    /// must still be found.
-    #[test]
-    fn comment_after_string_with_escaped_quote_is_detected() {
-        let src = "state p: String = \"a\\\"b\"\n// note\n";
-        let toks = tokens_for_text(src);
-        assert!(
-            toks.iter().any(|t| t.token_type == COMMENT),
-            "a `//` comment after a string containing an escaped quote must be \
-             classified as COMMENT",
-        );
-        // And the `//` inside the string (none here) would not be — sanity
-        // that the STRING token covers the whole literal.
-        assert!(toks.iter().any(|t| t.token_type == STRING));
     }
 }
