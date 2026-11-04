@@ -118,13 +118,9 @@ class IsaConformanceVmTest {
                 if (expectedGas >= 0 && out.gasUsed.toInt() != expectedGas) {
                     failures += "$name: gas ${out.gasUsed} != expected $expectedGas"
                 }
-                // `expected_signals` describes the store's final state, not the
-                // VM's write set: a READ-only vector (`read_signal_basic`) has an
-                // expected signal that the handler never wrote, and the Rust and
-                // Swift conformance suites both read the store directly. Reading
-                // `out.signals` (the write set) here was the outlier.
+                val finalSignals = out.signals.toMap()
                 vector.optJSONArray("expected_signals")?.toSignalSeeds().orEmpty().forEach { (id, raw) ->
-                    val got = signals.read(id)
+                    val got = finalSignals[id]
                     if (got == null) {
                         failures += "$name: signal $id missing"
                     } else if (!valueMatches(got, raw)) {
