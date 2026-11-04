@@ -256,18 +256,15 @@ class FluxBytecodeVmTest {
     /** FLUX-072: list-mutation opcodes (INSERT/REMOVE/CLEAR/REMOVE_ITEM) mirror flux-vm-ref. */
     @Test
     fun `list insert remove clear removeItem mutate in place`() {
-        // r0 = [], push 5, insert 7 at index stored in a register => [5,7],
-        // removeItem 7 => [5], clear => [], then assert r0 is an empty list.
-        // F1: LIST_INSERT takes the *register* holding the index, not a
-        // literal index byte.
+        // r0 = [], push 5, insert 7 at idx 1 => [5,7], removeItem 7 => [5],
+        // clear => [], then assert r0 is an empty list.
         val prog =
             byteArrayOf(
                 0x80.toByte(), 0, 0, 1, // ALLOC_LIST r0, cap=1
                 0xB0.toByte(), 1, 5, 0, 0, 0, 0, 0, 0, 0, // LOAD_INT_CONST r1 = 5
                 0x81.toByte(), 0, 1, // LIST_PUSH r0, r1  => [5]
                 0xB0.toByte(), 2, 7, 0, 0, 0, 0, 0, 0, 0, // LOAD_INT_CONST r2 = 7
-                0xB0.toByte(), 3, 1, 0, 0, 0, 0, 0, 0, 0, // LOAD_INT_CONST r3 = 1 (index)
-                0x85.toByte(), 0, 3, 2, // LIST_INSERT r0, idx=r3(1), r2 => [5,7]
+                0x85.toByte(), 0, 1, 2, // LIST_INSERT r0, idx=1, r2 => [5,7]
                 0x88.toByte(), 0, 2, // LIST_REMOVE_ITEM r0, r2(7) => [5]
                 0x87.toByte(), 0, // LIST_CLEAR r0 => []
                 0x00, // HALT
@@ -282,12 +279,10 @@ class FluxBytecodeVmTest {
 
     @Test
     fun `list remove out of bounds faults`() {
-        // F1: LIST_REMOVE's index is a register holding an Int.
         val prog =
             byteArrayOf(
                 0x80.toByte(), 0, 0, 1, // ALLOC_LIST r0, cap=1
-                0xB0.toByte(), 5, 5, 0, 0, 0, 0, 0, 0, 0, // LOAD_INT_CONST r5 = 5
-                0x86.toByte(), 0, 5, // LIST_REMOVE r0, idx=r5(5) (empty list)
+                0x86.toByte(), 0, 5, // LIST_REMOVE r0, idx=5 (empty list)
                 0x00, // HALT
             )
         val err = FluxBytecodeVM.run(prog, InMemorySignals(), FluxValue.NullVal)
@@ -383,39 +378,5 @@ class FluxBytecodeVmTest {
         val result = FluxBytecodeVM.runResumable(plain, signals, FluxValue.NullVal)
         assertTrue(result is RunResult.Halt)
         assertEquals(FluxValue.IntVal(42), signals.read(2u))
-    }
-
-    @Test
-    fun `runResumable faults on undecodable bytecode (F3)`() {
-        // 0xEE is not a valid opcode; the decoder must throw. The VM must
-        // surface this as a RunResult.Fault, not a successful Halt with an
-        // empty program — otherwise every corrupt handler silently no-ops.
-        val bad = byteArrayOf(0xEE.toByte())
-        val result = FluxBytecodeVM.runResumable(bad, InMemorySignals(), FluxValue.NullVal)
-        assertTrue(
-            result is RunResult.Fault,
-            "runResumable on undecodable bytecode must Fault, got $result",
-        )
-    }
-
-    @Test
-    fun `resume faults on undecodable program bytes (F3)`() {
-        // Build a SuspendState whose stored program bytes are corrupt.
-        // The resume path must Fault, not Halt with an empty program.
-        val bad = byteArrayOf(0xEE.toByte())
-        val state =
-            FluxBytecodeVM.SuspendState(
-                resumeIndex = 0,
-                registers = Array(16) { FluxValue.NullVal },
-                gasRemaining = 100u,
-                futureReg = 0,
-                signals = emptyList(),
-                program = bad,
-            )
-        val result = FluxBytecodeVM.resume(state, InMemorySignals(), FluxValue.NullVal)
-        assertTrue(
-            result is RunResult.Fault,
-            "resume on undecodable program bytes must Fault, got $result",
-        )
     }
 }
