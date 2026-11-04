@@ -1,7 +1,0 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
-cc 84e0045d52e78c63a5a7c897404215604c4c5a0980cf2ecab9c8fe8b4269a2f8 # shrinks to node = Node { id: 7, kind: Component, component_id: 0, props: Props { fields: [], hash: 14695981039346656037 }, children: [Node(99)], handlers: [], span: Span { file_id: 0, start: 0, end: 0 } }
