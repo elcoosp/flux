@@ -373,10 +373,9 @@ private fun RenderImage(
             .then(height?.let { Modifier.height(it) } ?: Modifier.fillMaxWidth())
             .then(if (width == null && height == null) Modifier.fillMaxWidth() else Modifier)
 
-    val currentBitmap = bitmap
-    if (currentBitmap != null) {
+    if (bitmap != null) {
         androidx.compose.foundation.Image(
-            bitmap = currentBitmap,
+            bitmap = bitmap!!,
             contentDescription = null,
             contentScale = resizeMode,
             modifier = modifier,
