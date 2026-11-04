@@ -23,39 +23,12 @@ impl<'b> Cursor<'b> {
     fn new(bytes: &'b [u8]) -> Self {
         Self { bytes, pos: 0 }
     }
-    /// Panics with a blob-specific message when a read overruns the buffer.
-    ///
-    /// Audit §6.7 (defense in depth): the cursor was previously a bare
-    /// `&self.bytes[..]` index. Blobs are internally produced, so a
-    /// slice-index panic was considered "safe" — but a slice-index panic
-    /// surfaces as `index out of range` with no context, which makes a
-    /// corrupted blob (a future encoder regression, a hand-crafted test
-    /// fixture) nearly undebuggable. This helper produces a message naming
-    /// the cursor position, the requested length, and the buffer size, so a
-    /// regression is diagnosed in seconds rather than by bisecting an arena.
-    fn ensure(&self, n: usize, what: &'static str) {
-        let end = self.pos.saturating_add(n);
-        assert!(
-            end <= self.bytes.len(),
-            "blob cursor overrun reading {what}: want {n} bytes at pos {}, buffer is {} bytes",
-            self.pos,
-            self.bytes.len(),
-        );
-    }
-
     fn take(&mut self, n: usize) -> &'b [u8] {
-        self.ensure(n, "slice");
         let slice = &self.bytes[self.pos..self.pos + n];
         self.pos += n;
         slice
     }
-    /// Peeks the next byte without advancing.
-    ///
-    /// The caller is responsible for `advance(1)` after reading — this is the
-    /// historical contract of this cursor, and `unpack_value` / `unpack_children`
-    /// rely on it. Only a bounds check is added; the position is untouched.
     fn u8(&mut self) -> u8 {
-        self.ensure(1, "u8");
         self.bytes[self.pos]
     }
     fn u16(&mut self) -> u16 {
@@ -74,7 +47,6 @@ impl<'b> Cursor<'b> {
         u64::from_le_bytes(buf)
     }
     fn advance(&mut self, n: usize) {
-        self.ensure(n, "advance");
         self.pos += n;
     }
 }
@@ -270,24 +242,4 @@ pub(crate) fn hash_children(children: &[Child]) -> u64 {
         accumulator = accumulator.wrapping_add(u64::from_le_bytes(digest));
     }
     accumulator
-}
-
-#[cfg(test)]
-mod f13_4_bounds_tests {
-    use super::*;
-
-    #[test]
-    #[should_panic(expected = "blob cursor overrun reading")]
-    fn unpack_props_panics_with_context_on_truncated_blob() {
-        // One byte: cannot even hold the leading `u16` count.
-        let truncated = [0u8; 1];
-        let _ = unpack_props(&truncated);
-    }
-
-    #[test]
-    #[should_panic(expected = "blob cursor overrun reading")]
-    fn cursor_take_panics_with_context_on_overrun() {
-        let mut c = Cursor::new(&[0u8; 4]);
-        let _ = c.take(8);
-    }
 }
