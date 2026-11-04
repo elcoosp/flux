@@ -610,18 +610,7 @@ fn generated_kotlin_parses() {
     // collides with `kotlin.collections.List`). The previous version
     // concatenated every example into ONE file and produced noise that hid
     // the real codegen defects (audit §8).
-    //
-    // Round-38: write the generated files into a *per-process* scratch dir.
-    // Before this fix the test wrote `flux_codegen_kotlin_<name>.kt` directly
-    // under `std::env::temp_dir()`, so two concurrent `cargo test`
-    // invocations (a still-running prior run, or a CI matrix that fans out
-    // this binary) shared the same filename: one process would
-    // `std::fs::remove_file` the file while the other's long-running
-    // `kotlinc` was still reading it, and kotlinc reported
-    // "source file or directory not found". Per-pid isolation removes the
-    // collision. (Flake surfaced in round 37's full-workspace sweep.)
-    let dir = std::env::temp_dir().join(format!("flux_codegen_kotlin_{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("create per-pid scratch dir");
+    let dir = std::env::temp_dir();
     let mut failures: Vec<(String, String)> = Vec::new();
     for (name, src) in examples() {
         // The generated code is a complete `.kt` file: it already emits its
@@ -962,4 +951,63 @@ fn flux_043_theme_extension_codegen() {
             token.name
         );
     }
+}
+
+/// Audit fix (HIGH): the shared emitter hardcoded the Swift
+/// `struct Name { let f: T }` spelling for record declarations, so a first-class
+/// `record` was emitted verbatim into Kotlin, where `struct`/`let` do not
+/// compile. Kotlin must emit a `data class` with `val` parameters instead.
+#[test]
+fn record_decl_emits_data_class() {
+    let src = "record Task { label: String, done: Bool }\ncompo Todo\n  state tasks: List[Task] = []\n  Text(\"todo\")\n\n";
+    let out = codegen_example("record_decl", src);
+    assert!(
+        out.contains("data class Task(val label: String, val done: Boolean)"),
+        "record must emit a Kotlin data class:\n{out}"
+    );
+    assert!(
+        !out.contains("struct Task"),
+        "Swift struct spelling must not leak into Kotlin:\n{out}"
+    );
+}
+
+/// Audit fix (HIGH): `Option[T]` rendered as `Option<T>` and `Map[K, V]` as
+/// `Map<K, V>` in BOTH backends. `Option<T>` is invalid Kotlin (needs `T?`);
+/// `Map<K, V>` happens to be right for Kotlin, so pin that spelling too.
+#[test]
+fn option_and_map_types_render_native_kotlin() {
+    let src =
+        "compo Hold(m: Map[String, Int])\n  state maybe: Option[Int] = Null\n  Text(\"hold\")\n\n";
+    let out = codegen_example("option_map_types", src);
+    assert!(
+        out.contains("mutableStateOf<Int?>"),
+        "Option[Int] state must render as `Int?`:\n{out}"
+    );
+    assert!(
+        out.contains("m: Map<String, Int>"),
+        "Map[String, Int] prop must render as `Map<String, Int>`:\n{out}"
+    );
+    assert!(
+        !out.contains("Option<"),
+        "invalid `Option<T>` spelling must not reach Kotlin output:\n{out}"
+    );
+}
+
+/// Security audit fix (HIGH): an unknown `curve` name is arbitrary user text
+/// that used to be spliced verbatim into the generated Kotlin
+/// (`animationSpec = <payload>`), a code-injection point. Unknown curves must
+/// fall back to the safe `tween()` default, mirroring the Swift backend.
+#[test]
+fn unknown_animation_curve_never_lands_verbatim() {
+    let payload = "0f); evil()(y";
+    let src = format!("compo A\n  Animate(curve: \"{payload}\") {{\n    Text(\"x\")\n  }}\n\n");
+    let out = codegen_example("animate_unknown_curve", &src);
+    assert!(
+        !out.contains("evil"),
+        "injected curve text must not reach the generated Kotlin:\n{out}"
+    );
+    assert!(
+        out.contains("tween()"),
+        "unknown curve must fall back to the tween() default:\n{out}"
+    );
 }
