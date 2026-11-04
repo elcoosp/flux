@@ -68,35 +68,6 @@ impl Checker {
             .filter_map(|name| sub.env.lookup(&name).map(|b| (name, b.clone())))
             .collect();
 
-        // A `use` path may be a bare module (`use theme`), a selective
-        // import (`use theme::red`), or a glob (`use theme::*`). Paths with
-        // more than two segments (`use a::b::c`) would require a nested-
-        // module loader, which the current loader signature
-        // (`Fn(name) -> Option<String>`) cannot express. Before this
-        // rejection, a 3+ segment path silently fell into the `else`
-        // branch and behaved as `use a` — globbing *every* export of the
-        // first module into the caller's scope, including names the user
-        // never asked for. Reject explicitly rather than silently leak.
-        if use_decl.segments.len() > 2 {
-            return Err(TypeError::new(
-                format!(
-                    "nested module paths are not yet supported: \
-                     `use {}`",
-                    use_decl
-                        .segments
-                        .iter()
-                        .map(|s| s.name.as_str())
-                        .collect::<Vec<_>>()
-                        .join("::"),
-                ),
-                span,
-            )
-            .with_hint(
-                "use at most two segments (`use module::symbol` or \
-                 `use module::*`); nested modules need a loader extension"
-                    .to_owned(),
-            ));
-        }
         if use_decl.glob {
             for (name, binding) in &exports {
                 self.env.insert(name.clone(), binding.clone());
@@ -179,27 +150,6 @@ fn export_name(decl: &Decl) -> Option<String> {
 /// recorded node id of the declaration and its inferred type.
 pub fn check_decl(checker: &mut Checker, decl: &Decl) -> Result<(NodeId, TcType), TypeError> {
     let span = decl.span();
-    // Reject any declaration whose name is reserved in a codegen target
-    // language (Swift or Kotlin). The two backends emit a Flux name verbatim
-    // as a native identifier (`struct {name}: View`, `@State var {name}`), so a
-    // component named `class` or `func` used to produce source that fails the
-    // native `swiftc -typecheck` / `kotlinc` step with an obscure error. Surface
-    // it here, before lowering, with a clear rename hint.
-    if let Some((name, name_span)) = super::reserved::decl_name(decl) {
-        if super::reserved::is_reserved(name) {
-            return Err(TypeError::new(
-                format!(
-                    "`{name}` is a reserved identifier in Swift / Kotlin and cannot be \
-                     emitted as a native name",
-                ),
-                name_span,
-            )
-            .with_hint(format!(
-                "rename the declaration (e.g. `{name}_`); the Swift and Kotlin \
-                 codegen backends use Flux names verbatim",
-            )));
-        }
-    }
     match decl {
         Decl::Type(_) => {
             // Already collected.
