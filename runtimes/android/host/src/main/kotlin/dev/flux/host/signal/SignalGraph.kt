@@ -44,13 +44,6 @@ public class SignalGraph : SignalStore {
     private val states = LinkedHashMap<UInt, CellState>()
     private var nextCell: UInt = 1_000_000u
 
-    /**
-     * Signals explicitly `write`-ten since the last [beginRun] (F2). Only these
-     * appear in [snapshot]; seeds and `resolveCell` results do not, matching the
-     * Rust oracle's `written` set.
-     */
-    private val writtenSinceRun = LinkedHashMap<UInt, FluxValue>()
-
     /** Returns the current value of [id], or `null` when unbound. */
     override fun read(id: UInt): FluxValue? = values[id]
 
@@ -63,7 +56,7 @@ public class SignalGraph : SignalStore {
     }
 
     /** Marks [id] as [CellState.Error] with [message]; the future resolved with a fault. */
-    public override fun markError(
+    public fun markError(
         id: UInt,
         message: String,
     ) {
@@ -94,23 +87,10 @@ public class SignalGraph : SignalStore {
         // A successful write resolves any pending/error cell back to Ready.
         states[id] = CellState.Ready
         pending.add(id)
-        writtenSinceRun[id] = value
     }
 
-    /**
-     * Signals **written since the last [beginRun]**, sorted by id (F2).
-     *
-     * Returns only explicit `write`s — not seeded cells and not resolved result
-     * cells — so a dispatch's reported write set matches the Rust oracle and
-     * drives the reconciler's dirty subset correctly.
-     */
-    override fun snapshot(): List<Pair<UInt, FluxValue>> =
-        writtenSinceRun.entries.sortedBy { it.key }.map { (k, v) -> k to v }
-
-    /** Starts a new handler run: [snapshot] reports only writes after this call. */
-    override fun beginRun() {
-        writtenSinceRun.clear()
-    }
+    /** Returns every written signal as a sorted `(id, value)` list. */
+    override fun snapshot(): List<Pair<UInt, FluxValue>> = values.entries.sortedBy { it.key }.map { (k, v) -> k to v }
 
     /** Seeds many signals at once (Init / StateDelta). */
     public fun seed(cells: Iterable<Pair<UInt, FluxValue>>) {
