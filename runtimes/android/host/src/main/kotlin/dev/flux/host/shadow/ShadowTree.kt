@@ -442,16 +442,11 @@ public class ShadowTree(
         executor: FluxExecutor,
     ) {
         val childIds = patchIndex.values.flatMap { childIdList(it) }.toSet()
-        // F7: a delta frame may carry multiple parentless roots or none. Reject
-        // the frame rather than picking an arbitrary root or crashing.
-        val roots = patchIndex.keys.filter { it !in childIds }
-        if (roots.size != 1) return
-        val rootId = roots.first()
+        val rootId = patchIndex.keys.firstOrNull { it !in childIds } ?: return
         root?.let { destroySubtree(it) }
         nodes.clear()
         parents.clear()
-        val rootNode = patchIndex[rootId] ?: return
-        val newRoot = build(rootNode, patchIndex, executor, depth = 0u)
+        val newRoot = build(patchIndex[rootId]!!, patchIndex, executor, depth = 0u)
         root = newRoot
         collect(newRoot)
         thunkHandlerToNode.entries.removeIf { it.value !in nodes }
@@ -544,7 +539,7 @@ public class ShadowTree(
                 // in-memory adapter views, so geometry (frame) is unavailable here
                 // — it is filled by the platform shell (ADR-0048). `null` still
                 // records node presence in the DevTools state.
-                if (BuildFlags.DEBUG && TelemetryBridge.sink != null) {
+                if (TelemetryBridge.sink != null) {
                     TelemetryBridge.emit(
                         TelemetryEvent.ViewMutation(
                             nodeId = node.id,
@@ -580,7 +575,7 @@ public class ShadowTree(
                 // DevTools: report the newly-created node so the component tree
                 // shows the live node graph (geometry is unavailable in the
                 // Android-free host crate; the shell fills it — ADR-0048).
-                if (BuildFlags.DEBUG && TelemetryBridge.sink != null) {
+                if (TelemetryBridge.sink != null) {
                     TelemetryBridge.emit(
                         TelemetryEvent.ViewMutation(
                             nodeId = built.id,
@@ -606,7 +601,7 @@ public class ShadowTree(
                 emitTrace(TraceEvent.Detach(seq = lastSeq, id = patch.id))
                 // DevTools: report the removed node (mutation_kind 1) so the
                 // component tree drops it from the live node graph.
-                if (BuildFlags.DEBUG && TelemetryBridge.sink != null) {
+                if (TelemetryBridge.sink != null) {
                     TelemetryBridge.emit(
                         TelemetryEvent.ViewMutation(
                             nodeId = patch.id,
