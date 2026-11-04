@@ -15,7 +15,7 @@
 
 use std::collections::HashMap;
 
-use flux_parser::{Block, Expr, TypeDecl};
+use flux_parser::{Block, Expr, RecordDecl, TypeDecl};
 
 use crate::emitter::Emitter;
 use crate::model::ComponentMeta;
@@ -206,6 +206,23 @@ pub trait Backend {
         format!("List<{element}>")
     }
 
+    /// Renders the native spelling of the `Option[T]` type. Both hosts spell
+    /// optionality with a trailing `?` (`Int?`); the surface `Option[Int]`
+    /// generic form is invalid in Swift and Kotlin alike, so this default is
+    /// shared and no backend overrides it.
+    #[must_use]
+    fn option_type(inner: &str) -> String {
+        format!("{inner}?")
+    }
+
+    /// Renders the native spelling of the `Map[K, V]` type (`Map<K, V>` for
+    /// Kotlin, the dictionary literal `[K: V]` for Swift). The default is the
+    /// generic angle-bracket form; Swift overrides it.
+    #[must_use]
+    fn map_type(key: &str, value: &str) -> String {
+        format!("Map<{key}, {value}>")
+    }
+
     /// Renders a `Spacer` leaf (e.g. `Spacer()` for SwiftUI, `Spacer("")` for Compose).
     #[must_use]
     fn spacer() -> &'static str {
@@ -322,6 +339,17 @@ pub trait Backend {
 
     /// Emits one algebraic data type as a native `sealed`/`enum` declaration.
     fn emit_sum_type(em: &mut Emitter<'_, Self>, sum: &TypeDecl)
+    where
+        Self: Sized;
+
+    /// Emits one `record` (product type) declaration as a native product type.
+    /// The spellings diverge (`struct Name { let f: T }` in Swift vs
+    /// `data class Name(val f: T, …)` in Kotlin), so — like
+    /// [`emit_sum_type`](Backend::emit_sum_type) — this is a required hook: the
+    /// shared emitter used to hardcode the Swift `struct` form for BOTH
+    /// backends, splicing invalid Swift syntax into every generated Kotlin
+    /// file that declared a record.
+    fn emit_record_type(em: &mut Emitter<'_, Self>, record: &RecordDecl)
     where
         Self: Sized;
 
