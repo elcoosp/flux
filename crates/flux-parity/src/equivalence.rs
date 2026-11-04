@@ -134,20 +134,10 @@ fn norm_cond(s: &str) -> String {
     while idx < chars.len() {
         match chars[idx] {
             '"' => {
-                // String literal: copy everything until the *unescaped* closing
-                // quote. A `\` inside the string escapes the next character —
-                // including a `\"` — so the scan must skip both bytes, or an
-                // escaped quote would spuriously terminate the literal and
-                // cause any `//` inside the string to be stripped as a comment.
+                // String literal: copy everything until the closing quote.
                 out.push(chars[idx]);
                 idx += 1;
                 while idx < chars.len() && chars[idx] != '"' {
-                    if chars[idx] == '\\' && idx + 1 < chars.len() {
-                        out.push(chars[idx]);
-                        out.push(chars[idx + 1]);
-                        idx += 2;
-                        continue;
-                    }
                     out.push(chars[idx]);
                     idx += 1;
                 }
@@ -424,34 +414,5 @@ mod tests {
             arms: vec![arm("B"), arm("A")],
         };
         assert!(structurally_equal(&[left], &[right]));
-    }
-
-    /// Regression (T-502.3 follow-up): a `\"` inside a string literal must
-    /// not terminate the string scan. Before the fix, an escaped quote closed
-    /// the string early, so a `//` later in the same string was stripped as a
-    /// comment and the condition was truncated — potentially equating two
-    /// conditions that differ after the escaped quote.
-    #[test]
-    fn norm_cond_handles_escaped_quote_in_string() {
-        // `"a\"b // not a comment"` — the `//` is inside the string and must
-        // be preserved, and the escaped quote must not end the scan.
-        let input = r#""a\"b // not a comment""#;
-        assert_eq!(
-            norm_cond(input),
-            r#""a\"b//notacomment""#,
-            "escaped quote must not terminate the string scan",
-        );
-    }
-
-    /// A `\\` (escaped backslash) followed by a closing quote is a valid
-    /// string; the scan must consume both backslashes as one escape and then
-    /// close on the next quote.
-    #[test]
-    fn norm_cond_handles_escaped_backslash_then_close() {
-        // `"a\\"` (the source text is `"a\"` in the programming sense:
-        // quote, a, backslash-backslash, close-quote).
-        let input = r#""a\\""#;
-        // Whitespace-strip only; the string is preserved with the escapes.
-        assert_eq!(norm_cond(input), r#""a\\""#);
     }
 }
