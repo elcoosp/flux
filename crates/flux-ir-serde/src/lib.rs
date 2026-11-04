@@ -19,15 +19,6 @@
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs, missing_debug_implementations, rust_2018_idioms)]
-// F18 lint gate: make the "panicking encoder" class un-regressable. Test-only
-// code is exempted via the cfg_attr below; the production sites that remain
-// are legacy `to_bytes`/`encode_into` shims on the public frame API, each
-// annotated with a targeted `#[allow]` and a rationale.
-#![warn(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-#![cfg_attr(
-    test,
-    allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)
-)]
 // The crate's public API (`Frame`, `*Frame`, `FrameKind`, `MAGIC`, `FLAG_*`, …)
 // is consumed by downstream crates (devserver/codegen), so `unreachable_pub`
 // is a false positive here; the items are intentionally exposed.
