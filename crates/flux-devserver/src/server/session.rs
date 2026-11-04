@@ -80,10 +80,22 @@ pub(crate) async fn serve_client(stream: TcpStream, shared: Arc<Shared>) -> Resu
             Ok(None) => return Ok(()),
             Ok(Some(Ok(Message::Binary(bytes)))) => {
                 if is_hello(&bytes) {
+                    // Round-21 fix: `handle_hello` returns `Some(reply)` for BOTH
+                    // outcomes — the accepted `Init` and the rejected `Error` — so
+                    // the plain `if let Some(reply)` below used to register a
+                    // rejected host into the broadcast list too, and it then
+                    // received every Init/Delta frame meant for accepted hosts
+                    // (the exact leak audit C7 closed at the auth layer, reopened
+                    // at the frame-kind layer). Only an `Init` reply means
+                    // "accepted": check the wire frame-kind byte at header offset
+                    // 5 (Appendix D §D.12: magic(4) version(1) frame_type(1)).
                     if let Some(reply) = handle_hello(&bytes, &shared).await {
+                        let accepted = reply.get(5) == Some(&flux_ir_serde::FRAME_INIT);
                         writer.send(Message::Binary(reply.into())).await?;
-                        // Accepted - register for broadcasts
-                        break shared.register();
+                        if accepted {
+                            // Accepted - register for broadcasts
+                            break shared.register();
+                        }
                     }
                     // Rejected - close without registering
                     return Ok(());
