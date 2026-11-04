@@ -55,13 +55,6 @@ In v3, the following length prefixes are written and read as **u32**
 **String content:**
 - `StringEntry.text` byte length
 - `frame::encode_str` / `try_encode_str` byte length
-- `telemetry::encode_str` / `telemetry::decode_str` byte length
-  (amended round 63, 2026-10-10): telemetry strings carry user-authored
-  content (`NetworkRequest.body`, `NetworkResponse.body`,
-  `PerfRecord.json`) — a real HTTP response body over 64 KB is exactly the
-  "user-plausible input" this ADR's Context section calls out, and was
-  silently truncated before this amendment. The telemetry codec now
-  dispatches on the version byte the same way `frame::encode_str` does.
 
 **Why not everything:** spans, closure captures, signal-meta
 `deps`/`layout`/`metas`, capability lists, telemetry payloads, and
