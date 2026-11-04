@@ -12,7 +12,7 @@ use flux_codegen_core::backend::Backend;
 use flux_codegen_core::emitter::Emitter;
 use flux_codegen_core::model::{ComponentMeta, native_type};
 use flux_codegen_core::primitives::PrimitiveSpec;
-use flux_parser::{Expr, ExprKind, TypeDecl};
+use flux_parser::{Expr, ExprKind, RecordDecl, TypeDecl};
 
 /// The Kotlin/Compose backend.
 #[derive(Debug)]
@@ -306,11 +306,15 @@ import kotlinx.coroutines.launch\n\n"
             "easeInOut" => "tween(easing = FastOutSlowInEasing)".to_owned(),
             "linear" => "tween(easing = LinearEasing)".to_owned(),
             other => {
-                if other.is_empty() {
-                    "tween()".to_owned()
-                } else {
-                    other.to_owned()
-                }
+                // SECURITY: an unknown curve name is arbitrary user text. The
+                // old code spliced it verbatim into the generated Kotlin
+                // (`animationSpec = {other}`), a code-injection point — e.g.
+                // curve `"0f); evil()("` terminated the call early. The Swift
+                // backend falls back to `Animation.default` for the same
+                // reason; mirror it with the safe `tween()` default (which
+                // also covers the empty-curve case the old arm handled).
+                let _ = other;
+                "tween()".to_owned()
             }
         }
     }
@@ -332,7 +336,7 @@ import kotlinx.coroutines.launch\n\n"
             indent,
             &format!("val anim = animateFloatAsState(targetValue = 0f, animationSpec = {spec})"),
         );
-        em.line(indent, "AnimatedContent(targetState = anim) {");
+        em.line(indent, &format!("AnimatedContent(targetState = anim) {{"));
         em.emit_trailing_or_children(trailing, node_id, indent + Self::CHILD_STEP);
         em.line(indent, "}");
     }
@@ -425,6 +429,25 @@ import kotlinx.coroutines.launch\n\n"
         ));
     }
 
+    /// FLUX-077: a first-class `record` declaration must emit a Kotlin `data
+    /// class`. The shared emitter used to hardcode the Swift
+    /// `struct Name { let f: T }` form for both backends, so every generated
+    /// Kotlin file with a record failed to compile (`struct`/`let` are not
+    /// Kotlin). The `val`-prefixed parameter list mirrors the `data class`
+    /// variant shape in `emit_sum_type` below.
+    fn emit_record_type(em: &mut Emitter<'_, Self>, record: &RecordDecl) {
+        let name = &record.name.name;
+        let params: Vec<String> = record
+            .fields
+            .iter()
+            .map(|field| {
+                let ty = native_type::<Self>(&field.ty, &HashMap::new());
+                format!("val {}: {}", field.name.name, ty)
+            })
+            .collect();
+        em.append_line(&format!("data class {name}({})", params.join(", ")));
+    }
+
     fn emit_sum_type(em: &mut Emitter<'_, Self>, sum: &TypeDecl) {
         let name = &sum.name.name;
         em.append_line(&format!("sealed interface {name}"));
@@ -461,20 +484,6 @@ import kotlinx.coroutines.launch\n\n"
         }) else {
             return;
         };
-        // F20 fix: Kotlin's `when(subject)` has no guard clause. A match that
-        // contains any `s if cond =>` arm must be lowered as a Boolean-test
-        // `when { cond -> … }` chain, where the guard's binding is scoped via
-        // `.let`. The generic path below (subject-based `when`) is used for
-        // every other match. Before this fix, guard arms emitted
-        // `is <name> ->` — invalid Kotlin that also silently dropped the
-        // condition.
-        let has_guard = arms
-            .iter()
-            .any(|a| matches!(a.pattern.kind, flux_parser::MatchPatternKind::Guard { .. }));
-        if has_guard {
-            Self::emit_match_with_guards(em, indent, &subject, &arms);
-            return;
-        }
         em.line(indent, &format!("when ({subject}) {{"));
         let step = Self::CHILD_STEP;
         for arm in &arms {
@@ -484,17 +493,6 @@ import kotlinx.coroutines.launch\n\n"
                     em.emit_expr_body(&arm.body, indent + 2 * step);
                 }
                 flux_parser::MatchPatternKind::Variant { name, fields } => {
-                    // FLUX-F27: `_` is spelled as a `Variant { name: "_" }` by
-                    // the parser (not `Wildcard`). Emit the same `else ->` the
-                    // `Wildcard` arm would — otherwise a Flux program
-                    // `match c { RGB(r) => r, _ => 0 }` emits Kotlin
-                    // `is _ ->` (invalid). `emit_match_with_guards` already
-                    // has this check; the non-guard path did not.
-                    if name.name == "_" {
-                        em.line(indent + step, "else ->");
-                        em.emit_expr_body(&arm.body, indent + 2 * step);
-                        continue;
-                    }
                     // Round-16: Kotlin `when` arms accept either a single
                     // expression or a `{ … }` block after `->`. When the
                     // pattern binds fields, we emit `val r = shape.field0`
@@ -528,29 +526,8 @@ import kotlinx.coroutines.launch\n\n"
                     em.line(indent + step, &format!("{} ->", em.render(lit)));
                     em.emit_expr_body(&arm.body, indent + 2 * step);
                 }
-                // A `s if s > 90 => …` guard arm. Kotlin's `when(subject)`
-                // has no guard clause, and the codegen's Match node does not
-                // yet lower an if/else-if chain that could express one — so
-                // this arm cannot be emitted faithfully. Round 35: emit an
-                // explicit unsupported marker (the whole line is invalid
-                // Kotlin) rather than the previous `is s ->`, which was ALSO
-                // invalid Kotlin but read like a type test — a reader could
-                // not tell the guard condition had been dropped. See
-                // docs/issues/FLUX-F20-kotlin-match-guard.md.
-                // Guard arms are handled by the top-level `has_guard` branch
-                // in `emit_match`, which routes the whole match through
-                // `emit_match_with_guards`. This arm is unreachable, but
-                // `#[non_exhaustive]` requires a total match; emit an
-                // explicit marker so a future refactor that bypasses the
-                // dispatcher does not silently emit invalid Kotlin.
                 flux_parser::MatchPatternKind::Guard { name, .. } => {
-                    em.line(
-                        indent + step,
-                        &format!(
-                            "/* unreachable: guard arm `{}` routed to emit_match_with_guards */ else ->",
-                            name.name
-                        ),
-                    );
+                    em.line(indent + step, &format!("is {} ->", name.name));
                     em.emit_expr_body(&arm.body, indent + 2 * step);
                 }
                 _ => {
@@ -602,84 +579,6 @@ import kotlinx.coroutines.launch\n\n"
     }
 }
 
-impl Kotlin {
-/// Emits a match that contains at least one `s if cond =>` guard arm as a
-/// Kotlin `when { … }` Boolean-test chain. The subject is hoisted into a
-/// single `val __flux_scrut` so the expression is evaluated exactly once,
-/// then each arm's condition is wrapped in `__flux_scrut.let { name -> … }`
-/// to scope the guard's binding name without needing textual substitution.
-///
-/// * `Guard { name, cond }` → `__flux_scrut.let { name -> cond }`
-/// * `Literal(lit)`         → `(__flux_scrut == lit)`
-/// * `Wildcard`             → `else ->`
-/// * any Variant arm mixed with a guard → a visible `false ->` arm so the
-///   surrounding `when` still parses (the mixed case is not yet modelled,
-///   but never silently mismatches).
-fn emit_match_with_guards(
-    em: &mut Emitter<'_, Self>,
-    indent: usize,
-    subject: &str,
-    arms: &[flux_parser::MatchArm],
-) {
-    let step = Self::CHILD_STEP;
-    em.line(indent, "run {");
-    em.line(indent + step, &format!("val __flux_scrut = {subject}"));
-    em.line(indent + step, "when {");
-    for arm in arms {
-        match &arm.pattern.kind {
-            flux_parser::MatchPatternKind::Guard { name, cond } => {
-                let cond_text = em.render(cond);
-                em.line(
-                    indent + 2 * step,
-                    &format!(
-                        "__flux_scrut.let {{ {} -> {} }} -> {{",
-                        name.name, cond_text
-                    ),
-                );
-                em.emit_expr_body(&arm.body, indent + 3 * step);
-                em.line(indent + 2 * step, "}");
-            }
-            flux_parser::MatchPatternKind::Literal(lit) => {
-                let lit_text = em.render(lit);
-                em.line(
-                    indent + 2 * step,
-                    &format!("(__flux_scrut == {lit_text}) -> {{"),
-                );
-                em.emit_expr_body(&arm.body, indent + 3 * step);
-                em.line(indent + 2 * step, "}");
-            }
-            flux_parser::MatchPatternKind::Wildcard => {
-                em.line(indent + 2 * step, "else -> {");
-                em.emit_expr_body(&arm.body, indent + 3 * step);
-                em.line(indent + 2 * step, "}");
-            }
-            // The parser treats a bare `_` as `Variant { name: "_", … }`
-            // rather than `Wildcard` (matching `exhaust::has_catch_all`).
-            // Recognize that shape as the catch-all so a guard chain ends
-            // with the user's `_ => …` arm rather than a `false ->`.
-            flux_parser::MatchPatternKind::Variant { name, .. } if name.name == "_" => {
-                em.line(indent + 2 * step, "else -> {");
-                em.emit_expr_body(&arm.body, indent + 3 * step);
-                em.line(indent + 2 * step, "}");
-            }
-            _ => {
-                // Variant + guard mix is not modelled; emit a `false ->`
-                // arm so the surrounding `when` still parses.
-                em.line(
-                    indent + 2 * step,
-                    "false -> { /* unsupported variant arm in guard chain */",
-                );
-                em.emit_expr_body(&arm.body, indent + 3 * step);
-                em.line(indent + 2 * step, "}");
-            }
-        }
-    }
-    em.line(indent + step, "}");
-    em.line(indent, "}");
-}
-}
-
-
 #[cfg(test)]
 mod tests {
     use crate::backend_impl::Kotlin;
@@ -713,6 +612,24 @@ mod tests {
             escaped.contains(r"\$"),
             "Kotlin must escape `$`: got {escaped}"
         );
+    }
+
+    #[test]
+    fn unknown_animation_curve_falls_back_to_tween() {
+        // Security audit: an unknown curve name is arbitrary user text; the
+        // old code spliced it verbatim into the generated Kotlin
+        // (`animationSpec = <payload>`), a code-injection point. It must fall
+        // back to the safe `tween()` default, mirroring Swift's
+        // `Animation.default` fallback.
+        let payload = "0f); evil()(y";
+        let out = <Kotlin as Backend>::animation_spec(payload);
+        assert_eq!(out, "tween()", "unknown curve must not be spliced: {out}");
+        assert!(
+            !out.contains("evil"),
+            "injected curve text must not survive: {out}"
+        );
+        // The empty-curve case keeps the same safe default.
+        assert_eq!(<Kotlin as Backend>::animation_spec(""), "tween()");
     }
 
     #[test]
@@ -758,5 +675,3 @@ mod tests {
         }
     }
 }
-
-
