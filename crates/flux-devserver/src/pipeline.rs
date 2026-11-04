@@ -56,6 +56,26 @@ use tree::{display_path, flatten_extra_nodes, merge_arenas, root_node};
 pub(crate) mod host_strings;
 pub(crate) mod tree;
 
+/// One per-file entry of the FLUX-074 item-B incremental-lower cache.
+///
+/// Round-21 fix: the entry must record the `handler_base` the IR was lowered
+/// against. The cached `LoweredIr`'s handler ids were allocated starting at
+/// that base; a cache hit under a *different* current base would splice ids
+/// that collide with the freshly lowered files' ids, and `write_closures`
+/// (flux-ir-serde) panics on the duplicate handler id in the merged closure
+/// stream. A hit is therefore only valid when the base has not moved.
+#[derive(Debug)]
+struct CachedLower {
+    /// The exact source text the IR was lowered from.
+    source: String,
+    /// The handler-id seed (`compile_one`'s `handler_base`) used at lower time.
+    handler_base: u32,
+    /// The lowered program.
+    lowered: LoweredIr,
+    /// The parsed AST retained for the release codegen path.
+    ast: Ast,
+}
+
 /// The outcome of compiling one source snapshot.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
@@ -92,8 +112,14 @@ pub struct Pipeline {
     root: PathBuf,
     /// Source snapshot per watched file, keyed by its assigned [`FileId`].
     sources: BTreeMap<FileId, (PathBuf, String)>,
-    /// Stable `path → FileId` assignment (dense, insertion-ordered).
+    /// Stable `path → FileId` assignment (insertion-ordered; ids are never
+    /// reused once removed — see [`next_file_id`](Self::next_file_id)).
     file_ids: BTreeMap<PathBuf, FileId>,
+    /// Monotonic [`FileId`] allocator (round-21 fix). `file_ids.len()` reused
+    /// ids after [`remove_file`](Self::remove_file) shrank the map, so a new
+    /// file could silently take over a live file's id and overwrite its source
+    /// snapshot. The counter only ever moves forward.
+    next_file_id: u32,
     /// The last successfully lowered program, or `None` before the first
     /// successful compile.
     last_good: Option<LoweredIr>,
@@ -128,7 +154,7 @@ pub struct Pipeline {
     /// snapshot it was produced from so an unchanged file is **not** re-parsed,
     /// re-type-checked, or re-lowered on a recompile (FLUX-074, item B:
     /// incremental lowering — bounded work to the changed subtree).
-    file_cache: BTreeMap<FileId, (String, LoweredIr, Ast)>,
+    file_cache: BTreeMap<FileId, CachedLower>,
     /// Number of files actually (re-)lowered in the most recent
     /// [`compile_tree`](Self::compile_tree) — incremented only when a file's
     /// source differs from its cache entry. Used as the bounded-work metric for
@@ -199,18 +225,7 @@ fn referenced_strings_and_handlers(
     let mut handlers = std::collections::HashSet::new();
     for p in patches {
         match p {
-            // FLUX-F66: `Reattach` also carries a `NodeRef` whose props
-            // may include string references and whose `handlers` list is a
-            // set of `HandlerId`s — the same shape as `Replace`/`Insert`.
-            // The walker's doc claims it is total over every `Patch`
-            // variant; the wildcard arm that previously caught `Reattach`
-            // made that claim false. No current caller hits this (the
-            // dispatch path emits only `Update`), but a future caller
-            // sharing the walker for a Reattach-bearing stream would ship
-            // a delta missing those references.
-            Patch::Replace { node, .. }
-            | Patch::Insert { node, .. }
-            | Patch::Reattach { node, .. } => {
+            Patch::Replace { node, .. } | Patch::Insert { node, .. } => {
                 walk_node(node, &mut strings, &mut handlers);
             }
             Patch::Update { props_diff, .. } => {
@@ -236,6 +251,7 @@ impl Pipeline {
             root: root.as_ref().to_path_buf(),
             sources: BTreeMap::new(),
             file_ids: BTreeMap::new(),
+            next_file_id: 0,
             last_good: None,
             last_sources: Vec::new(),
             seq: 0,
@@ -264,16 +280,24 @@ impl Pipeline {
     /// budget (§3.10): the full pipeline (parse + type check + lower + diff +
     /// serialize) is reported as `Scenario::LoopbackE2e` / `MetricKind::SaveToPhoton`,
     /// and the patch-serialization leg alone as `MetricKind::PatchRoundTrip`.
-    /// `tree_size` is the lowered node count (`lower_count`), giving the flamegraph
-    /// the same tree-size axis the harness uses. Returns empty until a compile has
-    /// recorded timings (i.e. before the first successful compile).
+    /// `tree_size` is the last-good lowered arena's node count, giving the
+    /// flamegraph the same tree-size axis the harness uses. Returns empty until
+    /// a compile has recorded timings (i.e. before the first successful compile).
     #[must_use]
     pub fn perf_records(&self) -> Vec<MetricRecord> {
         let t = self.timings;
         if t == PhaseTimings::default() {
             return Vec::new();
         }
-        let tree_size = self.lower_count;
+        // Round-21 fix: `tree_size` reported `lower_count` — the number of
+        // FILES (re-)lowered in the last compile — instead of the node count
+        // the flamegraph's tree-size axis documents, so the axis collapsed as
+        // the FLUX-074 cache made recompiles reuse more files. Report the
+        // lowered arena's node count.
+        let tree_size = self
+            .last_good
+            .as_ref()
+            .map_or(0, |ir| ir.arena.len() as u64);
         let total_ms =
             (t.parse + t.type_check + t.lower + t.diff + t.serialize).as_secs_f64() * 1000.0;
         let serialize_ms = t.serialize.as_secs_f64() * 1000.0;
@@ -622,7 +646,13 @@ impl Pipeline {
         if let Some(id) = self.file_ids.get(path) {
             return *id;
         }
-        let id = FileId::from(self.file_ids.len() as u32);
+        // Round-21 fix: allocate monotonically. `FileId::from(self.file_ids
+        // .len() as u32)` handed out an id that could still be live — after
+        // `remove_file` shrank the map, the next new file reused a removed
+        // id's successor and `sources.insert` silently overwrote another
+        // file's snapshot under the shared id. The counter never reuses.
+        let id = FileId::from(self.next_file_id);
+        self.next_file_id += 1;
         self.file_ids.insert(path.to_path_buf(), id);
         id
     }
@@ -785,29 +815,37 @@ impl Pipeline {
             // lowered result when a file's source is unchanged, so a save that
             // touches one file does not re-parse / re-type-check / re-lower the
             // others. `lower_count` records only the files actually re-lowered.
-            let (lowered, ast) = if let Some((cached_src, cached_ir, cached_ast)) =
-                self.file_cache.get(&file_id)
-            {
-                if cached_src == &source {
-                    (cached_ir.clone(), cached_ast.clone())
-                } else {
+            let (lowered, ast) = match self.file_cache.get(&file_id) {
+                // Round-21 fix (FLUX-074 handler-base collision): a cached IR
+                // may only be reused when it was lowered against the *current*
+                // handler base. Its handler ids were allocated starting at
+                // `cached.handler_base`; reusing it after the base moved (an
+                // earlier file in this very compile gained or lost handlers)
+                // splices colliding ids into the merged closure stream and
+                // `write_closures` panics with "duplicate handler id". On a
+                // valid hit the cached ids are exactly what a fresh lower with
+                // this base would produce, so the seed below advances by the
+                // cached entry's handler count, same as a fresh lower.
+                Some(cached)
+                    if cached.source == source && cached.handler_base == next_handler_base =>
+                {
+                    (cached.lowered.clone(), cached.ast.clone())
+                }
+                _ => {
                     self.lower_count += 1;
                     let produced =
                         self.compile_one(&source, file_id, &display, next_handler_base)?;
                     self.file_cache.insert(
                         file_id,
-                        (source.clone(), produced.0.clone(), produced.1.clone()),
+                        CachedLower {
+                            source: source.clone(),
+                            handler_base: next_handler_base,
+                            lowered: produced.0.clone(),
+                            ast: produced.1.clone(),
+                        },
                     );
                     produced
                 }
-            } else {
-                self.lower_count += 1;
-                let produced = self.compile_one(&source, file_id, &display, next_handler_base)?;
-                self.file_cache.insert(
-                    file_id,
-                    (source.clone(), produced.0.clone(), produced.1.clone()),
-                );
-                produced
             };
             // Advance the seed past every handler id this file produced —
             // both the top-level handlers (`lowered.closures`) and the
@@ -817,8 +855,8 @@ impl Pipeline {
             for id in lowered
                 .closures
                 .values()
-                .map(|c| c.id)
-                .chain(lowered.prop_thunks.values().map(|c| c.id))
+                .map(|c| u32::from(c.id))
+                .chain(lowered.prop_thunks.values().map(|c| u32::from(c.id)))
             {
                 next_handler_base = next_handler_base.max(id.saturating_add(1));
             }
@@ -1252,6 +1290,50 @@ mod tests {
     }
 
     #[test]
+    fn adding_a_handler_to_one_file_does_not_collide_with_cached_handlers_in_another() {
+        // Round-21 fix (FLUX-074 handler-base collision): `b.flux` has a
+        // handler and its lowered IR was cached with the handler base in force
+        // at lower time. Editing `a.flux` (the earlier FileId) to ADD a handler
+        // moves that base; reusing the cached `b.flux` IR under the new base
+        // then splices the same handler ids twice into the merged closure
+        // stream and `write_closures` (flux-ir-serde) panics with "duplicate
+        // handler id". The recompile must succeed with distinct ids instead.
+        let path_a = Path::new("/tmp/project/a.flux");
+        let path_b = Path::new("/tmp/project/b.flux");
+        let mut pipeline = Pipeline::new("/tmp/project", false);
+        pipeline.set_source(path_a, "compo A\n  Column {}\n".to_owned());
+        pipeline.set_source(
+            path_b,
+            "compo B\n  state count: Int = 0\n  Button(text: \"inc\", onClick: fn() { count = count + 1 })\n"
+                .to_owned(),
+        );
+        pipeline.compile().expect("initial compile succeeds");
+
+        // Edit `a.flux` to add a handler: every later file's handler base moves.
+        pipeline.set_source(
+            path_a,
+            "compo A\n  state count: Int = 0\n  Button(text: \"inc\", onClick: fn() { count = count + 1 })\n"
+                .to_owned(),
+        );
+        let outcome = pipeline
+            .compile()
+            .expect("recompile must not collide cached and fresh handler ids");
+        assert!(
+            matches!(outcome, Compiled::Delta(_) | Compiled::Unchanged),
+            "the handler edit still ships a frame, got {outcome:?}"
+        );
+
+        // And a no-op recompile afterwards must be a pure cache hit again: the
+        // re-cached entries now agree with the (stable) handler bases.
+        pipeline.compile().expect("noop recompile succeeds");
+        assert_eq!(
+            pipeline.lower_count(),
+            0,
+            "re-cached sources are not re-lowered once bases settle"
+        );
+    }
+
+    #[test]
     fn compiled_sources_is_cleared_on_failed_compile_retaining_previous_wire_tree() {
         let mut pipeline = Pipeline::new("/tmp/project", false);
         pipeline.set_source(
@@ -1538,6 +1620,58 @@ mod tests {
     }
 
     #[test]
+    fn new_file_after_remove_file_never_reuses_a_live_file_id() {
+        // Round-21 fix (FileId reuse): `file_id_for` allocated
+        // `file_ids.len()`, so after `remove_file` shrank the map the next new
+        // file took over a STILL-LIVE file's id and `sources.insert` silently
+        // replaced that file's source snapshot. Monotonic allocation keeps the
+        // surviving file's entry intact.
+        let path_a = Path::new("/tmp/project/a.flux");
+        let path_b = Path::new("/tmp/project/b.flux");
+        let path_c = Path::new("/tmp/project/c.flux");
+        let mut pipeline = Pipeline::new("/tmp/project", false);
+        pipeline.set_source(path_a, "compo A\n  Text(\"a\")\n".to_owned());
+        pipeline.set_source(path_b, "compo B\n  Text(\"b\")\n".to_owned());
+        pipeline.compile().expect("initial compile succeeds");
+
+        // Delete `a`, then add `c`. Under len()-allocation `c` would receive
+        // `b`'s live id and overwrite `b`'s snapshot.
+        let file_id_a = *pipeline.file_ids.get(path_a).expect("file A registered");
+        pipeline.remove_file(file_id_a);
+        pipeline.set_source(path_c, "compo C\n  Text(\"c\")\n".to_owned());
+        pipeline
+            .compile()
+            .expect("recompile with the new file succeeds");
+
+        let sources = pipeline.compiled_sources();
+        let paths: Vec<_> = sources.iter().map(|(p, _, _)| p.clone()).collect();
+        assert_eq!(
+            paths.len(),
+            2,
+            "no live source may be silently overwritten by a new file"
+        );
+        assert!(
+            paths.contains(&path_b.to_path_buf()),
+            "b's source must survive c's arrival, got {paths:?}"
+        );
+        assert!(
+            paths.contains(&path_c.to_path_buf()),
+            "the new file must be tracked, got {paths:?}"
+        );
+
+        // The id space never reuses: c's id is strictly beyond every id handed
+        // out before the removal.
+        let id_b = *pipeline.file_ids.get(path_b).expect("file B registered");
+        let id_c = *pipeline.file_ids.get(path_c).expect("file C registered");
+        assert!(
+            u32::from(id_c) > u32::from(id_b),
+            "monotonic allocation: c's id {} must exceed b's {}",
+            u32::from(id_c),
+            u32::from(id_b)
+        );
+    }
+
+    #[test]
     fn removed_file_drops_its_components_on_recompile() {
         // Audit P2.2: deleting a .flux file must remove its components so they
         // do not linger in the next compiled tree.
@@ -1607,6 +1741,36 @@ mod tests {
             assert!(!rec.samples.is_empty(), "a record must carry a sample");
         }
     }
+
+    #[test]
+    fn perf_records_tree_size_is_the_lowered_node_count() {
+        // Round-21 fix: `tree_size` reported `lower_count` (files lowered in
+        // the last compile) instead of the lowered arena's node count, so the
+        // DevTools flamegraph's tree-size axis collapsed as the FLUX-074 cache
+        // made recompiles reuse more files. It must equal the last-good
+        // arena's node count.
+        let mut pipeline = Pipeline::new(".", false);
+        pipeline.set_source(
+            Path::new("/tmp/perf_test/main.flux"),
+            "compo Hello\n  state count: Int = 0\n  Button(text: \"hi\")\n  Text(text: \"{count}\")\n"
+                .to_owned(),
+        );
+        pipeline.compile().expect("compiles");
+        let node_count = pipeline
+            .last_good
+            .as_ref()
+            .expect("tree compiled")
+            .arena
+            .len() as u64;
+        assert!(node_count > 1, "the test tree has more than one node");
+        for rec in pipeline.perf_records() {
+            assert_eq!(
+                rec.tree_size, node_count,
+                "tree_size must be the lowered arena's node count, not the files-lowered count"
+            );
+        }
+    }
+
     /// Audit H14: the `Error`-frame fallback used by every caller that hits
     /// an encoder-overflow (`compile`, `init_frame`, and the dispatch path all
     /// route through `error_frame`) must produce a *decodable* `Error` frame.
