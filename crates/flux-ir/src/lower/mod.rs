@@ -198,19 +198,9 @@ struct Lowerer<'a> {
     handler_counter: flux_syntax::HandlerId,
     /// Generic-instantiation cursor (roadmap Phase 1).
     mono: mono::MonoTable,
-    /// Names of record types declared with `record Name { … }` and of every
-    /// ADT variant declared with `type X = A(..) | B(..)`; calls to these
-    /// construct values (FLUX-072 / audit C5), not capability invocations.
+    /// Names of record types declared with `record Name { … }`; calls to these
+    /// construct values (FLUX-072), not capability invocations.
     record_ctors: std::collections::HashSet<String>,
-    /// Module-level associated constants (`Name.field = expr`, e.g.
-    /// `Color.red = RGB(1.0, 0.0, 0.0)` from `stdlib/color.flux`). Dotted path
-    /// joined with `.`; the value is the fully-lowered constant.
-    ///
-    /// Before this field existed, `Button(color: Color.red)` lowered the
-    /// `Field { base: Ident("Color"), field: "red" }` expression through
-    /// `lower_value`'s fallthrough to `Value::Null`, silently dropping every
-    /// stdlib preset (`Color.red`, `Font.body`, …).
-    const_bindings: std::collections::HashMap<String, flux_syntax::Value>,
     /// Declared component bodies, retained so `lower_call` can inline a
     /// component's body at the call site — binding its `prop`s to the call's
     /// argument signals. This is what lets `TaskRow(task: item, …)` inside a
@@ -243,7 +233,6 @@ impl<'a> Lowerer<'a> {
             handler_counter: flux_syntax::HandlerId::from(0u32),
             mono: mono::MonoTable::new(typed),
             record_ctors: std::collections::HashSet::new(),
-            const_bindings: std::collections::HashMap::new(),
             component_decls: std::collections::HashMap::new(),
             prop_indices: std::collections::HashMap::new(),
             inline_salt: None,
@@ -255,7 +244,7 @@ impl<'a> Lowerer<'a> {
     /// for tests; this method wraps it with a collision-detecting registry.
     fn intern_prop_index(&mut self, name: &str) -> Result<flux_syntax::PropIdx, LoweringError> {
         let idx = prop_index_for_name(name);
-        let key = idx;
+        let key = u16::from(idx);
         if let Some(existing) = self.prop_indices.get(&key) {
             if existing != name {
                 return Err(LoweringError::new(
@@ -359,6 +348,7 @@ impl<'a> Lowerer<'a> {
             match compile_prop_thunk(
                 prop_exprs,
                 &IrMetadata {
+                    field_indices: &self.typed.field_indices,
                     expr_types: &self.typed.types,
                 },
                 scope,
@@ -415,48 +405,27 @@ impl<'a> Lowerer<'a> {
                     .insert(comp.name.name.clone(), comp.clone());
                 self.lower_component(comp)
             }
-            // fn / trait / capability / import / use / const are type-level
-            // only; the type checker handled them, so we skip them.
-            Decl::Fn(_) | Decl::Trait(_) | Decl::Capability(_) | Decl::Use(_) => Ok(()),
-            // Module-level associated constant, e.g. `Color.red = RGB(1.0, 0.0, 0.0)`
-            // or `Font.body = Font("", 17.0, Regular, Normal)`. Retain the
-            // lowered value under its dotted path (`Color.red`) so a call site
-            // like `Button(color: Color.red)` resolves to the actual record
-            // instead of Null (see `Lowerer::const_bindings`).
-            Decl::Const(binding) => {
-                let path = binding
-                    .path
-                    .iter()
-                    .map(|id| id.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(".");
-                // A closure table is required by `lower_value`'s signature but
-                // a stdlib constant never contains a closure; pass a throwaway.
-                let mut discarded = Vec::new();
-                let value =
-                    self.lower_value(&binding.value, ComponentId::from(0u32), &mut discarded)?;
-                self.const_bindings.insert(path, value);
-                Ok(())
-            }
-            // An ADT declaration registers each *variant* name in the same
-            // constructor registry a `record` type uses. Variants are called
-            // exactly like record constructors (`RGB(1.0, 0.0, 0.0)`,
-            // `Font("", 17.0, Regular, Normal)`), and their value is a tagged
-            // record — without this registration, every variant-call seed and
-            // handler-level variant construction silently lowered to `Null`,
-            // and any `match` over the value never matched a single arm.
-            // (Bug: `stdlib/color.flux` `Color.red = RGB(1.0, 0.0, 0.0)` was
-            // reaching the host as Null.)
-            Decl::Type(type_decl) => {
-                for variant in &type_decl.variants {
-                    self.record_ctors.insert(variant.name.name.clone());
-                }
+            // fn / trait / capability / import / use / const are
+            // type-level only; the type checker handled them, so we skip them.
+            Decl::Fn(_) | Decl::Trait(_) | Decl::Capability(_) | Decl::Use(_) | Decl::Const(_) => {
                 Ok(())
             }
             // Record types register their constructor name so handler calls to
             // `Name(field: …)` lower as value construction (FLUX-072).
             Decl::Record(rec) => {
                 self.record_ctors.insert(rec.name.name.clone());
+                Ok(())
+            }
+            // ADT variant constructors (`type Shape = | Circle(Float)`) are
+            // value constructors too — the static seed path already materialises
+            // them via `variant_tag`, but the names were never registered here,
+            // so `shape = Circle(5.0)` inside a HANDLER lowered to a bogus
+            // `CALL_CAP "Circle"` that faults at runtime instead of building
+            // the tagged record (round-21).
+            Decl::Type(type_decl) => {
+                for variant in &type_decl.variants {
+                    self.record_ctors.insert(variant.name.name.clone());
+                }
                 Ok(())
             }
             #[allow(unreachable_patterns)]
@@ -772,7 +741,7 @@ impl<'a> Lowerer<'a> {
         // (`Counter[Int]` → `Counter_Int`) so each instantiation gets its own
         // `ComponentId` and the release backends emit one native type per
         // instantiation (roadmap Phase 1). Non-generic calls keep their name.
-        let interned = self.mono.next_specialised(&name).unwrap_or(name);
+        let interned = self.mono.next_specialised(&name).unwrap_or(name.clone());
         let component_id = self.intern_component(&interned);
         // A user-defined `compo` call lowers as `NodeKind::Component` (tag 0) so
         // the host's `adapterFor` resolves it through the component table and,
@@ -781,7 +750,14 @@ impl<'a> Lowerer<'a> {
         // the host maps them to their registered adapter. The `component_id` is
         // always set to the interned component name regardless, preserving the
         // shared-component table for both paths.
-        let is_user_compo = self.component_decls.contains_key(&interned);
+        //
+        // The membership check must use the SOURCE name: `component_decls` is
+        // keyed by the name the author wrote, while `interned` is the
+        // monomorphized mangle (`Counter[Int]` → `Counter_Int`), which is
+        // never a key — so generic user components used to lower as
+        // `NodeKind::Primitive` and the host resolved them through the
+        // primitive adapter table instead.
+        let is_user_compo = self.component_decls.contains_key(&name);
 
         // Inline a declared component's body at the call site when every prop
         // maps to an in-scope identifier (e.g. `TaskRow(task: item, …)` inside a
@@ -790,8 +766,18 @@ impl<'a> Lowerer<'a> {
         // of an unseeded component-global prop signal — the "tasks not
         // rendered" bug (FLUX-072). Falls back to the normal component-instance
         // path when inlining isn't possible.
-        let inline_children = if is_user_compo {
-            let comp = self.component_decls.get(&interned).unwrap().clone();
+        let inline_children = if is_user_compo && interned == name {
+            // Look up by the SOURCE name (see the `is_user_compo` note above):
+            // the interned name is the monomorphized mangle for generic calls
+            // and is never a `component_decls` key.
+            //
+            // Inlining is skipped for monomorphized (`interned != name`) calls:
+            // a generic instantiation must lower as a specialised
+            // `NodeKind::Component` (`Counter_Int`) so the release backends
+            // emit one native type per instantiation (roadmap Phase 1) —
+            // splicing the generic body here would drop the specialised
+            // component node entirely.
+            let comp = self.component_decls.get(&name).unwrap().clone();
             self.try_inline_component(&comp, args, trailing, owner, id)?
         } else {
             None
@@ -972,24 +958,6 @@ impl<'a> Lowerer<'a> {
             flux_parser::ExprKind::Bool(b) => Ok(Value::Bool(*b)),
             flux_parser::ExprKind::Str(parts) => self.lower_str(parts, owner, handlers),
             flux_parser::ExprKind::Null => Ok(Value::Null),
-            // Module-level associated constant, e.g. `Color.red` used at a call
-            // site. The field-access shape is `Field { base: Ident("Color"),
-            // field: Ident("red") }`; look the dotted path up in
-            // `const_bindings` (populated by `lower_decl` from `Decl::Const`).
-            // Without this branch the value silently lowered to Null.
-            flux_parser::ExprKind::Field { base, field } => {
-                if let flux_parser::ExprKind::Ident(base_ident) = &base.kind {
-                    let key = format!("{}.{}", base_ident.name, field.name);
-                    if let Some(value) = self.const_bindings.get(&key) {
-                        return Ok(value.clone());
-                    }
-                }
-                // Not a module-level constant — the lowering layer has no
-                // runtime record reader here (the codegen layer renders
-                // runtime field access from the AST), so keep the previous
-                // Null placeholder.
-                Ok(Value::Null)
-            }
             flux_parser::ExprKind::Lambda { params, body } => {
                 let handler = self.next_handler();
                 let mut intern = |s: &str| self.builder.intern_string(s);
@@ -1006,6 +974,7 @@ impl<'a> Lowerer<'a> {
                     &self.signal_scope,
                     &self.record_ctors,
                     &IrMetadata {
+                        field_indices: &self.typed.field_indices,
                         expr_types: &self.typed.types,
                     },
                     &mut self.prop_indices,
@@ -1059,25 +1028,9 @@ impl<'a> Lowerer<'a> {
                 // `record_ctors` guard keeps them out of this path.
                 if let flux_parser::ExprKind::Ident(ident) = &callee.kind {
                     if self.record_ctors.contains(&ident.name) {
-                        // Slot 0 carries the constructor's variant tag (the
-                        // FNV-1a of the constructor name, `variant_tag`). This
-                        // matches the runtime emitter's `compile_call`
-                        // ADT/variant branch (which writes the same tag into
-                        // slot 0 before any payload) and the `Record { .. }`
-                        // literal path above. Without a tag at slot 0, the
-                        // VM's `MATCH_TAG` returns `false` for the value and
-                        // every `match` arm is skipped.
-                        //
-                        // Positional payload args therefore start at slot 1;
-                        // a positional arg at slot 0 previously overwrote the
-                        // variant tag with the arg's value.
                         let mut lowered: Vec<(flux_syntax::PropIdx, Value)> =
-                            Vec::with_capacity(args.len() + 1);
-                        lowered.push((
-                            flux_syntax::PropIdx::from(0u16),
-                            Value::Int(i64::from(variant_tag(ident.name.as_str()))),
-                        ));
-                        let mut next_positional: u16 = 1;
+                            Vec::with_capacity(args.len());
+                        let mut next_positional: u16 = 0;
                         for arg in args {
                             let (idx, value) = match arg {
                                 flux_parser::Arg::Named { name, value } => (
