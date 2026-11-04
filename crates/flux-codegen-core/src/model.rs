@@ -104,10 +104,19 @@ pub fn native_type<B: Backend>(ty: &Type, subst: &HashMap<String, String>) -> St
             } else {
                 let rendered: Vec<String> =
                     args.iter().map(|a| native_type::<B>(a, subst)).collect();
-                if name.name == "List" {
-                    B::list_type(&rendered[0])
-                } else {
-                    format!("{}<{}>", name.name, rendered.join(", "))
+                // Audit fix: the stdlib generics used to fall through to the
+                // generic `Name<A, B>` spelling, which is invalid in BOTH
+                // target languages for `Option` (`Option<Int>` does not
+                // compile in Swift or Kotlin — both need `Int?`) and wrong in
+                // Swift for `Map` (a Swift dictionary is `[K: V]`). Route each
+                // stdlib constructor through its per-backend hook, the same
+                // way `List` already was. Arity mismatches fall back to the
+                // generic form rather than indexing out of bounds.
+                match (name.name.as_str(), rendered.as_slice()) {
+                    ("List", [element]) => B::list_type(element),
+                    ("Option", [inner]) => B::option_type(inner),
+                    ("Map", [key, value]) => B::map_type(key, value),
+                    _ => format!("{}<{}>", name.name, rendered.join(", ")),
                 }
             }
         }
