@@ -12,12 +12,19 @@ pub(crate) fn values_equal(a: &Value, b: &Value, ta: &StringTable, tb: &StringTa
             la.len() == lb.len() && la.iter().zip(lb).all(|(x, y)| values_equal(x, y, ta, tb))
         }
         (Value::Record(ra), Value::Record(rb)) => {
+            // Compare key-wise (not positionally): the emitter writes fields in
+            // a canonical order, but hand-built arenas may carry the same
+            // key/value pairs in a different order and are semantically equal.
             ra.len() == rb.len()
-                && ra
-                    .iter()
-                    .zip(rb)
-                    .all(|((ka, x), (kb, y))| ka == kb && values_equal(x, y, ta, tb))
+                && ra.iter().all(|(ka, x)| {
+                    rb.iter()
+                        .any(|(kb, y)| ka == kb && values_equal(x, y, ta, tb))
+                })
         }
+        // IEEE-754: `NaN != NaN` under derived `PartialEq`, but `Props::hash_into`
+        // canonicalizes NaN — so two NaN props hash equal and then failed this
+        // re-check, emitting a no-op `Update` on every single diff pass.
+        (Value::Float(x), Value::Float(y)) => x == y || (x.is_nan() && y.is_nan()),
         _ => a == b,
     }
 }
