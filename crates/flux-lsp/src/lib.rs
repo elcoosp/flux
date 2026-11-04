@@ -523,16 +523,7 @@ impl LanguageServer for FluxLsp {
             docs.remove(&uri);
         }
         if let Ok(mut versions) = self.versions.lock() {
-            // FLUX-F45: bump the counter BEFORE removing the map entry.
-            // A `did_change` that scheduled a debounced publish holds its
-            // own `Arc<AtomicU32>` clone, so removing the map entry alone
-            // does not stop that task — it wakes 50 ms later, sees
-            // `counter.load() == my_version`, and publishes stale
-            // diagnostics for a closed URI. Bumping the counter makes the
-            // task's guard fail, so it skips the publish.
-            if let Some(counter) = versions.remove(&uri) {
-                counter.fetch_add(1, Ordering::SeqCst);
-            }
+            versions.remove(&uri);
         }
         if let Some(client) = self.client.clone() {
             let _ = client.notify::<lsp_types::notification::PublishDiagnostics>(
