@@ -35,7 +35,7 @@ fn delta_v2_fixture_decodes() {
     let frame = Frame::from_delta_bytes(&bytes)
         .unwrap_or_else(|e| panic!("delta_v2.bin must decode: {}", e));
     assert!(
-        !frame.patches.is_empty(),
+        frame.patches.len() >= 1,
         "delta_v2 should contain at least one patch"
     );
 }
