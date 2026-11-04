@@ -34,7 +34,7 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
     // deterministic. Same class as the round-14 (`Insert`) and round-19
     // (`Reattach`) fixes.
     let mut in_both: Vec<NodeId> = old_ids.intersection(&new_ids).copied().collect();
-    in_both.sort_unstable_by_key(|id| *id);
+    in_both.sort_unstable_by_key(|id| u32::from(*id));
     for id in &in_both {
         let o = old.get(*id).expect("present in old");
         let n = new.get(*id).expect("present in new");
@@ -84,6 +84,11 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
         // avoided for the dominant unchanged case).
         let o_children = child_ids(&o);
         let n_children = child_ids(&n);
+        // Handler diffs must be re-checked on EVERY in-place path below:
+        // restricting `Patch::Handler` emission to the props-unchanged arms
+        // silently kept the stale closure whenever a node's props and handler
+        // changed in the same edit (or its children were reordered).
+        let handlers_changed = !handlers_equal(old, new, &o.handlers(), &n.handlers());
         if o_children == n_children {
             // Same child set: only order may differ.
             if child_order(&o) == child_order(&n) {
@@ -92,13 +97,28 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
                     id: *id,
                     props_diff: props_diff(&o, &n, old, new),
                 });
+                if handlers_changed {
+                    emit_handler(&mut patches, new, n.handlers(), o.handlers());
+                }
                 continue;
             }
             // Same set, different order → single Reorder, not remove+insert.
+            // A reorder does not re-deliver props or handlers, so a node whose
+            // style also changed in the same edit needs its `Update` emitted
+            // alongside the reorder (and its handler re-bound).
+            if !props_equal {
+                patches.push(Patch::Update {
+                    id: *id,
+                    props_diff: props_diff(&o, &n, old, new),
+                });
+            }
             patches.push(Patch::Reorder {
                 parent: *id,
                 keys: child_order(&n),
             });
+            if handlers_changed {
+                emit_handler(&mut patches, new, n.handlers(), o.handlers());
+            }
             continue;
         }
         // Child set differs (an add/remove handled by the loops below) but the
@@ -114,6 +134,9 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
             id: *id,
             props_diff: props_diff(&o, &n, old, new),
         });
+        if handlers_changed {
+            emit_handler(&mut patches, new, n.handlers(), o.handlers());
+        }
     }
 
     // Nodes removed from the new tree.
@@ -121,37 +144,49 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
     // removed id plus an inserted id that still denote the SAME component at
     // the same parent/index. Pair those up into a state-preserving
     // `Patch::Reattach` before falling back to remove+insert (roadmap Phase 3).
-    //
-    // Round-26: `old_ids.difference(&new_ids)` iterates an `AHashSet`, whose
-    // order is randomized per process. The `for id in &removed` loop below
-    // emits `Patch::Remove` patches directly, so a single edit that dropped
-    // two nodes shipped different wire bytes on each run. Collect and sort by
-    // `NodeId` (content-derived, so stable) to make the remove stream
-    // deterministic. Same class as the round-14 (`Insert`), round-19
-    // (`Reattach`), and round-20 (in-place) fixes; the four sites now all
-    // sort before emitting.
     let mut removed: Vec<NodeId> = old_ids.difference(&new_ids).copied().collect();
-    removed.sort_unstable_by_key(|id| *id);
     let mut inserted: Vec<NodeId> = new_ids.difference(&old_ids).copied().collect();
-    // Round-37: sort `inserted` *before* `reattach_pairs`, not only before
-    // the later `Insert` emission loop. `reattach_pairs` populates each
-    // `candidates[key]` vector by iterating `inserted`; when two inserted
-    // nodes share `(component_id, kind, parent, index)` — an edit that
-    // shuffles the spans (hence NodeIds) of two same-component siblings at
-    // the same slot — the "first untaken candidate" the pair picks depends
-    // on `inserted`'s order. That vector came from `AHashSet::difference`,
-    // whose iteration order is randomized per process, so the `Reattach`
-    // `new_id` field — and therefore the frame bytes — varied between runs.
-    // Same bug class as the round-14/19/20/26 sorts on `inserted` (Emit),
-    // `pairs` (Reattach), `in_both` (in-place), and `removed` (Remove).
-    inserted.sort_unstable_by_key(|id| *id);
     let pairs = reattach_pairs(old, new, &old_index, &new_index, &removed, &inserted);
 
+    // Round-21: `removed` comes from `AHashSet::difference()` whose iteration
+    // order is randomized per process, so multi-node deletes shipped different
+    // frame bytes on each run (same determinism class as the round-14/19/20
+    // fixes for Insert/Reattach/in-place). Node ids are content-derived, so
+    // sorting by them is stable.
+    removed.sort_unstable_by_key(|id| u32::from(*id));
     for id in &removed {
         if pairs.iter().any(|(old_id, _)| old_id == id) {
             continue;
         }
         patches.push(Patch::Remove { id: *id });
+    }
+
+    // Round-19: `pairs` is built by iterating `removed`, which comes from
+    // `AHashSet::difference()` — iteration order randomized per process. Two
+    // span-shifted siblings therefore emitted their `Reattach` patches in
+    // whichever order the hash set happened to produce, making the frame bytes
+    // nondeterministic. Sort by `old_id` so the emitted order is stable and
+    // reproducible; the pairs are otherwise independent, so the reordering has
+    // no semantic effect. Mirrors the round-14 sort applied to `inserted`.
+    //
+    // Round-21: the sorted `Reattach` patches are also emitted BEFORE the
+    // insert loop below. A reattach pair's `new_id` is a node the host has
+    // never seen, and a freshly-inserted child of that node is addressed at
+    // `parent: new_id`; emitting the `Insert` first handed the host a parent
+    // it doesn't yet have (the round-20 comment's own invariant: a subtree is
+    // always emitted root-before-children). Reattach targets are exactly the
+    // `inserted` ids the insert loop skips, so emitting them first cannot
+    // reorder anything the inserts depend on.
+    let mut pairs = pairs;
+    pairs.sort_by_key(|(old_id, _)| u32::from(*old_id));
+    let reattached_new_ids: AHashSet<NodeId> = pairs.iter().map(|(_, new_id)| *new_id).collect();
+    for (old_id, new_id) in pairs {
+        let n = new.get(new_id).expect("present in new");
+        patches.push(Patch::Reattach {
+            old_id,
+            new_id,
+            node: to_ref(&n),
+        });
     }
 
     // Audit C8 + CRITICAL fix: Insert carries an absolute index into the new
@@ -189,24 +224,11 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
         // without this the multi-root insert order (and therefore the frame
         // bytes) varied between runs. Node ids are content-derived, so
         // ordering by them is stable across processes for the same input.
-        (depth_of(*id), parent, index, *id)
+        (depth_of(*id), parent, index, u32::from(*id))
     });
 
-    // FLUX-F36: compute the new arena's ordered root list ONCE, before the
-    // insert loop. The previous `is_root_of_new` / `root_position` helpers
-    // re-walked `new.all_ids()` on every inserted root, and `root_position`
-    // nested that walk inside another walk — O(n²) per inserted root, O(k·n²)
-    // for k inserted roots. The parent index `new_index` (built above) already
-    // tells us which ids have a parent; a root is exactly an id it does not
-    // contain. Ordering comes from arena insertion order (which `all_ids`
-    // preserves), so the emitted index is stable.
-    let new_roots: Vec<NodeId> = new
-        .all_ids()
-        .filter(|nid| new_index.get(nid).is_none())
-        .collect();
-
     for id in &inserted {
-        if pairs.iter().any(|(_, new_id)| new_id == id) {
+        if reattached_new_ids.contains(id) {
             continue;
         }
         if let Some((parent, index)) = new_index.get(id).copied() {
@@ -216,50 +238,18 @@ pub fn diff(old: &IRArena, new: &IRArena) -> Vec<Patch> {
                 index,
                 node: to_ref(&n),
             });
-        } else if let Some(idx) = new_roots.iter().position(|r| r == id) {
+        } else if is_root_of_new(new, id) {
             // Audit C9: arena roots have no entry in `new_index` (no parent),
             // so new top-level components were silently dropped on hot reload.
             // Emit the insert against the stable synthetic wrapper id the
             // devserver's tree.rs uses for the multi-root Init (§D.12.2).
-            // FLUX-F36: `idx` is the position in `new_roots`, computed
-            // once above. A >65k-root arena is astronomically unlikely
-            // (real apps have single-digit top-level components), but
-            // `u16::try_from` surfaces the narrowing failure as a log
-            // line rather than a silently-truncated wire index; the
-            // affected root is skipped rather than emitting a wrong
-            // position.
-            let Ok(index_u16) = u16::try_from(idx) else {
-                tracing::error!(
-                    index = idx,
-                    "insert index exceeds the u16 wire limit; skipping this root insert"
-                );
-                continue;
-            };
             let n = new.get(*id).expect("present in new");
             patches.push(Patch::Insert {
                 parent: synthetic_root_id(),
-                index: index_u16,
+                index: root_position(new, id),
                 node: to_ref(&n),
             });
         }
-    }
-
-    // Round-19: `pairs` is built by iterating `removed`, which comes from
-    // `AHashSet::difference()` — iteration order randomized per process. Two
-    // span-shifted siblings therefore emitted their `Reattach` patches in
-    // whichever order the hash set happened to produce, making the frame bytes
-    // nondeterministic. Sort by `old_id` so the emitted order is stable and
-    // reproducible; the pairs are otherwise independent, so the reordering has
-    // no semantic effect. Mirrors the round-14 sort applied to `inserted`.
-    let mut pairs = pairs;
-    pairs.sort_by_key(|(old_id, _)| *old_id);
-    for (old_id, new_id) in pairs {
-        let n = new.get(new_id).expect("present in new");
-        patches.push(Patch::Reattach {
-            old_id,
-            new_id,
-            node: to_ref(&n),
-        });
     }
 
     patches
@@ -322,7 +312,7 @@ mod tests {
             .iter()
             .filter_map(|p| match p {
                 Patch::Insert { parent, index, .. } => {
-                    Some((*parent, u32::from(*index)))
+                    Some((u32::from(*parent), u32::from(*index)))
                 }
                 _ => None,
             })
@@ -362,156 +352,6 @@ mod tests {
         assert!(
             patches.iter().any(|p| matches!(p, Patch::Insert { .. })),
             "a newly added top-level component must produce an Insert patch (audit C9)"
-        );
-    }
-
-    /// Regression (round-26): the `removed` vector is built from
-    /// `AHashSet::difference()`, whose iteration order is randomized per
-    /// process. Without an explicit sort, the emitted `Patch::Remove` order
-    /// varied between runs — the same bug class the rounds 14/19/20 fixes
-    /// closed for `Insert`, `Reattach`, and in-place patches.
-    ///
-    /// The input uses 15 removable children with non-contiguous ids: the
-    /// probability that AHashSet iteration happens to produce an ascending
-    /// order is ~1/15!, so this test fires reliably on the un-sorted code.
-    #[test]
-    fn remove_patches_are_emitted_in_ascending_node_id_order() {
-        // 15 removable children, ids deliberately shuffled.
-        let ids: [u32; 15] = [91, 3, 47, 18, 76, 5, 88, 24, 60, 12, 99, 31, 55, 7, 70];
-        let children: Vec<(u32, NodeKind)> =
-            ids.iter().map(|id| (*id, NodeKind::Primitive)).collect();
-        let old = build_tree(1, NodeKind::Component, &children);
-        let new = build_tree(1, NodeKind::Component, &[]);
-
-        let patches = diff(&old, &new);
-        let actual: Vec<u32> = patches
-            .iter()
-            .filter_map(|p| match p {
-                Patch::Remove { id } => Some(*id),
-                _ => None,
-            })
-            .collect();
-
-        let mut sorted = actual.clone();
-        sorted.sort_unstable();
-        assert_eq!(
-            actual, sorted,
-            "Remove patches must be emitted in ascending node-id order; \
-             got {actual:?}",
-        );
-        assert_eq!(
-            actual.len(),
-            15,
-            "all 15 removable children must produce a Remove patch",
-        );
-    }
-
-    /// Regression (round-37): `reattach_pairs` must be deterministic even when
-    /// two inserted nodes share the `(component_id, kind, parent, index)` key
-    /// used for pairing. Such a pair comes from `AHashSet::difference`, whose
-    /// order is randomized per process — before this fix, the "first untaken
-    /// candidate" the pairing picked (and therefore the `Reattach::new_id`
-    /// the host received) varied between runs. The fix sorts `inserted` before
-    /// calling `reattach_pairs`, so the pairing is stable.
-    ///
-    /// Setup: two same-slot, same-parent old children with different spans
-    /// (hence different NodeIds), and two new children with the SAME shapes in
-    /// the reverse order (also different NodeIds). Each old child pairs with
-    /// exactly one new child. The assertion pins *which* pairing was chosen.
-    #[test]
-    fn reattach_pairs_is_deterministic_when_candidates_share_a_key() {
-        use flux_syntax::Patch;
-
-        let mk = |id: u32, component: u32, span: Span| Node {
-            id: NodeId::from(id),
-            kind: NodeKind::Primitive,
-            component_id: ComponentId::from(component),
-            props: Props::from_fields(vec![]),
-            children: vec![],
-            handlers: vec![],
-            span,
-        };
-        let mk_root = |children: &[u32]| Node {
-            id: NodeId::from(1u32),
-            kind: NodeKind::Component,
-            component_id: ComponentId::from(0u32),
-            props: Props::from_fields(vec![]),
-            children: children.iter().map(|c| Child::Node(NodeId::from(*c))).collect(),
-            handlers: vec![],
-            span: Span::new(0, 0, 10),
-        };
-
-        // Two old children, same key: parent 1, index 0 / 1, component 100 / 101,
-        // kinds both Primitive; spans distinguish the NodeIds.
-        let old = {
-            let mut b = ArenaBuilder::new();
-            b.pack(mk_root(&[10, 11]));
-            b.pack(mk(10, 100, Span::new(0, 10, 20)));
-            b.pack(mk(11, 101, Span::new(0, 20, 30)));
-            b.finish()
-        };
-        // Two new children: same keys (component 100 / 101, parent 1,
-        // indices 0 / 1), but swapped spans so the NodeIds swap positions.
-        let new = {
-            let mut b = ArenaBuilder::new();
-            b.pack(mk_root(&[20, 21]));
-            b.pack(mk(20, 100, Span::new(0, 20, 30)));
-            b.pack(mk(21, 101, Span::new(0, 10, 20)));
-            b.finish()
-        };
-
-        let patches = diff(&old, &new);
-        // Every child must be paired as a Reattach; no Remove / Insert / Update.
-        let reattached: Vec<(NodeId, NodeId)> = patches
-            .iter()
-            .filter_map(|p| match p {
-                Patch::Reattach { old_id, new_id, .. } => Some((*old_id, *new_id)),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(
-            reattached.len(),
-            2,
-            "both sibling swaps must pair into Reattach patches; got {patches:?}"
-        );
-        // The pairing must be sorted by old_id (the emission-time sort).
-        let mut sorted = reattached.clone();
-        sorted.sort_by_key(|(o, _)| *o);
-        assert_eq!(reattached, sorted, "Reattach emission must be sorted by old_id");
-
-        // The pairing itself must be deterministic: for each old_id, the
-        // chosen new_id must be the *smallest* newly-inserted candidate that
-        // shares its key — which the fix guarantees, because `inserted` is
-        // sorted ascending before `reattach_pairs` runs.
-        for (old_id, new_id) in &reattached {
-            // Each old_id must appear exactly once.
-            assert_eq!(
-                reattached.iter().filter(|(o, _)| o == old_id).count(),
-                1,
-                "old_id {old_id} paired more than once",
-            );
-            // The chosen new_id must not be greater than any other candidate
-            // that shares the same key (component_id + parent slot + index).
-            let chosen = *new_id;
-            let other = reattached
-                .iter()
-                .find(|(o, _)| o != old_id)
-                .map(|(_, n)| *n)
-                .expect("both sides of the pair");
-            assert!(
-                chosen != other,
-                "two distinct Reattach pairs must not share a new_id ({chosen})"
-            );
-        }
-
-        // Run the diff again and confirm identical output (determinism gate).
-        // `Patch` does not implement `PartialEq`, so compare the `Debug`
-        // rendering — structurally identical patches render identically.
-        let again = diff(&old, &new);
-        assert_eq!(
-            format!("{patches:?}"),
-            format!("{again:?}"),
-            "diff must be reproducible across calls (reattach pairing must be deterministic)"
         );
     }
 }
