@@ -27,19 +27,8 @@ public protocol SignalStore {
     mutating func markPending(_ id: UInt32)
     /// Resolves `id` to `value`, marking it `.ready` (an async capability finished).
     mutating func resolveCell(_ id: UInt32, _ value: FluxValue)
-    /// Returns every signal **written since the last `beginRun`**, sorted by id.
-    ///
-    /// Must contain only signals the handler wrote — not every seeded cell — or
-    /// every dispatch marks the whole graph dirty and `resume` replays unrelated
-    /// signals back into the store, clobbering writes made during the suspend
-    /// window. The Rust oracle filters on a `written` set for the same reason
-    /// (`flux-vm-ref/src/vm.rs::snapshot`).
+    /// Returns every written signal as a sorted `(id, value)` list.
     func snapshot() -> [(UInt32, FluxValue)]
-
-    /// Starts a new handler run: `snapshot()` reports only signals written after
-    /// this call. Seeds and `resolveCell` are not `write`-ten and are excluded,
-    /// matching the Rust oracle.
-    mutating func beginRun()
 }
 
 /// In-memory `SignalStore` used by tests, the reconciler and the dev server.
@@ -55,8 +44,6 @@ struct InMemorySignals: SignalStore {
     /// Monotonic id source for `allocateCell`, drawn from a high ceiling so it
     /// never collides with fixed ids like 99.
     private var nextCell: UInt32 = 1_000_000
-    /// Signals explicitly `write`-ten since the last `beginRun` (F2).
-    private var writtenSinceRun: [UInt32: FluxValue] = [:]
 
     init(store: [UInt32: FluxValue] = [:]) {
         self.store = store
@@ -68,11 +55,6 @@ struct InMemorySignals: SignalStore {
     mutating func write(_ id: UInt32, _ value: FluxValue) {
         store[id] = value
         cellStates[id] = .ready
-        writtenSinceRun[id] = value
-    }
-
-    mutating func beginRun() {
-        writtenSinceRun.removeAll(keepingCapacity: true)
     }
 
     mutating func allocateCell() -> UInt32 {
@@ -94,7 +76,7 @@ struct InMemorySignals: SignalStore {
     }
 
     func snapshot() -> [(UInt32, FluxValue)] {
-        writtenSinceRun.map { ($0.key, $0.value) }.sorted { $0.0 < $1.0 }
+        store.map { ($0.key, $0.value) }.sorted { $0.0 < $1.0 }
     }
 }
 
@@ -147,13 +129,6 @@ enum FluxBytecodeVM {
     static let entryGas: UInt32 = 100_000
 
     /// The per-dispatch allocation budget in bytes (§NFR-SEC-003 / ADR-0015).
-    /// Per-dispatch allocation ceiling (`NFR-SEC-003`, spec mlp-appendices
-    /// §E.3.1). The canonical cost model is 8 bytes per record field, 8
-    /// bytes per list backing slot (charged on `ALLOC_LIST`, not per push),
-    /// and 8 bytes per `LIST_PUSH`. The counter fires when
-    /// `allocated >= allocationBudget`. Any change must be mirrored in the
-    /// Kotlin VM, the Rust VM, and the boundary ISA vector.
-    ///
     /// A closure may allocate at most this many bytes across `ALLOC_RECORD` /
     /// `ALLOC_LIST` / `LIST_PUSH` before the VM raises `MemoryExhausted`. This
     /// bounds runaway handlers so a single bad closure cannot exhaust device
@@ -201,9 +176,6 @@ enum FluxBytecodeVM {
         capRegistry: CapabilityRegistry = .dev,
         permissions: PermissionChecker = AllowAllPermissionChecker()
     ) throws -> VmOutcome {
-        // F2: reset the written set so `snapshot()` reports only this dispatch's
-        // writes, matching the Rust oracle and the Kotlin host.
-        signals.beginRun()
         let offsets = program.map { $0.offset }
         var regs = [FluxValue](repeating: .null, count: 16)
         regs[0] = payload
@@ -262,7 +234,7 @@ enum FluxBytecodeVM {
                     if b == 0 { throw VmError.divByZero(offset: instr.offset) }
                     r = wrappingRem(a, b)
                 default:
-                    throw VmError.invalidDispatch(offset: instr.offset)
+                    fatalError("unreachable: matched arithmetic set")
                 }
                 regs[Int(dst)] = .int(r)
 
@@ -283,7 +255,7 @@ enum FluxBytecodeVM {
                 case .lteI64: r = a <= b
                 case .gteI64: r = a >= b
                 default:
-                    throw VmError.invalidDispatch(offset: instr.offset)
+                    fatalError("unreachable: matched integer compare set")
                 }
                 regs[Int(dst)] = .bool(r)
 
@@ -298,7 +270,7 @@ enum FluxBytecodeVM {
                 case .mulF64: r = a * b
                 case .divF64: r = fdiv(a, b)
                 default:
-                    throw VmError.invalidDispatch(offset: instr.offset)
+                    fatalError("unreachable: matched float arithmetic set")
                 }
                 regs[Int(dst)] = .float(r)
 
@@ -317,7 +289,7 @@ enum FluxBytecodeVM {
                 case .ltF64: r = a < b
                 case .gtF64: r = a > b
                 default:
-                    throw VmError.invalidDispatch(offset: instr.offset)
+                    fatalError("unreachable: matched float compare set")
                 }
                 regs[Int(dst)] = .bool(r)
 
@@ -413,11 +385,11 @@ enum FluxBytecodeVM {
             case .allocRecord:
                 let dst = instr.u8(0)
                 let count = Int(instr.u16(1))
-                // Each field reserves 8 bytes of logical slot cost (§E.3.1,
-                // canonical model). Bounds the total against the per-dispatch
-                // allocation budget (§NFR-SEC-003 / ADR-0015).
-                allocated &+= UInt64(count) &* 8
-                if allocated >= allocationBudget {
+                // Each field reserves two words of storage (a `UInt16` prop index
+                // plus a `FluxValue` tagged union). Bounds the total against the
+                // per-dispatch allocation budget (§NFR-SEC-003 / ADR-0015).
+                allocated &+= UInt64(count) &* 16
+                if allocated > allocationBudget {
                     throw VmError.memoryExhausted(offset: instr.offset)
                 }
                 var fields: [(UInt16, FluxValue)] = []
@@ -446,12 +418,9 @@ enum FluxBytecodeVM {
                 regs[Int(dst)] = .bool(recordsEqual(x, y))
 
             case .allocList:
-                // ALLOC_LIST reserves `cap` backing slots (one 8-byte slot
-                // per item), per §E.3.1. The previous flat `+8` accounted
-                // only for the list header and undercharged a large-cap list.
-                let cap = Int(instr.u16(1))
-                allocated &+= UInt64(cap) &* 8
-                if allocated >= allocationBudget {
+                // A freshly allocated list reserves one word for its header.
+                allocated &+= 8
+                if allocated > allocationBudget {
                     throw VmError.memoryExhausted(offset: instr.offset)
                 }
                 regs[Int(instr.u8(0))] = .list([])
@@ -461,7 +430,7 @@ enum FluxBytecodeVM {
                 let val = reg(instr.u8(1))
                 // Pushing one element grows the backing storage by one word.
                 allocated &+= 8
-                if allocated >= allocationBudget {
+                if allocated > allocationBudget {
                     throw VmError.memoryExhausted(offset: instr.offset)
                 }
                 guard case var .list(items) = regs[Int(list)] else {
@@ -492,8 +461,7 @@ enum FluxBytecodeVM {
             // --- FLUX-072: dynamic-list mutation (mirror flux-vm-ref). ---
             case .listInsert:
                 let list = instr.u8(0)
-                // The index operand is a *register* holding an Int (audit F1).
-                let idx = try Self.listIndex(regs[Int(instr.u8(1))], offset: instr.offset)
+                let idx = Int(instr.u8(1))
                 let val = reg(instr.u8(2))
                 guard case var .list(items) = regs[Int(list)] else {
                     throw VmError.typeMismatch(offset: instr.offset)
@@ -514,8 +482,7 @@ enum FluxBytecodeVM {
                 // corrupting the list. Ported the correct indices from
                 // `flux-vm-ref` and from the correct `.listInsert` arm.
                 let list = instr.u8(0)
-                // The index operand is a *register* holding an Int (audit F1).
-                let idx = try Self.listIndex(regs[Int(instr.u8(1))], offset: instr.offset)
+                let idx = Int(instr.u8(1))
                 guard case var .list(items) = regs[Int(list)] else {
                     throw VmError.typeMismatch(offset: instr.offset)
                 }
@@ -753,10 +720,6 @@ enum FluxBytecodeVM {
         permissions: PermissionChecker = AllowAllPermissionChecker(),
         programBytes: [UInt8]
     ) -> Result<RunResult, VmError> {
-        // F2: fresh-run entry (both `runResumable` overloads funnel here).
-        // `resume` bypasses `execTail` and calls `execTailWith` directly, so
-        // this reset does not clobber a suspended run's earlier writes.
-        signals.beginRun()
         var regs = [FluxValue](repeating: .null, count: 16)
         regs[0] = payload
         let gas = entryGas
@@ -780,10 +743,6 @@ enum FluxBytecodeVM {
         permissions: PermissionChecker = AllowAllPermissionChecker(),
         programBytes: [UInt8]
     ) -> Result<RunResult, VmError> {
-        // NOTE: execTailWith is called from BOTH the fresh-start path
-        // (`runResumable` via `execTail`) and the resume path (`resume`). The
-        // `beginRun` reset is done by the *callers* — never here — so `resume`
-        // does not clobber the earlier partial run's written set.
         let offsets = program.map { $0.offset }
         guard let startIndex = offsets.firstIndex(of: startOffset) else {
             return .failure(.invalidDispatch(offset: startOffset))
@@ -1010,8 +969,8 @@ enum FluxBytecodeVM {
             case .allocRecord:
                 let dst = instr.u8(0)
                 let count = Int(instr.u16(1))
-                allocated &+= UInt64(count) &* 8
-                if allocated >= allocationBudget { return .failure(.memoryExhausted(offset: instr.offset)) }
+                allocated &+= UInt64(count) &* 16
+                if allocated > allocationBudget { return .failure(.memoryExhausted(offset: instr.offset)) }
                 // Audit H2: the resumable path pre-populated records with
                 // positional nulls, diverging from `run` and the oracle;
                 // after any AWAIT every record carried phantom null fields.
@@ -1037,18 +996,15 @@ enum FluxBytecodeVM {
                 regs[Int(dst)] = .bool(recordsEqual(x, y))
 
             case .allocList:
-                // ALLOC_LIST reserves `cap` backing slots (one 8-byte slot
-                // per item), per §E.3.1.
-                let cap = Int(instr.u16(1))
-                allocated &+= UInt64(cap) &* 8
-                if allocated >= allocationBudget { return .failure(.memoryExhausted(offset: instr.offset)) }
+                allocated &+= 8
+                if allocated > allocationBudget { return .failure(.memoryExhausted(offset: instr.offset)) }
                 regs[Int(instr.u8(0))] = .list([])
 
             case .listPush:
                 let list = instr.u8(0)
                 let val = reg(instr.u8(1))
                 allocated &+= 8
-                if allocated >= allocationBudget { return .failure(.memoryExhausted(offset: instr.offset)) }
+                if allocated > allocationBudget { return .failure(.memoryExhausted(offset: instr.offset)) }
                 guard case var .list(items) = regs[Int(list)] else {
                     return .failure(.typeMismatch(offset: instr.offset))
                 }
@@ -1075,8 +1031,7 @@ enum FluxBytecodeVM {
             // --- FLUX-072: dynamic-list mutation (mirror flux-vm-ref). ---
             case .listInsert:
                 let list = instr.u8(0)
-                // The index operand is a *register* holding an Int (audit F1).
-                let idx = try Self.listIndex(regs[Int(instr.u8(1))], offset: instr.offset)
+                let idx = Int(instr.u8(1))
                 let val = reg(instr.u8(2))
                 guard case var .list(items) = regs[Int(list)] else {
                     throw VmError.typeMismatch(offset: instr.offset)
@@ -1097,8 +1052,7 @@ enum FluxBytecodeVM {
                 // corrupting the list. Ported the correct indices from
                 // `flux-vm-ref` and from the correct `.listInsert` arm.
                 let list = instr.u8(0)
-                // The index operand is a *register* holding an Int (audit F1).
-                let idx = try Self.listIndex(regs[Int(instr.u8(1))], offset: instr.offset)
+                let idx = Int(instr.u8(1))
                 guard case var .list(items) = regs[Int(list)] else {
                     throw VmError.typeMismatch(offset: instr.offset)
                 }
@@ -1247,7 +1201,6 @@ enum FluxBytecodeVM {
         stringTable: any StringResolver = EmptyStringTable(),
         capRegistry: CapabilityRegistry = .dev
     ) throws -> VmOutcome {
-        signals.beginRun()
         let program = try Instruction.decode(bytecode)
         let offsets = program.map { $0.offset }
         var regs = [FluxValue](repeating: .null, count: 16)
@@ -1294,7 +1247,7 @@ enum FluxBytecodeVM {
                 case .modI64:
                     if b == 0 { throw VmError.divByZero(offset: instr.offset) }
                     r = wrappingRem(a, b)
-                default: throw VmError.invalidDispatch(offset: instr.offset)
+                default: fatalError("unreachable")
                 }
                 regs[Int(dst)] = .int(r)
             case opcodeIndex[.negI64]!:
@@ -1312,7 +1265,7 @@ enum FluxBytecodeVM {
                 case .gtI64: r = a > b
                 case .lteI64: r = a <= b
                 case .gteI64: r = a >= b
-                default: throw VmError.invalidDispatch(offset: instr.offset)
+                default: fatalError("unreachable")
                 }
                 regs[Int(dst)] = .bool(r)
             case opcodeIndex[.addF64]!, opcodeIndex[.subF64]!, opcodeIndex[.mulF64]!, opcodeIndex[.divF64]!:
@@ -1325,7 +1278,7 @@ enum FluxBytecodeVM {
                 case .subF64: r = a - b
                 case .mulF64: r = a * b
                 case .divF64: r = fdiv(a, b)
-                default: throw VmError.invalidDispatch(offset: instr.offset)
+                default: fatalError("unreachable")
                 }
                 regs[Int(dst)] = .float(r)
             case opcodeIndex[.negF64]!:
@@ -1341,7 +1294,7 @@ enum FluxBytecodeVM {
                 case .eqF64: r = (a == b)
                 case .ltF64: r = a < b
                 case .gtF64: r = a > b
-                default: throw VmError.invalidDispatch(offset: instr.offset)
+                default: fatalError("unreachable")
                 }
                 regs[Int(dst)] = .bool(r)
             case opcodeIndex[.i64ToF64]!:
@@ -1412,8 +1365,8 @@ enum FluxBytecodeVM {
             case opcodeIndex[.allocRecord]!:
                 let dst = instr.u8(0)
                 let count = Int(instr.u16(1))
-                allocated &+= UInt64(count) &* 8
-                if allocated >= allocationBudget { throw VmError.memoryExhausted(offset: instr.offset) }
+                allocated &+= UInt64(count) &* 16
+                if allocated > allocationBudget { throw VmError.memoryExhausted(offset: instr.offset) }
                 // Audit H2: no pre-population — records start empty on all paths.
                 regs[Int(dst)] = .record([])
             case opcodeIndex[.getField]!:
@@ -1432,17 +1385,14 @@ enum FluxBytecodeVM {
                 let y = try requireRecord(reg(instr.u8(2)), at: instr.offset)
                 regs[Int(dst)] = .bool(recordsEqual(x, y))
             case opcodeIndex[.allocList]!:
-                // ALLOC_LIST reserves `cap` backing slots (one 8-byte slot
-                // per item), per §E.3.1.
-                let cap = Int(instr.u16(1))
-                allocated &+= UInt64(cap) &* 8
-                if allocated >= allocationBudget { throw VmError.memoryExhausted(offset: instr.offset) }
+                allocated &+= 8
+                if allocated > allocationBudget { throw VmError.memoryExhausted(offset: instr.offset) }
                 regs[Int(instr.u8(0))] = .list([])
             case opcodeIndex[.listPush]!:
                 let list = instr.u8(0)
                 let val = reg(instr.u8(1))
                 allocated &+= 8
-                if allocated >= allocationBudget { throw VmError.memoryExhausted(offset: instr.offset) }
+                if allocated > allocationBudget { throw VmError.memoryExhausted(offset: instr.offset) }
                 guard case var .list(items) = regs[Int(list)] else { throw VmError.typeMismatch(offset: instr.offset) }
                 items.append(val)
                 regs[Int(list)] = .list(items)
@@ -1512,8 +1462,7 @@ enum FluxBytecodeVM {
                 regs[Int(instr.u8(0))] = .bool(regs[src] == .null)
             case opcodeIndex[.listInsert]!:
                 let list = instr.u8(0)
-                // The index operand is a *register* holding an Int (audit F1).
-                let idx = try Self.listIndex(regs[Int(instr.u8(1))], offset: instr.offset)
+                let idx = Int(instr.u8(1))
                 let val = reg(instr.u8(2))
                 guard case var .list(items) = regs[Int(list)] else {
                     throw VmError.typeMismatch(offset: instr.offset)
@@ -1525,8 +1474,7 @@ enum FluxBytecodeVM {
                 regs[Int(list)] = .list(items)
             case opcodeIndex[.listRemove]!:
                 let list = instr.u8(0)
-                // The index operand is a *register* holding an Int (audit F1).
-                let idx = try Self.listIndex(regs[Int(instr.u8(1))], offset: instr.offset)
+                let idx = Int(instr.u8(1))
                 guard case var .list(items) = regs[Int(list)] else {
                     throw VmError.typeMismatch(offset: instr.offset)
                 }
@@ -1553,7 +1501,7 @@ enum FluxBytecodeVM {
                 }
                 regs[Int(list)] = .list(items)
             default:
-                throw VmError.invalidDispatch(offset: instr.offset)
+                fatalError("unknown opcode tag \(tag)")
             }
 
             ip = nextIP
@@ -1590,21 +1538,6 @@ enum FluxBytecodeVM {
     private static func requireInt(_ v: FluxValue, at offset: Int) throws -> Int64 {
         guard case let .int(i) = v else { throw VmError.typeMismatch(offset: offset) }
         return i
-    }
-
-    /// Reads a list index from a register: a non-negative `.int` that fits
-    /// `Int`. `LIST_INSERT` / `LIST_REMOVE` take the index from a *register*
-    /// holding an `Int` (matching `LIST_GET` and the emitter's
-    /// `compile_list_method`), not from the operand byte (audit F1). Negative
-    /// or oversized -> `indexOutOfBounds`; non-Int -> `typeMismatch`.
-    private static func listIndex(_ value: FluxValue, offset: Int) throws -> Int {
-        guard case .int(let i) = value else {
-            throw VmError.typeMismatch(offset: offset)
-        }
-        guard i >= 0, i <= Int64(Int.max) else {
-            throw VmError.indexOutOfBounds(offset: offset)
-        }
-        return Int(i)
     }
 
     private static func requireFloat(_ v: FluxValue, at offset: Int) throws -> Double {
