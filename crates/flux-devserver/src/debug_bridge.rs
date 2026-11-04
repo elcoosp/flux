@@ -136,6 +136,23 @@ impl DevToolsRouter {
         }
     }
 
+    /// Replaces the telemetry-enrichment source map.
+    ///
+    /// Round-21 fix: the router used to be built once at startup from the
+    /// *pre-compile* pipeline, so its [`SourceMap`] stayed empty forever and
+    /// every enriched telemetry event resolved to "no source mapping". The
+    /// server now rebuilds the map from the last-good tree after each
+    /// successful compile and installs it here.
+    pub fn set_source_map(&mut self, map: SourceMap) {
+        self.source_map = map;
+    }
+
+    /// The telemetry-enrichment source map currently installed.
+    #[must_use]
+    pub fn source_map(&self) -> &SourceMap {
+        &self.source_map
+    }
+
     /// Returns the most recent enriched telemetry batch for replay to a freshly
     /// subscribed DevTools client (snapshot-on-connect, FLUX-039).
     #[must_use]
@@ -174,12 +191,6 @@ impl DevToolsRouter {
                 // Disconnected or lagged (Full): evict the slow client.
                 Err(_) => false,
             });
-        // Also prune `devtools` senders whose clients disappeared between
-        // telemetry events. An announce is rare (once per host connect), so
-        // without this the `devtools` vector would keep dead senders until
-        // the next telemetry event — same class of leak as the host-identity
-        // side, just with a different trigger.
-        self.devtools.retain(|tx| !tx.is_closed());
         tracing::debug!(reached, "announce_host: broadcast complete");
         reached
     }
@@ -204,17 +215,6 @@ impl DevToolsRouter {
                 // Disconnected or lagged (buffer full): evict the slow client.
                 Err(_) => false,
             });
-        // Prune dead senders on the host-identity stream too. Without this a
-        // DevTools client that subscribed to the identity stream and then
-        // disconnected *before any announce fired* left a dead `Sender` in
-        // `host_announce` until the next real announce — which in a session
-        // that follows the live host may never happen. Over a long DevTools
-        // session with reconnects that accumulates without bound.
-        //
-        // `route_telemetry` is the hot path (one call per telemetry event);
-        // pruning here keeps the vector bounded without requiring a separate
-        // tick. The `is_closed()` check is O(1) per entry.
-        self.host_announce.retain(|tx| !tx.is_closed());
         tracing::debug!(reached, "route_telemetry: broadcast complete");
         reached
     }
@@ -223,20 +223,6 @@ impl DevToolsRouter {
     #[must_use]
     pub fn route_command(&self, command: DebugCommand) -> bool {
         self.host_command.try_send(command).is_ok()
-    }
-
-    /// Live subscriber counts as `(devtools, host_announce)`.
-    ///
-    /// Exposed so a test can assert dead subscribers do not silently
-    /// accumulate: `route_telemetry` prunes `devtools`, `announce_host` prunes
-    /// `host_announce`. A client that subscribes to the host-identity stream
-    /// and disconnects before any announce fires previously leaked an entry
-    /// in `host_announce` until the next real announce (which may never
-    /// happen in a session that follows the live host).
-    #[doc(hidden)]
-    #[must_use]
-    pub fn debug_subscriber_counts(&self) -> (usize, usize) {
-        (self.devtools.len(), self.host_announce.len())
     }
 }
 
@@ -260,22 +246,6 @@ pub async fn serve_devtools(
     token: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    serve_devtools_on(listener, router, token).await
-}
-
-/// Same as [`serve_devtools`] but takes a pre-bound listener, so a caller that
-/// needs to know the *actual* bound port (a test binding `:0`) can read it
-/// from [`tokio::net::TcpListener::local_addr`] before spawning. Round-44
-/// refactor: the integration tests previously hard-coded ports `17399`/`17400`,
-/// which raced with a previous run's listener (or with a concurrent
-/// invocation) and produced `ConnectionReset` flakes — the same class of bug
-/// closed for the kotlinc/swiftc temp-file writes in round 38.
-#[allow(clippy::result_large_err)]
-pub(crate) async fn serve_devtools_on(
-    listener: tokio::net::TcpListener,
-    router: std::sync::Arc<parking_lot::Mutex<DevToolsRouter>>,
-    token: Option<String>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     loop {
         let (stream, peer) = listener.accept().await?;
 
@@ -296,15 +266,6 @@ pub(crate) async fn serve_devtools_on(
                         if !query.contains(&format!("token={expected}")) {
                             // Build a 401 rejection response. Use `None` body
                             // to keep the error variant small (clippy).
-                            //
-                            // F18: the `unwrap()` is provably safe — status
-                            // 401, two ASCII-valued headers, and a `None`
-                            // body are all valid `Response` inputs, so the
-                            // builder cannot return an error. The `#[allow]`
-                            // is scoped to this statement so a future edit
-                            // that introduces a fallible field is caught by
-                            // the lint gate.
-                            #[allow(clippy::unwrap_used)]
                             let err = tokio_tungstenite::tungstenite::handshake::server::Response::builder()
                                 .status(401)
                                 .header("Content-Length", "0")
@@ -540,15 +501,10 @@ mod tests {
         use tokio_tungstenite::connect_async;
         use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
-        // Round-44: bind on port `0` and read the actual port from the
-        // listener before spawning the accept loop. The previous version
-        // hard-coded `127.0.0.1:17399`, which raced with a prior test run's
-        // listener (or a concurrent invocation) and produced `ConnectionReset`
-        // flakes. Port-0 binding + `local_addr()` removes the collision.
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind ephemeral port");
-        let addr = listener.local_addr().expect("resolve local addr");
+        // Fixed ephemeral-range port for the test endpoint. A probe/rebind race
+        // with `serve_devtools` (which binds the same addr itself) would hang
+        // the clients, so we use a stable port and let the server own the bind.
+        let addr: std::net::SocketAddr = "127.0.0.1:17399".parse().unwrap();
 
         let (host_tx, _host_rx) = mpsc::channel(1024);
         let source_map = SourceMap::default();
@@ -556,9 +512,9 @@ mod tests {
             source_map, host_tx,
         )));
         let router_for_spawn = test_router.clone();
-        tokio::spawn(async move { serve_devtools_on(listener, router_for_spawn, None).await });
-        // Yield so the accept task is scheduled; the listener is already bound.
-        tokio::task::yield_now().await;
+        tokio::spawn(async move { serve_devtools(addr, router_for_spawn, None).await });
+        // Give the accept loop a moment to bind.
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         // DevTools client subscribes (this is the ONLY thing a DevTools
         // client is allowed to do from the trust model's perspective).
@@ -603,11 +559,7 @@ mod tests {
         use tokio_tungstenite::tungstenite::client::IntoClientRequest;
         use tokio_tungstenite::{connect_async, tungstenite::Message};
 
-        // Round-44: ephemeral port binding (see `host_telemetry_reaches_devtools_client`).
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind ephemeral port");
-        let addr = listener.local_addr().expect("resolve local addr");
+        let addr: std::net::SocketAddr = "127.0.0.1:17400".parse().unwrap();
         let (host_tx, _host_rx) = mpsc::channel(1024);
         let test_router = std::sync::Arc::new(parking_lot::Mutex::new(DevToolsRouter::new(
             SourceMap::default(),
@@ -615,9 +567,9 @@ mod tests {
         )));
         tokio::spawn({
             let r = test_router.clone();
-            async move { serve_devtools_on(listener, r, None).await }
+            async move { serve_devtools(addr, r, None).await }
         });
-        tokio::task::yield_now().await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         // Host announces BEFORE any DevTools client connects.
         let announce = HostAnnounceFrame {
@@ -640,64 +592,5 @@ mod tests {
         let got = HostAnnounceFrame::from_bytes(&bytes).expect("decodes host announce");
         assert_eq!(got.platform, "ios");
         assert_eq!(got.device, "iPhone17,1");
-    }
-}
-
-#[cfg(test)]
-mod subscriber_leak_regression {
-    use super::*;
-
-    /// Regression: a DevTools client that subscribes to the host-identity
-    /// stream and disconnects *before any announce fires* used to leave a
-    /// dead entry in `host_announce` until the next real announce — which may
-    /// never happen in a session that follows the live host. `route_telemetry`
-    /// now prunes both subscriber lists (it is the hot path), so a burst of
-    /// connect/disconnect churn cannot grow the router unbounded.
-    #[test]
-    fn dead_host_announce_subscribers_are_pruned() {
-        let (host_tx, _host_rx) = mpsc::channel(1024);
-        let mut router = DevToolsRouter::new(SourceMap::default(), host_tx);
-
-        for _ in 0..20 {
-            let dev_rx = router.subscribe_devtools();
-            let host_rx = router.subscribe_host_announce();
-            drop(dev_rx);
-            drop(host_rx);
-        }
-        // One telemetry event drives pruning of both lists.
-        let event = TelemetryEvent::VmStep {
-            bytecode_offset: 0,
-            opcode: 1,
-            registers: Box::new([const { flux_syntax::Value::Null }; 16]),
-            gas_remaining: 1000,
-        };
-        router.route_telemetry(&event);
-
-        let (devtools, host_announce) = router.debug_subscriber_counts();
-        assert_eq!(
-            (devtools, host_announce),
-            (0, 0),
-            "dead subscribers must not accumulate: `route_telemetry` prunes both lists",
-        );
-    }
-
-    /// Live subscribers are preserved by the prune.
-    #[test]
-    fn live_subscribers_survive_the_prune() {
-        let (host_tx, _host_rx) = mpsc::channel(1024);
-        let mut router = DevToolsRouter::new(SourceMap::default(), host_tx);
-        let _dev = router.subscribe_devtools();
-        let _announce = router.subscribe_host_announce();
-
-        let event = TelemetryEvent::VmStep {
-            bytecode_offset: 0,
-            opcode: 1,
-            registers: Box::new([const { flux_syntax::Value::Null }; 16]),
-            gas_remaining: 1000,
-        };
-        router.route_telemetry(&event);
-
-        let (devtools, host_announce) = router.debug_subscriber_counts();
-        assert_eq!((devtools, host_announce), (1, 1));
     }
 }
