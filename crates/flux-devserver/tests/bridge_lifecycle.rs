@@ -20,7 +20,7 @@ fn stale_early_value_does_not_leak_across_sessions() {
 
     // --- Session 1 ---
     // A capability resolves, but no suspension has been reported yet.
-    let resumed = bridge.resume(42, Value::Int(1)).expect("encodes");
+    let resumed = bridge.resume(42, Value::Int(1));
     assert!(
         resumed.is_none(),
         "no handler parked yet; the value is held as early"
