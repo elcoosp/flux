@@ -1,7 +1,5 @@
 package dev.flux.host.vm
 
-import dev.flux.host.BuildFlags
-
 import dev.flux.host.vm.debug.TelemetryBridge
 import dev.flux.host.vm.debug.TelemetryEvent
 
@@ -81,9 +79,6 @@ public object FluxBytecodeVM {
         capabilities: CapabilityRegistry = CapabilityRegistry.default(),
         permissions: PermissionChecker = AllowAllPermissionChecker,
     ): VmResult {
-        // F2: reset the written set so `snapshot()` reports only this dispatch's
-        // writes, matching the Rust oracle.
-        signals.beginRun()
         val program =
             try {
                 Decoder.decodeProgram(bytecode)
@@ -115,35 +110,17 @@ public object FluxBytecodeVM {
         capabilities: CapabilityRegistry = CapabilityRegistry.default(),
         permissions: PermissionChecker = AllowAllPermissionChecker,
     ): RunResult {
-        signals.beginRun()
         val program =
             try {
                 Decoder.decodeProgram(bytecode)
             } catch (e: VmError) {
-                // F3: a decode failure is a terminal fault, not a silent
-                // empty-program Halt. The previous behaviour made every
-                // corrupt handler a "successful" no-op, hiding genuine opcode
-                // errors from the host (AGENTS.md §3.11).
-                return RunResult.Fault(e.kind, e.offset)
+                return RunResult.Halt(VmOutcome(emptyList(), Array(16) { FluxValue.NullVal }, 0u))
             }
         val offsets: List<UInt> = program.map { it.offset }
         val regs = Array<FluxValue>(16) { FluxValue.NullVal }
         regs[0] = payload
         regs[15] = FluxValue.IntVal(ENTRY_GAS.toLong())
-        return execTail(
-            program,
-            offsets,
-            signals,
-            0,
-            regs,
-            ENTRY_GAS,
-            strings,
-            capabilities,
-            permissions,
-            // F11.1: pass the original bytecode so a suspend does not have to
-            // re-serialise the decoded program.
-            programBytes = bytecode,
-        )
+        return execTail(program, offsets, signals, 0, regs, ENTRY_GAS, strings, capabilities, permissions)
     }
 
     /**
@@ -160,7 +137,6 @@ public object FluxBytecodeVM {
         capabilities: CapabilityRegistry = CapabilityRegistry.default(),
         permissions: PermissionChecker = AllowAllPermissionChecker,
     ): RunResult {
-        signals.beginRun()
         val offsets: List<UInt> = program.map { it.offset }
         val regs = Array<FluxValue>(16) { FluxValue.NullVal }
         regs[0] = payload
@@ -183,7 +159,6 @@ public object FluxBytecodeVM {
         capabilities: CapabilityRegistry = CapabilityRegistry.default(),
         permissions: PermissionChecker = AllowAllPermissionChecker,
     ): VmResult {
-        signals.beginRun()
         val offsets: List<UInt> = program.map { it.offset }
         val regs = Array<FluxValue>(16) { FluxValue.NullVal }
         regs[0] = payload
@@ -220,11 +195,7 @@ public object FluxBytecodeVM {
             try {
                 Decoder.decodeProgram(state.program)
             } catch (e: VmError) {
-                // F3: a decode failure is a terminal fault, not a silent
-                // empty-program Halt. The previous behaviour made every
-                // corrupt handler a "successful" no-op, hiding genuine opcode
-                // errors from the host (AGENTS.md §3.11).
-                return RunResult.Fault(e.kind, e.offset)
+                return RunResult.Halt(VmOutcome(emptyList(), Array(16) { FluxValue.NullVal }, 0u))
             }
         val offsets: List<UInt> = program.map { it.offset }
         val regs = state.registers.copyOf()
@@ -249,13 +220,6 @@ public object FluxBytecodeVM {
         strings: StringResolver,
         capabilities: CapabilityRegistry,
         permissions: PermissionChecker,
-        // F11.1: the original bytecode, if the caller still has it (the
-        // `runResumable(bytecode)` overload does). Used to fill
-        // `SuspendState.program` without re-serialising `program` into a
-        // boxed `ArrayList<Byte>` on every suspend — which was O(program)
-        // allocation in the AWAIT hot path. `null` falls back to re-serialising
-        // for callers that only have the decoded program.
-        programBytes: ByteArray? = null,
     ): RunResult {
         val regs = initialRegs.copyOf()
         var gas: UInt = initialGas
@@ -301,11 +265,7 @@ public object FluxBytecodeVM {
                     is StepResult.Suspend -> {
                         return RunResult.Suspended(
                             SuspendState(
-                                // F11.1: reuse the caller-provided bytecode
-                                // when available; only re-serialise as a
-                                // fallback. Avoids an O(program) allocation
-                                // on every suspend.
-                                program = programBytes ?: stateProgram(program),
+                                program = stateProgram(program),
                                 resumeIndex = result.resumeIndex,
                                 registers = regs.copyOf(),
                                 gasRemaining = gas,
@@ -315,7 +275,7 @@ public object FluxBytecodeVM {
                         )
                     }
                 }
-            if (BuildFlags.DEBUG && TelemetryBridge.sink != null) {
+            if (TelemetryBridge.sink != null) {
                 TelemetryBridge.emit(
                     TelemetryEvent.VmStep(
                         bytecodeOffset = instr.offset,
