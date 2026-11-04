@@ -77,7 +77,12 @@ impl IRArena {
                 Some(v) => v,
                 None => continue,
             };
-            let new_id = final_ids[&id];
+            // Orphan nodes (packed but unreachable from any root — hand-built
+            // arenas, partial removals) have no entry in `final_ids`, which
+            // only visits root-reachable nodes. Degrade to the original id
+            // (same policy as the dangling-child-ref tolerance below) instead
+            // of panicking on the HashMap index.
+            let new_id = final_ids.get(&id).copied().unwrap_or(id);
             let new_children = remap_children(&view.children(), &final_ids);
             builder.pack(Node {
                 id: new_id,
@@ -102,7 +107,8 @@ impl IRArena {
             new_arena.add_closure(c.clone());
         }
         for &id in &ids {
-            let new_id = final_ids[&id];
+            // Mirror the orphan tolerance in the rebuild loop above.
+            let new_id = final_ids.get(&id).copied().unwrap_or(id);
             let deps = self.signal_deps_of(id).to_vec();
             let thunk = self.prop_thunk_of(id).cloned();
             let layout = self.prop_layout_of(id).to_vec();
