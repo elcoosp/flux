@@ -88,6 +88,18 @@ pub fn collect_adts(env: &mut Env, ast: &Ast, supply: &mut Supply) {
                     .iter()
                     .map(|p| p.name.name.clone())
                     .collect();
+                // Variant field types referencing the ADT's own generic
+                // parameters must be rewritten from the surface names
+                // (`Named("T")`) to `Var(PARAM_BASE + i)` — the same rewrite
+                // components get below and the one `env.rs` documents for
+                // ADTs. Without it, matching a user-generic variant bound the
+                // pattern variable to the unresolved name (`expected Bool,
+                // got T`).
+                let param_index: HashMap<String, usize> = params
+                    .iter()
+                    .enumerate()
+                    .map(|(i, name)| (name.clone(), i))
+                    .collect();
                 let variants: Vec<VariantDef> = type_decl
                     .variants
                     .iter()
@@ -96,7 +108,11 @@ pub fn collect_adts(env: &mut Env, ast: &Ast, supply: &mut Supply) {
                         fields: v
                             .fields
                             .iter()
-                            .map(|f| TcType::from_surface(f, &primitives()))
+                            .map(|f| {
+                                let mut ty = TcType::from_surface(f, &primitives());
+                                rewrite_generics(&mut ty, &param_index);
+                                ty
+                            })
                             .collect(),
                     })
                     .collect();
