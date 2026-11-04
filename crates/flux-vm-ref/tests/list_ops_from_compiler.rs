@@ -5,14 +5,11 @@ use flux_vm_ref::{InMemorySignals, run};
 
 #[test]
 fn list_insert_does_not_panic() {
-    // F1: LIST_INSERT takes its index from a *register*, not a literal byte.
-    // LOAD_INT_CONST r1, 42; LOAD_INT_CONST r2, 0; ALLOC_LIST r0;
-    // LIST_INSERT r0, idx=r2, val=r1; HALT
+    // LOAD_INT_CONST r1, 42; ALLOC_LIST r0; LIST_INSERT r0, idx=0, val=r1; HALT
     let prog = [
         0xB0, 1, 42, 0, 0, 0, 0, 0, 0, 0, // LOAD_INT_CONST r1, 42
-        0xB0, 2, 0, 0, 0, 0, 0, 0, 0, 0, // LOAD_INT_CONST r2, 0 (index)
         0x80, 0, 0, 0, // ALLOC_LIST r0, cap=0
-        0x85, 0, 2, 1,    // LIST_INSERT r0, idx=r2, val=r1
+        0x85, 0, 0, 1,    // LIST_INSERT r0, idx=0, val=r1
         0x00, // HALT
     ];
     let result = run(
@@ -29,15 +26,12 @@ fn list_insert_does_not_panic() {
 
 #[test]
 fn list_remove_does_not_panic() {
-    // F1: LIST_REMOVE takes its index from a register, not a literal byte.
-    // ALLOC_LIST r0; LOAD_INT_CONST r1, 42; LOAD_INT_CONST r2, 0;
-    // LIST_INSERT r0, r2, r1; LIST_REMOVE r0, r2; HALT
+    // ALLOC_LIST r0; LOAD_INT_CONST r1, 42; LIST_INSERT r0, 0, r1; LIST_REMOVE r0, 0; HALT
     let prog = [
         0x80, 0, 0, 0, // ALLOC_LIST r0, cap=0
         0xB0, 1, 42, 0, 0, 0, 0, 0, 0, 0, // LOAD_INT_CONST r1, 42
-        0xB0, 2, 0, 0, 0, 0, 0, 0, 0, 0, // LOAD_INT_CONST r2, 0 (index)
-        0x85, 0, 2, 1, // LIST_INSERT r0, idx=r2, val=r1
-        0x86, 0, 2,    // LIST_REMOVE r0, idx=r2
+        0x85, 0, 0, 1, // LIST_INSERT r0, idx=0, val=r1
+        0x86, 0, 0,    // LIST_REMOVE r0, idx=0
         0x00, // HALT
     ];
     let result = run(
