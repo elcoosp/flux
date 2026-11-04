@@ -128,14 +128,9 @@ impl ResumeFrame {
         }
     }
 
-    /// Fallible encoder — returns [`WireError::LengthExceedsU16`] when the
-    /// settled value exceeds the wire format's length limits.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`WireError`] when the delivered value (or a nested
-    /// container inside it) is larger than the wire format allows.
-    pub fn try_to_bytes(&self) -> Result<Vec<u8>, WireError> {
+    /// Encodes the frame.
+    #[must_use]
+    pub fn to_bytes(&self) -> Vec<u8> {
         let mut w = Writer::new();
         w.u32(MAGIC);
         w.u8(PROTOCOL_VERSION);
@@ -143,24 +138,12 @@ impl ResumeFrame {
         w.u32(self.handler_id);
         w.u32(self.cell);
         w.u8(u8::from(self.is_error));
-        encode_value(&mut w, &self.value)?;
-        Ok(w.into_vec())
-    }
-
-    /// Encodes the frame.
-    ///
-    /// # Panics
-    ///
-    /// Panics when the settled value exceeds the wire format's length
-    /// limits. Production callers must use [`Self::try_to_bytes`]; this
-    /// wrapper exists for tests and for sites that cannot yet propagate
-    /// the error (audit H14 migration is complete on the async bridge).
-    #[must_use]
-// F18: public convenience shim — prefer `try_to_bytes`.
-#[allow(clippy::expect_used)]
-    pub fn to_bytes(&self) -> Vec<u8> {
-        self.try_to_bytes()
-            .expect("resume: value exceeds wire length limits")
+        // Scaffold: `ResumeFrame::to_bytes` returns `Vec<u8>`; a length
+        // overflow in the delivered value would have to propagate through
+        // the whole `to_bytes -> Result` migration (audit H14). For now the
+        // encode fails loud with context.
+        encode_value(&mut w, &self.value).expect("resume: value exceeds wire length limits");
+        w.into_vec()
     }
 
     /// Decodes a `Resume` frame.
@@ -201,7 +184,7 @@ fn expect_header<'a>(
         });
     }
     let version = r.u8("frame.version")?;
-    if !(crate::frame::PROTOCOL_VERSION_MIN..=PROTOCOL_VERSION).contains(&version) {
+    if version < crate::frame::PROTOCOL_VERSION_MIN || version > PROTOCOL_VERSION {
         return Err(WireError::InvalidTag {
             tag: version,
             context,
