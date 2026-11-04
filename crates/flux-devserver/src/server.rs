@@ -214,22 +214,35 @@ async fn bind_http(
 
 /// Compiles once at start-up so the first `Hello` can be answered immediately.
 fn initial_compile(shared: &Arc<Shared>) {
-    let perf_json = {
+    let (perf_json, refreshed_map) = {
         let mut pipeline = shared.pipeline.lock();
+        let mut refreshed_map = None;
         match pipeline.compile() {
-            Ok(_) => tracing::info!("initial compile succeeded"),
+            Ok(_) => {
+                // Round-21 fix: the router was built from the pipeline BEFORE
+                // this first compile, so its SourceMap was empty forever and
+                // every DevTools telemetry enrichment resolved to "no source
+                // mapping". Capture the map from the freshly compiled tree and
+                // install it on the router below.
+                refreshed_map = Some(pipeline.devtools_source_map());
+                tracing::info!("initial compile succeeded");
+            }
             Err(diagnostic) => {
                 tracing::warn!(%diagnostic, "initial compile failed; serving no tree until fixed");
             }
         }
         // Capture the render-perf records from the initial compile so DevTools
         // shows the flamegraph even before the first file edit (FLUX-059).
-        pipeline
+        let perf_json = pipeline
             .perf_records()
             .into_iter()
             .filter_map(|r| r.to_json().ok())
-            .collect::<Vec<String>>()
+            .collect::<Vec<String>>();
+        (perf_json, refreshed_map)
     };
+    if let Some(map) = refreshed_map {
+        shared.devtools_router.lock().set_source_map(map);
+    }
     for json in &perf_json {
         shared
             .devtools_router
@@ -346,5 +359,107 @@ impl RunningServer {
 impl Drop for RunningServer {
     fn drop(&mut self) {
         self.stop();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::*;
+    use flux_ir_serde::Frame;
+
+    /// A minimal well-formed component source whose tree carries one handler
+    /// closure, so the compiled SourceMap has both node spans and a bytecode
+    /// blob to resolve.
+    const SOURCE: &str = "compo Hello\n  state count: Int = 0\n  Button(text: \"tap\", onClick: fn() { count = count + 1 })\n";
+
+    fn scratch_root(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "flux-devserver-sourcemap-{tag}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch dir");
+        std::fs::write(dir.join("main.flux"), SOURCE).expect("write source");
+        dir
+    }
+
+    /// A `Shared` whose pipeline already holds one source, paired with a router
+    /// built the way `DevServer::start` builds it: from the PRE-compile
+    /// pipeline, i.e. with an empty SourceMap.
+    fn shared_with_router(root: &Path) -> (Arc<Shared>, Arc<parking_lot::Mutex<DevToolsRouter>>) {
+        let (tx, _rx) = tokio::sync::mpsc::channel::<DebugCommand>(16);
+        let router = Arc::new(parking_lot::Mutex::new(DevToolsRouter::new(
+            crate::debug_bridge::SourceMap::default(),
+            tx,
+        )));
+        let mut pipeline = Pipeline::new(root, false);
+        pipeline.set_source(&root.join("main.flux"), SOURCE.to_owned());
+        let shared = Arc::new(Shared::new(pipeline, Arc::clone(&router), None));
+        (shared, router)
+    }
+
+    /// Subscribes to the host broadcast channel so a test can capture the
+    /// frame a compile ships (same-module access to the private sender).
+    fn subscribe(shared: &Shared) -> tokio::sync::broadcast::Receiver<Vec<u8>> {
+        shared.clients.lock().subscribe()
+    }
+
+    #[test]
+    fn initial_compile_installs_devtools_source_map() {
+        // Round-21 fix: the router's SourceMap used to be captured before the
+        // first compile and stayed empty forever, so every DevTools telemetry
+        // enrichment resolved to "no source mapping". The initial compile must
+        // install a map that covers the compiled tree.
+        let root = scratch_root("initial");
+        let (shared, router) = shared_with_router(&root);
+        // Sanity: the router starts with the pre-compile (empty) map.
+        assert!(
+            router
+                .lock()
+                .source_map()
+                .span_for_bytecode_offset(0)
+                .is_none()
+        );
+        initial_compile(&shared);
+        // The tree's first closure bytecode starts at blob offset 0; the
+        // refreshed map must resolve it to the handler's source span.
+        assert!(
+            router
+                .lock()
+                .source_map()
+                .span_for_bytecode_offset(0)
+                .is_some(),
+            "initial_compile must install a source map covering the compiled tree"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn compile_and_broadcast_refreshes_devtools_source_map() {
+        // Round-21 fix: every successful recompile must rebuild the router's
+        // SourceMap from the new last-good tree, so spans track the edited
+        // sources instead of the startup snapshot (or nothing at all).
+        let root = scratch_root("recompile");
+        let (shared, router) = shared_with_router(&root);
+        let mut rx = subscribe(&shared);
+        assert!(
+            crate::watch::compile_and_broadcast(&shared),
+            "the first compile ships an Init frame"
+        );
+        // Grab the shipped Init and probe the refreshed map with a real
+        // merged-tree node id from the frame itself.
+        let init = Frame::from_init_bytes(&rx.try_recv().expect("Init frame broadcast"))
+            .expect("shipped frame decodes as Init");
+        assert!(
+            router
+                .lock()
+                .source_map()
+                .span_for_node_id(init.root.id)
+                .is_some(),
+            "compile_and_broadcast must refresh the router's source map"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
