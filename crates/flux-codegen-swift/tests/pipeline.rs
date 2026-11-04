@@ -236,14 +236,7 @@ fn generated_swift_type_checks() {
         eprintln!("swiftc not on PATH; skipping swiftc -typecheck check");
         return;
     }
-    // Round-38: write into a per-process scratch dir. Before this fix the
-    // test wrote `flux_codegen_swift_<name>.swift` directly under
-    // `std::env::temp_dir()`, so two concurrent `cargo test` invocations
-    // shared the same filename and could `remove_file` the file the other
-    // process's `swiftc` was still reading — the same class of flake
-    // already closed in `flux-codegen-kotlin`'s pipeline test.
-    let dir = std::env::temp_dir().join(format!("flux_codegen_swift_{}", std::process::id()));
-    std::fs::create_dir_all(&dir).expect("create per-pid scratch dir");
+    let dir = std::env::temp_dir();
     let mut failures: Vec<(String, String)> = Vec::new();
     for (name, src) in examples() {
         let generated = codegen_example(name, src);
@@ -450,5 +443,44 @@ fn router_navigate_emits_state_assignment() {
     assert!(
         out.contains("route.append(\"home\")"),
         "RouterNav.navigate('home') not emitted as route.append:\n{out}"
+    );
+}
+
+/// Audit fix (HIGH): record declarations were hardcoded in the shared emitter
+/// as `struct Name { let f: T }`. Swift keeps that spelling — pin it so the
+/// new `Backend::emit_record_type` hook does not drift.
+#[test]
+fn record_decl_emits_struct() {
+    let src = "record Task { label: String, done: Bool }\ncompo Todo\n  state tasks: List[Task] = []\n  Text(\"todo\")\n\n";
+    let out = codegen_example("record_decl", src);
+    assert!(
+        out.contains("struct Task {\n    let label: String\n    let done: Bool\n}"),
+        "record must emit a Swift struct with `let` fields:\n{out}"
+    );
+}
+
+/// Audit fix (HIGH): `Option[T]` rendered as `Option<T>` (invalid Swift —
+/// needs `T?`) and `Map[K, V]` rendered as `Map<K, V>` (invalid Swift — a
+/// dictionary is `[K: V]`). Pin the native spellings.
+#[test]
+fn option_and_map_types_render_native_swift() {
+    let src =
+        "compo Hold(m: Map[String, Int])\n  state maybe: Option[Int] = Null\n  Text(\"hold\")\n\n";
+    let out = codegen_example("option_map_types", src);
+    assert!(
+        out.contains("@State private var maybe: Int? ="),
+        "Option[Int] state must render as `Int?`:\n{out}"
+    );
+    assert!(
+        out.contains("m: [String: Int]"),
+        "Map[String, Int] prop must render as `[String: Int]`:\n{out}"
+    );
+    assert!(
+        !out.contains("Option<"),
+        "invalid `Option<T>` spelling must not reach Swift output:\n{out}"
+    );
+    assert!(
+        !out.contains("Map<"),
+        "invalid `Map<K, V>` spelling must not reach Swift output:\n{out}"
     );
 }
