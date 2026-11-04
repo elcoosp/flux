@@ -194,8 +194,11 @@ async fn run_client(state: Arc<DevToolsState>, addr: std::net::SocketAddr, until
     while tokio::time::Instant::now() < deadline {
         tokio::select! {
             msg = ws.next() => {
-                if let Some(Ok(Message::Binary(bytes))) = msg {
-                    ingest_message(&state, &Message::Binary(bytes));
+                match msg {
+                    Some(Ok(Message::Binary(bytes))) => {
+                        ingest_message(&state, &Message::Binary(bytes.into()));
+                    }
+                    _ => {}
                 }
             }
             _ = tokio::time::sleep(Duration::from_millis(20)) => {}
