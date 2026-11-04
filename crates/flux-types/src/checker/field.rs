@@ -12,7 +12,7 @@ impl Checker {
         &mut self,
         base: &Expr,
         field: &Ident,
-        _expr: &Expr,
+        expr: &Expr,
     ) -> Result<TcType, TypeError> {
         // Module-level associated constant access, e.g. `Color.red`:
         // the base is an identifier and the dot-path names a constant
@@ -32,15 +32,28 @@ impl Checker {
                     .enumerate()
                     .find(|(_, (n, _))| n == &field.name)
                 {
-                    // FLUX-F37: the previous code recorded the positional
-                    // index on `self.field_indices` for the bytecode
-                    // emitter. The emitter never read it — it keys
-                    // `GET_FIELD`/`SET_FIELD` by `prop_index_for_name`
-                    // (FNV-1a of the field name, matching the wire's
-                    // `PropIdx` keying). The positional map is removed;
-                    // the record's field type is returned here, which is
-                    // all the checker needs.
-                    let _ = pos; // the `find(|(_, (n, _))| ...)` position
+                    // Record the resolved positional index so the
+                    // bytecode emitter can emit GET_FIELD with the slot
+                    // the VM expects (records are positional).
+                    let fid = compute_node_id(0, ExprTag(10), expr.span, None);
+                    // Checked narrowing (audit H14 / Tier-2): a record with
+                    // more than u16::MAX fields would silently truncate the
+                    // positional index, and the bytecode emitter's GET_FIELD
+                    // would read a wrong slot. Absurd in practice (a user
+                    // would never author a 65k-field record), but the encode
+                    // is now total.
+                    let pos_u16 = u16::try_from(pos).map_err(|_| {
+                        TypeError::new(
+                            format!(
+                                "record has {} fields; field index exceeds the u16 \
+                                 wire limit (max {})",
+                                fields.len(),
+                                u16::MAX,
+                            ),
+                            field.span,
+                        )
+                    })?;
+                    self.field_indices.insert(fid, pos_u16);
                     Ok((**ty).clone())
                 } else {
                     Err(
@@ -67,10 +80,21 @@ impl Checker {
                         .enumerate()
                         .find(|(_, (n, _))| n == &field.name)
                     {
-                        // FLUX-F37: see the structural `Record` arm above —
-                        // the positional field-index map was never read by
-                        // the emitter and is removed.
-                        let _ = pos;
+                        let fid = compute_node_id(0, ExprTag(10), expr.span, None);
+                        // Same checked-narrowing rationale as the structural
+                        // `Record` arm above.
+                        let pos_u16 = u16::try_from(pos).map_err(|_| {
+                            TypeError::new(
+                                format!(
+                                    "record `{name}` has {} fields; field index \
+                                     exceeds the u16 wire limit (max {})",
+                                    fields.len(),
+                                    u16::MAX,
+                                ),
+                                field.span,
+                            )
+                        })?;
+                        self.field_indices.insert(fid, pos_u16);
                         Ok(ty.clone())
                     } else {
                         Err(TypeError::new(
@@ -119,10 +143,9 @@ impl Checker {
                     format!("no list method `{}` on `List[{}]`", field.name, inner),
                     field.span,
                 )
-                .with_hint(
+                .with_hint(format!(
                     "list methods: append, insert, remove, removeAt, clear, isEmpty, length"
-                        .to_string(),
-                )),
+                ))),
             },
             other => Err(TypeError::new(
                 format!("cannot access field `{}` on `{other}`", field.name),
