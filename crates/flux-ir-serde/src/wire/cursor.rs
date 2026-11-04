@@ -50,10 +50,6 @@ impl Writer {
     /// Migrate any encoder that can see user-authored sizes (a 70k-item
     /// `List` prop, a >65k-entry state seed) to [`Self::u16_len_checked`] as
     /// that migration lands.
-// F18: legacy panicking wrapper. All production encoder sites now use
-// `u16_len_checked` / `count_prefix`; this shim remains for a handful
-// of tests and internal sites whose inputs are bounded by construction.
-#[allow(clippy::panic)]
     pub(crate) fn u16_len(&mut self, n: usize, what: &'static str) {
         match self.u16_len_checked(n, what) {
             Ok(()) => {}
@@ -186,13 +182,6 @@ impl<'a> Reader<'a> {
     /// Reader for a frame at the given protocol version (from
     /// `read_frame_type`). Every length-prefix read in this cursor consults
     /// `version` to pick u16-vs-u32 semantics.
-    /// The protocol version this reader is decoding at (ADR-0059). Exposed
-    /// so nested sub-readers can inherit it — the sub-payload has no header
-    /// of its own, so the outer reader's version is the frame's version.
-    pub(crate) fn version(&self) -> u8 {
-        self.version
-    }
-
     pub(crate) fn with_version(bytes: &'a [u8], version: u8) -> Self {
         Self {
             bytes,
