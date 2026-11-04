@@ -1,6 +1,5 @@
 ---
 source: crates/flux-parity/tests/parity.rs
-assertion_line: 41
 expression: serialized
 ---
 verdict: equivalent
@@ -10,7 +9,7 @@ verdict: equivalent
         name: "PlatformButton",
         children: [
             If {
-                cond: "(platform() == \"ios\")",
+                cond: "0",
                 then_branch: [
                     Primitive {
                         name: "Button",
@@ -34,7 +33,7 @@ swift  == [
         name: "PlatformButton",
         children: [
             If {
-                cond: "( platform ( ) == \"ios\" )",
+                cond: "0",
                 then_branch: [
                     Primitive {
                         name: "Button",
@@ -58,7 +57,7 @@ kotlin == [
         name: "PlatformButton",
         children: [
             If {
-                cond: "(platform()==\"ios\")",
+                cond: "0",
                 then_branch: [
                     Primitive {
                         name: "Button",
