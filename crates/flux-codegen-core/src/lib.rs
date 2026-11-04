@@ -36,7 +36,6 @@ pub mod view_tree;
 
 #[cfg(test)]
 mod parity;
-mod source_map;
 
 pub use backend::Backend;
 pub use bridge::Bridge;
@@ -44,4 +43,3 @@ pub use emitter::Emitter;
 pub use error::CodegenError;
 pub use primitives::PrimitiveSpec;
 pub use view_tree::{ViewNode, view_tree};
-pub use source_map::{SourceMap, SourceMapEntry};
