@@ -70,6 +70,12 @@ pub struct Checker {
     pub types: HashMap<NodeId, TcType>,
     /// Every generic instantiation encountered.
     pub instantiations: Vec<GenericInstantiation>,
+    /// Resolved field position (0-based, declaration order) for each
+    /// `base.field` expression, keyed by the expression's `NodeId`. Mirrors the
+    /// `types` map but for the positional index the VM expects when emitting
+    /// `GET_FIELD`/`SET_FIELD` over a record stored as a positional
+    /// `Vec<(PropIdx, Value)>` (FLUX-072).
+    pub field_indices: HashMap<NodeId, u16>,
     /// Primitive scalar names.
     prims: std::collections::HashSet<String>,
     /// Generic parameter names in scope, mapped to their unification variable.
@@ -113,6 +119,7 @@ impl Checker {
             subst: HashMap::new(),
             types: HashMap::new(),
             instantiations: Vec::new(),
+            field_indices: HashMap::new(),
             prims,
             generics: HashMap::new(),
             module_loader: None,
@@ -142,34 +149,24 @@ impl Checker {
     }
 
     /// Fully applies the current substitution to `ty`.
-    ///
-    /// A substitution that fails to converge after 64 passes implies a cycle
-    /// (e.g. `X→Y, Y→X`), which cannot arise from a well-typed program or a
-    /// sound type checker — it indicates a checker bug. `resolve` is on the
-    /// hot path of every `infer`/`expect` call, so the fix here cannot be a
-    /// full `Result<TcType, TypeError>` migration: that would ripple through
-    /// every caller. Instead:
-    ///
-    /// * `debug_assert!(false, …)` fires in dev / test builds so a regression
-    ///   surfaces immediately at the point of failure.
-    /// * In release the function returns the last (unconverged) form, which is
-    ///   a bounded, non-panicking answer. It is wrong, but it cannot crash the
-    ///   host on user input — the audit's explicit requirement ("never a panic
-    ///   on user input"). A follow-up can migrate `resolve` to a fallible
-    ///   signature once the surrounding error plumbing supports it.
     fn resolve(&self, ty: &TcType) -> TcType {
         let mut out = ty.clone();
-        for _ in 0..64 {
+        // Round-21 adversarial: a *linear* substitution chain is not a cycle —
+        // `unify::bind`'s occurs check forbids cycles, but nothing bounds
+        // chain length. Forward-declared fns hand out fresh return vars, so
+        // 70 sequential `if` arms unify var→var one link per statement and
+        // reading the head needs one `apply` pass per link, tripping the old
+        // 64-pass `unreachable!` on ordinary (if unusual) programs. A chain
+        // needs at most one pass per substitution entry, so bound the loop by
+        // `subst.len()` and return the final form: the caller then reports a
+        // normal type error instead of panicking.
+        for _ in 0..=self.subst.len() {
             let next = out.apply(&self.subst);
             if next == out {
                 return out;
             }
             out = next;
         }
-        debug_assert!(
-            false,
-            "resolve exceeded 64 substitution passes — substitution contains a cycle",
-        );
         out
     }
 
@@ -227,7 +224,6 @@ mod field;
 mod generics;
 mod infer;
 mod opt_field;
-mod reserved;
 mod scope;
 mod use_resolution;
 
