@@ -80,6 +80,17 @@ fn check_nesting_depth(source: &str, file_id: u32, path: &str) -> Option<ParseEr
     let mut chars = source.char_indices().peekable();
     while let Some((offset, c)) = chars.next() {
         match c {
+            '/' if matches!(chars.peek(), Some(&(_, '/'))) => {
+                // Line comments are trivia: brackets inside them (commented-out
+                // code, TODO lists) must not count toward nesting depth, and a
+                // run of unbalanced openers in comments used to spuriously
+                // reject valid files. Skip to end of line.
+                while let Some((_, ch)) = chars.next() {
+                    if ch == '\n' {
+                        break;
+                    }
+                }
+            }
             '"' => {
                 // Skip string literals so braces inside them don't count.
                 let mut interp = 0usize;
@@ -88,26 +99,40 @@ fn check_nesting_depth(source: &str, file_id: u32, path: &str) -> Option<ParseEr
                         '\\' => {
                             chars.next();
                         }
-                        '{' => interp += 1,
-                        '}' => interp = interp.saturating_sub(1),
+                        '{' => {
+                            interp += 1;
+                            // String-interpolation braces bypass the
+                            // bracket grammar, so without this they were
+                            // invisible to the pre-scan and `{ "{ "{ … }" }" }`
+                            // recursed unbounded (one sub-parser per level)
+                            // before `MAX_PARSE_DEPTH` could fire. Fold them
+                            // into the same early-reject budget.
+                            depth += 1;
+                            if depth > MAX_NESTING_DEPTH {
+                                return Some(ParseError {
+                                    message: format!(
+                                        "nesting exceeds the maximum depth of {MAX_NESTING_DEPTH}"
+                                    ),
+                                    hint: Some(
+                                        "extract the inner expression or view into its own \
+                                         `compo` \u{2014} deeply nested trees are also slower to \
+                                         diff and harder to read"
+                                            .to_owned(),
+                                    ),
+                                    span: Span::new(file_id, offset as u32, offset as u32 + 1),
+                                    location: Location::from_offset(source, offset),
+                                    path: path.to_owned(),
+                                    line_text: line_at(source, offset),
+                                });
+                            }
+                        }
+                        '}' => {
+                            interp = interp.saturating_sub(1);
+                            depth = depth.saturating_sub(1);
+                        }
                         '"' if interp == 0 => break,
                         '\n' => break,
                         _ => {}
-                    }
-                }
-            }
-            // FLUX-F53: skip `//` line comments so brackets that appear in
-            // prose (a TODO, a code sample, a URL) do not count toward the
-            // nesting ceiling. Before this fix, any comment with more than
-            // 16 unmatched open brackets rejected the whole file with a
-            // "nesting exceeds" error pointing inside the comment.
-            // Flux has no block-comment syntax (see `lexer.rs`), so the
-            // `//`-to-newline skip is exhaustive.
-            '/' if matches!(chars.peek().map(|(_, c)| *c), Some('/')) => {
-                chars.next(); // consume the second '/'
-                while let Some((_, ch)) = chars.next() {
-                    if ch == '\n' {
-                        break;
                     }
                 }
             }
@@ -572,17 +597,9 @@ impl<'s> Parser<'s> {
                 span: field_span,
             });
             self.skip_layout();
-            // FLUX-F60: the comma between record fields is **optional**.
-            // The `while !self.at(RBrace)` guard above terminates the loop
-            // when the closing brace is reached, and `self.ident()` at the
-            // top of the next iteration reports a useful error when the
-            // next token is neither a `}` nor a valid field name. The
-            // previous `if !self.try_eat(Comma) { break; }` rejected the
-            // layout-separated multi-line form (`record R { x: Int\n y: Int }`),
-            // which every other block-bodied declaration accepts — and
-            // which the `skip_layout()` calls in this very function were
-            // written to support.
-            let _ = self.try_eat(TokenKind::Comma);
+            if !self.try_eat(TokenKind::Comma) {
+                break;
+            }
             self.skip_layout();
         }
         self.eat(TokenKind::RBrace)?;
@@ -1143,6 +1160,7 @@ impl<'s> Parser<'s> {
         // wrap the operand `n` times *after* the descent unwinds. No recursion
         // — no possible overflow regardless of the chain length.
         let mut nots: usize = 0;
+        let not_start = self.peek().start as u32;
         while self.at(TokenKind::Not) {
             self.inc_depth(self.peek())?;
             self.pos += 1;
@@ -1165,7 +1183,10 @@ impl<'s> Parser<'s> {
                     lhs: Box::new(expr),
                     rhs: Box::new(true_lit),
                 },
-                span: Span::new(self.file_id, end, end),
+                // Span the whole `!…` form from the outermost `!` (previously
+                // a zero-width span at the operand's end, so diagnostics/hover
+                // pointed just past the operand instead of at the expression).
+                span: Span::new(self.file_id, not_start, end),
             };
         }
         Ok(expr)
@@ -1513,7 +1534,11 @@ impl<'s> Parser<'s> {
             path: self.path,
             pos: 0,
             block_postfix: true,
-            depth: 0,
+            // Inherit the outer parser's recursion depth (+1 for this nesting
+            // level). Each nested string interpolation creates a fresh
+            // sub-parser; starting it back at 0 let `{ "{ "{ … }" }" }`
+            // recurse unbounded past `MAX_PARSE_DEPTH` and overflow the stack.
+            depth: self.depth + 1,
         };
         let expr = sub
             .expr()
@@ -1597,7 +1622,14 @@ impl<'s> Parser<'s> {
         self.skip_layout();
         if self.try_eat(TokenKind::Else) {
             if self.at(TokenKind::If) {
-                else_branch = Some(Box::new(self.if_expr()?));
+                // Count each `else if` link against the recursion-depth guard.
+                // The chain recurses between `expr()` calls, so `self.depth`
+                // never grew along it and a long-enough chain overflowed the
+                // stack despite `MAX_PARSE_DEPTH`.
+                self.inc_depth(self.peek())?;
+                let nested = self.if_expr();
+                self.depth -= 1;
+                else_branch = Some(Box::new(nested?));
             } else {
                 let blk = self.braced_block()?;
                 // `else { … }` lowers to a zero-arg lambda so it shares the
@@ -1704,32 +1736,18 @@ impl<'s> Parser<'s> {
             ))
         } else if tok.kind == TokenKind::Ident {
             let name = self.ident()?;
-            // Spec §18.5 documents guard arms: `s if s > 90 => "A"`.
-            // Before this fix, `match_pattern` returned immediately after the
-            // binding name, so the token stream at the `if` keyword failed the
-            // next `eat(FatArrow)` with "expected `=>`, found `if`" — every
-            // program that used the documented guard syntax was rejected at
-            // parse time, and the entire `MatchPatternKind::Guard` code path
-            // (type checker, exhaustiveness checker, both codegen backends,
-            // LSP go-to-definition) was unreachable.
-            if self.at(TokenKind::If) {
-                self.eat(TokenKind::If)?;
-                let cond = self.expr()?;
-                MatchPatternKind::Guard { name, cond }
-            } else {
-                let mut fields = Vec::new();
-                if self.at(TokenKind::LParen) {
-                    self.eat(TokenKind::LParen)?;
-                    while !self.at(TokenKind::RParen) {
-                        fields.push(self.pattern()?);
-                        if !self.try_eat(TokenKind::Comma) {
-                            break;
-                        }
+            let mut fields = Vec::new();
+            if self.at(TokenKind::LParen) {
+                self.eat(TokenKind::LParen)?;
+                while !self.at(TokenKind::RParen) {
+                    fields.push(self.pattern()?);
+                    if !self.try_eat(TokenKind::Comma) {
+                        break;
                     }
-                    self.eat(TokenKind::RParen)?;
                 }
-                MatchPatternKind::Variant { name, fields }
+                self.eat(TokenKind::RParen)?;
             }
+            MatchPatternKind::Variant { name, fields }
         } else {
             return Err(self.error(tok, "expected a match pattern", None));
         };
@@ -1881,7 +1899,22 @@ impl<'s> Parser<'s> {
     fn provide_expr(&mut self) -> Result<Expr, ParseError> {
         let start = self.eat(TokenKind::Provide)?;
         let context = self.ident()?;
-        self.eat(TokenKind::Use)?; // `with`
+        // The spec (mlp-appendices.md, `provide_expr`) spells the connector
+        // `with` (`provide Ctx with value`). `with` is not a reserved keyword,
+        // so it lexes as an `Ident`; accept the exact text and keep accepting
+        // the legacy `use` spelling so older sources still parse.
+        let connector = self.peek();
+        let connector_ok = (connector.kind == TokenKind::Ident
+            && self.text_of(connector) == "with")
+            || connector.kind == TokenKind::Use;
+        if !connector_ok {
+            return Err(self.error(
+                connector,
+                "expected `with` after the context name in `provide`",
+                Some("write `provide Ctx with value`".to_owned()),
+            ));
+        }
+        self.pos += 1;
         let value = self.expr()?;
         Ok(Expr {
             kind: ExprKind::Provide {
@@ -2125,7 +2158,14 @@ fn kind_name(kind: TokenKind) -> &'static str {
 }
 
 fn unescape(raw: &str) -> String {
-    let inner = raw.trim_matches('"');
+    // Strip exactly one opening and one closing quote. `trim_matches('"')`
+    // also stripped quotes that belong to the *content* — e.g. the pattern
+    // `"a\""` (token text `"a\""`) lost its escaped trailing quote and
+    // unescaped to `a` instead of `a"`.
+    let inner = raw
+        .strip_prefix('"')
+        .and_then(|r| r.strip_suffix('"'))
+        .unwrap_or(raw);
     let mut out = String::with_capacity(inner.len());
     let mut chars = inner.chars();
     while let Some(ch) = chars.next() {
