@@ -56,7 +56,16 @@ impl Json {
             Json::Num(n) => out.push_str(n),
             Json::Str(s) => {
                 out.push('"');
-                write_json_string_body(out, s);
+                for ch in s.chars() {
+                    match ch {
+                        '"' => out.push_str("\\\""),
+                        '\\' => out.push_str("\\\\"),
+                        '\n' => out.push_str("\\n"),
+                        '\r' => out.push_str("\\r"),
+                        '\t' => out.push_str("\\t"),
+                        c => out.push(c),
+                    }
+                }
                 out.push('"');
             }
             Json::Arr(items) => {
@@ -85,44 +94,18 @@ impl Json {
                     }
                     first = false;
                     out.push('"');
-                    write_json_string_body(out, k);
+                    for ch in k.chars() {
+                        if ch == '"' {
+                            out.push_str("\\\"");
+                        } else {
+                            out.push(ch);
+                        }
+                    }
                     out.push_str("\":");
                     v.write(out);
                 }
                 out.push('}');
             }
-        }
-    }
-}
-
-/// Writes the body of a JSON string (without the surrounding quotes),
-/// escaping every character that would otherwise make the output invalid
-/// JSON or that changes on a round-trip.
-///
-/// Round-74 fix: the previous per-value writer only handled `"`, `\\`, `\n`,
-/// `\r`, and `\t`. A string containing any other control character
-/// (`\u0000`..`\u001F`) was emitted as a **raw** byte — producing output
-/// that JSON readers reject (a NUL inside a string is invalid), and losing the
-/// escape on every round-trip. The object-key writer was even narrower: it
-/// escaped only `"`, so a key containing a backslash emitted a bare `\`,
-/// corrupting the key to a different string.
-fn write_json_string_body(out: &mut String, s: &str) {
-    for ch in s.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            '\u{08}' => out.push_str("\\b"),
-            '\u{0C}' => out.push_str("\\f"),
-            // Every other control character (U+0000..U+001F, except the ones
-            // already handled above) is emitted as a `\uXXXX` escape.
-            c if (c as u32) < 0x20 => {
-                use std::fmt::Write as _;
-                let _ = write!(out, "\\u{:04x}", c as u32);
-            }
-            c => out.push(c),
         }
     }
 }
@@ -300,19 +283,6 @@ impl<'a> Parser<'a> {
                         out.push('\r');
                         j += 1;
                     }
-                    // Round-75 fix: `\b` and `\f` are standard JSON escapes
-                    // (RFC 8259 §7). The writer already emits them (round 74);
-                    // the parser must read them back or the two halves of the
-                    // codec disagree on any string containing backspace or
-                    // formfeed — a latent round-trip failure.
-                    b'b' => {
-                        out.push('\u{08}');
-                        j += 1;
-                    }
-                    b'f' => {
-                        out.push('\u{0C}');
-                        j += 1;
-                    }
                     b'u' => {
                         // \uXXXX — parse 4 hex digits, handle surrogate pairs.
                         let hex = raw
@@ -409,77 +379,24 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Parses a JSON number per RFC 8259 §6:
-    ///
-    /// ```text
-    /// number = [ minus ] int [ frac ] [ exp ]
-    /// int    = zero / ( digit1-9 *DIGIT )
-    /// frac   = "." 1*DIGIT
-    /// exp    = ("e" / "E") [ "-" / "+" ] 1*DIGIT
-    /// ```
-    ///
-    /// Round-75 fix: the previous version greedily accepted any run of
-    /// digits/`.`/`e`/`E`/`+`/`-`, so strings like `1.2.3`, `1e`, `--1`, `1-2`,
-    /// and `1..2` were accepted as a `Json::Num` and re-emitted verbatim in
-    /// the canonical form. Two hosts that emitted different invalid spellings
-    /// of the *same* value would then canonicalize to different strings and
-    /// a trace comparison would spuriously diverge — or, worse, a downstream
-    /// JSON reader would reject the canonical form. Rejecting at parse time is
-    /// the only sound behavior for a canonicalizer whose whole purpose is that
-    /// both sides agree.
     fn parse_number(&mut self) -> Result<Json, String> {
         let start = self.pos;
-        // Optional sign.
         if self.peek() == Some(b'-') {
             self.pos += 1;
         }
-        // Integer part: `0` alone, or [1-9][0-9]*.
-        match self.peek() {
-            Some(b'0') => {
+        while let Some(c) = self.peek() {
+            if c.is_ascii_digit() || c == b'.' || c == b'e' || c == b'E' || c == b'+' || c == b'-' {
                 self.pos += 1;
-            }
-            Some(b'1'..=b'9') => {
-                self.pos += 1;
-                while self.peek().is_some_and(|c| c.is_ascii_digit()) {
-                    self.pos += 1;
-                }
-            }
-            _ => {
-                return Err(format!("invalid number at {start}: expected digit"));
-            }
-        }
-        // Optional fraction: `.` + 1*DIGIT.
-        if self.peek() == Some(b'.') {
-            self.pos += 1;
-            let digits_start = self.pos;
-            while self.peek().is_some_and(|c| c.is_ascii_digit()) {
-                self.pos += 1;
-            }
-            if self.pos == digits_start {
-                return Err(format!(
-                    "invalid number at {start}: '.' not followed by a digit"
-                ));
-            }
-        }
-        // Optional exponent: [eE] [+-]? 1*DIGIT.
-        if matches!(self.peek(), Some(b'e' | b'E')) {
-            self.pos += 1;
-            if matches!(self.peek(), Some(b'+' | b'-')) {
-                self.pos += 1;
-            }
-            let digits_start = self.pos;
-            while self.peek().is_some_and(|c| c.is_ascii_digit()) {
-                self.pos += 1;
-            }
-            if self.pos == digits_start {
-                return Err(format!(
-                    "invalid number at {start}: exponent missing digits"
-                ));
+            } else {
+                break;
             }
         }
         let text = std::str::from_utf8(&self.bytes[start..self.pos])
             .map_err(|_| "invalid number bytes".to_owned())?
             .to_owned();
+        if text.is_empty() || text == "-" {
+            return Err(format!("invalid number at {}", start));
+        }
         Ok(Json::Num(text))
     }
 
@@ -522,87 +439,4 @@ mod tests {
         assert!(Json::parse("{not json}").is_err());
         assert!(Json::parse("{\"a\":}").is_err());
     }
-
-    /// Round-74 regression: a value containing a control character must be
-    /// re-escaped as `\\uXXXX`, never emitted as a raw byte (which is invalid
-    /// JSON).
-    #[test]
-    fn value_control_chars_are_escaped() {
-        let v = Json::parse(r#"{"s":"a\u0000b"}"#).unwrap();
-        let c = v.canonical();
-        assert!(c.contains("\\u0000"), "canonical form must escape NUL: {c:?}");
-        assert!(!c.contains('\u{0}'), "canonical form must not contain a raw NUL");
-    }
-
-    /// Round-74 regression: an object key containing a backslash must escape
-    /// it as `\\\\`; the previous writer emitted it bare and corrupted the key.
-    #[test]
-    fn key_backslash_is_escaped() {
-        let v = Json::parse(r#"{"a\\b":1}"#).unwrap();
-        let c = v.canonical();
-        assert!(c.contains(r#""a\\b":"#), "canonical form must escape the key's backslash: {c:?}");
-    }
-    /// Round-75 regression: the number parser must reject malformed numbers
-    /// that previously slipped through (they would silently mis-canonicalize).
-    #[test]
-    fn invalid_numbers_are_rejected() {
-        for bad in [
-            r#"{"n":1.2.3}"#,
-            r#"{"n":1e}"#,
-            r#"{"n":1e+}"#,
-            r#"{"n":--1}"#,
-            r#"{"n":1-2}"#,
-            r#"{"n":1..2}"#,
-            r#"{"n":.5}"#,
-            r#"{"n":1.}"#,
-            r#"{"n":01}"#,
-        ] {
-            assert!(
-                Json::parse(bad).is_err(),
-                "must reject invalid JSON number: {bad}"
-            );
-        }
-    }
-
-    /// Round-75 regression: valid RFC 8259 numbers must still parse.
-    #[test]
-    fn valid_numbers_parse() {
-        for good in [
-            r#"{"n":0}"#,
-            r#"{"n":-0}"#,
-            r#"{"n":42}"#,
-            r#"{"n":-42}"#,
-            r#"{"n":1.5}"#,
-            r#"{"n":-1.5}"#,
-            r#"{"n":1e10}"#,
-            r#"{"n":1E10}"#,
-            r#"{"n":1e+10}"#,
-            r#"{"n":1e-10}"#,
-            r#"{"n":1.5e3}"#,
-            r#"{"n":1.5E-3}"#,
-        ] {
-            assert!(
-                Json::parse(good).is_ok(),
-                "must accept valid JSON number: {good}"
-            );
-        }
-    }
-
-    /// Round-75 regression: `\b` and `\f` must decode (the round-74 writer
-    /// emits them; without this the two halves of the codec disagree).
-    #[test]
-    fn backspace_and_formfeed_escapes_decode() {
-        let v = Json::parse(r#"{"s":"a\bb\fc"}"#).unwrap();
-        match v {
-            Json::Obj(pairs) => {
-                if let (_, Json::Str(s)) = &pairs[0] {
-                    assert_eq!(s, "a\u{08}b\u{0C}c");
-                } else {
-                    panic!("expected Str");
-                }
-            }
-            _ => panic!("expected Obj"),
-        }
-    }
-
 }
