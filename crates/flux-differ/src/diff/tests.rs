@@ -4,9 +4,6 @@
 //! modules next to the code they cover.
 
 #[cfg(test)]
-// `diff::tests` is the natural home for the differ's module tests;
-// renaming it would scatter the suite across sibling files.
-#[allow(clippy::module_inception)]
 mod tests {
 
     use crate::diff::emit::{closure_ref, emit_handler};
