@@ -71,16 +71,9 @@ pub(crate) fn check_agents_rules() -> Vec<AgentsFinding> {
 
 /// Directory names that are never source we own.
 fn is_skipped_dir(name: &str) -> bool {
-    // FLUX-F69: `.build` is Swift Package Manager's build directory.
-    // Without it in the skip set, `flux doctor` descends into
-    // `runtimes/ios/FluxHost/.build/...` and reports violations on
-    // generated SwiftPM artifacts (`runner.swift` and friends) that
-    // are not project source. The rest of the list predates this fix;
-    // any further tool-output dirs (`DerivedData`, `Pods`, `.gradle`,
-    // `dist`) can be added as they prove noisy.
     matches!(
         name,
-        "target" | "Generated" | ".git" | "node_modules" | "build" | ".build"
+        "target" | "Generated" | ".git" | "node_modules" | "build"
     )
 }
 
@@ -97,9 +90,8 @@ fn scan_file(path: &Path, root: &Path, out: &mut Vec<AgentsFinding>) {
     let is_test_file = is_test_path(path);
     let lines: Vec<&str> = text.lines().collect();
 
-    // Rule: file > 300 lines. Test files are exempt (AGENTS.md §1.2 targets
-    // production source, matching the CI gate's `is_test_file` skip on rule 1).
-    if !is_test_file && lines.len() > 300 {
+    // Rule: file > 300 lines.
+    if lines.len() > 300 {
         out.push(AgentsFinding {
             path: rel.clone(),
             line: 1,
@@ -157,9 +149,7 @@ fn scan_rust(rel: &str, lines: &[&str], is_test_file: bool, out: &mut Vec<Agents
                 if let (Some(fs), Some(fb)) = (fn_start, fn_base) {
                     if depth == fb {
                         let len = line_no - fs + 1;
-                        // Test files are exempt (their tests are often long
-                        // setup blocks; AGENTS.md §1.2 targets production).
-                        if len > 40 && !is_test_file {
+                        if len > 40 {
                             out.push(AgentsFinding {
                                 path: rel.to_owned(),
                                 line: fs,
@@ -207,9 +197,7 @@ fn scan_swift_kotlin(rel: &str, lines: &[&str], is_test_file: bool, out: &mut Ve
                 if let (Some(fs), Some(fb)) = (fn_start, fn_base) {
                     if depth == fb {
                         let len = line_no - fs + 1;
-                        // Test files are exempt (their tests are often long
-                        // setup blocks; AGENTS.md §1.2 targets production).
-                        if len > 40 && !is_test_file {
+                        if len > 40 {
                             out.push(AgentsFinding {
                                 path: rel.to_owned(),
                                 line: fs,
@@ -258,103 +246,13 @@ fn is_swift_kotlin_fn_start(line: &str) -> bool {
 }
 
 /// `true` when a Rust line contains a forbidden panic API in non-test code.
-///
-/// The check operates on the line with **line comments and string/char
-/// literals stripped** so a comment that merely mentions `.expect()`, or the
-/// definition of this very function (whose string literals are `.unwrap()`
-/// and `.expect(`), is not itself flagged. Before this fix, `flux doctor`
-/// reported a violation on its own source line —
-/// `line.contains(".unwrap()")` — because the substring appeared inside a
-/// string literal.
 fn contains_rust_panic_api(line: &str) -> bool {
-    let code = strip_comments_and_strings(line, Language::Rust);
-    // Match the exact set of panic APIs the CI gate (scripts/ci-size-gate.sh)
-    // flags in AGENTS.md §2.1: `unwrap`, `expect`, `panic!`. Do not extend
-    // this — the doctor must be exactly as strict as CI, not stricter.
-    code.contains(".unwrap()") || code.contains(".expect(") || code.contains("panic!(")
+    line.contains(".unwrap()") || line.contains(".expect(") || line.contains("panic!(")
 }
 
 /// `true` when a Swift/Kotlin line contains `try!`, `as!`, or `!!`.
-///
-/// Operates on the comment/string-stripped line, for the same reason as
-/// [`contains_rust_panic_api`]: a comment mentioning `try!` or a string
-/// literal containing `!!` must not be flagged.
 fn contains_force_unwrap(line: &str) -> bool {
-    let code = strip_comments_and_strings(line, Language::SwiftKotlin);
-    code.contains("try!") || code.contains("as!") || code.contains("!!")
-}
-
-/// Source language, for the comment/string stripper.
-#[derive(Clone, Copy)]
-enum Language {
-    Rust,
-    SwiftKotlin,
-}
-
-/// Returns `line` with its trailing line-comment and its string / char
-/// literals removed.
-///
-/// This is a best-effort lexer, not a full parser: it handles the shapes the
-/// doctor actually encounters (line comments, `//`, `"..."`, `'...'`, and the
-/// rare raw string `r"..."`), and deliberately does not attempt nested block
-/// comments. Every byte that survives is code, so a subsequent substring
-/// search on `.unwrap()` / `try!` / etc. is free of comment- and literal-
-/// induced false positives.
-fn strip_comments_and_strings(line: &str, lang: Language) -> String {
-    let mut out = String::with_capacity(line.len());
-    let bytes = line.as_bytes();
-    let mut i = 0usize;
-    // `/`-starting block comments are not stripped line-locally; a source line
-    // that opens `/* ... */` on a single line has its interior left intact and
-    // is rare enough that the whole-file brace tracker will not be thrown off
-    // by a stray brace inside one (the tracker counts braces on the raw line).
-    while i < bytes.len() {
-        let b = bytes[i];
-        // Line comment: `//` outside a string terminates the code portion.
-        if b == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
-            break;
-        }
-        // Double-quoted string literal.
-        if b == b'"' {
-            i += 1;
-            while i < bytes.len() {
-                if bytes[i] == b'\\' && i + 1 < bytes.len() {
-                    i += 2;
-                    continue;
-                }
-                if bytes[i] == b'"' {
-                    i += 1;
-                    break;
-                }
-                i += 1;
-            }
-            // Rust raw string `r"..."`: the leading `r` was already copied;
-            // treat the interior as part of the raw literal.
-            continue;
-        }
-        // Single-quoted char literal (Rust `'a'`, Swift `'a'`).
-        if b == b'\'' && matches!(lang, Language::Rust | Language::SwiftKotlin) {
-            // Skip only when it looks like a char literal: `'...'` with 1-2
-            // chars before the closing quote. Otherwise treat as a lifetime
-            // tick (Rust) or a label (Swift) and copy the byte.
-            if i + 2 < bytes.len() {
-                let c1 = bytes[i + 1];
-                let close = if c1 == b'\\' && i + 3 < bytes.len() {
-                    bytes.get(i + 3).copied() == Some(b'\'')
-                } else {
-                    bytes.get(i + 2).copied() == Some(b'\'')
-                };
-                if close {
-                    let width = if c1 == b'\\' { 4 } else { 3 };
-                    i += width;
-                    continue;
-                }
-            }
-        }
-        out.push(b as char);
-        i += 1;
-    }
-    out
+    line.contains("try!") || line.contains("as!") || line.contains("!!")
 }
 
 /// `true` when the path is clearly a test target.
