@@ -73,7 +73,13 @@ impl TypeError {
         out.push_str(&format!(
             "   | {}{}\n",
             " ".repeat(col.saturating_sub(1)),
-            "^".repeat(usize::max(1, (self.span.end - self.span.start) as usize))
+            // `saturating_sub`: a span with `end < start` (defensive — spans
+            // are normally ordered) panicked the caret rendering instead of
+            // degrading to a one-caret underline.
+            "^".repeat(usize::max(
+                1,
+                self.span.end.saturating_sub(self.span.start) as usize
+            ))
         ));
         if let Some(hint) = &self.hint {
             out.push_str(&format!("   |\n   = hint: {hint}\n"));
