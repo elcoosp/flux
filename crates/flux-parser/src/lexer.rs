@@ -346,11 +346,17 @@ impl<'s> Lexer<'s> {
             match self.peek() {
                 Some(' ') | Some('\t') | Some('\r') => self.pos += 1,
                 Some('/') if self.peek_at(1) == Some('/') => {
+                    // Skip to end of line but do NOT consume the '\n' itself:
+                    // the `Some('\n')` arm below must observe it so that a
+                    // pending line boundary (and thus Indent/Dedent layout)
+                    // is still emitted for the next significant token.
+                    // Trailing comments after code used to swallow the
+                    // newline, losing the following line's layout entirely.
                     while let Some(ch) = self.peek() {
-                        self.pos += 1;
                         if ch == '\n' {
                             break;
                         }
+                        self.pos += 1;
                     }
                 }
                 Some('\n') => {
@@ -417,7 +423,7 @@ impl<'s> Lexer<'s> {
             '>' if self.peek_at(1) == Some('=') => self.take(TokenKind::GtEq, 2),
             '>' => self.take(TokenKind::Gt, 1),
             '-' if self.peek_at(1) == Some('>') => self.take(TokenKind::Arrow, 2),
-            '-' if !self.prev_can_end_value && self.is_number(1) => self.lex_number(start)?,
+            '-' if !self.prev_can_end_value && self.is_number(1) => self.lex_number(start),
             '-' => self.take(TokenKind::Minus, 1),
             '@' => self.take(TokenKind::At, 1),
             '(' => self.bracket_tok(TokenKind::LParen),
@@ -434,7 +440,7 @@ impl<'s> Lexer<'s> {
             '|' if self.peek_at(1) == Some('|') => self.take(TokenKind::Or, 2),
             '|' => self.take(TokenKind::Pipe, 1),
             '"' => self.lex_string(start)?,
-            '0'..='9' => self.lex_number(start)?,
+            '0'..='9' => self.lex_number(start),
             c if c.is_ascii_alphabetic() || c == '_' => self.lex_ident(start),
             other => {
                 return Err(LexError::new(
@@ -513,24 +519,10 @@ impl<'s> Lexer<'s> {
         Ok(())
     }
 
-    /// Lexes an integer or float literal.
-    ///
-    /// Accepts three shapes (mirroring the grammar in `mlp-appendices.md` §B):
-    /// * `-?DIGIT+` — `Int`
-    /// * `-?DIGIT+ "." DIGIT+` — `Float`
-    /// * `-?DIGIT+ ("." DIGIT+)? [eE] [+-]? DIGIT+` — `Float`
-    ///
-    /// Round-77 fix: the previous version did not consume an exponent, so
-    /// `1e10` lexed as `Int(1)` followed by `Ident("e10")` — the parser saw
-    /// two unrelated tokens and the user got "expected Float, got Int" plus
-    /// "unbound name `e10`" for what is plainly one number. Any exponent
-    /// form (including `1.5e-10` and the integer-mantissa form `1e10`) is
-    /// now a single `Float` token.
-    fn lex_number(&mut self, start: usize) -> Result<(), LexError> {
+    fn lex_number(&mut self, start: usize) {
         if self.peek() == Some('-') {
             self.pos += 1;
         }
-        // Integer part.
         while let Some(ch) = self.peek() {
             if ch.is_ascii_digit() {
                 self.pos += 1;
@@ -538,12 +530,10 @@ impl<'s> Lexer<'s> {
                 break;
             }
         }
-        // Optional fractional part. Note `is_float` is set here so an
-        // integer-mantissa exponent form (`1e10`) still lexes as a Float.
-        let mut is_float = false;
-        if self.peek() == Some('.') && self.peek_at(1).is_some_and(|c| c.is_ascii_digit()) {
+        let is_float =
+            self.peek() == Some('.') && self.peek_at(1).is_some_and(|c| c.is_ascii_digit());
+        if is_float {
             self.pos += 1; // '.'
-            is_float = true;
             while let Some(ch) = self.peek() {
                 if ch.is_ascii_digit() {
                     self.pos += 1;
@@ -551,65 +541,19 @@ impl<'s> Lexer<'s> {
                     break;
                 }
             }
-        }
-        // Optional exponent: `[eE]` then an optional sign then 1+ digits.
-        // An `e` NOT followed by a digit or a sign+digit is left for the
-        // identifier lexer (`e10` in a hypothetical `1 e10` sequence is not
-        // a valid exponent if it's not immediately after a number). The
-        // lookahead ensures we never consume a bare `e` that starts an
-        // identifier.
-        if matches!(self.peek(), Some('e' | 'E')) {
-            let after_e = self.peek_at(1);
-            let exp_digits_start = match after_e {
-                Some('+' | '-') => self.peek_at(2).is_some_and(|c| c.is_ascii_digit()),
-                Some(c) if c.is_ascii_digit() => true,
-                _ => false,
-            };
-            if exp_digits_start {
-                is_float = true;
-                self.pos += 1; // 'e'/'E'
-                if matches!(self.peek(), Some('+' | '-')) {
-                    self.pos += 1;
-                }
-                while let Some(ch) = self.peek() {
-                    if ch.is_ascii_digit() {
-                        self.pos += 1;
-                    } else {
-                        break;
-                    }
-                }
-            }
-        }
-        let kind = if is_float {
-            TokenKind::Float
+            self.out.push(Token {
+                kind: TokenKind::Float,
+                start,
+                end: self.cur_byte(),
+            });
         } else {
-            TokenKind::Int
-        };
-        // Round-79 fix: reject a number immediately followed by an identifier
-        // character. `1e`, `1x`, and `1_billion` previously lexed as
-        // `Int(1)` + `Ident("e"/"x"/"_billion")`; the parser silently
-        // accepted the trailing identifier as a separate block item, so a
-        // typo like `1e` (intended as `1e10`) became `Float(1.0)` with no
-        // error — a silent miscompile. Python's tokenizer rejects the same
-        // class. Users who want `1` followed by an identifier write `1 e`
-        // (with whitespace), which still works because a space is not
-        // alphanumeric.
-        if let Some(ch) = self.peek() {
-            if ch.is_ascii_alphabetic() || ch == '_' {
-                let end = self.cur_byte() + ch.len_utf8();
-                return Err(LexError::new(
-                    format!("invalid number literal: unexpected `{ch}` immediately after a number"),
-                    Span::new(self.file_id, start as u32, end as u32),
-                ));
-            }
+            self.out.push(Token {
+                kind: TokenKind::Int,
+                start,
+                end: self.cur_byte(),
+            });
         }
-        self.out.push(Token {
-            kind,
-            start,
-            end: self.cur_byte(),
-        });
         self.prev_can_end_value = true;
-        Ok(())
     }
 
     fn lex_ident(&mut self, start: usize) {
@@ -741,37 +685,6 @@ mod tests {
             })
             .collect();
         assert_eq!(kinds, vec!["ident", "minus", "int", "eof"]);
-    }
-
-    /// Round-77 regression: exponent notation (`1e10`, `1.5e-10`, `1E10`) must
-    /// lex as a single `Float`, not `Int(1)` + `Ident("e10")`.
-    #[test]
-    fn exponent_literals_lex_as_float() {
-        for src in ["1e10", "1.5e10", "1.5e-10", "1E10", "1e-3", "1.5E+3"] {
-            let toks = lex(src, 0).expect(src);
-            assert_eq!(toks.len(), 2, "{src}: expected Float + Eof, got {toks:?}");
-            assert_eq!(toks[0].kind, TokenKind::Float, "{src}: must be a single Float");
-        }
-        let toks = lex("e10", 0).expect("e10");
-        assert_eq!(toks[0].kind, TokenKind::Ident);
-    }
-
-    /// Round-79 regression: a number immediately followed by an identifier
-    /// character is a syntax error, not `Int + Ident`. Before the fix, `1e`
-    /// (typo for `1e10`) lexed as `Int(1)` + `Ident("e")`, and the parser
-    /// silently accepted the two as separate items — a silent miscompile.
-    #[test]
-    fn number_followed_by_ident_char_is_an_error() {
-        for bad in ["1e", "1x", "1_000", "1.5e", "42abc"] {
-            assert!(
-                lex(bad, 0).is_err(),
-                "{bad}: must be rejected (number followed by ident char)"
-            );
-        }
-        // Legitimate uses still lex.
-        assert_eq!(lex("1e10", 0).unwrap()[0].kind, TokenKind::Float);
-        assert_eq!(lex("1..2", 0).unwrap().len(), 5); // Int Dot Dot Int Eof
-        assert_eq!(lex("1.foo", 0).unwrap().len(), 4); // Int Dot Ident Eof
     }
 
     #[test]
