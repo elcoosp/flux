@@ -1,0 +1,34 @@
+/* Flux documentation site — custom styles.
+ *
+ * The accent palette is derived from the Flux logo's lightning bolt
+ * (#F2A018 ≈ hsl(35, 89%, 52%)). Starlight's default blue is fully replaced.
+ * All values pass WCAG AA in both modes (computed, see
+ * docs/decisions/0003-brand-accent.md):
+ *   light accent-high #8E480B — 6.81:1 on white (body text AA)
+ *   light accent      #A4640A — 4.77:1 with white text (AA normal text)
+ *   dark  accent-high #FFD270 — 12.9:1+ on dark backgrounds (body text AA)
+ *   dark  accent      #F6AB3B — 9.5:1+ on dark backgrounds
+ * Starlight switches themes via the `data-theme` attribute on <html>, so the
+ * overrides are declared separately per theme — the supported pattern.
+ */
+
+:root {
+  --sl-color-accent-low: hsl(36 100% 93%);
+  --sl-color-accent: hsl(35 89% 34%);
+  --sl-color-accent-high: hsl(28 85% 30%);
+}
+
+[data-theme='dark'] {
+  --sl-color-accent-low: hsl(33 70% 16%);
+  --sl-color-accent: hsl(37 92% 58%);
+  --sl-color-accent-high: hsl(41 100% 72%);
+}
+
+/* Brand touch: give the site title the accent color in both modes. */
+.site-title {
+  color: var(--sl-color-accent-high);
+}
+
+[data-theme='dark'] .site-title {
+  color: var(--sl-color-accent-high);
+}
