@@ -1,0 +1,81 @@
+---
+title: Migrate from Flutter
+description: An honest map from Flutter widgets to Flux primitives — layout, state, async — and the gaps Flux does not cover yet.
+type: how-to
+sidebar:
+  order: 10
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+If you come from Flutter, Flux's declarative component model feels familiar:
+a tree of components, recomputed from state. The differences are structural —
+Flux splits layout into a small set of primitives, keeps state in signals,
+and ships native code instead of a rendering engine. This guide maps the
+concepts and names the gaps plainly.
+
+## Widget → component map
+
+| Flutter | Flux | Notes |
+| --- | --- | --- |
+| `Column(children: [...])` | `Column` | `gap` replaces `SizedBox` spacers between children |
+| `Row(children: [...])` | `Row` | Same, horizontal |
+| `Text('...')` | `Text` | Interpolate signals with `{expr}` |
+| `ElevatedButton` / `TextButton` | `Button` | `onPress` takes a `Handler` closure |
+| `TextField` | `TextInput` | Controlled: `text: $binding`, `onChangeText` |
+| `Image.asset(...)` | `Image` | `source` takes an asset path |
+| `Navigator` / `MaterialPageRoute` | `Router` + `Screen` | `RouterNav.navigate` swaps screens |
+| `Stack` | `Stack` | Same name, same idea |
+| `GridView` | `Grid` | `columns` and `gap` props |
+| `Scaffold` | Compose it | Assemble a `Column`/`Row` root yourself |
+| `Container` / `Padding` | Component props + `gap` | No standalone padding widget |
+
+## State
+
+| Flutter | Flux |
+| --- | --- |
+| `StatefulWidget` + `setState` | `compo` with `state` signals; assign in a handler |
+| `ValueNotifier` / `ChangeNotifier` | A signal; derived `let` replaces `Selector` |
+| `InheritedWidget` / `Provider` | A store `compo` lifted above consumers; values as props |
+| `FutureBuilder` | A capability call returning a result cell (`Ready`/`Pending`/`Error`) |
+| `StreamBuilder` | Not yet; async data flows through capabilities |
+
+The mental shift: no rebuild-in-progress dance. Assignment writes a signal,
+the dirty set is computed from the dependency graph, and only affected leaves
+recompose. See [state management](/guides/state-management/).
+
+## Lists and keys
+
+| Flutter | Flux |
+| --- | --- |
+| `ListView` over data | `ForEach(tasks, key: fn(t) { t.label }) { item => … }` |
+| `Key` / `ValueKey` | The `key` function argument |
+| Mutate list + `setState` | `tasks.append(...)` / `tasks.remove(task)` / `tasks.clear()` |
+
+Keyed reconciliation matches children by node ID, so rows reorder and patch
+in place — scroll positions and field contents survive edits.
+
+## What Flux does not cover yet
+
+- **The full widget catalog.** Only stdlib primitives exist; richer themed
+  widgets (cards, chips) are a design-tokens/theming roadmap item.
+- **Implicit animations.** Animation primitives are a roadmap item; today you
+  drive values through signals. An `Animate` primitive exists for signal-
+  driven curves and durations.
+- **Web and desktop targets.** Flux renders natively on iOS and Android
+  only. For embedded web content there is a `WebHost` primitive.
+- **Styling depth.** No arbitrary `style` objects; layout flows through
+  `gap`/`alignment` and per-component props.
+
+For the common screens — forms, navigation, lists, capability-backed data —
+Flux covers the ground. Where a gap bites, reach for the `WebHost` escape
+hatch or wait for the roadmap item rather than fighting the layout system.
+
+<Aside type="note">Coming from React Native instead? The mapping is in
+[Migrate from React Native](/guides/migrate-from-rn/).</Aside>
+
+## Next steps
+
+- [Build the todo app](/tutorials/todo-app/) to exercise the mapped concepts
+  in a real app.
+- [The stdlib reference](/reference/stdlib/) for every primitive's props.

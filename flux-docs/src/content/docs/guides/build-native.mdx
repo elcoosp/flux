@@ -1,0 +1,83 @@
+---
+title: Ship a native release
+description: Generate SwiftUI and Jetpack Compose sources with flux build ios|android, understand the output layout, and hand the sources to the native toolchains.
+type: how-to
+sidebar:
+  order: 5
+---
+
+import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+
+Development runs through the bytecode VM so saves hot-reload in milliseconds.
+Release is different: `flux build` compiles the same IR to idiomatic native
+source and ships no VM, no patch protocol, and no shadow tree. This guide
+walks the release path per platform.
+
+## Generate the native sources
+
+Run the build from your project root and pick the platform:
+
+<Tabs>
+  <TabItem label="iOS">
+    ```bash
+    flux build ios
+    ```
+    Emits `platforms/ios/Generated/main.swift`.
+  </TabItem>
+  <TabItem label="Android">
+    ```bash
+    flux build android
+    ```
+    Emits `platforms/android/Generated/main.kt`.
+  </TabItem>
+</Tabs>
+
+Both targets use `--root <path>` if you build a project elsewhere, matching
+`flux dev`.
+
+## What the output looks like
+
+For the canonical counter (see the
+[counter walkthrough](/tutorials/your-first-app/)) the emitted code is the
+plain native equivalent of your `.flux`:
+
+- `compo Counter` becomes `struct Counter: View` (SwiftUI) and
+  `@Composable fun Counter()` (Compose).
+- `state count` becomes `@State private var count: Int = 0` and
+  `var count by remember { mutableStateOf<Int>(0) }`.
+- `Column gap: 8.0` becomes `VStack(spacing:)` and
+  `Column(verticalArrangement = spacedBy(8.dp))`.
+
+There is no interpreter in the shipped app — the generated code is ordinary
+SwiftUI and Compose that you review, version, and compile like any other
+native source.
+
+## Hand the sources to the toolchain
+
+If `xcodebuild` or `gradle` is present on your machine, `flux build` suggests
+the next build step after emitting the sources. Otherwise, compile them in
+your app target like any other generated source:
+
+- **iOS** — add the generated Swift files to your app target and build with
+  Xcode as usual.
+- **Android** — include the generated Kotlin files in your module's source
+  set and build with Gradle.
+
+## Why dev and release stay equivalent
+
+Both execution tiers consume the same Reactive Tree IR. A parity harness
+(`flux-parity`) captures traces from dev-VM execution and from release
+codegen output and proves their equivalence in CI — the two paths are
+verified, not assumed. See [Dev vs release](/explanation/dev-vs-release/) for
+the reasoning and the current platform status.
+
+<Aside type="note">On Android, the dev tier already renders through the same
+declarative components the release codegen emits. The iOS dev tier is
+imperative (UIKit) while convergence to the declarative tier is gated on
+measurement (ADR-0048) — release output is SwiftUI on both tiers.</Aside>
+
+## Next steps
+
+- [Formatting and CI gates](/guides/formatting-and-ci/) to keep generated
+  input canonical.
+- [Project status](/explanation/project-status/) for what is verified today.

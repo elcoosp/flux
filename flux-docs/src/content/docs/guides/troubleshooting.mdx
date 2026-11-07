@@ -1,0 +1,134 @@
+---
+title: Troubleshoot Flux errors
+description: Diagnose Flux errors by class — compile (parse, type, lower), runtime VM faults, and capability denials — with the message shape, root cause, and fix for each.
+type: how-to
+sidebar:
+  order: 11
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Every error Flux surfaces — in the dev server log, the on-device red banner,
+or the CLI output — belongs to the unified error taxonomy: three classes,
+each carrying a `what` / `where` / `why` / `how` payload. This guide is keyed
+to that taxonomy so you can go from message to fix.
+
+| Class | When it fires | Where you see it |
+| --- | --- | --- |
+| **Compile** | Parse, type-check, or lowering failure | Dev server log, `flux lsp`, VS Code |
+| **Runtime** | VM fault during handler evaluation | On-device overlay, server log, trace |
+| **Capability** | A `CALL_CAP` denied by the host or OS | On-device red banner, trace |
+
+## Compile errors
+
+Typical shape:
+
+```text
+[compile:Parse] expected `Int`, got `String` (hint: `count` was inferred as Int at line 18)
+[compile:Type] …
+[compile:Lower] …
+```
+
+Each compile error carries a phase, a message, a `span` (file:line:col), and
+an optional hint.
+
+| Phase | What it means | Common cause | Fix |
+| --- | --- | --- | --- |
+| `Parse` | The parser rejected the source | Mixed indentation and braces, or a missing indent under a view call | Follow the indentation grammar; run `flux dev` and read the caret |
+| `Type` | The type checker rejected an expression | A signal used as the wrong type, or a handler body that mismatches its prop type | Read the `hint` — it names the previously inferred type and location |
+| `Lower` | The typed AST could not lower to the IR | A construct outside the supported surface | Simplify the expression; check `flux doc` for the supported surface |
+
+**Fix path:** open the file:line:col from the `span`, read the `hint`, and
+re-express the construct. Compile errors are deterministic — re-running
+`flux dev` reproduces them exactly.
+
+## Runtime (VM) errors
+
+Typical shape:
+
+```text
+[runtime] gas budget exhausted at offset 42
+[runtime] division by zero at offset 17
+```
+
+Runtime errors wrap a stable VM fault kind, so the fault code is load-bearing
+and asserted by the golden ISA vectors. The `offset` points at the offending
+instruction, which tells you which Flux expression lowered to it.
+
+### Gas budget exhausted
+
+A handler ran for more than 100,000 instructions. Break the work into
+smaller handlers, or remove an accidental infinite loop or unbounded
+recursion.
+
+### Memory pool exhausted
+
+The 16 MiB frame memory pool ran out — usually large literals or deep frames.
+Reduce the data held in handler scope; page large data through a capability
+instead of inlining it.
+
+### Index out of bounds
+
+A list, record, or string index fell outside its bounds. Guard the index
+before access — this is a logic bug in the handler.
+
+### Null dereference
+
+A field access was performed on `Null`. Check the value before field access,
+or ensure the upstream signal is initialized; the `??` operator covers the
+common fallback case.
+
+### Invalid opcode dispatch
+
+The dispatch byte was not a valid opcode — usually a corrupt or stale patch
+frame. Restart `flux dev`. If it recurs, treat it as a wire or lowering bug
+and file an issue with the frame bytes.
+
+### Type mismatch
+
+Operands did not match what the monomorphized opcode expects — `ADD_I64`
+needs two integers, `ADD_F64` two floats. Align the operand types.
+
+### Division by zero
+
+Integer division or remainder by zero fails as an error, never a panic.
+Guard the divisor before the `/` or `%` operation.
+
+**Fix path:** the fault is deterministic and reproducible. The handler
+bytecode around the reported offset maps back to a specific Flux expression —
+fix that expression.
+
+## Capability errors
+
+Typical shape:
+
+```text
+[capability] `Storage.removeItem` (2/3): the OS grant `.storage` was not authorized for this capability call
+```
+
+Capability errors carry the numeric `cap_id` / `method_id`, the resolved
+`cap_name` / `method_name` when registered, the required OS permission, and a
+human-readable `why`. They **never crash** the app — the denied call does not
+run, and the host renders a red banner.
+
+- **Root cause:** a capability call reached a service gated behind an OS
+  permission the user has not granted (Camera, Location, Notifications).
+- **Fix:** request and await the permission before calling the capability.
+  The host surfaces the system prompt; re-invoke the handler after the grant
+  resolves.
+
+Capability ids are derived deterministically — see the
+[capabilities reference](/reference/capabilities/) for the id table.
+
+<Aside type="tip">Compile errors name a span, runtime errors name a bytecode
+offset, capability errors name a cap/method pair. Read that locator first —
+it is the fastest route from message to cause.</Aside>
+
+## Still stuck?
+
+- [Dev vs release](/explanation/dev-vs-release/) clarifies which execution
+  tier produced the error.
+- [The wire, explained](/explanation/the-wire/) helps when frames look
+  corrupt.
+- [State management](/guides/state-management/) covers state that refuses to
+  update.

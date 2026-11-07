@@ -1,0 +1,84 @@
+---
+title: Format sources and gate CI
+description: Enforce canonical style with flux fmt --check, catch environment drift with flux doctor --strict, and keep the repo's fmt/clippy gates green.
+type: how-to
+sidebar:
+  order: 7
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Flux enforces canonical style and environment health mechanically, so reviews
+argue about code instead of formatting. This guide covers the three gates you
+run before opening a PR.
+
+## Format `.flux` sources
+
+`flux fmt` formats `.flux` files to canonical style. With no paths it formats
+`main.flux` in the project root:
+
+```bash
+flux fmt                       # format main.flux in place
+flux fmt src/views.flux        # format specific files
+```
+
+Gate a pipeline with `--check`: the files are verified but not written, and
+the process exits non-zero when any file would change:
+
+```bash
+flux fmt --check
+```
+
+## Check environment health
+
+`flux doctor` runs the environment health check: toolchain state, stdlib
+parse health, wire protocol version, and — best effort — connected devices
+and simulators:
+
+```bash
+flux doctor
+```
+
+It also runs the local structural checks: approved-dependency drift (the
+repository vets dependencies through ADRs, and `flux doctor` reports
+unapproved drift) and violations of the repository's documented house rules.
+
+Use `--strict` to make advisory findings blocking, so the command can gate a
+pre-commit hook:
+
+```bash
+flux doctor --strict   # exits non-zero on any finding
+```
+
+## Keep the Rust gates green
+
+If you touch the Flux implementation itself, the repository's CI expects a
+clean tree by these commands — never plain `cargo test`:
+
+```bash
+cargo fmt -- --check
+cargo clippy -- -D warnings
+cargo nextest run
+cargo test --doc      # doctests: nextest does not run these
+```
+
+| Command | Gate |
+| --- | --- |
+| `cargo fmt -- --check` | Formatting clean |
+| `cargo clippy -- -D warnings` | No lints |
+| `cargo nextest run` | Full suite (unit, property, snapshot) |
+| `cargo test --doc` | Doctests |
+
+Library crates forbid `unsafe_code`, production code contains no `unwrap` /
+`expect` / `panic!`, and every error carries a source `Span` — the clippy and
+nextest gates are how these rules stay true.
+
+<Aside type="tip">`flux fmt --check` and `flux doctor --strict` are cheap.
+Wire both into a pre-commit hook and CI fails on formatting or drift before a
+human ever sees it.</Aside>
+
+## Next steps
+
+- [Testing and benchmarks](/guides/testing-and-benchmarks/) for the five test
+  layers behind `cargo nextest run`.
+- [Project status](/explanation/project-status/) for the CI workflow map.

@@ -1,0 +1,103 @@
+---
+title: Use platform capabilities
+description: Call Camera, Storage, Router, Clipboard, and Location through the versioned capability contract — result cells, permission gating, and error handling.
+type: how-to
+sidebar:
+  order: 4
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Platform services — storage, camera, clipboard, location — are not compiled
+into your UI tree. They are **capabilities**: versioned contracts with stable,
+deterministically derived identifiers, resolved identically on the dev server
+and on both native hosts. This guide shows how to call them and how their
+errors surface.
+
+## The capability surface
+
+The stable capability identifiers are declared in
+[`stdlib/capabilities.flux`](https://github.com/elcoosp/flux/blob/main/stdlib/capabilities.flux)
+and mirrored by the host capability registries:
+
+| Capability | ID | Example method |
+| --- | --- | --- |
+| `Camera` | 1 | capture |
+| `Storage` | 2 | `removeItem` (method 3) |
+| `Router` | 3 | `navigate` (method 1 — drives the visible screen) |
+| `Clipboard` | 4 | copy / paste |
+| `Location` | 5 | current position |
+| … | up through 11 | see `stdlib/capabilities.flux` |
+
+Capability ids are derived deterministically and never hand-assigned — a
+hand-assigned id desyncs the server and host registries and fails the parity
+guards in CI.
+
+## Call a capability from a handler
+
+`CALL_CAP` is the mechanism; you reach it through the stdlib surface. The todo
+app's Reset button clears the list and removes the persisted copy:
+
+```flux
+Button text: "Reset", onPress: || {
+    tasks.clear()
+    Storage.removeItem(key: "todos")
+}
+```
+
+`Storage.removeItem` is capability 2, method 3. The call carries its
+arguments as a record and returns a **result cell**:
+
+| Cell state | Meaning |
+| --- | --- |
+| `Ready` | The call completed; the value is available. |
+| `Pending` | An async capability is in flight; render your loading state. |
+| `Error` | The call failed or was denied; the error carries the reason. |
+
+A synchronous capability settles the cell before the call returns. An async
+one leaves it `Pending`, and an injected `AsyncResolver` settles it when the
+platform responds — the result is threaded back onto the reactive dispatcher,
+so you never write signals from a background thread yourself.
+
+## Render the pending and error states
+
+Because the cell is a value in the signal graph, you render its states with
+ordinary expressions:
+
+```flux
+compo Profile
+    state name: Option[String] = None
+    Column gap: 8.0
+        Text text: name ?? "Loading..."
+```
+
+The `??` fallback covers `Pending` and empty results. For explicit error
+handling, branch on the cell state and surface the reason in your UI —
+capability errors are data, not exceptions.
+
+## Handle permission denial
+
+Capabilities gated behind OS permissions (Camera, Location, Notifications)
+report a denial through the error path. The call **never crashes** the app:
+
+- The host surfaces the system permission prompt when the capability needs
+  one.
+- A denied call renders as an on-device red banner and records an error in
+  the trace; the denied call does not run.
+- Re-invoke the handler after the user grants the permission.
+
+The error payload names the numeric `cap_id` / `method_id`, the resolved
+`cap_name` / `method_name` when registered, the required OS permission, and a
+human-readable `why` — see the
+[troubleshooting guide](/guides/troubleshooting/) for the full shapes.
+
+<Aside type="note">The canonical machine-readable surface is emitted by the
+CLI: `flux doc` prints the JSON schema of the stdlib API, capabilities
+included. Keep it open while you wire calls.</Aside>
+
+## Next steps
+
+- [Capability reference](/reference/capabilities/) for the id/method tables
+  and the result-cell model.
+- [State management](/guides/state-management/) for the async data patterns
+  built on result cells.

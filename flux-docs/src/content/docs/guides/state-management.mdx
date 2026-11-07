@@ -1,0 +1,127 @@
+---
+title: Manage state
+description: Patterns over the Flux signal graph — local signals, derived values, shared stores, controlled inputs, and async data through capabilities.
+type: how-to
+sidebar:
+  order: 2
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Flux renders from a reactive signal graph. Every `state` declaration is a
+signal, and an assignment inside a handler is the whole update: the UI
+recomputes only the nodes that read the written signal. This guide gives
+copy-paste patterns for the shapes you meet beyond the counter.
+
+## Declare local state
+
+Declare a signal at the top of a `compo`:
+
+```flux
+compo Counter
+    state count: Int = 0
+    Column gap: 8.0
+        Text text: "tapped {count} times"
+        Button text: "Increment", onPress: || { count = count + 1 }
+```
+
+The `$count: Int = 0` shorthand is equivalent — you meet it in the scaffold
+and in `examples/counter`. Both forms create the same signal; pick one style
+per codebase and keep it.
+
+There is no separate `setState`. The assignment *is* the update, and the
+assignment inside a handler propagates through the dependency graph before
+the host reconciles the dirty set.
+
+## Derive values instead of storing them
+
+A value computed from other signals should be derived, not stored — two
+signals that can disagree are a bug you have not met yet. Declare it as a
+read-only `let` computed from signals:
+
+```flux
+compo Cart
+    state items: Int = 3
+    state price: Float = 9.99
+    let total: Float = items * price   // recomputed when items or price change
+    Column
+        Text text: "Total: {total}"
+```
+
+Derivation recomputes when a written signal reaches it, and only the leaves
+that read `total` recompose.
+
+## Bind a text input both ways
+
+`TextInput` is controlled: bind the signal with `$` and write the typed value
+back in `onChangeText`:
+
+```flux
+compo Composer
+    state draft: String = ""
+    Column gap: 8.0
+        TextInput text: $draft, onChangeText: fn(v) { draft = v }, placeholder: "Say something"
+        Button text: "Clear", onPress: || { draft = "" }
+```
+
+The `$draft` binding keeps the field and the signal in lockstep, so the Clear
+button empties the field by assigning the signal.
+
+## Share state across components
+
+Flux has no provider/context widget. For state shared across components, lift
+a store component above its consumers and thread values down as props:
+
+```flux
+compo SessionStore
+    state token: Option[String] = None
+    // actions are handlers that write the store's signals
+
+compo App
+    SessionStore
+        // children read token/user via props threaded from here
+```
+
+Keep stores small and explicit — one store per domain (auth, cart, settings),
+mounted at the root `Router` or `Screen` that needs it. The signal graph is
+shared across the whole app, so a store mounted high is visible to everything
+mounted beneath it.
+
+## Load async data through a capability
+
+Handlers stay synchronous; async work goes through a capability call that
+returns a result cell (`Ready` / `Pending` / `Error`). An async capability
+leaves the cell `Pending`, and an injected resolver settles it when the
+platform responds:
+
+```flux
+compo Profile
+    state name: Option[String] = None
+    Column gap: 8.0
+        Text text: name ?? "Loading..."
+        Button text: "Load", onPress: || {
+            // call the capability; the result cell settles and updates `name`
+        }
+```
+
+The `??` operator renders the fallback while the cell is pending. See
+[Capabilities](/guides/capabilities/) for the call surface and permission
+handling.
+
+<Aside type="caution">Never write signals or mutate the shadow tree from
+outside the reactive dispatcher. Capability results are threaded back onto
+the dispatcher for you — keep it that way.</Aside>
+
+## Pattern summary
+
+- **Local**: `state` (or `$`) plus assignment in a handler.
+- **Computed**: a `let` derived from signals, never a second signal.
+- **Shared**: a store `compo` lifted above its consumers; values as props.
+- **Input**: `$binding` on `TextInput` plus `onChangeText`.
+- **Async**: capability call → result cell → signal update on resolve.
+
+## Next steps
+
+- [Navigation](/guides/navigation/) for multi-screen apps that share state.
+- [Host-authoritative state](/explanation/reactivity/) for the invariant that
+  makes one tap cost one update, independent of tree size.

@@ -1,0 +1,85 @@
+---
+title: Navigate between screens
+description: Build multi-screen apps with Router, Screen, and RouterNav — the route prop contract, initial routes, and capability-driven navigation.
+type: how-to
+sidebar:
+  order: 3
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Flux ships navigation as part of the language: a `Router` declares the stack,
+`Screen` children declare the routes, and `RouterNav.navigate` switches the
+visible screen. This guide shows the working pattern from
+`examples/router` and `examples/todo`.
+
+## Declare a router with two screens
+
+Every screen must carry a `route` prop, and the router names its first
+screen:
+
+```flux
+compo App
+    Column gap: 8.0
+        Router initialRouteName: "home"
+            Screen route: "home"
+                Column gap: 16.0
+                    Text text: "Home"
+                    Button text: "Go to Settings", onPress: || {
+                        RouterNav.navigate("settings")
+                    }
+            Screen route: "settings"
+                Column gap: 16.0
+                    Text text: "Settings"
+                    Button text: "Go to Home", onPress: || {
+                        RouterNav.navigate("home")
+                    }
+```
+
+- `initialRouteName` names the screen shown at startup.
+- `RouterNav.navigate("settings")` makes the screen whose `route` equals
+  `"settings"` visible.
+- Each screen owns its layout through its own layout component (`Column`).
+
+<Aside type="caution">The prop name must be exactly `route`. The host reads
+it by its hashed prop name (FNV-1a of `"route"`), so renaming it silently
+breaks navigation — the contract is normative in the adapter appendices.</Aside>
+
+## Keep screen state across navigation
+
+The reconciler matches children by node ID, so an existing screen is
+reordered, never recreated, across push/pop. State you keep in screen-level
+signals survives navigation: a half-typed form stays filled when the user
+switches screens and returns.
+
+Model per-screen state with `state` declarations inside the screen's
+components, and cross-screen state with a store lifted above the `Router`
+(see [state management](/guides/state-management/)).
+
+## Drive navigation from data
+
+Navigation runs through the Router capability (capability 3, method 1), which
+writes its argument to a well-known signal the host reconcilers observe. You
+call it through `RouterNav.navigate` from any handler — buttons, pickers,
+gesture callbacks — and the visible screen follows the value.
+
+The todo app's About button is the minimal example:
+
+```flux
+Button text: "About", onPress: || { RouterNav.navigate("about") }
+```
+
+## Structure of a multi-screen app
+
+The `examples/todo` app shows the full shape: one screen renders the task
+list and its input row, the second renders a static About screen, and both
+live inside one `Router` at the root of the layout tree. Keep routers at the
+root of a screen region and let components below stay route-unaware — they
+receive data and emit handlers, exactly like any other component.
+
+## Next steps
+
+- [The todo tutorial](/tutorials/todo-app/) builds a two-screen app end to
+  end.
+- [The wire, explained](/explanation/the-wire/) explains why patches — not
+  full tree re-sends — move screens.

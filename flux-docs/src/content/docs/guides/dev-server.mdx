@@ -1,0 +1,105 @@
+---
+title: Run and configure the dev server
+description: Configure flux dev — ports, health probe, LAN exposure, and pairing tokens for the hot-reload loop.
+type: how-to
+sidebar:
+  order: 1
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The dev server (`flux dev`) is your constant companion while you build a Flux
+app: it watches, parses, type-checks, lowers, and diffs your `.flux` sources,
+then ships binary patches to the connected host apps. This guide covers every
+knob it exposes.
+
+## Start the server on the defaults
+
+Run it from your project root (or point it anywhere with `--root`):
+
+```bash
+flux dev
+# Listening on ws://127.0.0.1:7331
+```
+
+The defaults serve a project in the current directory, bound to localhost:
+
+| Flag | Default | Role |
+| --- | --- | --- |
+| `--root <path>` | `.` | Project root to watch and serve |
+| `--ws-host <addr>` | `127.0.0.1` | WebSocket bind address |
+| `--ws-port <port>` | `7331` | Patch channel to the host apps |
+| `--http-port <port>` | `7332` | HTTP asset server |
+| `--token <secret>` | unset | Require a pairing token in the `Hello` handshake |
+
+The same defaults live in `flux.toml` under `[dev]`, so a checked-in project
+configures its ports for every contributor. See the
+[flux.toml reference](/reference/flux-toml/).
+
+## Verify the server is healthy
+
+The asset server exposes a health probe:
+
+```bash
+curl http://127.0.0.1:7332/health
+```
+
+```text
+ok
+```
+
+## Serve a physical device over the LAN
+
+Simulators and emulators reach `127.0.0.1` on your machine; a physical device
+cannot. Expose the server on your LAN and point the host app at your machine's
+LAN IP:
+
+```bash
+flux dev --ws-host 0.0.0.0
+```
+
+In the host app, set the server address to `ws://192.168.1.42:7331`, replacing
+the IP with the address of the machine running `flux dev`. The Android host
+stores this in its resources; the iOS host takes it in its connection screen.
+
+## Require a pairing token
+
+An open dev loop on localhost is safe by default. A LAN-exposed server must
+authenticate the hosts that push bytecode to it:
+
+```bash
+flux dev --ws-host 0.0.0.0 --token <secret>
+```
+
+The host presents its token during the `Hello` handshake (wire protocol
+Appendix D, pairing/auth section). Hosts read their token from:
+
+- the `FLUX_DEV_TOKEN` environment variable, or
+- `[dev] token` in `flux.toml`.
+
+A host without the token is rejected at the handshake and receives no frames.
+
+<Aside type="caution">Never run `--ws-host 0.0.0.0` without `--token` on a
+shared network. Any device on the LAN can then connect and receive your
+source-derived frames.</Aside>
+
+## What the server does on save
+
+Every save triggers the full pipeline — you never restart anything:
+
+1. Parse and type-check every `.flux` file. Diagnostics appear in the server
+   log with source spans.
+2. Lower the program to the Reactive Tree IR.
+3. Diff the new tree against the previous one.
+4. Serialize the minimal edit script as a binary patch and send it over
+   `:7331`.
+
+A handler-body edit is typically a few hundred bytes on the wire because
+props and closures are content-addressed (BLAKE3) and cached on the host
+after the first `Init` frame. See [The wire, explained](/explanation/the-wire/).
+
+## Next steps
+
+- [Ship a native release](/guides/build-native/) when dev looks right.
+- [Wire protocol reference](/reference/wire-protocol/) for the frames the
+  server sends.

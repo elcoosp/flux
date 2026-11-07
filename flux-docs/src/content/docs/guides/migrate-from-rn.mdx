@@ -1,0 +1,96 @@
+---
+title: Migrate from React Native
+description: An honest map from React Native concepts to Flux primitives — component model, state, effects — and the gaps Flux does not cover yet.
+type: how-to
+sidebar:
+  order: 9
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Flux is a write-once UI language that compiles to native iOS and Android. If
+you know React Native, most of the vocabulary transfers with a syntax change.
+This guide maps RN concepts to Flux primitives and names the gaps plainly:
+Flux targets the common 90% of app screens — forms, navigation, state,
+capabilities — not 100% of RN's surface.
+
+## Component model
+
+| React Native | Flux | Notes |
+| --- | --- | --- |
+| `function Component() { return <View>… }` | `compo Name` with an indented body | Children indent beneath a view call that carries a named prop |
+| `<View style={{flexDirection:'column'}}>` | [`Column`](/guides/state-management/) | Flux splits RN's `View` into `Column`/`Row` by design |
+| `<View style={{flexDirection:'row'}}>` | `Row` | Same split, horizontal |
+| `<Text>` | `Text` | Interpolate signals with `{expr}` |
+| `<Button>` | `Button` | `onPress` takes a `Handler` closure |
+| `<TextInput>` | `TextInput` | Controlled: `text: $binding`, `onChangeText` |
+| `<Image>` | `Image` | `source` takes an asset path |
+| `react-navigation` | `Router` + `Screen` | Navigate via `RouterNav.navigate` |
+
+The stdlib's public component names mirror RN naming deliberately (see
+ADR-0053 on public-surface naming), so muscle memory survives the port.
+
+## State
+
+| React Native | Flux |
+| --- | --- |
+| `useState` | `state name: Type = initial` at the top of a `compo` |
+| `setState(v)` | Assign the signal: `name = v` inside a handler |
+| Derived value in render | A read-only `let` computed from signals |
+| Context / Redux | A store `compo` lifted above consumers; values as props |
+
+The mental shift: there is no re-render cycle to opt into. Assignment
+propagates through the signal graph, and only the nodes that read the written
+signal recompose. See [state management](/guides/state-management/).
+
+## Lists and keys
+
+| React Native | Flux |
+| --- | --- |
+| `.map` over data into elements | `ForEach(tasks, key: fn(t) { t.label }) { item => … }` |
+| `key` prop | The `key` function argument |
+| Mutate array + `setState` | `tasks.append(...)` / `tasks.remove(task)` / `tasks.clear()` |
+
+The reconciler matches children by node ID and the key function, so existing
+rows reorder and patch in place instead of rebuilding.
+
+## Effects and async
+
+| React Native | Flux |
+| --- | --- |
+| `useEffect(fetch)` | A capability call returning a result cell (`Ready`/`Pending`/`Error`) |
+| Loading branches | Render from the cell: `name ?? "Loading..."` |
+| Native modules | Capabilities with stable ids (Storage, Camera, Clipboard, Location…) |
+
+There is no `async` keyword in handlers — async work settles through the
+capability result cell, and results land back on the reactive dispatcher for
+you. See [capabilities](/guides/capabilities/).
+
+## What Flux does not cover yet
+
+These gaps are real as of this writing — plan around them rather than
+discovering them in review:
+
+- **Stylesheets and flex props.** There is no `StyleSheet.create` or
+  arbitrary `style` object. Layout is expressed through `Column`/`Row`
+  `gap`/`alignment` and per-component props. Design tokens and theming are a
+  roadmap item.
+- **Third-party component libraries.** Only the stdlib primitives exist. For
+  web content there is a `WebHost` primitive that embeds web views; deeper
+  native interop is an escape-hatch concern.
+- **Web target.** Flux renders natively on iOS and Android only. There is no
+  web backend.
+
+If your app depends heavily on one of these, hold off on the port — but the
+common screens (forms, navigation, state, capability-backed data) transfer
+directly.
+
+<Aside type="note">The migration stories for Flutter live in a companion
+guide: [Migrate from Flutter](/guides/migrate-from-flutter/).</Aside>
+
+## Next steps
+
+- [Build the todo app](/tutorials/todo-app/) to exercise the mapped concepts
+  in a real app.
+- [Troubleshooting](/guides/troubleshooting/) for the error shapes you meet
+  during a port.

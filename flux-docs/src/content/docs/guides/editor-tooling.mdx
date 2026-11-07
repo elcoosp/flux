@@ -1,0 +1,76 @@
+---
+title: Set up editor tooling
+description: Install the VS Code extension and use flux lsp for parse and type diagnostics on .flux sources.
+type: how-to
+sidebar:
+  order: 6
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Flux ships a language server (`flux-lsp`, built on `async-lsp`) and a VS Code
+extension that wraps it. Together they give you syntax highlighting,
+diagnostics, hot-reload status, and a one-click run on device.
+
+## Install the VS Code extension
+
+The extension lives in the repository at
+[`editors/vscode/`](https://github.com/elcoosp/flux/tree/main/editors/vscode):
+
+```bash
+cd editors/vscode
+pnpm install
+```
+
+Open the folder in VS Code and launch it as an extension development host
+(press `F5`), or package it with `vsce` and install the produced `.vsix`.
+The extension bundles the Flux TextMate grammar — the same grammar this docs
+site uses for `flux` code blocks — so highlighting matches the CLI's view of
+the language.
+
+While the extension is active you get:
+
+- **Syntax highlighting** for `.flux` sources.
+- **Diagnostics** pushed from parse and type checks.
+- **Hot-reload status** for the connected dev server.
+- **"Run on device"** to point the current project at a connected host.
+
+## Get diagnostics from the CLI
+
+The same diagnostics are available headlessly through `flux lsp`. It parses
+and type-checks one file and prints the findings as JSON:
+
+```bash
+flux lsp src/main.flux
+```
+
+The output carries each diagnostic's message, span, and hint, so you can pipe
+it into review tooling:
+
+```json
+{ "diagnostics": [ { "message": "expected `Int`, got `String`", "span": { "file": "src/main.flux", "start": 214, "end": 228 }, "hint": "`count` was inferred as Int at line 18" } ] }
+```
+
+On large files where you only need syntax errors, skip the type checker:
+
+```bash
+flux lsp src/main.flux --no-types
+```
+
+## How diagnostics reach your editor
+
+Every error Flux produces carries a source `Span` — file, line, and column —
+which is what makes the editor integration useful: you get caret-positioned
+diagnostics instead of a log dump. The [troubleshooting
+guide](/guides/troubleshooting/) explains what each diagnostic class means
+and how to fix it.
+
+<Aside type="tip">Run `flux doctor` when an editor session behaves oddly. It
+checks the toolchain, stdlib parse health, and wire protocol version in one
+shot.</Aside>
+
+## Next steps
+
+- [Formatting and CI gates](/guides/formatting-and-ci/) to keep sources
+  canonical before they reach review.
+- [CLI reference](/reference/cli/) for the full `flux lsp` surface.

@@ -1,0 +1,91 @@
+---
+title: Run tests and benchmarks
+description: Exercise the five test layers — nextest, proptest, insta snapshots, criterion budgets, and the dev-vs-release parity harness.
+type: how-to
+sidebar:
+  order: 8
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Flux's quality bar is mechanical: every public function has a test, and the
+suite spans five layers. This guide shows how to run each layer and what it
+proves.
+
+## Run the full suite
+
+The project's test runner is `cargo-nextest` — never plain `cargo test`:
+
+```bash
+cargo nextest run
+```
+
+| Layer | Tool | What it proves |
+| --- | --- | --- |
+| Unit | `cargo nextest run` | Every function, edge cases, error paths |
+| Property | `proptest` | Node-ID stability, diff minimality, round-trips |
+| Snapshot | `insta` | Swift & Kotlin codegen output |
+| Benchmark | `criterion` | Per-stage latency budgets |
+| Parity | `tests/` | Dev VM execution equals release codegen |
+
+Doctests run separately, because nextest does not execute them:
+
+```bash
+cargo test --doc
+```
+
+## Check dev-vs-release parity
+
+The parity harness (`flux-parity`) is the tool that keeps the two execution
+tiers honest: it captures traces from dev-VM execution and from release
+codegen, reduces them, and checks equivalence. Golden scenarios — including
+a 1,000-node counter tree and no-op dispatches — live under `tests/` and run
+in the `parity-check` CI workflow.
+
+When you change lowering, differ, or codegen behavior, run the parity
+scenarios before trusting your own tests:
+
+```bash
+cargo nextest run -p flux-parity
+```
+
+## Validate against the golden ISA vectors
+
+The shipping Swift (`FluxBytecodeVM`) and Kotlin VMs are validated against
+**92 golden ISA vectors** under `tests/isa-vectors/`. The Rust VM oracle
+(`flux-vm-ref`) is the behavioral reference for the instruction set, and the
+vectors are shared by all three implementations, so a fault code change fails
+everywhere at once.
+
+## Measure against the latency budgets
+
+The headline metric is the **Save → pixels** budget — the wall-clock a
+developer feels during hot reload — measured end to end by the LANE-H
+harness: a real `DevServer` plus a headless loopback WebSocket client, with
+at least 50 edits per tree size, reported as p50/p99.
+
+| Stage | Budget |
+| --- | --- |
+| Parse a 500-line file | < 5 ms |
+| Diff a 50-node tree | < 1 ms |
+| Serialize a 50-node patch | < 1 ms |
+| VM eval per frame | < 2 ms |
+
+Criterion benchmarks carry these budgets; the `benchmarks.yml` and
+`perf-harness.yml` CI workflows run them:
+
+```bash
+cargo bench
+```
+
+<Aside type="caution">Property-based and adversarial suites
+(`proptest`, the wire fuzzer, the corruption tests) intentionally throw
+garbage at the pipeline. A failure there means a real robustness bug, not a
+bad seed — record the failing case, do not delete it from the corpus.</Aside>
+
+## Next steps
+
+- [The VM instruction set](/reference/vm-isa/) — the contract the golden
+  vectors encode.
+- [Formatting and CI gates](/guides/formatting-and-ci/) for the pre-commit
+  gates that run before the suite.
