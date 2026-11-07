@@ -1,0 +1,128 @@
+---
+title: Wire protocol reference
+description: The binary protocol between the dev server and host apps — frame header, patch encodings, node and value layouts, prop diffs, closures, and BLAKE3 content addressing.
+type: reference
+sidebar:
+  order: 5
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The dev server and the host apps speak a **binary wire protocol** — the
+normative Appendix D of the specification. All multi-byte integers are
+little-endian. This page is a working map of the layout; the appendix in
+`docs/spec/mlp-appendices.md` remains the normative source.
+
+## Protocol version
+
+The current protocol version is **3** (`0x03`), introduced by ADR-0059:
+frame-level, node-level, and prop-level length prefixes for user-authored
+collections (patches, props, children, handlers, reorder keys, and the
+frame deltas) are written as **u32** instead of u16, so a 70,000-element
+list prop or a >64 KB string ships to the host. A host that receives a
+version it does not support rejects the handshake (`unsupported_version`).
+
+## Frame structure
+
+Every frame starts with a header:
+
+| Offset | Size | Field | Description |
+| --- | --- | --- | --- |
+| 0 | 4 | magic | `0x465C5558` (`"FLUX"`) |
+| 4 | 1 | version | Protocol version (currently 3) |
+| 5 | 4 | seq | Monotonic sequence number |
+| 9 | 1 | flags | See flag bits below |
+| 10 | 2 | patch_count | Number of Patch entries |
+| 12 | 2 | handler_count | Number of HandlerDef entries |
+| 14 | 2 | string_count | New interned strings (0 if no delta) |
+| 16 | … | patches | `[Patch; patch_count]` |
+| … | … | handlers | `[HandlerDef; handler_count]` |
+| … | … | strings | `[StringEntry; string_count]` (if delta) |
+| … | … | state_delta | StateDelta (if flag set) |
+| … | … | src_map_delta | SourceMapDelta (if flag set) |
+
+Flag bits: 0 `full_tree` · 1 `error` · 2 `heartbeat` · 3 `has_state_delta` ·
+4 `has_src_map_delta` · 5 `has_string_table_delta`.
+
+## Patch encoding
+
+Each patch starts with a one-byte tag:
+
+| Tag | Type | Payload |
+| --- | --- | --- |
+| `0x01` | Replace | u32 id, Node |
+| `0x02` | Update | u32 id, PropDiff |
+| `0x03` | Insert | u32 parent_id, u16 index, Node |
+| `0x04` | Remove | u32 id |
+| `0x05` | Reorder | u32 parent_id, key_count, `[u32; key_count]` |
+| `0x06` | Handler | u32 id, ClosureRef |
+
+The dev server computes the dirty set from written signals and emits
+**Update** patches addressed only to dirty nodes, plus structural patches
+where control props changed.
+
+## Node encoding
+
+| Field | Size | Description |
+| --- | --- | --- |
+| id | 4 | NodeId |
+| kind | 1 | NodeKind (0 = Component, 1 = Primitive, …) |
+| component_id | 4 | Interned component name ID |
+| prop_count + props | … | `[(u16 prop_idx, Value); prop_count]` |
+| child_count + children | … | `[Child; child_count]` |
+| handler_count + handlers | … | `[u32 HandlerId; handler_count]` |
+| span_file / span_start / span_end | 12 | Source span (FileId, byte offsets) |
+
+## Value encoding
+
+| Tag | Type | Payload (after tag) |
+| --- | --- | --- |
+| `0x00` | Null | (none) |
+| `0x01` | Int | i64 (8 bytes) |
+| `0x02` | Float | f64 (8 bytes) |
+| `0x03` | Bool | u8 (0 or 1) |
+| `0x04` | Str | u32 string_id (interned) |
+| `0x05` | HandlerRef | u32 handler_id |
+| `0x06` | List | count, `[Value; count]` |
+| `0x07` | Record | count, `[(u16 prop_idx, Value); count]` |
+
+## PropDiff encoding
+
+| Field | Description |
+| --- | --- |
+| change_count + changes | `[(u16 prop_idx, Value); change_count]` |
+| removal_count + removals | `[u16 prop_idx; removal_count]` |
+
+## Closures (ClosureRef)
+
+Handler and prop-thunk closures share the `ClosureRef` encoding: an 8-byte
+BLAKE3 hash (content address), a bytecode offset/length into the shared
+blob, the captured signal ids, and a source span. On `HALT`, `r0` is
+reserved for node context and `r1` holds the `ALLOC_RECORD` result; the
+prop layout maps record fields to prop indices.
+
+## Content addressing
+
+Props, closures, and nodes are content-addressed by BLAKE3 hash. For each
+item in a frame: if the hash is already in the host cache, the frame sends
+only the 8-byte hash; otherwise it sends the full data and the host caches
+it. After the initial `Init`, more than 90% of items are cache hits — which
+is why a handler-body edit is typically a few hundred bytes on the wire.
+
+## Handshake and pairing
+
+Hosts authenticate during the `Hello` handshake when the server runs with
+`--token`: the host presents the token read from `FLUX_DEV_TOKEN` or
+`[dev] token` in `flux.toml`, and a rejected host receives no frames (see
+ADR-0038 for the transport gap this closed).
+
+<Aside type="caution">Do not add opcodes, patch tags, or frame fields
+without an ADR and a protocol version bump — hosts and servers validate
+against the same tables, and drift ships silent on-device faults.</Aside>
+
+## Next steps
+
+- [The VM instruction set](/reference/vm-isa/) — the bytecode the closures
+  reference.
+- [The wire, explained](/explanation/the-wire/) — why the protocol is binary
+  and how patches stay tiny.

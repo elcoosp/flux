@@ -1,0 +1,136 @@
+---
+title: Language reference
+description: The .flux surface — components, records, signals, closures, view calls, interpolation, operators, and types.
+type: reference
+sidebar:
+  order: 1
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+This page is the reference for the `.flux` language surface. Grammar
+extensions and their rationale are recorded as ADRs (the parser grammar is
+normative in the specification's appendices); this page presents the surface
+you write every day.
+
+## Program structure
+
+A `.flux` file contains top-level declarations:
+
+| Declaration | Syntax | Purpose |
+| --- | --- | --- |
+| Component | `compo Name(props…)` | A UI component with an indented body |
+| Record | `record Name { field: Type, … }` | A data type with named fields |
+| Const binding | `Name.field = expr` | A top-level constant (used by `color.flux`, `font.flux`) |
+
+## Components (`compo`)
+
+```flux
+compo TaskRow(task: Task, tasks: List[Task])
+    Row gap: 8.0
+        Text text: task.label
+        Button text: "Remove", onPress: || { tasks.remove(task) }
+```
+
+- A `compo` declares typed props in parentheses and owns an indented body.
+- Children indent beneath a view call that carries at least one named prop —
+  this is what lets the indentation-delimited grammar distinguish a child
+  block from a sibling.
+- Prop defaults are written inline: `enabled: Bool = true`.
+
+## State signals
+
+Two equivalent forms declare a reactive signal at the top of a `compo`:
+
+```flux
+compo Counter
+    $count: Int = 0            // sigil form
+
+compo Counter2
+    state count: Int = 0       // keyword form
+```
+
+An assignment inside a handler writes the signal. Written signals propagate
+through the dependency graph, and only nodes whose props read a written
+signal re-materialize — see [host-authoritative state](/explanation/reactivity/).
+
+## Derived values (`let`)
+
+```flux
+let total: Float = items * price
+```
+
+A `let` declares a read-only binding computed from signals. It recomputes
+when a written signal reaches it; do not mirror it into a second signal.
+
+## Closures
+
+| Form | Shape | Used for |
+| --- | --- | --- |
+| Zero-argument | `\|\| { count = count + 1 }` | Handler props (`onPress`, `onChange`) |
+| Named parameter | `fn(v) { newTask = v }` | Callbacks that receive the event value |
+| Key function | `fn(t) { t.label }` | `ForEach` keys |
+| Lambda child | `{ item => TaskRow(task: item, …) }` | `ForEach` item rendering |
+
+## View calls and props
+
+A view call names a stdlib component and carries named props:
+
+```flux
+TextInput text: $newTask, onChangeText: fn(v) { newTask = v }, placeholder: "What needs doing?"
+```
+
+- Props are comma-separated `name: value` pairs on one line.
+- `text: $signal` two-way binds the prop to a signal (used by `TextInput`).
+- Handlers are closures; their bodies compile to bytecode the host VM runs.
+
+## Interpolation and operators
+
+```flux
+Text text: "tapped {count} times"
+```
+
+`{expr}` inside a string literal interpolates a value into the prop. The
+expression surface includes arithmetic, comparison, optional chaining with
+`?.`, and the `??` fallback operator:
+
+```flux
+Text text: name ?? "Loading..."
+```
+
+## Control flow: ForEach and routing
+
+```flux
+ForEach(tasks, key: fn(t) { t.label }) { item => TaskRow(task: item, tasks: tasks) }
+Router initialRouteName: "tasks"
+    Screen route: "tasks"
+        …
+```
+
+`ForEach` renders a list with a key function; `Router`/`Screen`/`RouterNav`
+drive navigation. See the [navigation guide](/guides/navigation/).
+
+## Types
+
+| Type | Written as | Notes |
+| --- | --- | --- |
+| Primitives | `String`, `Int`, `Float`, `Bool` | |
+| List | `List[Task]` | Mutable through `append`/`remove`/`clear` |
+| Optional | `Option[String]` | Unwrap with `??` fallback |
+| Record | declared `record` types | Field access with `.` |
+| Color | `Color` | Presets `red`/`green`/`blue`/`black`/`white` |
+| Font | `Font`, `Weight`, `Style` | Presets `body`/`title`/`caption` |
+
+The stdlib value types live in `stdlib/prelude.flux` (`Option`,
+`Alignment`, `Overflow`, `KeyboardType`, `ContentMode`, `Ref`, `Handler`)
+and `stdlib/traits.flux` (`Numeric`, `Eq`, `Show`).
+
+<Aside type="note">Grammar gaps the stdlib needed — top-level `Name.field =
+expr` constants, prop defaults, record literals in value position, and
+symbolic operator method names — are all closed and recorded in
+ADR-0037/ADR-0035; no gap remains open.</Aside>
+
+## Next steps
+
+- [The stdlib reference](/reference/stdlib/) for every component's props.
+- [The CLI reference](/reference/cli/) to run the language.

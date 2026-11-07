@@ -1,0 +1,94 @@
+---
+title: VM instruction set
+description: The host VM's register-based ISA — signal ops, monomorphized arithmetic, list ops, closures, fault policy, and the golden vectors that pin it.
+type: reference
+sidebar:
+  order: 6
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The host app embeds a **register-based bytecode VM**. Instructions are
+monomorphized: there is no generic `ADD` with tag dispatch — there are
+`ADD_I64`, `ADD_F64`, and so on. This keeps the hot path branch-free and the
+execution trace byte-identical across hosts. The ISA is normative in
+specification Appendix E.
+
+## Signal operations
+
+| Opcode | Mnemonic | Args | Description |
+| --- | --- | --- | --- |
+| `0x10` | `READ_SIGNAL` | reg_dst(u8), signal_id(u32) | Read a signal into a register |
+| `0x11` | `WRITE_SIGNAL` | signal_id(u32), reg_src(u8) | Write a register's value to a signal |
+
+A handler closure ends by writing the signals the dispatch consumed. Those
+written ids, sorted ascending, become the `signals` trace event.
+
+## Arithmetic (monomorphized)
+
+| Opcode | Mnemonic | Args | Description |
+| --- | --- | --- | --- |
+| `0x20` | `ADD_I64` | dst, a, b (u8 each) | `dst = a + b` (i64) |
+| `0x21` | `SUB_I64` | dst, a, b | `dst = a - b` |
+| `0x22` | `MUL_I64` | dst, a, b | `dst = a * b` |
+| `0x23` | `DIV_I64` | dst, a, b | `dst = a / b` |
+| `0x24` | `MOD_I64` | dst, a, b | `dst = a % b` |
+
+Floating-point variants (`ADD_F64`, …) occupy the same `0x2x` band with the
+`F64` suffix. The counter's `count = count + 1` compiles to
+`READ_SIGNAL` → `LOAD_INT_CONST` → `ADD_I64` → `WRITE_SIGNAL`.
+
+## List operations
+
+Four `LIST_*` opcodes back the list mutations the compiler emits for
+`append` / `remove` / `clear` on `List[T]` signals. Together with the rest
+of the table, the opcode vocabulary totals 61 entries (`Opcode::ALL`), and
+the dev-host opcode tables are generated from that single source (see
+ADR-0058) — a drifted hand-ported table fails CI before it reaches a device.
+
+## Fault-related opcodes
+
+| Opcode | Mnemonic | Notes |
+| --- | --- | --- |
+| `0xD1` | `IS_NULL` | Null test used before field access; a `GET_FIELD` on `Null` faults (ADR-0024) |
+
+## Closures and calling conventions
+
+Handler and prop-thunk closures share the wire's `ClosureRef` encoding
+(content-addressed by BLAKE3). Register conventions:
+
+- `r0` is reserved for node context.
+- `r1` holds the `ALLOC_RECORD` result on `HALT`.
+- `prop_layout` maps record fields to prop indices for thunk results.
+
+## Fault policy
+
+| Resource | Limit | Behavior on exhaustion |
+| --- | --- | --- |
+| Gas | 100,000 instructions per handler | Fault: `gas budget exhausted` |
+| Memory pool | 16 MiB per frame | Fault: `memory pool exhausted` |
+
+A thunk or handler fault leaves the node with its prior props — the render
+goes stale, never blank. The error surfaces through the on-device overlay
+and a trace `error` event; the view is never torn down. Division by zero
+and null field access are faults too (ADR-0023, ADR-0024), not panics.
+
+## Golden vectors
+
+The ISA is pinned by **92 golden ISA vectors** under
+[`tests/isa-vectors/`](https://github.com/elcoosp/flux/tree/main/tests/isa-vectors),
+shared by the Rust oracle (`flux-vm-ref`), the shipping Swift VM
+(`FluxBytecodeVM`), and the Kotlin VM. A fault-code or opcode change fails
+all three implementations at once.
+
+<Aside type="caution">Do not add opcodes without an ADR and a protocol
+version bump. The dev-host opcode tables are generated from
+`Opcode::ALL` — hand-editing them is the drift the parity guards exist to
+catch.</Aside>
+
+## Next steps
+
+- [Wire protocol reference](/reference/wire-protocol/) — how closures and
+  their bytecode travel to the host.
+- [Testing and benchmarks](/guides/testing-and-benchmarks/) — how to run the
+  vectors and the parity suite.

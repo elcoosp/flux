@@ -1,0 +1,63 @@
+---
+title: flux.toml reference
+description: The Flux project manifest — project name and entry, dev server ports, and pairing token configuration.
+type: reference
+sidebar:
+  order: 4
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+`flux.toml` is the project manifest at the root of every Flux project. It
+configures the CLI and the dev server, and it is versioned with your project
+so every contributor gets the same ports and settings.
+
+## Format
+
+```toml
+[project]
+name = "todo"
+entry = "main.flux"
+
+[dev]
+ws_port = 7331
+http_port = 7332
+```
+
+## Keys
+
+### `[project]`
+
+| Key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | string | — | Project name |
+| `entry` | string | — | The entry `.flux` file, usually `main.flux` |
+
+### `[dev]`
+
+| Key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `ws_port` | integer | `7331` | WebSocket patch channel port |
+| `http_port` | integer | `7332` | HTTP asset server port (serves `/health`) |
+| `token` | string | unset | Pairing token hosts must present in the `Hello` handshake |
+
+`flux dev` reads these values, and its `--ws-port` / `--http-port` /
+`--token` flags override them for a single run.
+
+## Pairing tokens
+
+Hosts read their token from the `FLUX_DEV_TOKEN` environment variable or
+from `[dev] token` in this file, and present it during the `Hello` handshake
+when the server was started with `--token`. Set the same secret in both
+places when you expose the dev server on a LAN — see the
+[dev server guide](/guides/dev-server/).
+
+<Aside type="caution">A token in `flux.toml` is versioned with the project.
+For anything beyond a local, throwaway pairing secret, prefer
+`FLUX_DEV_TOKEN` in your shell or device configuration.</Aside>
+
+## Next steps
+
+- [CLI reference](/reference/cli/) for the flags that override these keys.
+- [Wire protocol reference](/reference/wire-protocol/) for the handshake the
+  token guards.

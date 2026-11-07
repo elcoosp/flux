@@ -1,0 +1,83 @@
+---
+title: Capabilities reference
+description: The versioned capability contract — stable ids, methods, result cells, permission gating, and how async results return to the signal graph.
+type: reference
+sidebar:
+  order: 7
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Platform services are exposed to `.flux` programs through a **versioned
+capability contract**: a registry of capabilities and methods with stable,
+deterministically derived numeric ids, resolved identically on the dev
+server and on both native hosts. The declarations live in
+[`stdlib/capabilities.flux`](https://github.com/elcoosp/flux/blob/main/stdlib/capabilities.flux)
+and the host registries mirror them; the IDL is kept in sync by generated
+code (ADR-0045, ADR-0058).
+
+## Capability ids
+
+| Capability | ID | Known method |
+| --- | --- | --- |
+| `Camera` | 1 | capture |
+| `Storage` | 2 | `removeItem` (method 3) |
+| `Router` | 3 | `navigate` (method 1) |
+| `Clipboard` | 4 | copy / paste |
+| `Location` | 5 | current position |
+| … | up through 11 | see `stdlib/capabilities.flux` |
+
+Capability ids are derived deterministically and never hand-assigned — a
+hand-assigned id desyncs the server and host registries, and the parity
+guards fail the build when the tables drift.
+
+A capability call in the wire/VM is `CALL_CAP`; it carries the capability
+and method ids plus the argument record.
+
+## Result cells
+
+`CALL_CAP` returns a **result-cell signal**. The cell is part of the
+reactive graph, so you render its states with ordinary expressions:
+
+| State | Meaning | Typical render |
+| --- | --- | --- |
+| `Ready` | The call completed | The value |
+| `Pending` | An async call is in flight | `value ?? "Loading..."` |
+| `Error` | The call failed or was denied | Your error UI |
+
+A synchronous capability settles the cell before the call returns. An async
+capability leaves it `Pending` and an injected `AsyncResolver` settles it
+when the platform responds (ADR-0044, ADR-0045).
+
+## Async delivery
+
+Async results are threaded back onto the reactive dispatcher by the host —
+you never write signals from a background thread. When a cell settles, the
+host recomputes the dirty set from the written signal exactly as for any
+other dispatch, and only the nodes that read the cell recompose.
+
+## Permission gating
+
+Capabilities backed by OS permissions (Camera, Location, Notifications) are
+gated by the host:
+
+- The host surfaces the system permission prompt when required.
+- A denied call produces a **capability error** — it never crashes the app.
+  The denied call does not run, and the host renders the on-device red
+  banner.
+- The error payload names `cap_id` / `method_id`, the resolved
+  `cap_name` / `method_name`, the required OS permission, and a
+  human-readable `why`.
+
+See the [troubleshooting guide](/guides/troubleshooting/) for the fix path,
+and the [capabilities how-to](/guides/capabilities/) for call patterns.
+
+<Aside type="note">`flux doc` prints the machine-readable schema of the
+capability surface along with the rest of the stdlib — keep it open while
+wiring calls.</Aside>
+
+## Next steps
+
+- [Capabilities how-to](/guides/capabilities/) for copy-paste call patterns.
+- [Wire protocol reference](/reference/wire-protocol/) for how capability
+  results travel.

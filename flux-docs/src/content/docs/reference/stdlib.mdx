@@ -1,0 +1,111 @@
+---
+title: Standard library reference
+description: Every Flux stdlib component with its real prop contract — layout, text, controls, input, navigation, overlays, motion — plus value types and presets.
+type: reference
+sidebar:
+  order: 2
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The Flux standard library declares every UI primitive as a `.flux` file under
+[`stdlib/`](https://github.com/elcoosp/flux/tree/main/stdlib). The
+declarations are contracts: component bodies are supplied natively by the
+platform adapters in dev and by the SwiftUI/Compose backends in release, but
+the props and types you see below are the single shared surface.
+
+The canonical machine-readable form of this page is the CLI:
+
+```bash
+flux doc
+```
+
+`flux doc` prints the JSON schema of the stdlib API to stdout.
+
+## Layout
+
+| Component | Props | Notes |
+| --- | --- | --- |
+| `Column` | `gap: Float = 0.0`, `alignment: Option[Alignment] = None` | Vertical stack |
+| `Row` | `gap: Float = 0.0`, `alignment: Option[Alignment] = None` | Horizontal stack |
+| `Stack` | `gap: Float = 0.0`, `alignment: Option[Alignment] = None` | Z-stacked children |
+| `Grid` | `columns: Int = 2`, `gap: Float = 0.0` | Grid layout |
+| `ScrollView` | `orientation: Option[String] = None` | Scrollable container |
+| `Spacer` | `flex: Float = 1.0` | Flexible space |
+| `SafeArea` | `edges: Option[String] = None` | Inset children by safe areas |
+
+## Text and media
+
+| Component | Props | Notes |
+| --- | --- | --- |
+| `Text` | `text: String`, `font: Option[Font] = None`, `size: Option[Float] = None`, `color: Option[Color] = None`, `alignment: Option[Alignment] = None`, `maxLines: Option[Int] = None` | String interpolation via `{expr}` |
+| `Image` | `source: String`, `width: Option[Float] = None`, `height: Option[Float] = None`, `resizeMode: Option[String] = Some("fill")` | Renders a bitmap asset |
+| `WebHost` | `src: String` | Embedded web view — the native-interop escape hatch |
+
+## Controls
+
+| Component | Props | Notes |
+| --- | --- | --- |
+| `Button` | `text: String`, `onPress: Handler`, `enabled: Bool = true`, `color: Option[Color] = None` | Tappable action |
+| `Toggle` | `value: Bool = false`, `onValueChange: Handler = fn() {}`, `enabled: Bool = true` | Boolean control |
+| `Switch` | `value: Bool = false`, `onChange: Handler = fn() {}`, `enabled: Bool = true` | Boolean switch |
+| `Checkbox` | `value: Bool = false`, `onChange: Handler = fn() {}`, `label: Option[String] = None`, `enabled: Bool = true` | Checkable option |
+| `Slider` | `value: Float = 0.0`, `onChange: Handler = fn() {}`, `min: Float = 0.0`, `max: Float = 1.0`, `step: Float = 0.0`, `enabled: Bool = true` | Range selector |
+| `Picker` | `value: Int = 0`, `onChange: Handler = fn() {}`, `items: List[String] = []`, `enabled: Bool = true` | Selection from items |
+
+## Text input
+
+| Component | Props | Notes |
+| --- | --- | --- |
+| `TextInput` | `text: String = ""`, `onChangeText: Handler`, `placeholder: Option[String] = None`, `enabled: Bool = true`, `secureTextEntry: Bool = false` | Controlled text field; `text: $signal` binds both ways |
+| `TextArea` | `value: String = ""`, `onChange: Handler = fn() {}`, `placeholder: Option[String] = None`, `maxLines: Option[Int] = None`, `enabled: Bool = true` | Multi-line input |
+
+`TextInput` is declared in `stdlib/text_field.flux`; its public name mirrors
+React Native per the public-surface naming decision (ADR-0053).
+
+## Navigation
+
+| Component | Props | Notes |
+| --- | --- | --- |
+| `Router` | `initialRouteName: String = "home"` | Navigation container; shows the active `Screen` |
+| `Screen` | `route: String` | A routed screen; the prop name is part of the adapter contract |
+
+See the [navigation guide](/guides/navigation/) for the working pattern.
+
+## Overlays
+
+| Component | Props | Notes |
+| --- | --- | --- |
+| `Sheet` | `onDismiss: Handler = fn() {}` | Bottom sheet |
+| `Modal` | `onDismiss: Handler = fn() {}` | Modal presentation |
+| `Dialog` | `onDismiss: Handler = fn() {}` | Dialog presentation |
+
+## Motion and gesture
+
+| Component | Props | Notes |
+| --- | --- | --- |
+| `Animate` | `signal: Signal`, `curve: String = "easeInOut"`, `duration: Float = 0.3` | Drives a value through a curve over time |
+| `Gesture` | `kind: String = "longPress"`, `onGesture: Handler = fn() {}`, `threshold: Float = 0.0` | Gesture recognizer |
+
+## Value types and presets
+
+| Source | Contents |
+| --- | --- |
+| `stdlib/prelude.flux` | `Option`, `Alignment`, `Overflow`, `KeyboardType`, `ContentMode`, `Ref`, `Handler` |
+| `stdlib/traits.flux` | `Numeric`, `Eq`, `Show` |
+| `stdlib/color.flux` | `Color` (`RGB`) plus `red` / `green` / `blue` / `black` / `white` |
+| `stdlib/font.flux` | `Font`, `Weight`, `Style` plus `body` / `title` / `caption` presets |
+| `stdlib/capabilities.flux` | Capability declarations (see the [capabilities reference](/reference/capabilities/)) |
+| `stdlib/platform.flux` | Platform tag and query helpers |
+
+<Aside type="caution">Prop contracts are normative. A new prop must appear in
+both the dev adapters and the release backends with the same name and type —
+the adapter contract (spec Appendix F) and the parity tests enforce this, and
+adding a primitive is a cross-cutting change by design.</Aside>
+
+## Next steps
+
+- [Language reference](/reference/language/) for the syntax these
+  declarations use.
+- [Capabilities reference](/reference/capabilities/) for the platform
+  services behind the capability declarations.
