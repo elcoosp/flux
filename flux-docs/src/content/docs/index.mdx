@@ -1,0 +1,75 @@
+---
+title: Flux
+description: Flux is a write-once UI language for native iOS and Android — hot-reload .flux on device, then ship SwiftUI and Jetpack Compose from the same source.
+template: splash
+type: explanation
+sidebar:
+  order: 0
+hero:
+  tagline: Write once. Render native on iOS and Android.
+  actions:
+    - text: Start the tutorial
+      link: /tutorials/your-first-app/
+      icon: right-arrow
+    - text: Browse the CLI reference
+      link: /reference/cli/
+      icon: document
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+Flux is a write-once UI language for native iOS and Android. You author your UI
+in `.flux` files. In development, a precompiled host app receives binary patches
+over WebSocket and hot-reloads your UI in milliseconds. In release, the exact
+same source compiles to idiomatic **SwiftUI** and **Jetpack Compose**. No
+webview. No JavaScript bridge. No interpreter in production.
+
+| | Traditional cross-platform | Flux |
+| --- | --- | --- |
+| Render target | WebView / canvas | Real `UIView` / Compose `View` |
+| Hot reload | Full rebuild or JS eval | Binary IR patch over WebSocket |
+| Release build | Interpreter shipped in prod | SwiftUI / Compose codegen |
+| State | Framework-locked | SolidJS-style signal graph over one shared IR |
+
+The development loop and the release artifact come from the **same Reactive
+Tree IR**. You iterate against a fast bytecode VM host during development and
+ship platform-native code in release — no fork in the road, no "dev looks
+different from prod". A parity harness (`flux-parity`) continuously proves that
+dev-VM execution and release codegen stay equivalent, so the two paths are
+verified, not assumed.
+
+<CardGrid stagger>
+  <Card title="One language, two native apps" icon="document">
+    Author your UI once in `.flux`. A precompiled host app renders it on iOS
+    and Android in dev; release builds compile the same IR to SwiftUI and
+    Jetpack Compose.
+  </Card>
+  <Card title="Live hot reload" icon="rocket">
+    Save a `.flux` file and the dev server parses, type-checks, lowers, diffs,
+    and ships a binary patch in milliseconds. The on-device tree updates in
+    place.
+  </Card>
+  <Card title="Real tooling" icon="puzzle">
+    A CLI, a hot-reload dev server with pairing tokens, a language server with
+    a VS Code extension, a formatter, and a gpui DevTools desktop app.
+  </Card>
+  <Card title="Spec-driven" icon="open-book">
+    Every non-obvious choice is justified in an Architecture Decision Record —
+    40 ADRs, normative wire and ISA appendices, and enforced parity tests.
+  </Card>
+</CardGrid>
+
+## Choose your path
+
+<LinkCard title="Build your first Flux app" href="/tutorials/your-first-app/" description="A guided tutorial: build the CLI, scaffold a project, hot-reload on a device, and ship a native release." />
+<LinkCard title="Run and configure the dev server" href="/guides/dev-server/" description="Ports, LAN exposure, and pairing tokens for the hot-reload loop." />
+<LinkCard title="Language and stdlib reference" href="/reference/language/" description="The complete .flux surface: components, signals, closures, and types." />
+<LinkCard title="How Flux works" href="/explanation/architecture/" description="The parse → typecheck → lower → diff → patch → VM pipeline, explained." />
+
+## What you need
+
+The Rust toolchain builds everything on the CLI side. Xcode (iOS 16+
+deployment target) and the Android SDK are required only for the host apps.
+Walk through the [first-app tutorial](/tutorials/your-first-app/) for the full
+setup.

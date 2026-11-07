@@ -1,0 +1,171 @@
+---
+title: Build the todo app
+description: Recreate the real examples/todo app step by step — records, List state, keyed ForEach, controlled text input, routing, and a Storage capability call.
+type: tutorial
+sidebar:
+  order: 2
+---
+
+import { LinkCard, Aside } from '@astrojs/starlight/components';
+
+This tutorial rebuilds the todo app that ships at
+[`examples/todo/`](https://github.com/elcoosp/flux/tree/main/examples/todo).
+Along the way you use records, list state, keyed iteration, a controlled text
+input, two routed screens, and a capability call. You need a working setup
+from the [first-app tutorial](/tutorials/your-first-app/) — the CLI built and
+one host app runnable.
+
+## 1. Create the project and data model
+
+```bash
+flux init todo
+cd todo
+```
+
+Replace the contents of `main.flux` with the data model: a `record` type and
+a row component that renders one task.
+
+```flux
+record Task { label: String, done: Bool, }
+
+compo TaskRow(task: Task, tasks: List[Task])
+    Row gap: 8.0
+        Text text: task.label
+        Button text: "Remove", onPress: || { tasks.remove(task) }
+```
+
+A `record` declares a data type with named fields. `TaskRow` shows the two
+ways components receive data: the task it renders comes in as a prop, and the
+owning list arrives as a second prop so the Remove handler can mutate it.
+
+## 2. Declare the app state
+
+Add the root component. Its `state` declarations create signals — the
+reactive cells that the whole UI reads from.
+
+```flux
+compo TodoApp
+    state tasks: List[Task] = [
+        Task(label: "Buy milk", done: false),
+        Task(label: "Walk dog", done: false),
+    ]
+    state newTask: String = ""
+```
+
+- `tasks` holds the list model. The initial value is a list of record
+  literals.
+- `newTask` backs the text input. Assigning it in a handler updates every
+  node that reads it — nothing else re-renders.
+
+## 3. Lay out the first screen with routing
+
+Wrap the UI in `Router` / `Screen`. The host shows only the screen whose
+`route` prop matches the active route.
+
+```flux
+    Router initialRouteName: "tasks"
+        Screen route: "tasks"
+            Column gap: 12.0
+                Text text: "Flux To-Do"
+                Row gap: 8.0
+                    TextInput text: $newTask, onChangeText: fn(v) { newTask = v }, placeholder: "What needs doing?"
+                    Button text: "Add", onPress: || {
+                        tasks.append(Task(label: newTask, done: false))
+                        newTask = ""
+                    }
+```
+
+Three details matter:
+
+- **`TextInput` is controlled.** `text: $newTask` two-way binds the field to
+  the signal, and `onChangeText` writes the typed value back. You reset the
+  field by assigning `newTask = ""` in the Add handler.
+- **List mutation is ordinary assignment.** `tasks.append(...)` is the whole
+  update — there is no separate `setState`.
+- **A view call owns an indented child block only when it carries at least
+  one named prop.** `Router initialRouteName: "tasks"` declares `initialRouteName`,
+  so its `Screen` children indent beneath it.
+
+## 4. Render the list with a keyed ForEach
+
+Below the input row, iterate over the tasks:
+
+```flux
+                Column gap: 8.0
+                    ForEach(tasks, key: fn(t) { t.label }) { item => TaskRow(task: item, tasks: tasks) }
+```
+
+The `key` function identifies each item across edits, so the reconciler
+reorders and patches existing rows in place — it does not rebuild the list
+on every change. Because `TaskRow` receives `tasks` too, its Remove handler
+can call `tasks.remove(task)` and the keyed diff removes exactly that row.
+
+## 5. Reset through a capability
+
+Add a Reset button that clears the list and the persisted copy:
+
+```flux
+                Button text: "Reset", onPress: || {
+                    tasks.clear()
+                    Storage.removeItem(key: "todos")
+                }
+```
+
+`Storage` is a **capability** — a platform service declared in the stdlib and
+resolved identically on the server and on both hosts. `Storage.removeItem`
+(capability 2, method 3) reaches the host, and if the OS permission behind it
+is denied, the call reports an error instead of crashing.
+
+## 6. Add the second screen
+
+Finish with the About screen and its navigation handlers:
+
+```flux
+                Button text: "About", onPress: || { RouterNav.navigate("about") }
+        Screen route: "about"
+            Column gap: 12.0
+                Text text: "About"
+                Text text: "A real Flux app"
+                Button text: "Back", onPress: || { RouterNav.navigate("tasks") }
+```
+
+`RouterNav.navigate("about")` drives the visible screen. The `route` prop
+name is part of the adapter contract — the host reads it by its hashed name,
+so it must be exactly `route`.
+
+## 7. Run it
+
+Start the dev server from the project directory and open the host app:
+
+```bash
+flux dev                 # WebSocket on :7331
+```
+
+Point the iOS or Android host at `ws://127.0.0.1:7331` (see
+[run the host app](/tutorials/your-first-app/#4-run-the-host-app) if you need
+the platform steps). Add tasks, remove one, switch to the About screen and
+back, then press Reset.
+
+## 8. Ship the release forms
+
+Generate the native sources for both platforms:
+
+```bash
+flux build ios       # -> platforms/ios/Generated/main.swift
+flux build android   # -> platforms/android/Generated/main.kt
+```
+
+The generated SwiftUI and Compose code renders the same screens you ran
+in dev — the parity harness proves the two paths stay equivalent.
+
+<Aside type="note">The full source of this app lives at
+`examples/todo/main.flux` in the repository, together with the `counter` and
+`router` examples. Each example doubles as an integration test in CI.</Aside>
+
+## Next steps
+
+- [State management](/guides/state-management/) — patterns for derived values
+  and shared stores.
+- [Navigation](/guides/navigation/) — Router, Screen, and RouterNav in depth.
+- [Capabilities](/guides/capabilities/) — the full capability surface and
+  permission handling.

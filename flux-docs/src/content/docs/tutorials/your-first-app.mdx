@@ -1,0 +1,175 @@
+---
+title: Your first Flux app
+description: Build the Flux CLI, scaffold a project, hot-reload a counter on an iOS or Android host app, and ship a native release — end to end.
+type: tutorial
+sidebar:
+  order: 1
+---
+
+import { Steps, LinkCard, Aside } from '@astrojs/starlight/components';
+
+This tutorial walks you from a clean machine to a live, hot-reloading Flux UI
+on a real device or simulator, and finishes with a native release build. It
+takes about ten minutes.
+
+## Prerequisites
+
+| Tool | Why you need it | Check |
+| --- | --- | --- |
+| Rust (rustup) | Builds the `flux` CLI | `cargo --version` |
+| Xcode 16+ and XcodeGen | Runs the iOS host app (iOS 16+ target) | `xcodegen version` |
+| Android Studio + JDK 17+ | Runs the Android host app | `./gradlew --version` |
+
+You need Xcode or the Android SDK only for the host apps. Everything on the
+Rust side — dev server, parser, differ, VM oracle, codegen — builds and runs
+without them.
+
+## 1. Build the CLI
+
+From the repository root:
+
+```bash
+git clone https://github.com/elcoosp/flux
+cd flux
+cargo build --bin flux
+```
+
+This produces `target/debug/flux`. Use `cargo build --release --bin flux` for
+a faster binary when you plan to keep the CLI installed.
+
+The first build provisions the pinned nightly toolchain automatically through
+`rust-toolchain.toml`, so you do not select a toolchain by hand.
+
+## 2. Scaffold a project
+
+```bash
+flux init myapp
+cd myapp
+```
+
+`flux init` writes three files into `myapp/`:
+
+```text
+myapp/
+├── main.flux      # entry component: a stateful counter
+├── flux.toml      # project config: name, entry, dev ports
+└── .fluxignore    # build output and VCS noise
+```
+
+Open `main.flux`. It contains the canonical Flux counter:
+
+```flux
+compo Counter
+    $count: Int = 0
+
+    Column gap: 8.0
+        Text text: "tapped {count} times"
+        Button text: "Increment", onPress: || { count = count + 1 }
+```
+
+## 3. Start the dev server
+
+```bash
+flux dev
+```
+
+You will see:
+
+```text
+Listening on ws://127.0.0.1:7331
+```
+
+The dev server parses and type-checks every `.flux` file, lowers the program
+to the Reactive Tree IR, and binds two ports:
+
+- **WebSocket `:7331`** — the patch channel to the host apps.
+- **HTTP `:7332`** — the asset server, with a `/health` probe.
+
+Verify the server is up in another shell:
+
+```bash
+curl http://127.0.0.1:7332/health
+```
+
+```text
+ok
+```
+
+## 4. Run the host app
+
+The host app is precompiled native code that connects to the dev server and
+renders the IR it receives. Pick your platform.
+
+<Steps>
+
+1. **iOS.** The host project is generated with XcodeGen:
+
+    ```bash
+    # from the repository root
+    xcodegen generate            # writes runtimes/ios/FluxApp.xcworkspace
+    open runtimes/ios/FluxApp.xcworkspace
+    ```
+
+    Pick a simulator or a tethered device in Xcode and press **Run**. The app
+    connects to `ws://127.0.0.1:7331` and renders your `Counter`.
+
+2. **Android.** Build and install the host on a connected emulator or device:
+
+    ```bash
+    # from the repository root
+    ./gradlew :runtimes:android:app:installDebug
+    ```
+
+    Launch **Flux** from the launcher. It connects to `ws://127.0.0.1:7331`
+    and renders the same UI.
+
+</Steps>
+
+Tap **Increment** in the running app. The label updates — and the next step
+shows that you never recompile to change it.
+
+## 5. Edit and watch it hot-reload
+
+Open `main.flux` and change the `Text` label:
+
+```flux
+Text text: "tapped {count} times — wow"
+```
+
+Save the file. The dev server diffs the tree and ships a binary patch over
+the WebSocket, and the host updates in place. You never leave the running
+app, and you never rebuild the host.
+
+A handler-body edit is typically a few hundred bytes on the wire, because
+props and closures are content-addressed with BLAKE3 and cached on the host
+after the first `Init` frame.
+
+## 6. Build a native release
+
+When you want real SwiftUI or Jetpack Compose instead of the dev patch path:
+
+```bash
+flux build ios       # -> platforms/ios/Generated/main.swift
+flux build android   # -> platforms/android/Generated/main.kt
+```
+
+`flux build` lowers your `.flux` to idiomatic native source with no VM. If
+`xcodebuild` or `gradle` is present on your machine, it suggests the next
+build step; otherwise it emits the generated sources for you to compile.
+
+## What you learned
+
+- `flux init` scaffolds a project; `flux dev` serves it on `:7331`/`:7332`.
+- The host apps render and hot-reload over the WebSocket patch channel.
+- `flux build ios|android` emits SwiftUI and Jetpack Compose from the same
+  IR — dev and release are one program, verified by the parity harness.
+
+<Aside type="tip">Physical devices cannot reach `127.0.0.1`. See the
+[dev server guide](/guides/dev-server/) for LAN exposure and pairing
+tokens.</Aside>
+
+## Next steps
+
+Build the todo app from scratch to practice lists, routing, and capabilities:
+
+<LinkCard title="Build the todo app" href="/tutorials/todo-app/" description="A guided tutorial through the real examples/todo app: records, lists, routing, and capabilities." />
