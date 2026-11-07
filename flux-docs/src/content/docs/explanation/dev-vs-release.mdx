@@ -1,0 +1,76 @@
+---
+title: Dev vs release
+description: Why Flux has two execution tiers over one IR — interpreted patches for liveness in dev, native codegen for zero runtime overhead in release — and how parity is proven.
+type: explanation
+sidebar:
+  order: 3
+---
+
+import { Card, CardGrid, Aside } from '@astrojs/starlight/components';
+
+Flux has two execution modes. Both consume the **same Reactive Tree IR**
+produced by the lowering pass — they differ only in how the host turns that
+IR into pixels.
+
+## Dev mode — interpreted and patched
+
+In dev, a precompiled **host app** ships to the device. The dev server
+parses `.flux`, lowers it to the Reactive Tree IR, diffs it against the
+previous tree, and ships **binary patches** over a WebSocket. The host's
+embedded register-based bytecode VM and signal graph apply the patch and
+mutate a shadow tree of native views.
+
+- Fast iteration: save → diff → patch, with no app recompile.
+- Full introspection: the wire frame, the VM outcome, and the reconcile
+  trace are all observable.
+- The `trace` sink is free in production (ADR-0027 INV-2): no overhead when
+  no driver is attached.
+
+## Release mode — codegen'd native
+
+In release, the same IR is **codegen'd** to idiomatic Swift/SwiftUI and
+Kotlin/Jetpack Compose. There is no VM, no patch protocol, no shadow tree —
+the output is a normal native app.
+
+<CardGrid>
+  <Card title="SwiftUI" icon="seti:swift">
+    `compo Counter` → `struct Counter: View`. `state` → `@State`.
+    `Column(gap:)` → `VStack(spacing:)`.
+  </Card>
+  <Card title="Jetpack Compose" icon="seti:kotlin">
+    `compo Counter` → `@Composable fun Counter()`. `state` →
+    `remember { mutableStateOf(...) }`. `Column(gap:)` →
+    `Column(verticalArrangement = spacedBy(...))`.
+  </Card>
+</CardGrid>
+
+## Why two modes?
+
+The dev loop needs liveness (patch, don't recompile); the shipped product
+needs zero runtime overhead (native codegen). Keeping a single IR as the
+contract means the dev experience and the release binary are provably the
+same program — which is exactly what the parity harness proves: it captures
+traces from both tiers and checks their equivalence in CI.
+
+## Platform status within the tiers
+
+The two hosts converge at different speeds, and the project is explicit
+about it:
+
+- **Android dev renders declaratively.** The dev tier drives the same
+  declarative components the release codegen emits.
+- **iOS dev is still imperative (UIKit).** Convergence to the declarative
+  tier is gated on measurement (ADR-0048) — the migration happens when the
+  numbers support it, not by decree.
+- **Release is native on both platforms.** SwiftUI and Compose codegen
+  output is the shipped artifact either way.
+
+<Aside type="note">Node identity is what makes the two tiers equivalent in
+practice: the codegen backends thread the same stable node IDs the dev VM
+used, so generated views keep the exact identity the reconciler matched
+during development. See [Architecture](/explanation/architecture/).</Aside>
+
+## Next steps
+
+- [Ship a native release](/guides/build-native/) — the operational how-to.
+- [Project status](/explanation/project-status/) — what is verified today.

@@ -1,0 +1,71 @@
+---
+title: The wire, explained
+description: Why Flux talks binary over WebSocket, how BLAKE3 content addressing keeps patches tiny, and why the dirty set decides what ships.
+type: explanation
+sidebar:
+  order: 4
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Flux talks to the host over a **binary wire protocol** (Appendix D), not
+JSON. This page explains the reasoning; the byte-level layout lives in the
+[wire protocol reference](/reference/wire-protocol/).
+
+## Why binary
+
+The patch channel carries frames on every save — potentially many per
+minute during a hot-reload session, each on a device that is simultaneously
+running your UI. A text format would spend its bytes on quotes, braces, and
+field names. The binary protocol spends them on structure:
+
+- All multi-byte integers are little-endian.
+- A fixed 16-byte header opens every frame: magic `0x465C5558` (`"FLUX"`),
+  version, sequence number, flags, and the entry counts.
+- Variable data follows: patches, handler definitions, and interned strings.
+
+## Why content addressing
+
+Every prop, closure, and node is content-addressed by a **BLAKE3 hash**.
+For each item in a frame, the server checks the host's cache: if the hash is
+present, it sends only the 8-byte hash; if not, it sends the full data and
+the host caches it.
+
+The consequences are the patch economics you observe in practice:
+
+- After the initial `Init` frame, more than 90% of props and closures are
+  cache hits.
+- A handler-body edit is typically a few hundred bytes on the wire.
+- Interned strings ship once in a string-table delta and are referenced by
+  id thereafter.
+
+## Why the dirty set decides
+
+The server does not guess what changed. It computes
+`dirty = ⋃ dependents[S]` — the union of every node that depends on a
+written signal (ADR-0027) — and emits **Update** patches addressed only to
+dirty nodes, plus structural patches (`Insert` / `Remove` / `Reorder`) where
+control props actually changed. Everything else stays out of the frame,
+which is how a tap in a 1,000-node tree costs one update.
+
+## Flags and liveness
+
+The header's flag bits make the channel self-describing: `full_tree` marks
+the initial snapshot, `heartbeat` keeps the connection observable, `error`
+frames carry failure states, and the delta flags announce which tables
+(state, source maps, strings) accompany the patches. A host that cannot
+support the advertised protocol version rejects the handshake rather than
+misinterpreting frames — protocol v3 (ADR-0059) widened the length prefixes
+for user-authored collections to u32 for exactly this kind of
+forward-compatibility discipline.
+
+<Aside type="note">The DevTools desktop app (`flux-devtools-ui`, gpui-based)
+subscribes to the same wire protocol and renders live telemetry from it —
+one protocol, two consumers (ADR-0039, ADR-0041).</Aside>
+
+## Next steps
+
+- [Wire protocol reference](/reference/wire-protocol/) — the normative
+  layouts, byte by byte.
+- [VM instruction set](/reference/vm-isa/) — what the closures in a frame
+  reference.

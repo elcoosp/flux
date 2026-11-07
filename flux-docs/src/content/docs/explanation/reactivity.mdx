@@ -1,0 +1,80 @@
+---
+title: Reactivity and host-authoritative state
+description: The SolidJS-style signal graph, the host-authoritative state invariant (ADR-0027), and how a tap becomes exactly one update — independent of tree size.
+type: explanation
+sidebar:
+  order: 2
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Flux's reactivity is **SolidJS-style**: a fine-grained dependency graph over
+signals, not a virtual-diffing re-render loop. And Flux's state is
+**host-authoritative**: the server never owns runtime signal values — it
+ships structure (the IR) and deltas (patches), while the host owns the
+signal graph, evaluates handlers, and reconciles the view.
+
+## The invariant
+
+> After a dispatch writes signal set `S`, the only nodes whose rendered
+> output may change are (a) nodes whose prop/control expressions read some
+> `s ∈ S`, and (b) nodes built/destroyed/reordered by keyed structural
+> diffs triggered by (a). Everything else must be untouched.
+
+This invariant is normative (ADR-0027), and it is what makes a 1,000-node
+tree cost **one update** when you tap a counter bound to a single signal —
+independent of tree size.
+
+## How a dispatch flows
+
+1. **Dispatch** — a tap evaluates the handler closure in the host VM,
+   writing one or more signals (for example `count = count + 1`).
+2. **Signals** — the VM reports the written signal ids, sorted ascending,
+   as the `signals` trace event.
+3. **Dirty set** — the host intersects the written signals with each node's
+   `signal_deps`, emitting a `dirty` list in `(depth asc, id asc)` order.
+4. **Update** — only the dirty nodes re-materialize their props and fire
+   `update`. Clean siblings are untouched.
+5. **Step end** — cumulative counters close the step: `built`, `updated`,
+   `skipped_unchanged`, `detached`, `prop_materializations`.
+
+A handler that writes a signal nothing reads produces `dirty: []` and zero
+update/build/detach events — the `noop_dispatch` golden scenario pins this.
+
+## Consequences
+
+- **Patches are minimal.** A `count = count + 1` tap produces an `Update`
+  patch addressed to the dirty node(s) only, never a re-send of the whole
+  tree.
+- **Trace parity is observable.** Because state is host-owned and
+  deterministic, the same frame + dispatch script run against Swift and
+  Kotlin yields byte-identical traces — that is the parity harness's job.
+- **The server round-trip is on its way out.** Phase 3 of ADR-0027 ships
+  prop thunks to the host, so the per-tap server round-trip and the
+  `currentFrame()` reconstruction disappear entirely; the host recomputes
+  from the dirty set.
+
+## What this rules out
+
+<Aside type="caution">The reconciler must not subscribe to the signal graph
+as an observer — that double-fires. It consumes the VM outcome (ADR-0027
+records this as explicitly out of scope).</Aside>
+
+The same discipline explains the fault policy you meet in practice: when a
+handler faults, the node keeps its prior props (render stale, never blank),
+and the error surfaces through the overlay and the trace — the view is
+never torn down.
+
+## Where to see it
+
+The counter example is the canonical demonstration: one signal, one
+dependent `Text`, and a tap that costs exactly one update while the `Column`
+and `Button` skip unchanged. The [todo tutorial](/tutorials/todo-app/) shows
+the same mechanics with lists and routing layered on top.
+
+## Next steps
+
+- [Dev vs release](/explanation/dev-vs-release/) — how the two execution
+  tiers share this machinery.
+- [Architecture](/explanation/architecture/) — the crates that implement
+  the graph and the dirty set.

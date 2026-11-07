@@ -1,0 +1,110 @@
+---
+title: Architecture
+description: How Flux works — the parse → typecheck → lower → diff → patch → VM pipeline, the 16 crates, stable node identity, and the three normative contracts.
+type: explanation
+sidebar:
+  order: 1
+---
+
+import { Aside, FileTree } from '@astrojs/starlight/components';
+
+Flux is a Rust workspace of 16 crates (~63k lines) plus native host
+implementations in Swift and Kotlin. Understanding the pipeline explains
+every observable behavior — why saves are fast, why state survives edits,
+and why dev and release stay equivalent.
+
+## The pipeline
+
+```text
+ main.flux
+     │
+     ▼
+┌─────────────┐   ┌─────────────┐   ┌──────────────────────┐
+│ flux-parser │──▶│ flux-types  │──▶│       flux-ir        │
+│ (lex/parse) │   │ (typecheck) │   │ (Reactive Tree IR)   │
+└─────────────┘   └─────────────┘   └──────────┬───────────┘
+                                               │
+                    ┌──────────────────────────┴──────────────┐
+                    ▼ dev                                     ▼ release
+        ┌──────────────┐   ┌───────────────┐      ┌─────────────────────────┐
+        │ flux-differ  │──▶│ flux-ir-serde │      │    flux-codegen-core    │
+        │ (tree diff)  │   │ (MsgPack patch│      │ (data-driven emitter)   │
+        └──────────────┘   └───────┬───────┘      └───────────┬─────────────┘
+                                   │ WebSocket :7331           │
+                                   ▼                           ├─▶ flux-codegen-swift  → SwiftUI
+                        ┌──────────────────┐                   └─▶ flux-codegen-kotlin → Compose
+                        │  Host app VM +   │
+                        │  signal graph +  │   ◀── validated against
+                        │  shadow tree     │        92 golden ISA vectors
+                        │ (Swift / Kotlin) │        (tests/isa-vectors/)
+                        └──────────────────┘
+```
+
+One source, two consumers. The dev tier diffs and patches; the release tier
+codegens. Both start from the same Reactive Tree IR, which is what the
+parity harness verifies.
+
+## The crates
+
+| Crate | Role |
+| --- | --- |
+| `flux-syntax` | Spans, NodeId, FNV-1a node-id hashing, value/patch vocabulary |
+| `flux-parser` | Hand-written lexer + recursive-descent parser with error recovery |
+| `flux-types` | Type checker over the parse tree |
+| `flux-ir` | Reactive Tree IR: arena, stable u32 node IDs, ClosureIR bytecode table, InstanceRegistry |
+| `flux-ir-serde` | Binary patch (de)serialization — MessagePack, blake3 content addressing |
+| `flux-differ` | Structural tree differ producing minimal edit scripts |
+| `flux-vm-ref` | Reference register VM — the behavioral oracle for the ISA |
+| `flux-devserver` | Hot-reload pipeline, WebSocket patch channel, HTTP asset server |
+| `flux-codegen-core` | Shared data-driven emitter (Backend trait, primitive registry) |
+| `flux-codegen-swift` | SwiftUI backend with a node-ID bridge |
+| `flux-codegen-kotlin` | Jetpack Compose backend with a node-ID bridge |
+| `flux-cli` | The `flux` binary |
+| `flux-parity` | Dev VM == release codegen parity harness |
+| `flux-lsp` | Language server (async-lsp) |
+| `flux-devtools-ui` | gpui DevTools desktop app over the same wire protocol |
+| `flux-perf-harness` | Render-performance measurement against the latency budgets |
+
+## Stable node identity
+
+Node IDs are stable, content-derived **FNV-1a-32 hashes — never sequential**.
+Two tag families keep expression and declaration IDs disjoint, and the
+codegen backends thread the exact same family tags through their node-ID
+bridges.
+
+This is the load-bearing trick behind hot reload: because IDs are stable
+across edits where structure does not change, a hot swap preserves component
+state. The todo app's half-typed text field survives every save because the
+host matches the new tree against the old one by ID.
+
+## Prop indexing
+
+Prop indices are FNV-1a-32 of the prop **name**, masked to `u16`, derived
+identically by the host kits (`PropsIndex.propIndexForName` on Android).
+Indices are never hardcoded — a hardcoded index desyncs from the server and
+renders silently blank UI.
+
+## The shadow tree and keyed reconciliation
+
+The shadow tree is not a tree of raw native views. Each `ShadowNode` holds
+its materialized props in a platform-observable store: on Android, props
+live in a Compose `MutableState` (injected via `propsStateFactory`, because
+a plain `var` is invisible to snapshot tracking); on iOS the tree is
+observed natively.
+
+**Keyed reconciliation** matches children by `nodeId` — an existing node is
+reordered, never recreated — preserving scroll position, text field
+contents, and screen state across diffs and router push/pop.
+
+## Three normative contracts
+
+<Aside type="caution">Three contracts are normative and versioned in
+`docs/spec/mlp-appendices.md`: the **wire protocol** (Appendix D), the **VM
+ISA** (Appendix E), and the **adapter contracts** (Appendix F). Cross-cutting
+changes to any of them require an ADR and a protocol version bump.</Aside>
+
+## Next steps
+
+- [Reactivity](/explanation/reactivity/) — the invariant that makes a tap
+  cost one update.
+- [Dev vs release](/explanation/dev-vs-release/) — why two execution tiers.

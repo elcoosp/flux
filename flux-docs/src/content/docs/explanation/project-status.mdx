@@ -1,0 +1,77 @@
+---
+title: Project status
+description: What is verified and runnable in Flux today — the dev hot-reload path, release codegen, tooling — and what is still converging.
+type: explanation
+sidebar:
+  order: 5
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Flux is under active development, and the project is deliberate about
+distinguishing what is proven from what is converging. This page tracks the
+difference.
+
+## Working today
+
+- **Dev server (`flux dev`)** — binds a WebSocket patch channel on `:7331`
+  and an HTTP asset server on `:7332` with a `/health` probe. Saves are
+  diffed and shipped as binary patches; verified live against the repo's
+  examples.
+- **Host apps (iOS and Android)** — precompiled native hosts that connect
+  to the dev server, run the embedded bytecode VM, and reconcile a shadow
+  tree of native views. Default connection is `ws://127.0.0.1:7331`.
+- **CLI** — `flux init` / `dev` / `build` / `fmt` / `lsp` / `doc` /
+  `doctor`, all documented in the [CLI reference](/reference/cli/).
+- **Release codegen** — `flux build ios|android` lowers `.flux` to
+  idiomatic SwiftUI and Jetpack Compose, driven by the shared data-driven
+  emitter with node-ID bridges on both backends.
+- **Language server and editor tooling** — `flux-lsp` plus the VS Code
+  extension with highlighting, diagnostics, hot-reload status, and run on
+  device.
+- **DevTools desktop app** — a gpui-based GUI rendering live telemetry over
+  the same wire protocol.
+- **Parity harness** — trace capture, reduction, and equivalence checking
+  between dev-VM execution and release codegen output.
+- **Perf harness and budgets** — the Save → pixels budget and per-stage
+  latency budgets enforced by benchmarks.
+
+## Converging
+
+- **iOS declarative dev tier** — Android dev already renders through the
+  same declarative components the release codegen emits; the iOS dev tier is
+  imperative (UIKit) until convergence, and that migration is gated on
+  measurement (ADR-0048).
+- **Cross-host naming convergence** — adapter and capability naming is being
+  aligned across hosts under a single convention (ADR-0049).
+
+## How the project proves claims
+
+Every claim above is backed by a mechanism, not a promise:
+
+| Claim | Mechanism |
+| --- | --- |
+| Dev and release are the same program | `flux-parity` equivalence checking in CI |
+| Hosts behave identically | Byte-identical reconcile traces across Swift and Kotlin |
+| The VM matches its contract | 92 golden ISA vectors shared by Rust, Swift, Kotlin |
+| Hot reload stays fast | LANE-H harness with p50/p99 budgets on Save → pixels |
+| Regressions fail loudly | 19 GitHub Actions workflows guard `main` |
+
+## Architecture decisions
+
+Every non-obvious choice is recorded as an ADR in the repository under
+[`docs/adr/`](https://github.com/elcoosp/flux/tree/main/docs/adr) — 40 MADR
+records through ADR-0059, from gas accounting to wire protocol v3. They stay
+in the repository (not copied into this site) so the source of truth is one
+file per decision, versioned next to the code that implements it.
+
+<Aside type="caution">The project does not ship a runtime interpreter in
+release builds. If a proposal adds one, it needs an ADR and a budget — the
+release artifact is native code, full stop.</Aside>
+
+## Next steps
+
+- [Dev vs release](/explanation/dev-vs-release/) — the reasoning behind the
+  two tiers.
+- [Testing and benchmarks](/guides/testing-and-benchmarks/) — run the
+  mechanisms yourself.
