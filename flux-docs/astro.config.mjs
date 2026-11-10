@@ -2,6 +2,9 @@
 import { defineConfig } from 'astro/config';
 import mdx from '@astrojs/mdx';
 import starlight from '@astrojs/starlight';
+import astroTakumi from 'astro-takumi';
+import fs from 'node:fs';
+import { makeRender } from './src/og-render.mjs';
 import linksValidator from 'starlight-links-validator';
 import imageZoom from 'starlight-image-zoom';
 import headingBadges from 'starlight-heading-badges';
@@ -21,11 +24,23 @@ import fluxGrammar from './src/flux.tmLanguage.json';
 // Version baseline (verified 2026-11-07): Astro 7.4.7, @astrojs/starlight
 // 0.42.10, TypeScript pinned to 6.0.3 (`astro check` does not support
 // TypeScript 7 — see docs/decisions/0001-typescript-version.md).
+const __logoB64 = fs.readFileSync("./src/assets/logo.png").toString("base64");
+const __render = makeRender({
+  logoDataUrl: "data:image/png;base64," + __logoB64,
+  accentHex: "#a34a0f",
+  accentHexA12: "#a34a0f1f",
+  domain: "flux-language-docs.vercel.app",
+  projectName: "Flux",
+});
+
 export default defineConfig({
+	vite: {
+		ssr: { external: ["jsdom", "astro-takumi"] },
+	},
   // llms.txt / llms-full.txt need absolute URLs, and this mirrors the
   // canonical deployment URL already declared by the repository's own
   // website/ config. See docs/decisions/0005-site-url-and-llms-txt.md.
-  site: 'https://flux-lang.dev',
+  site: 'https://flux-language-docs.vercel.app',
   markdown: {
     shikiConfig: {
       langs: [fluxGrammar],
@@ -33,13 +48,16 @@ export default defineConfig({
   },
   integrations: [
     starlight({
+			routeMiddleware: "./src/routeData.ts",
+      expressiveCode: {
+      	themes: ['github-light', 'github-dark'],
+      },
       title: 'Flux',
       description:
         'Flux — a write-once UI language for native iOS and Android. Write .flux, hot-reload on device over binary patches, and ship SwiftUI + Jetpack Compose.',
-      logo: {
-        light: './src/assets/logo-light.svg',
-        dark: './src/assets/logo-dark.svg',
-      },
+
+      logo: { src: './src/assets/logo.png' },
+      favicon: '/favicon.png',
       customCss: ['./src/styles/custom.css'],
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/elcoosp/flux' },
@@ -86,5 +104,16 @@ export default defineConfig({
       ],
     }),
     mdx(),
-  ],
+	
+		astroTakumi({
+			options: {
+				domBackend: "linkedom",
+				fonts: [fs.readFileSync("./node_modules/@fontsource/roboto/files/roboto-latin-400-normal.woff2")],
+				width: 1200,
+				height: 630,
+				format: "png",
+			},
+			render: __render,
+		}),
+	],
 });
