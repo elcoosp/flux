@@ -1,4 +1,5 @@
 [package]
+publish = false
 name = "flux-devtools-ui"
 version.workspace = true
 edition = "2024"

@@ -1,4 +1,5 @@
 [package]
+publish = false
 name = "flux-perf-harness"
 description = "Render-perf harness for the Flux iOS/Android convergence question (PRD-J, ADR-0048)"
 version.workspace = true
