@@ -6,7 +6,7 @@ sidebar:
   order: 2
 ---
 
-import { Aside } from '@astrojs/starlight/components';
+import { Aside, Code } from '@astrojs/starlight/components';
 
 The Flux standard library declares every UI primitive as a `.flux` file under
 [`stdlib/`](https://github.com/elcoosp/flux/tree/main/stdlib). The
@@ -16,9 +16,7 @@ the props and types you see below are the single shared surface.
 
 The canonical machine-readable form of this page is the CLI:
 
-```bash
-flux doc
-```
+<Code lang="bash" code={`flux doc`} />
 
 `flux doc` prints the JSON schema of the stdlib API to stdout.
 

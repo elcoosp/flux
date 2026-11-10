@@ -13,15 +13,15 @@
  */
 
 :root {
-  --sl-color-accent-low: hsl(36 100% 93%);
-  --sl-color-accent: hsl(35 89% 34%);
-  --sl-color-accent-high: hsl(28 85% 30%);
+  --sl-color-accent-low: hsl(24 83% 93%);
+  --sl-color-accent: hsl(24 83% 35%);
+  --sl-color-accent-high: hsl(24 83% 28%);
 }
 
 [data-theme='dark'] {
-  --sl-color-accent-low: hsl(33 70% 16%);
-  --sl-color-accent: hsl(37 92% 58%);
-  --sl-color-accent-high: hsl(41 100% 72%);
+  --sl-color-accent-low: hsl(24 83% 16%);
+  --sl-color-accent: hsl(24 83% 60%);
+  --sl-color-accent-high: hsl(24 83% 75%);
 }
 
 /* Brand touch: give the site title the accent color in both modes. */

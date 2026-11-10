@@ -6,7 +6,7 @@ sidebar:
   order: 6
 ---
 
-import { Aside } from '@astrojs/starlight/components';
+import { Aside, Code } from '@astrojs/starlight/components';
 
 Flux ships a language server (`flux-lsp`, built on `async-lsp`) and a VS Code
 extension that wraps it. Together they give you syntax highlighting,
@@ -17,10 +17,8 @@ diagnostics, hot-reload status, and a one-click run on device.
 The extension lives in the repository at
 [`editors/vscode/`](https://github.com/elcoosp/flux/tree/main/editors/vscode):
 
-```bash
-cd editors/vscode
-pnpm install
-```
+<Code lang="bash" code={`cd editors/vscode
+pnpm install`} />
 
 Open the folder in VS Code and launch it as an extension development host
 (press `F5`), or package it with `vsce` and install the produced `.vsix`.
@@ -40,22 +38,16 @@ While the extension is active you get:
 The same diagnostics are available headlessly through `flux lsp`. It parses
 and type-checks one file and prints the findings as JSON:
 
-```bash
-flux lsp src/main.flux
-```
+<Code lang="bash" code={`flux lsp src/main.flux`} />
 
 The output carries each diagnostic's message, span, and hint, so you can pipe
 it into review tooling:
 
-```json
-{ "diagnostics": [ { "message": "expected `Int`, got `String`", "span": { "file": "src/main.flux", "start": 214, "end": 228 }, "hint": "`count` was inferred as Int at line 18" } ] }
-```
+<Code lang="json" code={`{ "diagnostics": [ { "message": "expected \`Int\`, got \`String\`", "span": { "file": "src/main.flux", "start": 214, "end": 228 }, "hint": "\`count\` was inferred as Int at line 18" } ] }`} />
 
 On large files where you only need syntax errors, skip the type checker:
 
-```bash
-flux lsp src/main.flux --no-types
-```
+<Code lang="bash" code={`flux lsp src/main.flux --no-types`} />
 
 ## How diagnostics reach your editor
 

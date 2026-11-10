@@ -6,16 +6,14 @@ sidebar:
   order: 3
 ---
 
-import { Aside } from '@astrojs/starlight/components';
+import { Aside, Code } from '@astrojs/starlight/components';
 
 The `flux` binary is the developer CLI for the Flux UI language: it scaffolds
 projects, runs the hot-reload dev server, codegens native apps, and inspects
 the stdlib and environment. The surface below is generated from the CLI's
 command definitions in `crates/flux-cli`.
 
-```bash
-flux <command> [flags]
-```
+<Code lang="bash" code={`flux <command> [flags]`} />
 
 | Command | Purpose |
 | --- | --- |

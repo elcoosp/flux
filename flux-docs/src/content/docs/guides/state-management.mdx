@@ -6,7 +6,7 @@ sidebar:
   order: 2
 ---
 
-import { Aside } from '@astrojs/starlight/components';
+import { Aside, Code } from '@astrojs/starlight/components';
 
 Flux renders from a reactive signal graph. Every `state` declaration is a
 signal, and an assignment inside a handler is the whole update: the UI
@@ -17,13 +17,11 @@ copy-paste patterns for the shapes you meet beyond the counter.
 
 Declare a signal at the top of a `compo`:
 
-```flux
-compo Counter
+<Code lang="rust" code={`compo Counter
     state count: Int = 0
     Column gap: 8.0
         Text text: "tapped {count} times"
-        Button text: "Increment", onPress: || { count = count + 1 }
-```
+        Button text: "Increment", onPress: || { count = count + 1 }`} />
 
 The `$count: Int = 0` shorthand is equivalent — you meet it in the scaffold
 and in `examples/counter`. Both forms create the same signal; pick one style
@@ -39,14 +37,12 @@ A value computed from other signals should be derived, not stored — two
 signals that can disagree are a bug you have not met yet. Declare it as a
 read-only `let` computed from signals:
 
-```flux
-compo Cart
+<Code lang="rust" code={`compo Cart
     state items: Int = 3
     state price: Float = 9.99
     let total: Float = items * price   // recomputed when items or price change
     Column
-        Text text: "Total: {total}"
-```
+        Text text: "Total: {total}"`} />
 
 Derivation recomputes when a written signal reaches it, and only the leaves
 that read `total` recompose.
@@ -56,13 +52,11 @@ that read `total` recompose.
 `TextInput` is controlled: bind the signal with `$` and write the typed value
 back in `onChangeText`:
 
-```flux
-compo Composer
+<Code lang="rust" code={`compo Composer
     state draft: String = ""
     Column gap: 8.0
         TextInput text: $draft, onChangeText: fn(v) { draft = v }, placeholder: "Say something"
-        Button text: "Clear", onPress: || { draft = "" }
-```
+        Button text: "Clear", onPress: || { draft = "" }`} />
 
 The `$draft` binding keeps the field and the signal in lockstep, so the Clear
 button empties the field by assigning the signal.
@@ -72,15 +66,13 @@ button empties the field by assigning the signal.
 Flux has no provider/context widget. For state shared across components, lift
 a store component above its consumers and thread values down as props:
 
-```flux
-compo SessionStore
+<Code lang="rust" code={`compo SessionStore
     state token: Option[String] = None
     // actions are handlers that write the store's signals
 
 compo App
     SessionStore
-        // children read token/user via props threaded from here
-```
+        // children read token/user via props threaded from here`} />
 
 Keep stores small and explicit — one store per domain (auth, cart, settings),
 mounted at the root `Router` or `Screen` that needs it. The signal graph is
@@ -94,15 +86,13 @@ returns a result cell (`Ready` / `Pending` / `Error`). An async capability
 leaves the cell `Pending`, and an injected resolver settles it when the
 platform responds:
 
-```flux
-compo Profile
+<Code lang="rust" code={`compo Profile
     state name: Option[String] = None
     Column gap: 8.0
         Text text: name ?? "Loading..."
         Button text: "Load", onPress: || {
-            // call the capability; the result cell settles and updates `name`
-        }
-```
+            // call the capability; the result cell settles and updates \`name\`
+        }`} />
 
 The `??` operator renders the fallback while the cell is pending. See
 [Capabilities](/guides/capabilities/) for the call surface and permission

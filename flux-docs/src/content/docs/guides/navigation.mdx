@@ -6,7 +6,7 @@ sidebar:
   order: 3
 ---
 
-import { Aside } from '@astrojs/starlight/components';
+import { Aside, Code } from '@astrojs/starlight/components';
 
 Flux ships navigation as part of the language: a `Router` declares the stack,
 `Screen` children declare the routes, and `RouterNav.navigate` switches the
@@ -18,8 +18,7 @@ visible screen. This guide shows the working pattern from
 Every screen must carry a `route` prop, and the router names its first
 screen:
 
-```flux
-compo App
+<Code lang="rust" code={`compo App
     Column gap: 8.0
         Router initialRouteName: "home"
             Screen route: "home"
@@ -33,8 +32,7 @@ compo App
                     Text text: "Settings"
                     Button text: "Go to Home", onPress: || {
                         RouterNav.navigate("home")
-                    }
-```
+                    }`} />
 
 - `initialRouteName` names the screen shown at startup.
 - `RouterNav.navigate("settings")` makes the screen whose `route` equals
@@ -65,9 +63,7 @@ gesture callbacks — and the visible screen follows the value.
 
 The todo app's About button is the minimal example:
 
-```flux
-Button text: "About", onPress: || { RouterNav.navigate("about") }
-```
+<Code lang="rust" code={`Button text: "About", onPress: || { RouterNav.navigate("about") }`} />
 
 ## Structure of a multi-screen app
 

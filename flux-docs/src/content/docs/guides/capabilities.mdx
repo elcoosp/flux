@@ -6,7 +6,7 @@ sidebar:
   order: 4
 ---
 
-import { Aside } from '@astrojs/starlight/components';
+import { Aside, Code } from '@astrojs/starlight/components';
 
 Platform services — storage, camera, clipboard, location — are not compiled
 into your UI tree. They are **capabilities**: versioned contracts with stable,
@@ -38,12 +38,10 @@ guards in CI.
 `CALL_CAP` is the mechanism; you reach it through the stdlib surface. The todo
 app's Reset button clears the list and removes the persisted copy:
 
-```flux
-Button text: "Reset", onPress: || {
+<Code lang="rust" code={`Button text: "Reset", onPress: || {
     tasks.clear()
     Storage.removeItem(key: "todos")
-}
-```
+}`} />
 
 `Storage.removeItem` is capability 2, method 3. The call carries its
 arguments as a record and returns a **result cell**:
@@ -64,12 +62,10 @@ so you never write signals from a background thread yourself.
 Because the cell is a value in the signal graph, you render its states with
 ordinary expressions:
 
-```flux
-compo Profile
+<Code lang="rust" code={`compo Profile
     state name: Option[String] = None
     Column gap: 8.0
-        Text text: name ?? "Loading..."
-```
+        Text text: name ?? "Loading..."`} />
 
 The `??` fallback covers `Pending` and empty results. For explicit error
 handling, branch on the cell state and surface the reason in your UI —

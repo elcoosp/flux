@@ -6,7 +6,7 @@ sidebar:
   order: 8
 ---
 
-import { Aside } from '@astrojs/starlight/components';
+import { Aside, Code } from '@astrojs/starlight/components';
 
 Flux's quality bar is mechanical: every public function has a test, and the
 suite spans five layers. This guide shows how to run each layer and what it
@@ -16,9 +16,7 @@ proves.
 
 The project's test runner is `cargo-nextest` — never plain `cargo test`:
 
-```bash
-cargo nextest run
-```
+<Code lang="bash" code={`cargo nextest run`} />
 
 | Layer | Tool | What it proves |
 | --- | --- | --- |
@@ -30,9 +28,7 @@ cargo nextest run
 
 Doctests run separately, because nextest does not execute them:
 
-```bash
-cargo test --doc
-```
+<Code lang="bash" code={`cargo test --doc`} />
 
 ## Check dev-vs-release parity
 
@@ -45,9 +41,7 @@ in the `parity-check` CI workflow.
 When you change lowering, differ, or codegen behavior, run the parity
 scenarios before trusting your own tests:
 
-```bash
-cargo nextest run -p flux-parity
-```
+<Code lang="bash" code={`cargo nextest run -p flux-parity`} />
 
 ## Validate against the golden ISA vectors
 
@@ -74,9 +68,7 @@ at least 50 edits per tree size, reported as p50/p99.
 Criterion benchmarks carry these budgets; the `benchmarks.yml` and
 `perf-harness.yml` CI workflows run them:
 
-```bash
-cargo bench
-```
+<Code lang="bash" code={`cargo bench`} />
 
 <Aside type="caution">Property-based and adversarial suites
 (`proptest`, the wire fuzzer, the corruption tests) intentionally throw

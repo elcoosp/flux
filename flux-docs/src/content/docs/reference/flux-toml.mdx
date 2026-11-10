@@ -6,7 +6,7 @@ sidebar:
   order: 4
 ---
 
-import { Aside } from '@astrojs/starlight/components';
+import { Aside, Code } from '@astrojs/starlight/components';
 
 `flux.toml` is the project manifest at the root of every Flux project. It
 configures the CLI and the dev server, and it is versioned with your project
@@ -14,15 +14,13 @@ so every contributor gets the same ports and settings.
 
 ## Format
 
-```toml
-[project]
+<Code lang="toml" code={`[project]
 name = "todo"
 entry = "main.flux"
 
 [dev]
 ws_port = 7331
-http_port = 7332
-```
+http_port = 7332`} />
 
 ## Keys
 

@@ -6,7 +6,7 @@ sidebar:
   order: 5
 ---
 
-import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+import { Aside, Code, TabItem, Tabs } from '@astrojs/starlight/components';
 
 Development runs through the bytecode VM so saves hot-reload in milliseconds.
 Release is different: `flux build` compiles the same IR to idiomatic native
@@ -19,15 +19,11 @@ Run the build from your project root and pick the platform:
 
 <Tabs>
   <TabItem label="iOS">
-    ```bash
-    flux build ios
-    ```
+    <Code lang="bash" code={`flux build ios`} />
     Emits `platforms/ios/Generated/main.swift`.
   </TabItem>
   <TabItem label="Android">
-    ```bash
-    flux build android
-    ```
+    <Code lang="bash" code={`flux build android`} />
     Emits `platforms/android/Generated/main.kt`.
   </TabItem>
 </Tabs>

@@ -6,7 +6,7 @@ sidebar:
   order: 11
 ---
 
-import { Aside } from '@astrojs/starlight/components';
+import { Aside, Code } from '@astrojs/starlight/components';
 
 Every error Flux surfaces — in the dev server log, the on-device red banner,
 or the CLI output — belongs to the unified error taxonomy: three classes,
@@ -23,11 +23,9 @@ to that taxonomy so you can go from message to fix.
 
 Typical shape:
 
-```text
-[compile:Parse] expected `Int`, got `String` (hint: `count` was inferred as Int at line 18)
+<Code lang="text" code={`[compile:Parse] expected \`Int\`, got \`String\` (hint: \`count\` was inferred as Int at line 18)
 [compile:Type] …
-[compile:Lower] …
-```
+[compile:Lower] …`} />
 
 Each compile error carries a phase, a message, a `span` (file:line:col), and
 an optional hint.
@@ -46,10 +44,8 @@ re-express the construct. Compile errors are deterministic — re-running
 
 Typical shape:
 
-```text
-[runtime] gas budget exhausted at offset 42
-[runtime] division by zero at offset 17
-```
+<Code lang="text" code={`[runtime] gas budget exhausted at offset 42
+[runtime] division by zero at offset 17`} />
 
 Runtime errors wrap a stable VM fault kind, so the fault code is load-bearing
 and asserted by the golden ISA vectors. The `offset` points at the offending
@@ -102,9 +98,7 @@ fix that expression.
 
 Typical shape:
 
-```text
-[capability] `Storage.removeItem` (2/3): the OS grant `.storage` was not authorized for this capability call
-```
+<Code lang="text" code={`[capability] \`Storage.removeItem\` (2/3): the OS grant \`.storage\` was not authorized for this capability call`} />
 
 Capability errors carry the numeric `cap_id` / `method_id`, the resolved
 `cap_name` / `method_name` when registered, the required OS permission, and a

@@ -6,6 +6,10 @@ type: explanation
 sidebar:
   order: 0
 hero:
+  image:
+    file: ../../assets/logo.png
+    alt: Logo
+  title: "Flux"
   tagline: Write once. Render native on iOS and Android.
   actions:
     - text: Start the tutorial
@@ -17,7 +21,7 @@ hero:
       variant: minimal
 ---
 
-import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+import { Card, CardGrid, LinkButton, LinkCard } from '@astrojs/starlight/components';
 
 Flux is a write-once UI language for native iOS and Android. You author your UI
 in `.flux` files. In development, a precompiled host app receives binary patches
@@ -59,6 +63,8 @@ verified, not assumed.
     40 ADRs, normative wire and ISA appendices, and enforced parity tests.
   </Card>
 </CardGrid>
+
+<LinkButton href="/tutorials/todo-app/" icon="right-arrow">Start the tutorial</LinkButton>
 
 ## Choose your path
 

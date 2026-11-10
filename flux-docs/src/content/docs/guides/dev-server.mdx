@@ -6,7 +6,7 @@ sidebar:
   order: 1
 ---
 
-import { Aside } from '@astrojs/starlight/components';
+import { Aside, Code } from '@astrojs/starlight/components';
 
 The dev server (`flux dev`) is your constant companion while you build a Flux
 app: it watches, parses, type-checks, lowers, and diffs your `.flux` sources,
@@ -17,10 +17,8 @@ knob it exposes.
 
 Run it from your project root (or point it anywhere with `--root`):
 
-```bash
-flux dev
-# Listening on ws://127.0.0.1:7331
-```
+<Code lang="bash" code={`flux dev
+# Listening on ws://127.0.0.1:7331`} />
 
 The defaults serve a project in the current directory, bound to localhost:
 
@@ -40,13 +38,9 @@ configures its ports for every contributor. See the
 
 The asset server exposes a health probe:
 
-```bash
-curl http://127.0.0.1:7332/health
-```
+<Code lang="bash" code={`curl http://127.0.0.1:7332/health`} />
 
-```text
-ok
-```
+<Code lang="text" code={`ok`} />
 
 ## Serve a physical device over the LAN
 
@@ -54,9 +48,7 @@ Simulators and emulators reach `127.0.0.1` on your machine; a physical device
 cannot. Expose the server on your LAN and point the host app at your machine's
 LAN IP:
 
-```bash
-flux dev --ws-host 0.0.0.0
-```
+<Code lang="bash" code={`flux dev --ws-host 0.0.0.0`} />
 
 In the host app, set the server address to `ws://192.168.1.42:7331`, replacing
 the IP with the address of the machine running `flux dev`. The Android host
@@ -67,9 +59,7 @@ stores this in its resources; the iOS host takes it in its connection screen.
 An open dev loop on localhost is safe by default. A LAN-exposed server must
 authenticate the hosts that push bytecode to it:
 
-```bash
-flux dev --ws-host 0.0.0.0 --token <secret>
-```
+<Code lang="bash" code={`flux dev --ws-host 0.0.0.0 --token <secret>`} />
 
 The host presents its token during the `Hello` handshake (wire protocol
 Appendix D, pairing/auth section). Hosts read their token from:

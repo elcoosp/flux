@@ -6,7 +6,7 @@ sidebar:
   order: 1
 ---
 
-import { Aside, FileTree } from '@astrojs/starlight/components';
+import { Aside, Code, FileTree } from '@astrojs/starlight/components';
 
 Flux is a Rust workspace of 16 crates (~63k lines) plus native host
 implementations in Swift and Kotlin. Understanding the pipeline explains
@@ -15,8 +15,7 @@ and why dev and release stay equivalent.
 
 ## The pipeline
 
-```text
- main.flux
+<Code lang="text" code={` main.flux
      │
      ▼
 ┌─────────────┐   ┌─────────────┐   ┌──────────────────────┐
@@ -37,8 +36,7 @@ and why dev and release stay equivalent.
                         │  signal graph +  │   ◀── validated against
                         │  shadow tree     │        92 golden ISA vectors
                         │ (Swift / Kotlin) │        (tests/isa-vectors/)
-                        └──────────────────┘
-```
+                        └──────────────────┘`} />
 
 One source, two consumers. The dev tier diffs and patches; the release tier
 codegens. Both start from the same Reactive Tree IR, which is what the

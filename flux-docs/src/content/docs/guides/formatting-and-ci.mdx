@@ -6,7 +6,7 @@ sidebar:
   order: 7
 ---
 
-import { Aside } from '@astrojs/starlight/components';
+import { Aside, Code } from '@astrojs/starlight/components';
 
 Flux enforces canonical style and environment health mechanically, so reviews
 argue about code instead of formatting. This guide covers the three gates you
@@ -17,17 +17,13 @@ run before opening a PR.
 `flux fmt` formats `.flux` files to canonical style. With no paths it formats
 `main.flux` in the project root:
 
-```bash
-flux fmt                       # format main.flux in place
-flux fmt src/views.flux        # format specific files
-```
+<Code lang="bash" code={`flux fmt                       # format main.flux in place
+flux fmt src/views.flux        # format specific files`} />
 
 Gate a pipeline with `--check`: the files are verified but not written, and
 the process exits non-zero when any file would change:
 
-```bash
-flux fmt --check
-```
+<Code lang="bash" code={`flux fmt --check`} />
 
 ## Check environment health
 
@@ -35,9 +31,7 @@ flux fmt --check
 parse health, wire protocol version, and — best effort — connected devices
 and simulators:
 
-```bash
-flux doctor
-```
+<Code lang="bash" code={`flux doctor`} />
 
 It also runs the local structural checks: approved-dependency drift (the
 repository vets dependencies through ADRs, and `flux doctor` reports
@@ -46,21 +40,17 @@ unapproved drift) and violations of the repository's documented house rules.
 Use `--strict` to make advisory findings blocking, so the command can gate a
 pre-commit hook:
 
-```bash
-flux doctor --strict   # exits non-zero on any finding
-```
+<Code lang="bash" code={`flux doctor --strict   # exits non-zero on any finding`} />
 
 ## Keep the Rust gates green
 
 If you touch the Flux implementation itself, the repository's CI expects a
 clean tree by these commands — never plain `cargo test`:
 
-```bash
-cargo fmt -- --check
+<Code lang="bash" code={`cargo fmt -- --check
 cargo clippy -- -D warnings
 cargo nextest run
-cargo test --doc      # doctests: nextest does not run these
-```
+cargo test --doc      # doctests: nextest does not run these`} />
 
 | Command | Gate |
 | --- | --- |

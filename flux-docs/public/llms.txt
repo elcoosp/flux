@@ -1,0 +1,30 @@
+# flux
+
+> AI-agent index.
+
+- [Architecture](/explanation/architecture/) — How Flux works — the parse → typecheck → lower → diff → patch → VM pipeline, the 16 crates, stable node identity, and the three normative contracts.
+- [Dev vs release](/explanation/dev-vs-release/) — Why Flux has two execution tiers over one IR — interpreted patches for liveness in dev, native codegen for zero runtime overhead in release — and how parity is proven.
+- [Project status](/explanation/project-status/) — What is verified and runnable in Flux today — the dev hot-reload path, release codegen, tooling — and what is still converging.
+- [Reactivity and host-authoritative state](/explanation/reactivity/) — The SolidJS-style signal graph, the host-authoritative state invariant (ADR-0027), and how a tap becomes exactly one update — independent of tree size.
+- [The wire, explained](/explanation/the-wire/) — Why Flux talks binary over WebSocket, how BLAKE3 content addressing keeps patches tiny, and why the dirty set decides what ships.
+- [Ship a native release](/guides/build-native/) — Generate SwiftUI and Jetpack Compose sources with flux build ios|android, understand the output layout, and hand the sources to the native toolchains.
+- [Use platform capabilities](/guides/capabilities/) — Call Camera, Storage, Router, Clipboard, and Location through the versioned capability contract — result cells, permission gating, and error handling.
+- [Run and configure the dev server](/guides/dev-server/) — Configure flux dev — ports, health probe, LAN exposure, and pairing tokens for the hot-reload loop.
+- [Set up editor tooling](/guides/editor-tooling/) — Install the VS Code extension and use flux lsp for parse and type diagnostics on .flux sources.
+- [Format sources and gate CI](/guides/formatting-and-ci/) — Enforce canonical style with flux fmt --check, catch environment drift with flux doctor --strict, and keep the repo's fmt/clippy gates green.
+- [Migrate from Flutter](/guides/migrate-from-flutter/) — An honest map from Flutter widgets to Flux primitives — layout, state, async — and the gaps Flux does not cover yet.
+- [Migrate from React Native](/guides/migrate-from-rn/) — An honest map from React Native concepts to Flux primitives — component model, state, effects — and the gaps Flux does not cover yet.
+- [Navigate between screens](/guides/navigation/) — Build multi-screen apps with Router, Screen, and RouterNav — the route prop contract, initial routes, and capability-driven navigation.
+- [Manage state](/guides/state-management/) — Patterns over the Flux signal graph — local signals, derived values, shared stores, controlled inputs, and async data through capabilities.
+- [Run tests and benchmarks](/guides/testing-and-benchmarks/) — Exercise the five test layers — nextest, proptest, insta snapshots, criterion budgets, and the dev-vs-release parity harness.
+- [Troubleshoot Flux errors](/guides/troubleshooting/) — Diagnose Flux errors by class — compile (parse, type, lower), runtime VM faults, and capability denials — with the message shape, root cause, and fix for each.
+- [Flux](/) — Flux is a write-once UI language for native iOS and Android — hot-reload .flux on device, then ship SwiftUI and Jetpack Compose from the same source.
+- [Capabilities reference](/reference/capabilities/) — The versioned capability contract — stable ids, methods, result cells, permission gating, and how async results return to the signal graph.
+- [CLI reference](/reference/cli/) — The flux command-line interface — init, dev, build, lsp, fmt, doc, doctor — with every flag, default, and environment variable.
+- [flux.toml reference](/reference/flux-toml/) — The Flux project manifest — project name and entry, dev server ports, and pairing token configuration.
+- [Language reference](/reference/language/) — The .flux surface — components, records, signals, closures, view calls, interpolation, operators, and types.
+- [Standard library reference](/reference/stdlib/) — Every Flux stdlib component with its real prop contract — layout, text, controls, input, navigation, overlays, motion — plus value types and presets.
+- [VM instruction set](/reference/vm-isa/) — The host VM's register-based ISA — signal ops, monomorphized arithmetic, list ops, closures, fault policy, and the golden vectors that pin it.
+- [Wire protocol reference](/reference/wire-protocol/) — The binary protocol between the dev server and host apps — frame header, patch encodings, node and value layouts, prop diffs, closures, and BLAKE3 content addressing.
+- [Build the todo app](/tutorials/todo-app/) — Recreate the real examples/todo app step by step — records, List state, keyed ForEach, controlled text input, routing, and a Storage capability call.
+- [Your first Flux app](/tutorials/your-first-app/) — Build the Flux CLI, scaffold a project, hot-reload a counter on an iOS or Android host app, and ship a native release — end to end.

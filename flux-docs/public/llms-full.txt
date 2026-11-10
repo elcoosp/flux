@@ -1,0 +1,2622 @@
+---
+title: Architecture
+description: How Flux works — the parse → typecheck → lower → diff → patch → VM pipeline, the 16 crates, stable node identity, and the three normative contracts.
+type: explanation
+sidebar:
+  order: 1
+---
+
+import { Aside, Code, FileTree } from '@astrojs/starlight/components';
+
+Flux is a Rust workspace of 16 crates (~63k lines) plus native host
+implementations in Swift and Kotlin. Understanding the pipeline explains
+every observable behavior — why saves are fast, why state survives edits,
+and why dev and release stay equivalent.
+
+## The pipeline
+
+<Code lang="text" code={` main.flux
+     │
+     ▼
+┌─────────────┐   ┌─────────────┐   ┌──────────────────────┐
+│ flux-parser │──▶│ flux-types  │──▶│       flux-ir        │
+│ (lex/parse) │   │ (typecheck) │   │ (Reactive Tree IR)   │
+└─────────────┘   └─────────────┘   └──────────┬───────────┘
+                                               │
+                    ┌──────────────────────────┴──────────────┐
+                    ▼ dev                                     ▼ release
+        ┌──────────────┐   ┌───────────────┐      ┌─────────────────────────┐
+        │ flux-differ  │──▶│ flux-ir-serde │      │    flux-codegen-core    │
+        │ (tree diff)  │   │ (MsgPack patch│      │ (data-driven emitter)   │
+        └──────────────┘   └───────┬───────┘      └───────────┬─────────────┘
+                                   │ WebSocket :7331           │
+                                   ▼                           ├─▶ flux-codegen-swift  → SwiftUI
+                        ┌──────────────────┐                   └─▶ flux-codegen-kotlin → Compose
+                        │  Host app VM +   │
+                        │  signal graph +  │   ◀── validated against
+                        │  shadow tree     │        92 golden ISA vectors
+                        │ (Swift / Kotlin) │        (tests/isa-vectors/)
+                        └──────────────────┘`} />
+
+One source, two consumers. The dev tier diffs and patches; the release tier
+codegens. Both start from the same Reactive Tree IR, which is what the
+parity harness verifies.
+
+## The crates
+
+| Crate | Role |
+| --- | --- |
+| `flux-syntax` | Spans, NodeId, FNV-1a node-id hashing, value/patch vocabulary |
+| `flux-parser` | Hand-written lexer + recursive-descent parser with error recovery |
+| `flux-types` | Type checker over the parse tree |
+| `flux-ir` | Reactive Tree IR: arena, stable u32 node IDs, ClosureIR bytecode table, InstanceRegistry |
+| `flux-ir-serde` | Binary patch (de)serialization — MessagePack, blake3 content addressing |
+| `flux-differ` | Structural tree differ producing minimal edit scripts |
+| `flux-vm-ref` | Reference register VM — the behavioral oracle for the ISA |
+| `flux-devserver` | Hot-reload pipeline, WebSocket patch channel, HTTP asset server |
+| `flux-codegen-core` | Shared data-driven emitter (Backend trait, primitive registry) |
+| `flux-codegen-swift` | SwiftUI backend with a node-ID bridge |
+| `flux-codegen-kotlin` | Jetpack Compose backend with a node-ID bridge |
+| `flux-cli` | The `flux` binary |
+| `flux-parity` | Dev VM == release codegen parity harness |
+| `flux-lsp` | Language server (async-lsp) |
+| `flux-devtools-ui` | gpui DevTools desktop app over the same wire protocol |
+| `flux-perf-harness` | Render-performance measurement against the latency budgets |
+
+## Stable node identity
+
+Node IDs are stable, content-derived **FNV-1a-32 hashes — never sequential**.
+Two tag families keep expression and declaration IDs disjoint, and the
+codegen backends thread the exact same family tags through their node-ID
+bridges.
+
+This is the load-bearing trick behind hot reload: because IDs are stable
+across edits where structure does not change, a hot swap preserves component
+state. The todo app's half-typed text field survives every save because the
+host matches the new tree against the old one by ID.
+
+## Prop indexing
+
+Prop indices are FNV-1a-32 of the prop **name**, masked to `u16`, derived
+identically by the host kits (`PropsIndex.propIndexForName` on Android).
+Indices are never hardcoded — a hardcoded index desyncs from the server and
+renders silently blank UI.
+
+## The shadow tree and keyed reconciliation
+
+The shadow tree is not a tree of raw native views. Each `ShadowNode` holds
+its materialized props in a platform-observable store: on Android, props
+live in a Compose `MutableState` (injected via `propsStateFactory`, because
+a plain `var` is invisible to snapshot tracking); on iOS the tree is
+observed natively.
+
+**Keyed reconciliation** matches children by `nodeId` — an existing node is
+reordered, never recreated — preserving scroll position, text field
+contents, and screen state across diffs and router push/pop.
+
+## Three normative contracts
+
+<Aside type="caution">Three contracts are normative and versioned in
+`docs/spec/mlp-appendices.md`: the **wire protocol** (Appendix D), the **VM
+ISA** (Appendix E), and the **adapter contracts** (Appendix F). Cross-cutting
+changes to any of them require an ADR and a protocol version bump.</Aside>
+
+## Next steps
+
+- [Reactivity](/explanation/reactivity/) — the invariant that makes a tap
+  cost one update.
+- [Dev vs release](/explanation/dev-vs-release/) — why two execution tiers.
+
+
+---
+
+---
+title: Dev vs release
+description: Why Flux has two execution tiers over one IR — interpreted patches for liveness in dev, native codegen for zero runtime overhead in release — and how parity is proven.
+type: explanation
+sidebar:
+  order: 3
+---
+
+import { Card, CardGrid, Aside } from '@astrojs/starlight/components';
+
+Flux has two execution modes. Both consume the **same Reactive Tree IR**
+produced by the lowering pass — they differ only in how the host turns that
+IR into pixels.
+
+## Dev mode — interpreted and patched
+
+In dev, a precompiled **host app** ships to the device. The dev server
+parses `.flux`, lowers it to the Reactive Tree IR, diffs it against the
+previous tree, and ships **binary patches** over a WebSocket. The host's
+embedded register-based bytecode VM and signal graph apply the patch and
+mutate a shadow tree of native views.
+
+- Fast iteration: save → diff → patch, with no app recompile.
+- Full introspection: the wire frame, the VM outcome, and the reconcile
+  trace are all observable.
+- The `trace` sink is free in production (ADR-0027 INV-2): no overhead when
+  no driver is attached.
+
+## Release mode — codegen'd native
+
+In release, the same IR is **codegen'd** to idiomatic Swift/SwiftUI and
+Kotlin/Jetpack Compose. There is no VM, no patch protocol, no shadow tree —
+the output is a normal native app.
+
+<CardGrid>
+  <Card title="SwiftUI" icon="seti:swift">
+    `compo Counter` → `struct Counter: View`. `state` → `@State`.
+    `Column(gap:)` → `VStack(spacing:)`.
+  </Card>
+  <Card title="Jetpack Compose" icon="seti:kotlin">
+    `compo Counter` → `@Composable fun Counter()`. `state` →
+    `remember { mutableStateOf(...) }`. `Column(gap:)` →
+    `Column(verticalArrangement = spacedBy(...))`.
+  </Card>
+</CardGrid>
+
+## Why two modes?
+
+The dev loop needs liveness (patch, don't recompile); the shipped product
+needs zero runtime overhead (native codegen). Keeping a single IR as the
+contract means the dev experience and the release binary are provably the
+same program — which is exactly what the parity harness proves: it captures
+traces from both tiers and checks their equivalence in CI.
+
+## Platform status within the tiers
+
+The two hosts converge at different speeds, and the project is explicit
+about it:
+
+- **Android dev renders declaratively.** The dev tier drives the same
+  declarative components the release codegen emits.
+- **iOS dev is still imperative (UIKit).** Convergence to the declarative
+  tier is gated on measurement (ADR-0048) — the migration happens when the
+  numbers support it, not by decree.
+- **Release is native on both platforms.** SwiftUI and Compose codegen
+  output is the shipped artifact either way.
+
+<Aside type="note">Node identity is what makes the two tiers equivalent in
+practice: the codegen backends thread the same stable node IDs the dev VM
+used, so generated views keep the exact identity the reconciler matched
+during development. See [Architecture](/explanation/architecture/).</Aside>
+
+## Next steps
+
+- [Ship a native release](/guides/build-native/) — the operational how-to.
+- [Project status](/explanation/project-status/) — what is verified today.
+
+
+---
+
+---
+title: Project status
+description: What is verified and runnable in Flux today — the dev hot-reload path, release codegen, tooling — and what is still converging.
+type: explanation
+sidebar:
+  order: 5
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Flux is under active development, and the project is deliberate about
+distinguishing what is proven from what is converging. This page tracks the
+difference.
+
+## Working today
+
+- **Dev server (`flux dev`)** — binds a WebSocket patch channel on `:7331`
+  and an HTTP asset server on `:7332` with a `/health` probe. Saves are
+  diffed and shipped as binary patches; verified live against the repo's
+  examples.
+- **Host apps (iOS and Android)** — precompiled native hosts that connect
+  to the dev server, run the embedded bytecode VM, and reconcile a shadow
+  tree of native views. Default connection is `ws://127.0.0.1:7331`.
+- **CLI** — `flux init` / `dev` / `build` / `fmt` / `lsp` / `doc` /
+  `doctor`, all documented in the [CLI reference](/reference/cli/).
+- **Release codegen** — `flux build ios|android` lowers `.flux` to
+  idiomatic SwiftUI and Jetpack Compose, driven by the shared data-driven
+  emitter with node-ID bridges on both backends.
+- **Language server and editor tooling** — `flux-lsp` plus the VS Code
+  extension with highlighting, diagnostics, hot-reload status, and run on
+  device.
+- **DevTools desktop app** — a gpui-based GUI rendering live telemetry over
+  the same wire protocol.
+- **Parity harness** — trace capture, reduction, and equivalence checking
+  between dev-VM execution and release codegen output.
+- **Perf harness and budgets** — the Save → pixels budget and per-stage
+  latency budgets enforced by benchmarks.
+
+## Converging
+
+- **iOS declarative dev tier** — Android dev already renders through the
+  same declarative components the release codegen emits; the iOS dev tier is
+  imperative (UIKit) until convergence, and that migration is gated on
+  measurement (ADR-0048).
+- **Cross-host naming convergence** — adapter and capability naming is being
+  aligned across hosts under a single convention (ADR-0049).
+
+## How the project proves claims
+
+Every claim above is backed by a mechanism, not a promise:
+
+| Claim | Mechanism |
+| --- | --- |
+| Dev and release are the same program | `flux-parity` equivalence checking in CI |
+| Hosts behave identically | Byte-identical reconcile traces across Swift and Kotlin |
+| The VM matches its contract | 92 golden ISA vectors shared by Rust, Swift, Kotlin |
+| Hot reload stays fast | LANE-H harness with p50/p99 budgets on Save → pixels |
+| Regressions fail loudly | 19 GitHub Actions workflows guard `main` |
+
+## Architecture decisions
+
+Every non-obvious choice is recorded as an ADR in the repository under
+[`docs/adr/`](https://github.com/elcoosp/flux/tree/main/docs/adr) — 40 MADR
+records through ADR-0059, from gas accounting to wire protocol v3. They stay
+in the repository (not copied into this site) so the source of truth is one
+file per decision, versioned next to the code that implements it.
+
+<Aside type="caution">The project does not ship a runtime interpreter in
+release builds. If a proposal adds one, it needs an ADR and a budget — the
+release artifact is native code, full stop.</Aside>
+
+## Next steps
+
+- [Dev vs release](/explanation/dev-vs-release/) — the reasoning behind the
+  two tiers.
+- [Testing and benchmarks](/guides/testing-and-benchmarks/) — run the
+  mechanisms yourself.
+
+
+---
+
+---
+title: Reactivity and host-authoritative state
+description: The SolidJS-style signal graph, the host-authoritative state invariant (ADR-0027), and how a tap becomes exactly one update — independent of tree size.
+type: explanation
+sidebar:
+  order: 2
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Flux's reactivity is **SolidJS-style**: a fine-grained dependency graph over
+signals, not a virtual-diffing re-render loop. And Flux's state is
+**host-authoritative**: the server never owns runtime signal values — it
+ships structure (the IR) and deltas (patches), while the host owns the
+signal graph, evaluates handlers, and reconciles the view.
+
+## The invariant
+
+> After a dispatch writes signal set `S`, the only nodes whose rendered
+> output may change are (a) nodes whose prop/control expressions read some
+> `s ∈ S`, and (b) nodes built/destroyed/reordered by keyed structural
+> diffs triggered by (a). Everything else must be untouched.
+
+This invariant is normative (ADR-0027), and it is what makes a 1,000-node
+tree cost **one update** when you tap a counter bound to a single signal —
+independent of tree size.
+
+## How a dispatch flows
+
+1. **Dispatch** — a tap evaluates the handler closure in the host VM,
+   writing one or more signals (for example `count = count + 1`).
+2. **Signals** — the VM reports the written signal ids, sorted ascending,
+   as the `signals` trace event.
+3. **Dirty set** — the host intersects the written signals with each node's
+   `signal_deps`, emitting a `dirty` list in `(depth asc, id asc)` order.
+4. **Update** — only the dirty nodes re-materialize their props and fire
+   `update`. Clean siblings are untouched.
+5. **Step end** — cumulative counters close the step: `built`, `updated`,
+   `skipped_unchanged`, `detached`, `prop_materializations`.
+
+A handler that writes a signal nothing reads produces `dirty: []` and zero
+update/build/detach events — the `noop_dispatch` golden scenario pins this.
+
+## Consequences
+
+- **Patches are minimal.** A `count = count + 1` tap produces an `Update`
+  patch addressed to the dirty node(s) only, never a re-send of the whole
+  tree.
+- **Trace parity is observable.** Because state is host-owned and
+  deterministic, the same frame + dispatch script run against Swift and
+  Kotlin yields byte-identical traces — that is the parity harness's job.
+- **The server round-trip is on its way out.** Phase 3 of ADR-0027 ships
+  prop thunks to the host, so the per-tap server round-trip and the
+  `currentFrame()` reconstruction disappear entirely; the host recomputes
+  from the dirty set.
+
+## What this rules out
+
+<Aside type="caution">The reconciler must not subscribe to the signal graph
+as an observer — that double-fires. It consumes the VM outcome (ADR-0027
+records this as explicitly out of scope).</Aside>
+
+The same discipline explains the fault policy you meet in practice: when a
+handler faults, the node keeps its prior props (render stale, never blank),
+and the error surfaces through the overlay and the trace — the view is
+never torn down.
+
+## Where to see it
+
+The counter example is the canonical demonstration: one signal, one
+dependent `Text`, and a tap that costs exactly one update while the `Column`
+and `Button` skip unchanged. The [todo tutorial](/tutorials/todo-app/) shows
+the same mechanics with lists and routing layered on top.
+
+## Next steps
+
+- [Dev vs release](/explanation/dev-vs-release/) — how the two execution
+  tiers share this machinery.
+- [Architecture](/explanation/architecture/) — the crates that implement
+  the graph and the dirty set.
+
+
+---
+
+---
+title: The wire, explained
+description: Why Flux talks binary over WebSocket, how BLAKE3 content addressing keeps patches tiny, and why the dirty set decides what ships.
+type: explanation
+sidebar:
+  order: 4
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Flux talks to the host over a **binary wire protocol** (Appendix D), not
+JSON. This page explains the reasoning; the byte-level layout lives in the
+[wire protocol reference](/reference/wire-protocol/).
+
+## Why binary
+
+The patch channel carries frames on every save — potentially many per
+minute during a hot-reload session, each on a device that is simultaneously
+running your UI. A text format would spend its bytes on quotes, braces, and
+field names. The binary protocol spends them on structure:
+
+- All multi-byte integers are little-endian.
+- A fixed 16-byte header opens every frame: magic `0x465C5558` (`"FLUX"`),
+  version, sequence number, flags, and the entry counts.
+- Variable data follows: patches, handler definitions, and interned strings.
+
+## Why content addressing
+
+Every prop, closure, and node is content-addressed by a **BLAKE3 hash**.
+For each item in a frame, the server checks the host's cache: if the hash is
+present, it sends only the 8-byte hash; if not, it sends the full data and
+the host caches it.
+
+The consequences are the patch economics you observe in practice:
+
+- After the initial `Init` frame, more than 90% of props and closures are
+  cache hits.
+- A handler-body edit is typically a few hundred bytes on the wire.
+- Interned strings ship once in a string-table delta and are referenced by
+  id thereafter.
+
+## Why the dirty set decides
+
+The server does not guess what changed. It computes
+`dirty = ⋃ dependents[S]` — the union of every node that depends on a
+written signal (ADR-0027) — and emits **Update** patches addressed only to
+dirty nodes, plus structural patches (`Insert` / `Remove` / `Reorder`) where
+control props actually changed. Everything else stays out of the frame,
+which is how a tap in a 1,000-node tree costs one update.
+
+## Flags and liveness
+
+The header's flag bits make the channel self-describing: `full_tree` marks
+the initial snapshot, `heartbeat` keeps the connection observable, `error`
+frames carry failure states, and the delta flags announce which tables
+(state, source maps, strings) accompany the patches. A host that cannot
+support the advertised protocol version rejects the handshake rather than
+misinterpreting frames — protocol v3 (ADR-0059) widened the length prefixes
+for user-authored collections to u32 for exactly this kind of
+forward-compatibility discipline.
+
+<Aside type="note">The DevTools desktop app (`flux-devtools-ui`, gpui-based)
+subscribes to the same wire protocol and renders live telemetry from it —
+one protocol, two consumers (ADR-0039, ADR-0041).</Aside>
+
+## Next steps
+
+- [Wire protocol reference](/reference/wire-protocol/) — the normative
+  layouts, byte by byte.
+- [VM instruction set](/reference/vm-isa/) — what the closures in a frame
+  reference.
+
+
+---
+
+---
+title: Ship a native release
+description: Generate SwiftUI and Jetpack Compose sources with flux build ios|android, understand the output layout, and hand the sources to the native toolchains.
+type: how-to
+sidebar:
+  order: 5
+---
+
+import { Aside, Code, TabItem, Tabs } from '@astrojs/starlight/components';
+
+Development runs through the bytecode VM so saves hot-reload in milliseconds.
+Release is different: `flux build` compiles the same IR to idiomatic native
+source and ships no VM, no patch protocol, and no shadow tree. This guide
+walks the release path per platform.
+
+## Generate the native sources
+
+Run the build from your project root and pick the platform:
+
+<Tabs>
+  <TabItem label="iOS">
+    <Code lang="bash" code={`flux build ios`} />
+    Emits `platforms/ios/Generated/main.swift`.
+  </TabItem>
+  <TabItem label="Android">
+    <Code lang="bash" code={`flux build android`} />
+    Emits `platforms/android/Generated/main.kt`.
+  </TabItem>
+</Tabs>
+
+Both targets use `--root <path>` if you build a project elsewhere, matching
+`flux dev`.
+
+## What the output looks like
+
+For the canonical counter (see the
+[counter walkthrough](/tutorials/your-first-app/)) the emitted code is the
+plain native equivalent of your `.flux`:
+
+- `compo Counter` becomes `struct Counter: View` (SwiftUI) and
+  `@Composable fun Counter()` (Compose).
+- `state count` becomes `@State private var count: Int = 0` and
+  `var count by remember { mutableStateOf<Int>(0) }`.
+- `Column gap: 8.0` becomes `VStack(spacing:)` and
+  `Column(verticalArrangement = spacedBy(8.dp))`.
+
+There is no interpreter in the shipped app — the generated code is ordinary
+SwiftUI and Compose that you review, version, and compile like any other
+native source.
+
+## Hand the sources to the toolchain
+
+If `xcodebuild` or `gradle` is present on your machine, `flux build` suggests
+the next build step after emitting the sources. Otherwise, compile them in
+your app target like any other generated source:
+
+- **iOS** — add the generated Swift files to your app target and build with
+  Xcode as usual.
+- **Android** — include the generated Kotlin files in your module's source
+  set and build with Gradle.
+
+## Why dev and release stay equivalent
+
+Both execution tiers consume the same Reactive Tree IR. A parity harness
+(`flux-parity`) captures traces from dev-VM execution and from release
+codegen output and proves their equivalence in CI — the two paths are
+verified, not assumed. See [Dev vs release](/explanation/dev-vs-release/) for
+the reasoning and the current platform status.
+
+<Aside type="note">On Android, the dev tier already renders through the same
+declarative components the release codegen emits. The iOS dev tier is
+imperative (UIKit) while convergence to the declarative tier is gated on
+measurement (ADR-0048) — release output is SwiftUI on both tiers.</Aside>
+
+## Next steps
+
+- [Formatting and CI gates](/guides/formatting-and-ci/) to keep generated
+  input canonical.
+- [Project status](/explanation/project-status/) for what is verified today.
+
+
+---
+
+---
+title: Use platform capabilities
+description: Call Camera, Storage, Router, Clipboard, and Location through the versioned capability contract — result cells, permission gating, and error handling.
+type: how-to
+sidebar:
+  order: 4
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+
+Platform services — storage, camera, clipboard, location — are not compiled
+into your UI tree. They are **capabilities**: versioned contracts with stable,
+deterministically derived identifiers, resolved identically on the dev server
+and on both native hosts. This guide shows how to call them and how their
+errors surface.
+
+## The capability surface
+
+The stable capability identifiers are declared in
+[`stdlib/capabilities.flux`](https://github.com/elcoosp/flux/blob/main/stdlib/capabilities.flux)
+and mirrored by the host capability registries:
+
+| Capability | ID | Example method |
+| --- | --- | --- |
+| `Camera` | 1 | capture |
+| `Storage` | 2 | `removeItem` (method 3) |
+| `Router` | 3 | `navigate` (method 1 — drives the visible screen) |
+| `Clipboard` | 4 | copy / paste |
+| `Location` | 5 | current position |
+| … | up through 11 | see `stdlib/capabilities.flux` |
+
+Capability ids are derived deterministically and never hand-assigned — a
+hand-assigned id desyncs the server and host registries and fails the parity
+guards in CI.
+
+## Call a capability from a handler
+
+`CALL_CAP` is the mechanism; you reach it through the stdlib surface. The todo
+app's Reset button clears the list and removes the persisted copy:
+
+<Code lang="rust" code={`Button text: "Reset", onPress: || {
+    tasks.clear()
+    Storage.removeItem(key: "todos")
+}`} />
+
+`Storage.removeItem` is capability 2, method 3. The call carries its
+arguments as a record and returns a **result cell**:
+
+| Cell state | Meaning |
+| --- | --- |
+| `Ready` | The call completed; the value is available. |
+| `Pending` | An async capability is in flight; render your loading state. |
+| `Error` | The call failed or was denied; the error carries the reason. |
+
+A synchronous capability settles the cell before the call returns. An async
+one leaves it `Pending`, and an injected `AsyncResolver` settles it when the
+platform responds — the result is threaded back onto the reactive dispatcher,
+so you never write signals from a background thread yourself.
+
+## Render the pending and error states
+
+Because the cell is a value in the signal graph, you render its states with
+ordinary expressions:
+
+<Code lang="rust" code={`compo Profile
+    state name: Option[String] = None
+    Column gap: 8.0
+        Text text: name ?? "Loading..."`} />
+
+The `??` fallback covers `Pending` and empty results. For explicit error
+handling, branch on the cell state and surface the reason in your UI —
+capability errors are data, not exceptions.
+
+## Handle permission denial
+
+Capabilities gated behind OS permissions (Camera, Location, Notifications)
+report a denial through the error path. The call **never crashes** the app:
+
+- The host surfaces the system permission prompt when the capability needs
+  one.
+- A denied call renders as an on-device red banner and records an error in
+  the trace; the denied call does not run.
+- Re-invoke the handler after the user grants the permission.
+
+The error payload names the numeric `cap_id` / `method_id`, the resolved
+`cap_name` / `method_name` when registered, the required OS permission, and a
+human-readable `why` — see the
+[troubleshooting guide](/guides/troubleshooting/) for the full shapes.
+
+<Aside type="note">The canonical machine-readable surface is emitted by the
+CLI: `flux doc` prints the JSON schema of the stdlib API, capabilities
+included. Keep it open while you wire calls.</Aside>
+
+## Next steps
+
+- [Capability reference](/reference/capabilities/) for the id/method tables
+  and the result-cell model.
+- [State management](/guides/state-management/) for the async data patterns
+  built on result cells.
+
+
+---
+
+---
+title: Run and configure the dev server
+description: Configure flux dev — ports, health probe, LAN exposure, and pairing tokens for the hot-reload loop.
+type: how-to
+sidebar:
+  order: 1
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+
+The dev server (`flux dev`) is your constant companion while you build a Flux
+app: it watches, parses, type-checks, lowers, and diffs your `.flux` sources,
+then ships binary patches to the connected host apps. This guide covers every
+knob it exposes.
+
+## Start the server on the defaults
+
+Run it from your project root (or point it anywhere with `--root`):
+
+<Code lang="bash" code={`flux dev
+# Listening on ws://127.0.0.1:7331`} />
+
+The defaults serve a project in the current directory, bound to localhost:
+
+| Flag | Default | Role |
+| --- | --- | --- |
+| `--root <path>` | `.` | Project root to watch and serve |
+| `--ws-host <addr>` | `127.0.0.1` | WebSocket bind address |
+| `--ws-port <port>` | `7331` | Patch channel to the host apps |
+| `--http-port <port>` | `7332` | HTTP asset server |
+| `--token <secret>` | unset | Require a pairing token in the `Hello` handshake |
+
+The same defaults live in `flux.toml` under `[dev]`, so a checked-in project
+configures its ports for every contributor. See the
+[flux.toml reference](/reference/flux-toml/).
+
+## Verify the server is healthy
+
+The asset server exposes a health probe:
+
+<Code lang="bash" code={`curl http://127.0.0.1:7332/health`} />
+
+<Code lang="text" code={`ok`} />
+
+## Serve a physical device over the LAN
+
+Simulators and emulators reach `127.0.0.1` on your machine; a physical device
+cannot. Expose the server on your LAN and point the host app at your machine's
+LAN IP:
+
+<Code lang="bash" code={`flux dev --ws-host 0.0.0.0`} />
+
+In the host app, set the server address to `ws://192.168.1.42:7331`, replacing
+the IP with the address of the machine running `flux dev`. The Android host
+stores this in its resources; the iOS host takes it in its connection screen.
+
+## Require a pairing token
+
+An open dev loop on localhost is safe by default. A LAN-exposed server must
+authenticate the hosts that push bytecode to it:
+
+<Code lang="bash" code={`flux dev --ws-host 0.0.0.0 --token <secret>`} />
+
+The host presents its token during the `Hello` handshake (wire protocol
+Appendix D, pairing/auth section). Hosts read their token from:
+
+- the `FLUX_DEV_TOKEN` environment variable, or
+- `[dev] token` in `flux.toml`.
+
+A host without the token is rejected at the handshake and receives no frames.
+
+<Aside type="caution">Never run `--ws-host 0.0.0.0` without `--token` on a
+shared network. Any device on the LAN can then connect and receive your
+source-derived frames.</Aside>
+
+## What the server does on save
+
+Every save triggers the full pipeline — you never restart anything:
+
+1. Parse and type-check every `.flux` file. Diagnostics appear in the server
+   log with source spans.
+2. Lower the program to the Reactive Tree IR.
+3. Diff the new tree against the previous one.
+4. Serialize the minimal edit script as a binary patch and send it over
+   `:7331`.
+
+A handler-body edit is typically a few hundred bytes on the wire because
+props and closures are content-addressed (BLAKE3) and cached on the host
+after the first `Init` frame. See [The wire, explained](/explanation/the-wire/).
+
+## Next steps
+
+- [Ship a native release](/guides/build-native/) when dev looks right.
+- [Wire protocol reference](/reference/wire-protocol/) for the frames the
+  server sends.
+
+
+---
+
+---
+title: Set up editor tooling
+description: Install the VS Code extension and use flux lsp for parse and type diagnostics on .flux sources.
+type: how-to
+sidebar:
+  order: 6
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+
+Flux ships a language server (`flux-lsp`, built on `async-lsp`) and a VS Code
+extension that wraps it. Together they give you syntax highlighting,
+diagnostics, hot-reload status, and a one-click run on device.
+
+## Install the VS Code extension
+
+The extension lives in the repository at
+[`editors/vscode/`](https://github.com/elcoosp/flux/tree/main/editors/vscode):
+
+<Code lang="bash" code={`cd editors/vscode
+pnpm install`} />
+
+Open the folder in VS Code and launch it as an extension development host
+(press `F5`), or package it with `vsce` and install the produced `.vsix`.
+The extension bundles the Flux TextMate grammar — the same grammar this docs
+site uses for `flux` code blocks — so highlighting matches the CLI's view of
+the language.
+
+While the extension is active you get:
+
+- **Syntax highlighting** for `.flux` sources.
+- **Diagnostics** pushed from parse and type checks.
+- **Hot-reload status** for the connected dev server.
+- **"Run on device"** to point the current project at a connected host.
+
+## Get diagnostics from the CLI
+
+The same diagnostics are available headlessly through `flux lsp`. It parses
+and type-checks one file and prints the findings as JSON:
+
+<Code lang="bash" code={`flux lsp src/main.flux`} />
+
+The output carries each diagnostic's message, span, and hint, so you can pipe
+it into review tooling:
+
+<Code lang="json" code={`{ "diagnostics": [ { "message": "expected \`Int\`, got \`String\`", "span": { "file": "src/main.flux", "start": 214, "end": 228 }, "hint": "\`count\` was inferred as Int at line 18" } ] }`} />
+
+On large files where you only need syntax errors, skip the type checker:
+
+<Code lang="bash" code={`flux lsp src/main.flux --no-types`} />
+
+## How diagnostics reach your editor
+
+Every error Flux produces carries a source `Span` — file, line, and column —
+which is what makes the editor integration useful: you get caret-positioned
+diagnostics instead of a log dump. The [troubleshooting
+guide](/guides/troubleshooting/) explains what each diagnostic class means
+and how to fix it.
+
+<Aside type="tip">Run `flux doctor` when an editor session behaves oddly. It
+checks the toolchain, stdlib parse health, and wire protocol version in one
+shot.</Aside>
+
+## Next steps
+
+- [Formatting and CI gates](/guides/formatting-and-ci/) to keep sources
+  canonical before they reach review.
+- [CLI reference](/reference/cli/) for the full `flux lsp` surface.
+
+
+---
+
+---
+title: Format sources and gate CI
+description: Enforce canonical style with flux fmt --check, catch environment drift with flux doctor --strict, and keep the repo's fmt/clippy gates green.
+type: how-to
+sidebar:
+  order: 7
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+
+Flux enforces canonical style and environment health mechanically, so reviews
+argue about code instead of formatting. This guide covers the three gates you
+run before opening a PR.
+
+## Format `.flux` sources
+
+`flux fmt` formats `.flux` files to canonical style. With no paths it formats
+`main.flux` in the project root:
+
+<Code lang="bash" code={`flux fmt                       # format main.flux in place
+flux fmt src/views.flux        # format specific files`} />
+
+Gate a pipeline with `--check`: the files are verified but not written, and
+the process exits non-zero when any file would change:
+
+<Code lang="bash" code={`flux fmt --check`} />
+
+## Check environment health
+
+`flux doctor` runs the environment health check: toolchain state, stdlib
+parse health, wire protocol version, and — best effort — connected devices
+and simulators:
+
+<Code lang="bash" code={`flux doctor`} />
+
+It also runs the local structural checks: approved-dependency drift (the
+repository vets dependencies through ADRs, and `flux doctor` reports
+unapproved drift) and violations of the repository's documented house rules.
+
+Use `--strict` to make advisory findings blocking, so the command can gate a
+pre-commit hook:
+
+<Code lang="bash" code={`flux doctor --strict   # exits non-zero on any finding`} />
+
+## Keep the Rust gates green
+
+If you touch the Flux implementation itself, the repository's CI expects a
+clean tree by these commands — never plain `cargo test`:
+
+<Code lang="bash" code={`cargo fmt -- --check
+cargo clippy -- -D warnings
+cargo nextest run
+cargo test --doc      # doctests: nextest does not run these`} />
+
+| Command | Gate |
+| --- | --- |
+| `cargo fmt -- --check` | Formatting clean |
+| `cargo clippy -- -D warnings` | No lints |
+| `cargo nextest run` | Full suite (unit, property, snapshot) |
+| `cargo test --doc` | Doctests |
+
+Library crates forbid `unsafe_code`, production code contains no `unwrap` /
+`expect` / `panic!`, and every error carries a source `Span` — the clippy and
+nextest gates are how these rules stay true.
+
+<Aside type="tip">`flux fmt --check` and `flux doctor --strict` are cheap.
+Wire both into a pre-commit hook and CI fails on formatting or drift before a
+human ever sees it.</Aside>
+
+## Next steps
+
+- [Testing and benchmarks](/guides/testing-and-benchmarks/) for the five test
+  layers behind `cargo nextest run`.
+- [Project status](/explanation/project-status/) for the CI workflow map.
+
+
+---
+
+---
+title: Migrate from Flutter
+description: An honest map from Flutter widgets to Flux primitives — layout, state, async — and the gaps Flux does not cover yet.
+type: how-to
+sidebar:
+  order: 10
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+If you come from Flutter, Flux's declarative component model feels familiar:
+a tree of components, recomputed from state. The differences are structural —
+Flux splits layout into a small set of primitives, keeps state in signals,
+and ships native code instead of a rendering engine. This guide maps the
+concepts and names the gaps plainly.
+
+## Widget → component map
+
+| Flutter | Flux | Notes |
+| --- | --- | --- |
+| `Column(children: [...])` | `Column` | `gap` replaces `SizedBox` spacers between children |
+| `Row(children: [...])` | `Row` | Same, horizontal |
+| `Text('...')` | `Text` | Interpolate signals with `{expr}` |
+| `ElevatedButton` / `TextButton` | `Button` | `onPress` takes a `Handler` closure |
+| `TextField` | `TextInput` | Controlled: `text: $binding`, `onChangeText` |
+| `Image.asset(...)` | `Image` | `source` takes an asset path |
+| `Navigator` / `MaterialPageRoute` | `Router` + `Screen` | `RouterNav.navigate` swaps screens |
+| `Stack` | `Stack` | Same name, same idea |
+| `GridView` | `Grid` | `columns` and `gap` props |
+| `Scaffold` | Compose it | Assemble a `Column`/`Row` root yourself |
+| `Container` / `Padding` | Component props + `gap` | No standalone padding widget |
+
+## State
+
+| Flutter | Flux |
+| --- | --- |
+| `StatefulWidget` + `setState` | `compo` with `state` signals; assign in a handler |
+| `ValueNotifier` / `ChangeNotifier` | A signal; derived `let` replaces `Selector` |
+| `InheritedWidget` / `Provider` | A store `compo` lifted above consumers; values as props |
+| `FutureBuilder` | A capability call returning a result cell (`Ready`/`Pending`/`Error`) |
+| `StreamBuilder` | Not yet; async data flows through capabilities |
+
+The mental shift: no rebuild-in-progress dance. Assignment writes a signal,
+the dirty set is computed from the dependency graph, and only affected leaves
+recompose. See [state management](/guides/state-management/).
+
+## Lists and keys
+
+| Flutter | Flux |
+| --- | --- |
+| `ListView` over data | `ForEach(tasks, key: fn(t) { t.label }) { item => … }` |
+| `Key` / `ValueKey` | The `key` function argument |
+| Mutate list + `setState` | `tasks.append(...)` / `tasks.remove(task)` / `tasks.clear()` |
+
+Keyed reconciliation matches children by node ID, so rows reorder and patch
+in place — scroll positions and field contents survive edits.
+
+## What Flux does not cover yet
+
+- **The full widget catalog.** Only stdlib primitives exist; richer themed
+  widgets (cards, chips) are a design-tokens/theming roadmap item.
+- **Implicit animations.** Animation primitives are a roadmap item; today you
+  drive values through signals. An `Animate` primitive exists for signal-
+  driven curves and durations.
+- **Web and desktop targets.** Flux renders natively on iOS and Android
+  only. For embedded web content there is a `WebHost` primitive.
+- **Styling depth.** No arbitrary `style` objects; layout flows through
+  `gap`/`alignment` and per-component props.
+
+For the common screens — forms, navigation, lists, capability-backed data —
+Flux covers the ground. Where a gap bites, reach for the `WebHost` escape
+hatch or wait for the roadmap item rather than fighting the layout system.
+
+<Aside type="note">Coming from React Native instead? The mapping is in
+[Migrate from React Native](/guides/migrate-from-rn/).</Aside>
+
+## Next steps
+
+- [Build the todo app](/tutorials/todo-app/) to exercise the mapped concepts
+  in a real app.
+- [The stdlib reference](/reference/stdlib/) for every primitive's props.
+
+
+---
+
+---
+title: Migrate from React Native
+description: An honest map from React Native concepts to Flux primitives — component model, state, effects — and the gaps Flux does not cover yet.
+type: how-to
+sidebar:
+  order: 9
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Flux is a write-once UI language that compiles to native iOS and Android. If
+you know React Native, most of the vocabulary transfers with a syntax change.
+This guide maps RN concepts to Flux primitives and names the gaps plainly:
+Flux targets the common 90% of app screens — forms, navigation, state,
+capabilities — not 100% of RN's surface.
+
+## Component model
+
+| React Native | Flux | Notes |
+| --- | --- | --- |
+| `function Component() { return <View>… }` | `compo Name` with an indented body | Children indent beneath a view call that carries a named prop |
+| `<View style={{flexDirection:'column'}}>` | [`Column`](/guides/state-management/) | Flux splits RN's `View` into `Column`/`Row` by design |
+| `<View style={{flexDirection:'row'}}>` | `Row` | Same split, horizontal |
+| `<Text>` | `Text` | Interpolate signals with `{expr}` |
+| `<Button>` | `Button` | `onPress` takes a `Handler` closure |
+| `<TextInput>` | `TextInput` | Controlled: `text: $binding`, `onChangeText` |
+| `<Image>` | `Image` | `source` takes an asset path |
+| `react-navigation` | `Router` + `Screen` | Navigate via `RouterNav.navigate` |
+
+The stdlib's public component names mirror RN naming deliberately (see
+ADR-0053 on public-surface naming), so muscle memory survives the port.
+
+## State
+
+| React Native | Flux |
+| --- | --- |
+| `useState` | `state name: Type = initial` at the top of a `compo` |
+| `setState(v)` | Assign the signal: `name = v` inside a handler |
+| Derived value in render | A read-only `let` computed from signals |
+| Context / Redux | A store `compo` lifted above consumers; values as props |
+
+The mental shift: there is no re-render cycle to opt into. Assignment
+propagates through the signal graph, and only the nodes that read the written
+signal recompose. See [state management](/guides/state-management/).
+
+## Lists and keys
+
+| React Native | Flux |
+| --- | --- |
+| `.map` over data into elements | `ForEach(tasks, key: fn(t) { t.label }) { item => … }` |
+| `key` prop | The `key` function argument |
+| Mutate array + `setState` | `tasks.append(...)` / `tasks.remove(task)` / `tasks.clear()` |
+
+The reconciler matches children by node ID and the key function, so existing
+rows reorder and patch in place instead of rebuilding.
+
+## Effects and async
+
+| React Native | Flux |
+| --- | --- |
+| `useEffect(fetch)` | A capability call returning a result cell (`Ready`/`Pending`/`Error`) |
+| Loading branches | Render from the cell: `name ?? "Loading..."` |
+| Native modules | Capabilities with stable ids (Storage, Camera, Clipboard, Location…) |
+
+There is no `async` keyword in handlers — async work settles through the
+capability result cell, and results land back on the reactive dispatcher for
+you. See [capabilities](/guides/capabilities/).
+
+## What Flux does not cover yet
+
+These gaps are real as of this writing — plan around them rather than
+discovering them in review:
+
+- **Stylesheets and flex props.** There is no `StyleSheet.create` or
+  arbitrary `style` object. Layout is expressed through `Column`/`Row`
+  `gap`/`alignment` and per-component props. Design tokens and theming are a
+  roadmap item.
+- **Third-party component libraries.** Only the stdlib primitives exist. For
+  web content there is a `WebHost` primitive that embeds web views; deeper
+  native interop is an escape-hatch concern.
+- **Web target.** Flux renders natively on iOS and Android only. There is no
+  web backend.
+
+If your app depends heavily on one of these, hold off on the port — but the
+common screens (forms, navigation, state, capability-backed data) transfer
+directly.
+
+<Aside type="note">The migration stories for Flutter live in a companion
+guide: [Migrate from Flutter](/guides/migrate-from-flutter/).</Aside>
+
+## Next steps
+
+- [Build the todo app](/tutorials/todo-app/) to exercise the mapped concepts
+  in a real app.
+- [Troubleshooting](/guides/troubleshooting/) for the error shapes you meet
+  during a port.
+
+
+---
+
+---
+title: Navigate between screens
+description: Build multi-screen apps with Router, Screen, and RouterNav — the route prop contract, initial routes, and capability-driven navigation.
+type: how-to
+sidebar:
+  order: 3
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+
+Flux ships navigation as part of the language: a `Router` declares the stack,
+`Screen` children declare the routes, and `RouterNav.navigate` switches the
+visible screen. This guide shows the working pattern from
+`examples/router` and `examples/todo`.
+
+## Declare a router with two screens
+
+Every screen must carry a `route` prop, and the router names its first
+screen:
+
+<Code lang="rust" code={`compo App
+    Column gap: 8.0
+        Router initialRouteName: "home"
+            Screen route: "home"
+                Column gap: 16.0
+                    Text text: "Home"
+                    Button text: "Go to Settings", onPress: || {
+                        RouterNav.navigate("settings")
+                    }
+            Screen route: "settings"
+                Column gap: 16.0
+                    Text text: "Settings"
+                    Button text: "Go to Home", onPress: || {
+                        RouterNav.navigate("home")
+                    }`} />
+
+- `initialRouteName` names the screen shown at startup.
+- `RouterNav.navigate("settings")` makes the screen whose `route` equals
+  `"settings"` visible.
+- Each screen owns its layout through its own layout component (`Column`).
+
+<Aside type="caution">The prop name must be exactly `route`. The host reads
+it by its hashed prop name (FNV-1a of `"route"`), so renaming it silently
+breaks navigation — the contract is normative in the adapter appendices.</Aside>
+
+## Keep screen state across navigation
+
+The reconciler matches children by node ID, so an existing screen is
+reordered, never recreated, across push/pop. State you keep in screen-level
+signals survives navigation: a half-typed form stays filled when the user
+switches screens and returns.
+
+Model per-screen state with `state` declarations inside the screen's
+components, and cross-screen state with a store lifted above the `Router`
+(see [state management](/guides/state-management/)).
+
+## Drive navigation from data
+
+Navigation runs through the Router capability (capability 3, method 1), which
+writes its argument to a well-known signal the host reconcilers observe. You
+call it through `RouterNav.navigate` from any handler — buttons, pickers,
+gesture callbacks — and the visible screen follows the value.
+
+The todo app's About button is the minimal example:
+
+<Code lang="rust" code={`Button text: "About", onPress: || { RouterNav.navigate("about") }`} />
+
+## Structure of a multi-screen app
+
+The `examples/todo` app shows the full shape: one screen renders the task
+list and its input row, the second renders a static About screen, and both
+live inside one `Router` at the root of the layout tree. Keep routers at the
+root of a screen region and let components below stay route-unaware — they
+receive data and emit handlers, exactly like any other component.
+
+## Next steps
+
+- [The todo tutorial](/tutorials/todo-app/) builds a two-screen app end to
+  end.
+- [The wire, explained](/explanation/the-wire/) explains why patches — not
+  full tree re-sends — move screens.
+
+
+---
+
+---
+title: Manage state
+description: Patterns over the Flux signal graph — local signals, derived values, shared stores, controlled inputs, and async data through capabilities.
+type: how-to
+sidebar:
+  order: 2
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+
+Flux renders from a reactive signal graph. Every `state` declaration is a
+signal, and an assignment inside a handler is the whole update: the UI
+recomputes only the nodes that read the written signal. This guide gives
+copy-paste patterns for the shapes you meet beyond the counter.
+
+## Declare local state
+
+Declare a signal at the top of a `compo`:
+
+<Code lang="rust" code={`compo Counter
+    state count: Int = 0
+    Column gap: 8.0
+        Text text: "tapped {count} times"
+        Button text: "Increment", onPress: || { count = count + 1 }`} />
+
+The `$count: Int = 0` shorthand is equivalent — you meet it in the scaffold
+and in `examples/counter`. Both forms create the same signal; pick one style
+per codebase and keep it.
+
+There is no separate `setState`. The assignment *is* the update, and the
+assignment inside a handler propagates through the dependency graph before
+the host reconciles the dirty set.
+
+## Derive values instead of storing them
+
+A value computed from other signals should be derived, not stored — two
+signals that can disagree are a bug you have not met yet. Declare it as a
+read-only `let` computed from signals:
+
+<Code lang="rust" code={`compo Cart
+    state items: Int = 3
+    state price: Float = 9.99
+    let total: Float = items * price   // recomputed when items or price change
+    Column
+        Text text: "Total: {total}"`} />
+
+Derivation recomputes when a written signal reaches it, and only the leaves
+that read `total` recompose.
+
+## Bind a text input both ways
+
+`TextInput` is controlled: bind the signal with `$` and write the typed value
+back in `onChangeText`:
+
+<Code lang="rust" code={`compo Composer
+    state draft: String = ""
+    Column gap: 8.0
+        TextInput text: $draft, onChangeText: fn(v) { draft = v }, placeholder: "Say something"
+        Button text: "Clear", onPress: || { draft = "" }`} />
+
+The `$draft` binding keeps the field and the signal in lockstep, so the Clear
+button empties the field by assigning the signal.
+
+## Share state across components
+
+Flux has no provider/context widget. For state shared across components, lift
+a store component above its consumers and thread values down as props:
+
+<Code lang="rust" code={`compo SessionStore
+    state token: Option[String] = None
+    // actions are handlers that write the store's signals
+
+compo App
+    SessionStore
+        // children read token/user via props threaded from here`} />
+
+Keep stores small and explicit — one store per domain (auth, cart, settings),
+mounted at the root `Router` or `Screen` that needs it. The signal graph is
+shared across the whole app, so a store mounted high is visible to everything
+mounted beneath it.
+
+## Load async data through a capability
+
+Handlers stay synchronous; async work goes through a capability call that
+returns a result cell (`Ready` / `Pending` / `Error`). An async capability
+leaves the cell `Pending`, and an injected resolver settles it when the
+platform responds:
+
+<Code lang="rust" code={`compo Profile
+    state name: Option[String] = None
+    Column gap: 8.0
+        Text text: name ?? "Loading..."
+        Button text: "Load", onPress: || {
+            // call the capability; the result cell settles and updates \`name\`
+        }`} />
+
+The `??` operator renders the fallback while the cell is pending. See
+[Capabilities](/guides/capabilities/) for the call surface and permission
+handling.
+
+<Aside type="caution">Never write signals or mutate the shadow tree from
+outside the reactive dispatcher. Capability results are threaded back onto
+the dispatcher for you — keep it that way.</Aside>
+
+## Pattern summary
+
+- **Local**: `state` (or `$`) plus assignment in a handler.
+- **Computed**: a `let` derived from signals, never a second signal.
+- **Shared**: a store `compo` lifted above its consumers; values as props.
+- **Input**: `$binding` on `TextInput` plus `onChangeText`.
+- **Async**: capability call → result cell → signal update on resolve.
+
+## Next steps
+
+- [Navigation](/guides/navigation/) for multi-screen apps that share state.
+- [Host-authoritative state](/explanation/reactivity/) for the invariant that
+  makes one tap cost one update, independent of tree size.
+
+
+---
+
+---
+title: Run tests and benchmarks
+description: Exercise the five test layers — nextest, proptest, insta snapshots, criterion budgets, and the dev-vs-release parity harness.
+type: how-to
+sidebar:
+  order: 8
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+
+Flux's quality bar is mechanical: every public function has a test, and the
+suite spans five layers. This guide shows how to run each layer and what it
+proves.
+
+## Run the full suite
+
+The project's test runner is `cargo-nextest` — never plain `cargo test`:
+
+<Code lang="bash" code={`cargo nextest run`} />
+
+| Layer | Tool | What it proves |
+| --- | --- | --- |
+| Unit | `cargo nextest run` | Every function, edge cases, error paths |
+| Property | `proptest` | Node-ID stability, diff minimality, round-trips |
+| Snapshot | `insta` | Swift & Kotlin codegen output |
+| Benchmark | `criterion` | Per-stage latency budgets |
+| Parity | `tests/` | Dev VM execution equals release codegen |
+
+Doctests run separately, because nextest does not execute them:
+
+<Code lang="bash" code={`cargo test --doc`} />
+
+## Check dev-vs-release parity
+
+The parity harness (`flux-parity`) is the tool that keeps the two execution
+tiers honest: it captures traces from dev-VM execution and from release
+codegen, reduces them, and checks equivalence. Golden scenarios — including
+a 1,000-node counter tree and no-op dispatches — live under `tests/` and run
+in the `parity-check` CI workflow.
+
+When you change lowering, differ, or codegen behavior, run the parity
+scenarios before trusting your own tests:
+
+<Code lang="bash" code={`cargo nextest run -p flux-parity`} />
+
+## Validate against the golden ISA vectors
+
+The shipping Swift (`FluxBytecodeVM`) and Kotlin VMs are validated against
+**92 golden ISA vectors** under `tests/isa-vectors/`. The Rust VM oracle
+(`flux-vm-ref`) is the behavioral reference for the instruction set, and the
+vectors are shared by all three implementations, so a fault code change fails
+everywhere at once.
+
+## Measure against the latency budgets
+
+The headline metric is the **Save → pixels** budget — the wall-clock a
+developer feels during hot reload — measured end to end by the LANE-H
+harness: a real `DevServer` plus a headless loopback WebSocket client, with
+at least 50 edits per tree size, reported as p50/p99.
+
+| Stage | Budget |
+| --- | --- |
+| Parse a 500-line file | < 5 ms |
+| Diff a 50-node tree | < 1 ms |
+| Serialize a 50-node patch | < 1 ms |
+| VM eval per frame | < 2 ms |
+
+Criterion benchmarks carry these budgets; the `benchmarks.yml` and
+`perf-harness.yml` CI workflows run them:
+
+<Code lang="bash" code={`cargo bench`} />
+
+<Aside type="caution">Property-based and adversarial suites
+(`proptest`, the wire fuzzer, the corruption tests) intentionally throw
+garbage at the pipeline. A failure there means a real robustness bug, not a
+bad seed — record the failing case, do not delete it from the corpus.</Aside>
+
+## Next steps
+
+- [The VM instruction set](/reference/vm-isa/) — the contract the golden
+  vectors encode.
+- [Formatting and CI gates](/guides/formatting-and-ci/) for the pre-commit
+  gates that run before the suite.
+
+
+---
+
+---
+title: Troubleshoot Flux errors
+description: Diagnose Flux errors by class — compile (parse, type, lower), runtime VM faults, and capability denials — with the message shape, root cause, and fix for each.
+type: how-to
+sidebar:
+  order: 11
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+
+Every error Flux surfaces — in the dev server log, the on-device red banner,
+or the CLI output — belongs to the unified error taxonomy: three classes,
+each carrying a `what` / `where` / `why` / `how` payload. This guide is keyed
+to that taxonomy so you can go from message to fix.
+
+| Class | When it fires | Where you see it |
+| --- | --- | --- |
+| **Compile** | Parse, type-check, or lowering failure | Dev server log, `flux lsp`, VS Code |
+| **Runtime** | VM fault during handler evaluation | On-device overlay, server log, trace |
+| **Capability** | A `CALL_CAP` denied by the host or OS | On-device red banner, trace |
+
+## Compile errors
+
+Typical shape:
+
+<Code lang="text" code={`[compile:Parse] expected \`Int\`, got \`String\` (hint: \`count\` was inferred as Int at line 18)
+[compile:Type] …
+[compile:Lower] …`} />
+
+Each compile error carries a phase, a message, a `span` (file:line:col), and
+an optional hint.
+
+| Phase | What it means | Common cause | Fix |
+| --- | --- | --- | --- |
+| `Parse` | The parser rejected the source | Mixed indentation and braces, or a missing indent under a view call | Follow the indentation grammar; run `flux dev` and read the caret |
+| `Type` | The type checker rejected an expression | A signal used as the wrong type, or a handler body that mismatches its prop type | Read the `hint` — it names the previously inferred type and location |
+| `Lower` | The typed AST could not lower to the IR | A construct outside the supported surface | Simplify the expression; check `flux doc` for the supported surface |
+
+**Fix path:** open the file:line:col from the `span`, read the `hint`, and
+re-express the construct. Compile errors are deterministic — re-running
+`flux dev` reproduces them exactly.
+
+## Runtime (VM) errors
+
+Typical shape:
+
+<Code lang="text" code={`[runtime] gas budget exhausted at offset 42
+[runtime] division by zero at offset 17`} />
+
+Runtime errors wrap a stable VM fault kind, so the fault code is load-bearing
+and asserted by the golden ISA vectors. The `offset` points at the offending
+instruction, which tells you which Flux expression lowered to it.
+
+### Gas budget exhausted
+
+A handler ran for more than 100,000 instructions. Break the work into
+smaller handlers, or remove an accidental infinite loop or unbounded
+recursion.
+
+### Memory pool exhausted
+
+The 16 MiB frame memory pool ran out — usually large literals or deep frames.
+Reduce the data held in handler scope; page large data through a capability
+instead of inlining it.
+
+### Index out of bounds
+
+A list, record, or string index fell outside its bounds. Guard the index
+before access — this is a logic bug in the handler.
+
+### Null dereference
+
+A field access was performed on `Null`. Check the value before field access,
+or ensure the upstream signal is initialized; the `??` operator covers the
+common fallback case.
+
+### Invalid opcode dispatch
+
+The dispatch byte was not a valid opcode — usually a corrupt or stale patch
+frame. Restart `flux dev`. If it recurs, treat it as a wire or lowering bug
+and file an issue with the frame bytes.
+
+### Type mismatch
+
+Operands did not match what the monomorphized opcode expects — `ADD_I64`
+needs two integers, `ADD_F64` two floats. Align the operand types.
+
+### Division by zero
+
+Integer division or remainder by zero fails as an error, never a panic.
+Guard the divisor before the `/` or `%` operation.
+
+**Fix path:** the fault is deterministic and reproducible. The handler
+bytecode around the reported offset maps back to a specific Flux expression —
+fix that expression.
+
+## Capability errors
+
+Typical shape:
+
+<Code lang="text" code={`[capability] \`Storage.removeItem\` (2/3): the OS grant \`.storage\` was not authorized for this capability call`} />
+
+Capability errors carry the numeric `cap_id` / `method_id`, the resolved
+`cap_name` / `method_name` when registered, the required OS permission, and a
+human-readable `why`. They **never crash** the app — the denied call does not
+run, and the host renders a red banner.
+
+- **Root cause:** a capability call reached a service gated behind an OS
+  permission the user has not granted (Camera, Location, Notifications).
+- **Fix:** request and await the permission before calling the capability.
+  The host surfaces the system prompt; re-invoke the handler after the grant
+  resolves.
+
+Capability ids are derived deterministically — see the
+[capabilities reference](/reference/capabilities/) for the id table.
+
+<Aside type="tip">Compile errors name a span, runtime errors name a bytecode
+offset, capability errors name a cap/method pair. Read that locator first —
+it is the fastest route from message to cause.</Aside>
+
+## Still stuck?
+
+- [Dev vs release](/explanation/dev-vs-release/) clarifies which execution
+  tier produced the error.
+- [The wire, explained](/explanation/the-wire/) helps when frames look
+  corrupt.
+- [State management](/guides/state-management/) covers state that refuses to
+  update.
+
+
+---
+
+---
+title: Flux
+description: Flux is a write-once UI language for native iOS and Android — hot-reload .flux on device, then ship SwiftUI and Jetpack Compose from the same source.
+template: splash
+type: explanation
+sidebar:
+  order: 0
+hero:
+  image:
+    file: ../../assets/logo.png
+    alt: Logo
+  title: "Flux"
+  tagline: Write once. Render native on iOS and Android.
+  actions:
+    - text: Start the tutorial
+      link: /tutorials/your-first-app/
+      icon: right-arrow
+    - text: Browse the CLI reference
+      link: /reference/cli/
+      icon: document
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkButton, LinkCard } from '@astrojs/starlight/components';
+
+Flux is a write-once UI language for native iOS and Android. You author your UI
+in `.flux` files. In development, a precompiled host app receives binary patches
+over WebSocket and hot-reloads your UI in milliseconds. In release, the exact
+same source compiles to idiomatic **SwiftUI** and **Jetpack Compose**. No
+webview. No JavaScript bridge. No interpreter in production.
+
+| | Traditional cross-platform | Flux |
+| --- | --- | --- |
+| Render target | WebView / canvas | Real `UIView` / Compose `View` |
+| Hot reload | Full rebuild or JS eval | Binary IR patch over WebSocket |
+| Release build | Interpreter shipped in prod | SwiftUI / Compose codegen |
+| State | Framework-locked | SolidJS-style signal graph over one shared IR |
+
+The development loop and the release artifact come from the **same Reactive
+Tree IR**. You iterate against a fast bytecode VM host during development and
+ship platform-native code in release — no fork in the road, no "dev looks
+different from prod". A parity harness (`flux-parity`) continuously proves that
+dev-VM execution and release codegen stay equivalent, so the two paths are
+verified, not assumed.
+
+<CardGrid stagger>
+  <Card title="One language, two native apps" icon="document">
+    Author your UI once in `.flux`. A precompiled host app renders it on iOS
+    and Android in dev; release builds compile the same IR to SwiftUI and
+    Jetpack Compose.
+  </Card>
+  <Card title="Live hot reload" icon="rocket">
+    Save a `.flux` file and the dev server parses, type-checks, lowers, diffs,
+    and ships a binary patch in milliseconds. The on-device tree updates in
+    place.
+  </Card>
+  <Card title="Real tooling" icon="puzzle">
+    A CLI, a hot-reload dev server with pairing tokens, a language server with
+    a VS Code extension, a formatter, and a gpui DevTools desktop app.
+  </Card>
+  <Card title="Spec-driven" icon="open-book">
+    Every non-obvious choice is justified in an Architecture Decision Record —
+    40 ADRs, normative wire and ISA appendices, and enforced parity tests.
+  </Card>
+</CardGrid>
+
+<LinkButton href="/tutorials/todo-app/" icon="right-arrow">Start the tutorial</LinkButton>
+
+## Choose your path
+
+<LinkCard title="Build your first Flux app" href="/tutorials/your-first-app/" description="A guided tutorial: build the CLI, scaffold a project, hot-reload on a device, and ship a native release." />
+<LinkCard title="Run and configure the dev server" href="/guides/dev-server/" description="Ports, LAN exposure, and pairing tokens for the hot-reload loop." />
+<LinkCard title="Language and stdlib reference" href="/reference/language/" description="The complete .flux surface: components, signals, closures, and types." />
+<LinkCard title="How Flux works" href="/explanation/architecture/" description="The parse → typecheck → lower → diff → patch → VM pipeline, explained." />
+
+## What you need
+
+The Rust toolchain builds everything on the CLI side. Xcode (iOS 16+
+deployment target) and the Android SDK are required only for the host apps.
+Walk through the [first-app tutorial](/tutorials/your-first-app/) for the full
+setup.
+
+
+---
+
+---
+title: Capabilities reference
+description: The versioned capability contract — stable ids, methods, result cells, permission gating, and how async results return to the signal graph.
+type: reference
+sidebar:
+  order: 7
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Platform services are exposed to `.flux` programs through a **versioned
+capability contract**: a registry of capabilities and methods with stable,
+deterministically derived numeric ids, resolved identically on the dev
+server and on both native hosts. The declarations live in
+[`stdlib/capabilities.flux`](https://github.com/elcoosp/flux/blob/main/stdlib/capabilities.flux)
+and the host registries mirror them; the IDL is kept in sync by generated
+code (ADR-0045, ADR-0058).
+
+## Capability ids
+
+| Capability | ID | Known method |
+| --- | --- | --- |
+| `Camera` | 1 | capture |
+| `Storage` | 2 | `removeItem` (method 3) |
+| `Router` | 3 | `navigate` (method 1) |
+| `Clipboard` | 4 | copy / paste |
+| `Location` | 5 | current position |
+| … | up through 11 | see `stdlib/capabilities.flux` |
+
+Capability ids are derived deterministically and never hand-assigned — a
+hand-assigned id desyncs the server and host registries, and the parity
+guards fail the build when the tables drift.
+
+A capability call in the wire/VM is `CALL_CAP`; it carries the capability
+and method ids plus the argument record.
+
+## Result cells
+
+`CALL_CAP` returns a **result-cell signal**. The cell is part of the
+reactive graph, so you render its states with ordinary expressions:
+
+| State | Meaning | Typical render |
+| --- | --- | --- |
+| `Ready` | The call completed | The value |
+| `Pending` | An async call is in flight | `value ?? "Loading..."` |
+| `Error` | The call failed or was denied | Your error UI |
+
+A synchronous capability settles the cell before the call returns. An async
+capability leaves it `Pending` and an injected `AsyncResolver` settles it
+when the platform responds (ADR-0044, ADR-0045).
+
+## Async delivery
+
+Async results are threaded back onto the reactive dispatcher by the host —
+you never write signals from a background thread. When a cell settles, the
+host recomputes the dirty set from the written signal exactly as for any
+other dispatch, and only the nodes that read the cell recompose.
+
+## Permission gating
+
+Capabilities backed by OS permissions (Camera, Location, Notifications) are
+gated by the host:
+
+- The host surfaces the system permission prompt when required.
+- A denied call produces a **capability error** — it never crashes the app.
+  The denied call does not run, and the host renders the on-device red
+  banner.
+- The error payload names `cap_id` / `method_id`, the resolved
+  `cap_name` / `method_name`, the required OS permission, and a
+  human-readable `why`.
+
+See the [troubleshooting guide](/guides/troubleshooting/) for the fix path,
+and the [capabilities how-to](/guides/capabilities/) for call patterns.
+
+<Aside type="note">`flux doc` prints the machine-readable schema of the
+capability surface along with the rest of the stdlib — keep it open while
+wiring calls.</Aside>
+
+## Next steps
+
+- [Capabilities how-to](/guides/capabilities/) for copy-paste call patterns.
+- [Wire protocol reference](/reference/wire-protocol/) for how capability
+  results travel.
+
+
+---
+
+---
+title: CLI reference
+description: The flux command-line interface — init, dev, build, lsp, fmt, doc, doctor — with every flag, default, and environment variable.
+type: reference
+sidebar:
+  order: 3
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+
+The `flux` binary is the developer CLI for the Flux UI language: it scaffolds
+projects, runs the hot-reload dev server, codegens native apps, and inspects
+the stdlib and environment. The surface below is generated from the CLI's
+command definitions in `crates/flux-cli`.
+
+<Code lang="bash" code={`flux <command> [flags]`} />
+
+| Command | Purpose |
+| --- | --- |
+| `flux init <name>` | Scaffold a new Flux project at `<name>/` |
+| `flux dev` | Start the hot-reload dev server |
+| `flux build <platform>` | Codegen the project for a native platform |
+| `flux lsp <file>` | Emit parse + type-check diagnostics as JSON |
+| `flux fmt [files…]` | Format `.flux` sources to canonical style |
+| `flux doc` | Emit a JSON schema of the stdlib API |
+| `flux doctor` | Run the environment health check |
+
+## `flux init <name>`
+
+Scaffolds `<name>/` with `main.flux` (a stateful counter component),
+`flux.toml`, and `.fluxignore`.
+
+| Argument | Value |
+| --- | --- |
+| `name` | Project name; also the directory that is created |
+
+## `flux dev`
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--root <path>` | `.` | Project root to watch and serve |
+| `--ws-host <addr>` | `127.0.0.1` | WebSocket bind host; `0.0.0.0` exposes the LAN |
+| `--ws-port <port>` | `7331` | WebSocket patch channel |
+| `--http-port <port>` | `7332` | HTTP asset server |
+| `--token <secret>` | unset | Require the token in the host `Hello` handshake |
+
+Hosts authenticate with the token read from `FLUX_DEV_TOKEN` or
+`[dev] token` in `flux.toml`. Without `--token`, localhost keeps an open dev
+loop. See the [dev server guide](/guides/dev-server/) for the operational
+details.
+
+## `flux build <platform>`
+
+| Argument / flag | Values | Description |
+| --- | --- | --- |
+| `platform` | `ios`, `android` | Target platform (positional) |
+| `--root <path>` | `.` | Project root to build |
+
+Emits generated sources to `platforms/<platform>/Generated/` (`main.swift`
+/ `main.kt`), then invokes the native toolchain when present.
+
+## `flux lsp <file>`
+
+| Argument / flag | Default | Description |
+| --- | --- | --- |
+| `file` | required | The `.flux` source file to analyze |
+| `--no-types` | off | Parse diagnostics only — the fast path for large files |
+
+Prints parse and type-check diagnostics as JSON; every diagnostic carries a
+span and an optional hint.
+
+## `flux fmt [files…]`
+
+| Argument / flag | Default | Description |
+| --- | --- | --- |
+| `files…` | `main.flux` | Files to format; with no paths, formats `main.flux` in the project root |
+| `--check` | off | Verify without writing; exits non-zero when a file would change (CI gating) |
+
+## `flux doc`
+
+No flags. Prints the JSON schema of the stdlib API to stdout — the
+source-of-truth surface behind the [stdlib reference](/reference/stdlib/).
+
+## `flux doctor`
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--strict` | off | Exit non-zero on advisory findings so the command can gate a pre-commit hook |
+
+Checks toolchain state, stdlib parse health, wire protocol version, and
+(best-effort) connected devices and simulators, plus the local structural
+checks: approved-dependency drift and house-rule violations.
+
+## Environment variables
+
+| Variable | Used by | Purpose |
+| --- | --- | --- |
+| `FLUX_DEV_TOKEN` | Host apps | Pairing token for the dev server `Hello` handshake |
+| `RUST_LOG` | CLI | Tracing filter; defaults to `info` |
+| `NO_COLOR` | CLI | Disables ANSI colors in output |
+
+<Aside type="note">ANSI colors are emitted only when stdout is a real terminal
+and `NO_COLOR` is unset, so piped and redirected output stays plain text.</Aside>
+
+## Next steps
+
+- [flux.toml reference](/reference/flux-toml/) for the project manifest.
+- [Dev server guide](/guides/dev-server/) for day-to-day operation.
+
+
+---
+
+---
+title: flux.toml reference
+description: The Flux project manifest — project name and entry, dev server ports, and pairing token configuration.
+type: reference
+sidebar:
+  order: 4
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+
+`flux.toml` is the project manifest at the root of every Flux project. It
+configures the CLI and the dev server, and it is versioned with your project
+so every contributor gets the same ports and settings.
+
+## Format
+
+<Code lang="toml" code={`[project]
+name = "todo"
+entry = "main.flux"
+
+[dev]
+ws_port = 7331
+http_port = 7332`} />
+
+## Keys
+
+### `[project]`
+
+| Key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | string | — | Project name |
+| `entry` | string | — | The entry `.flux` file, usually `main.flux` |
+
+### `[dev]`
+
+| Key | Type | Default | Description |
+| --- | --- | --- | --- |
+| `ws_port` | integer | `7331` | WebSocket patch channel port |
+| `http_port` | integer | `7332` | HTTP asset server port (serves `/health`) |
+| `token` | string | unset | Pairing token hosts must present in the `Hello` handshake |
+
+`flux dev` reads these values, and its `--ws-port` / `--http-port` /
+`--token` flags override them for a single run.
+
+## Pairing tokens
+
+Hosts read their token from the `FLUX_DEV_TOKEN` environment variable or
+from `[dev] token` in this file, and present it during the `Hello` handshake
+when the server was started with `--token`. Set the same secret in both
+places when you expose the dev server on a LAN — see the
+[dev server guide](/guides/dev-server/).
+
+<Aside type="caution">A token in `flux.toml` is versioned with the project.
+For anything beyond a local, throwaway pairing secret, prefer
+`FLUX_DEV_TOKEN` in your shell or device configuration.</Aside>
+
+## Next steps
+
+- [CLI reference](/reference/cli/) for the flags that override these keys.
+- [Wire protocol reference](/reference/wire-protocol/) for the handshake the
+  token guards.
+
+
+---
+
+---
+title: Language reference
+description: The .flux surface — components, records, signals, closures, view calls, interpolation, operators, and types.
+type: reference
+sidebar:
+  order: 1
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+
+This page is the reference for the `.flux` language surface. Grammar
+extensions and their rationale are recorded as ADRs (the parser grammar is
+normative in the specification's appendices); this page presents the surface
+you write every day.
+
+## Program structure
+
+A `.flux` file contains top-level declarations:
+
+| Declaration | Syntax | Purpose |
+| --- | --- | --- |
+| Component | `compo Name(props…)` | A UI component with an indented body |
+| Record | `record Name { field: Type, … }` | A data type with named fields |
+| Const binding | `Name.field = expr` | A top-level constant (used by `color.flux`, `font.flux`) |
+
+## Components (`compo`)
+
+<Code lang="rust" code={`compo TaskRow(task: Task, tasks: List[Task])
+    Row gap: 8.0
+        Text text: task.label
+        Button text: "Remove", onPress: || { tasks.remove(task) }`} />
+
+- A `compo` declares typed props in parentheses and owns an indented body.
+- Children indent beneath a view call that carries at least one named prop —
+  this is what lets the indentation-delimited grammar distinguish a child
+  block from a sibling.
+- Prop defaults are written inline: `enabled: Bool = true`.
+
+## State signals
+
+Two equivalent forms declare a reactive signal at the top of a `compo`:
+
+<Code lang="rust" code={`compo Counter
+    $count: Int = 0            // sigil form
+
+compo Counter2
+    state count: Int = 0       // keyword form`} />
+
+An assignment inside a handler writes the signal. Written signals propagate
+through the dependency graph, and only nodes whose props read a written
+signal re-materialize — see [host-authoritative state](/explanation/reactivity/).
+
+## Derived values (`let`)
+
+<Code lang="rust" code={`let total: Float = items * price`} />
+
+A `let` declares a read-only binding computed from signals. It recomputes
+when a written signal reaches it; do not mirror it into a second signal.
+
+## Closures
+
+| Form | Shape | Used for |
+| --- | --- | --- |
+| Zero-argument | `\|\| { count = count + 1 }` | Handler props (`onPress`, `onChange`) |
+| Named parameter | `fn(v) { newTask = v }` | Callbacks that receive the event value |
+| Key function | `fn(t) { t.label }` | `ForEach` keys |
+| Lambda child | `{ item => TaskRow(task: item, …) }` | `ForEach` item rendering |
+
+## View calls and props
+
+A view call names a stdlib component and carries named props:
+
+<Code lang="rust" code={`TextInput text: $newTask, onChangeText: fn(v) { newTask = v }, placeholder: "What needs doing?"`} />
+
+- Props are comma-separated `name: value` pairs on one line.
+- `text: $signal` two-way binds the prop to a signal (used by `TextInput`).
+- Handlers are closures; their bodies compile to bytecode the host VM runs.
+
+## Interpolation and operators
+
+<Code lang="rust" code={`Text text: "tapped {count} times"`} />
+
+`{expr}` inside a string literal interpolates a value into the prop. The
+expression surface includes arithmetic, comparison, optional chaining with
+`?.`, and the `??` fallback operator:
+
+<Code lang="rust" code={`Text text: name ?? "Loading..."`} />
+
+## Control flow: ForEach and routing
+
+<Code lang="rust" code={`ForEach(tasks, key: fn(t) { t.label }) { item => TaskRow(task: item, tasks: tasks) }
+Router initialRouteName: "tasks"
+    Screen route: "tasks"
+        …`} />
+
+`ForEach` renders a list with a key function; `Router`/`Screen`/`RouterNav`
+drive navigation. See the [navigation guide](/guides/navigation/).
+
+## Types
+
+| Type | Written as | Notes |
+| --- | --- | --- |
+| Primitives | `String`, `Int`, `Float`, `Bool` | |
+| List | `List[Task]` | Mutable through `append`/`remove`/`clear` |
+| Optional | `Option[String]` | Unwrap with `??` fallback |
+| Record | declared `record` types | Field access with `.` |
+| Color | `Color` | Presets `red`/`green`/`blue`/`black`/`white` |
+| Font | `Font`, `Weight`, `Style` | Presets `body`/`title`/`caption` |
+
+The stdlib value types live in `stdlib/prelude.flux` (`Option`,
+`Alignment`, `Overflow`, `KeyboardType`, `ContentMode`, `Ref`, `Handler`)
+and `stdlib/traits.flux` (`Numeric`, `Eq`, `Show`).
+
+<Aside type="note">Grammar gaps the stdlib needed — top-level `Name.field =
+expr` constants, prop defaults, record literals in value position, and
+symbolic operator method names — are all closed and recorded in
+ADR-0037/ADR-0035; no gap remains open.</Aside>
+
+## Next steps
+
+- [The stdlib reference](/reference/stdlib/) for every component's props.
+- [The CLI reference](/reference/cli/) to run the language.
+
+
+---
+
+---
+title: Standard library reference
+description: Every Flux stdlib component with its real prop contract — layout, text, controls, input, navigation, overlays, motion — plus value types and presets.
+type: reference
+sidebar:
+  order: 2
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+
+The Flux standard library declares every UI primitive as a `.flux` file under
+[`stdlib/`](https://github.com/elcoosp/flux/tree/main/stdlib). The
+declarations are contracts: component bodies are supplied natively by the
+platform adapters in dev and by the SwiftUI/Compose backends in release, but
+the props and types you see below are the single shared surface.
+
+The canonical machine-readable form of this page is the CLI:
+
+<Code lang="bash" code={`flux doc`} />
+
+`flux doc` prints the JSON schema of the stdlib API to stdout.
+
+## Layout
+
+| Component | Props | Notes |
+| --- | --- | --- |
+| `Column` | `gap: Float = 0.0`, `alignment: Option[Alignment] = None` | Vertical stack |
+| `Row` | `gap: Float = 0.0`, `alignment: Option[Alignment] = None` | Horizontal stack |
+| `Stack` | `gap: Float = 0.0`, `alignment: Option[Alignment] = None` | Z-stacked children |
+| `Grid` | `columns: Int = 2`, `gap: Float = 0.0` | Grid layout |
+| `ScrollView` | `orientation: Option[String] = None` | Scrollable container |
+| `Spacer` | `flex: Float = 1.0` | Flexible space |
+| `SafeArea` | `edges: Option[String] = None` | Inset children by safe areas |
+
+## Text and media
+
+| Component | Props | Notes |
+| --- | --- | --- |
+| `Text` | `text: String`, `font: Option[Font] = None`, `size: Option[Float] = None`, `color: Option[Color] = None`, `alignment: Option[Alignment] = None`, `maxLines: Option[Int] = None` | String interpolation via `{expr}` |
+| `Image` | `source: String`, `width: Option[Float] = None`, `height: Option[Float] = None`, `resizeMode: Option[String] = Some("fill")` | Renders a bitmap asset |
+| `WebHost` | `src: String` | Embedded web view — the native-interop escape hatch |
+
+## Controls
+
+| Component | Props | Notes |
+| --- | --- | --- |
+| `Button` | `text: String`, `onPress: Handler`, `enabled: Bool = true`, `color: Option[Color] = None` | Tappable action |
+| `Toggle` | `value: Bool = false`, `onValueChange: Handler = fn() {}`, `enabled: Bool = true` | Boolean control |
+| `Switch` | `value: Bool = false`, `onChange: Handler = fn() {}`, `enabled: Bool = true` | Boolean switch |
+| `Checkbox` | `value: Bool = false`, `onChange: Handler = fn() {}`, `label: Option[String] = None`, `enabled: Bool = true` | Checkable option |
+| `Slider` | `value: Float = 0.0`, `onChange: Handler = fn() {}`, `min: Float = 0.0`, `max: Float = 1.0`, `step: Float = 0.0`, `enabled: Bool = true` | Range selector |
+| `Picker` | `value: Int = 0`, `onChange: Handler = fn() {}`, `items: List[String] = []`, `enabled: Bool = true` | Selection from items |
+
+## Text input
+
+| Component | Props | Notes |
+| --- | --- | --- |
+| `TextInput` | `text: String = ""`, `onChangeText: Handler`, `placeholder: Option[String] = None`, `enabled: Bool = true`, `secureTextEntry: Bool = false` | Controlled text field; `text: $signal` binds both ways |
+| `TextArea` | `value: String = ""`, `onChange: Handler = fn() {}`, `placeholder: Option[String] = None`, `maxLines: Option[Int] = None`, `enabled: Bool = true` | Multi-line input |
+
+`TextInput` is declared in `stdlib/text_field.flux`; its public name mirrors
+React Native per the public-surface naming decision (ADR-0053).
+
+## Navigation
+
+| Component | Props | Notes |
+| --- | --- | --- |
+| `Router` | `initialRouteName: String = "home"` | Navigation container; shows the active `Screen` |
+| `Screen` | `route: String` | A routed screen; the prop name is part of the adapter contract |
+
+See the [navigation guide](/guides/navigation/) for the working pattern.
+
+## Overlays
+
+| Component | Props | Notes |
+| --- | --- | --- |
+| `Sheet` | `onDismiss: Handler = fn() {}` | Bottom sheet |
+| `Modal` | `onDismiss: Handler = fn() {}` | Modal presentation |
+| `Dialog` | `onDismiss: Handler = fn() {}` | Dialog presentation |
+
+## Motion and gesture
+
+| Component | Props | Notes |
+| --- | --- | --- |
+| `Animate` | `signal: Signal`, `curve: String = "easeInOut"`, `duration: Float = 0.3` | Drives a value through a curve over time |
+| `Gesture` | `kind: String = "longPress"`, `onGesture: Handler = fn() {}`, `threshold: Float = 0.0` | Gesture recognizer |
+
+## Value types and presets
+
+| Source | Contents |
+| --- | --- |
+| `stdlib/prelude.flux` | `Option`, `Alignment`, `Overflow`, `KeyboardType`, `ContentMode`, `Ref`, `Handler` |
+| `stdlib/traits.flux` | `Numeric`, `Eq`, `Show` |
+| `stdlib/color.flux` | `Color` (`RGB`) plus `red` / `green` / `blue` / `black` / `white` |
+| `stdlib/font.flux` | `Font`, `Weight`, `Style` plus `body` / `title` / `caption` presets |
+| `stdlib/capabilities.flux` | Capability declarations (see the [capabilities reference](/reference/capabilities/)) |
+| `stdlib/platform.flux` | Platform tag and query helpers |
+
+<Aside type="caution">Prop contracts are normative. A new prop must appear in
+both the dev adapters and the release backends with the same name and type —
+the adapter contract (spec Appendix F) and the parity tests enforce this, and
+adding a primitive is a cross-cutting change by design.</Aside>
+
+## Next steps
+
+- [Language reference](/reference/language/) for the syntax these
+  declarations use.
+- [Capabilities reference](/reference/capabilities/) for the platform
+  services behind the capability declarations.
+
+
+---
+
+---
+title: VM instruction set
+description: The host VM's register-based ISA — signal ops, monomorphized arithmetic, list ops, closures, fault policy, and the golden vectors that pin it.
+type: reference
+sidebar:
+  order: 6
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The host app embeds a **register-based bytecode VM**. Instructions are
+monomorphized: there is no generic `ADD` with tag dispatch — there are
+`ADD_I64`, `ADD_F64`, and so on. This keeps the hot path branch-free and the
+execution trace byte-identical across hosts. The ISA is normative in
+specification Appendix E.
+
+## Signal operations
+
+| Opcode | Mnemonic | Args | Description |
+| --- | --- | --- | --- |
+| `0x10` | `READ_SIGNAL` | reg_dst(u8), signal_id(u32) | Read a signal into a register |
+| `0x11` | `WRITE_SIGNAL` | signal_id(u32), reg_src(u8) | Write a register's value to a signal |
+
+A handler closure ends by writing the signals the dispatch consumed. Those
+written ids, sorted ascending, become the `signals` trace event.
+
+## Arithmetic (monomorphized)
+
+| Opcode | Mnemonic | Args | Description |
+| --- | --- | --- | --- |
+| `0x20` | `ADD_I64` | dst, a, b (u8 each) | `dst = a + b` (i64) |
+| `0x21` | `SUB_I64` | dst, a, b | `dst = a - b` |
+| `0x22` | `MUL_I64` | dst, a, b | `dst = a * b` |
+| `0x23` | `DIV_I64` | dst, a, b | `dst = a / b` |
+| `0x24` | `MOD_I64` | dst, a, b | `dst = a % b` |
+
+Floating-point variants (`ADD_F64`, …) occupy the same `0x2x` band with the
+`F64` suffix. The counter's `count = count + 1` compiles to
+`READ_SIGNAL` → `LOAD_INT_CONST` → `ADD_I64` → `WRITE_SIGNAL`.
+
+## List operations
+
+Four `LIST_*` opcodes back the list mutations the compiler emits for
+`append` / `remove` / `clear` on `List[T]` signals. Together with the rest
+of the table, the opcode vocabulary totals 61 entries (`Opcode::ALL`), and
+the dev-host opcode tables are generated from that single source (see
+ADR-0058) — a drifted hand-ported table fails CI before it reaches a device.
+
+## Fault-related opcodes
+
+| Opcode | Mnemonic | Notes |
+| --- | --- | --- |
+| `0xD1` | `IS_NULL` | Null test used before field access; a `GET_FIELD` on `Null` faults (ADR-0024) |
+
+## Closures and calling conventions
+
+Handler and prop-thunk closures share the wire's `ClosureRef` encoding
+(content-addressed by BLAKE3). Register conventions:
+
+- `r0` is reserved for node context.
+- `r1` holds the `ALLOC_RECORD` result on `HALT`.
+- `prop_layout` maps record fields to prop indices for thunk results.
+
+## Fault policy
+
+| Resource | Limit | Behavior on exhaustion |
+| --- | --- | --- |
+| Gas | 100,000 instructions per handler | Fault: `gas budget exhausted` |
+| Memory pool | 16 MiB per frame | Fault: `memory pool exhausted` |
+
+A thunk or handler fault leaves the node with its prior props — the render
+goes stale, never blank. The error surfaces through the on-device overlay
+and a trace `error` event; the view is never torn down. Division by zero
+and null field access are faults too (ADR-0023, ADR-0024), not panics.
+
+## Golden vectors
+
+The ISA is pinned by **92 golden ISA vectors** under
+[`tests/isa-vectors/`](https://github.com/elcoosp/flux/tree/main/tests/isa-vectors),
+shared by the Rust oracle (`flux-vm-ref`), the shipping Swift VM
+(`FluxBytecodeVM`), and the Kotlin VM. A fault-code or opcode change fails
+all three implementations at once.
+
+<Aside type="caution">Do not add opcodes without an ADR and a protocol
+version bump. The dev-host opcode tables are generated from
+`Opcode::ALL` — hand-editing them is the drift the parity guards exist to
+catch.</Aside>
+
+## Next steps
+
+- [Wire protocol reference](/reference/wire-protocol/) — how closures and
+  their bytecode travel to the host.
+- [Testing and benchmarks](/guides/testing-and-benchmarks/) — how to run the
+  vectors and the parity suite.
+
+
+---
+
+---
+title: Wire protocol reference
+description: The binary protocol between the dev server and host apps — frame header, patch encodings, node and value layouts, prop diffs, closures, and BLAKE3 content addressing.
+type: reference
+sidebar:
+  order: 5
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The dev server and the host apps speak a **binary wire protocol** — the
+normative Appendix D of the specification. All multi-byte integers are
+little-endian. This page is a working map of the layout; the appendix in
+`docs/spec/mlp-appendices.md` remains the normative source.
+
+## Protocol version
+
+The current protocol version is **3** (`0x03`), introduced by ADR-0059:
+frame-level, node-level, and prop-level length prefixes for user-authored
+collections (patches, props, children, handlers, reorder keys, and the
+frame deltas) are written as **u32** instead of u16, so a 70,000-element
+list prop or a >64 KB string ships to the host. A host that receives a
+version it does not support rejects the handshake (`unsupported_version`).
+
+## Frame structure
+
+Every frame starts with a header:
+
+| Offset | Size | Field | Description |
+| --- | --- | --- | --- |
+| 0 | 4 | magic | `0x465C5558` (`"FLUX"`) |
+| 4 | 1 | version | Protocol version (currently 3) |
+| 5 | 4 | seq | Monotonic sequence number |
+| 9 | 1 | flags | See flag bits below |
+| 10 | 2 | patch_count | Number of Patch entries |
+| 12 | 2 | handler_count | Number of HandlerDef entries |
+| 14 | 2 | string_count | New interned strings (0 if no delta) |
+| 16 | … | patches | `[Patch; patch_count]` |
+| … | … | handlers | `[HandlerDef; handler_count]` |
+| … | … | strings | `[StringEntry; string_count]` (if delta) |
+| … | … | state_delta | StateDelta (if flag set) |
+| … | … | src_map_delta | SourceMapDelta (if flag set) |
+
+Flag bits: 0 `full_tree` · 1 `error` · 2 `heartbeat` · 3 `has_state_delta` ·
+4 `has_src_map_delta` · 5 `has_string_table_delta`.
+
+## Patch encoding
+
+Each patch starts with a one-byte tag:
+
+| Tag | Type | Payload |
+| --- | --- | --- |
+| `0x01` | Replace | u32 id, Node |
+| `0x02` | Update | u32 id, PropDiff |
+| `0x03` | Insert | u32 parent_id, u16 index, Node |
+| `0x04` | Remove | u32 id |
+| `0x05` | Reorder | u32 parent_id, key_count, `[u32; key_count]` |
+| `0x06` | Handler | u32 id, ClosureRef |
+
+The dev server computes the dirty set from written signals and emits
+**Update** patches addressed only to dirty nodes, plus structural patches
+where control props changed.
+
+## Node encoding
+
+| Field | Size | Description |
+| --- | --- | --- |
+| id | 4 | NodeId |
+| kind | 1 | NodeKind (0 = Component, 1 = Primitive, …) |
+| component_id | 4 | Interned component name ID |
+| prop_count + props | … | `[(u16 prop_idx, Value); prop_count]` |
+| child_count + children | … | `[Child; child_count]` |
+| handler_count + handlers | … | `[u32 HandlerId; handler_count]` |
+| span_file / span_start / span_end | 12 | Source span (FileId, byte offsets) |
+
+## Value encoding
+
+| Tag | Type | Payload (after tag) |
+| --- | --- | --- |
+| `0x00` | Null | (none) |
+| `0x01` | Int | i64 (8 bytes) |
+| `0x02` | Float | f64 (8 bytes) |
+| `0x03` | Bool | u8 (0 or 1) |
+| `0x04` | Str | u32 string_id (interned) |
+| `0x05` | HandlerRef | u32 handler_id |
+| `0x06` | List | count, `[Value; count]` |
+| `0x07` | Record | count, `[(u16 prop_idx, Value); count]` |
+
+## PropDiff encoding
+
+| Field | Description |
+| --- | --- |
+| change_count + changes | `[(u16 prop_idx, Value); change_count]` |
+| removal_count + removals | `[u16 prop_idx; removal_count]` |
+
+## Closures (ClosureRef)
+
+Handler and prop-thunk closures share the `ClosureRef` encoding: an 8-byte
+BLAKE3 hash (content address), a bytecode offset/length into the shared
+blob, the captured signal ids, and a source span. On `HALT`, `r0` is
+reserved for node context and `r1` holds the `ALLOC_RECORD` result; the
+prop layout maps record fields to prop indices.
+
+## Content addressing
+
+Props, closures, and nodes are content-addressed by BLAKE3 hash. For each
+item in a frame: if the hash is already in the host cache, the frame sends
+only the 8-byte hash; otherwise it sends the full data and the host caches
+it. After the initial `Init`, more than 90% of items are cache hits — which
+is why a handler-body edit is typically a few hundred bytes on the wire.
+
+## Handshake and pairing
+
+Hosts authenticate during the `Hello` handshake when the server runs with
+`--token`: the host presents the token read from `FLUX_DEV_TOKEN` or
+`[dev] token` in `flux.toml`, and a rejected host receives no frames (see
+ADR-0038 for the transport gap this closed).
+
+<Aside type="caution">Do not add opcodes, patch tags, or frame fields
+without an ADR and a protocol version bump — hosts and servers validate
+against the same tables, and drift ships silent on-device faults.</Aside>
+
+## Next steps
+
+- [The VM instruction set](/reference/vm-isa/) — the bytecode the closures
+  reference.
+- [The wire, explained](/explanation/the-wire/) — why the protocol is binary
+  and how patches stay tiny.
+
+
+---
+
+---
+title: Build the todo app
+description: Recreate the real examples/todo app step by step — records, List state, keyed ForEach, controlled text input, routing, and a Storage capability call.
+type: tutorial
+sidebar:
+  order: 2
+---
+
+import { Aside, Code, LinkCard } from '@astrojs/starlight/components';
+
+This tutorial rebuilds the todo app that ships at
+[`examples/todo/`](https://github.com/elcoosp/flux/tree/main/examples/todo).
+Along the way you use records, list state, keyed iteration, a controlled text
+input, two routed screens, and a capability call. You need a working setup
+from the [first-app tutorial](/tutorials/your-first-app/) — the CLI built and
+one host app runnable.
+
+## 1. Create the project and data model
+
+<Code lang="bash" code={`flux init todo
+cd todo`} />
+
+Replace the contents of `main.flux` with the data model: a `record` type and
+a row component that renders one task.
+
+<Code lang="rust" code={`record Task { label: String, done: Bool, }
+
+compo TaskRow(task: Task, tasks: List[Task])
+    Row gap: 8.0
+        Text text: task.label
+        Button text: "Remove", onPress: || { tasks.remove(task) }`} />
+
+A `record` declares a data type with named fields. `TaskRow` shows the two
+ways components receive data: the task it renders comes in as a prop, and the
+owning list arrives as a second prop so the Remove handler can mutate it.
+
+## 2. Declare the app state
+
+Add the root component. Its `state` declarations create signals — the
+reactive cells that the whole UI reads from.
+
+<Code lang="rust" code={`compo TodoApp
+    state tasks: List[Task] = [
+        Task(label: "Buy milk", done: false),
+        Task(label: "Walk dog", done: false),
+    ]
+    state newTask: String = ""`} />
+
+- `tasks` holds the list model. The initial value is a list of record
+  literals.
+- `newTask` backs the text input. Assigning it in a handler updates every
+  node that reads it — nothing else re-renders.
+
+## 3. Lay out the first screen with routing
+
+Wrap the UI in `Router` / `Screen`. The host shows only the screen whose
+`route` prop matches the active route.
+
+<Code lang="rust" code={`compo TodoApp
+    // ...state declarations from step 2...
+
+    Router initialRouteName: "tasks"
+        Screen route: "tasks"
+            Column gap: 12.0
+                Text text: "Flux To-Do"
+                Row gap: 8.0
+                    TextInput text: $newTask,
+                        onChangeText: fn(v) { newTask = v },
+                        placeholder: "What needs doing?"
+                    Button text: "Add", onPress: || {
+                        tasks.append(Task(label: newTask, done: false))
+                        newTask = ""
+                    }`} />
+
+Three details matter:
+
+- **`TextInput` is controlled.** `text: $newTask` two-way binds the field to
+  the signal, and `onChangeText` writes the typed value back. You reset the
+  field by assigning `newTask = ""` in the Add handler.
+- **List mutation is ordinary assignment.** `tasks.append(...)` is the whole
+  update — there is no separate `setState`.
+- **A view call owns an indented child block only when it carries at least
+  one named prop.** `Router initialRouteName: "tasks"` declares `initialRouteName`,
+  so its `Screen` children indent beneath it.
+
+## 4. Render the list with a keyed ForEach
+
+Below the input row, iterate over the tasks:
+
+<Code lang="rust" code={`compo TodoApp
+    // ...state, Router, tasks screen from steps 2-3...
+
+    Column gap: 8.0
+        ForEach(tasks, key: fn(t) { t.label }) {
+                        item => TaskRow(task: item, tasks: tasks)
+                    }`} />
+
+The `key` function identifies each item across edits, so the reconciler
+reorders and patches existing rows in place — it does not rebuild the list
+on every change. Because `TaskRow` receives `tasks` too, its Remove handler
+can call `tasks.remove(task)` and the keyed diff removes exactly that row.
+
+## 5. Reset through a capability
+
+Add a Reset button that clears the list and the persisted copy:
+
+<Code lang="rust" code={`compo TodoApp
+    // ...tasks screen from steps 2-4...
+
+    Button text: "Reset", onPress: || {
+        tasks.clear()
+        Storage.removeItem(key: "todos")
+    }`} />
+
+`Storage` is a **capability** — a platform service declared in the stdlib and
+resolved identically on the server and on both hosts. `Storage.removeItem`
+(capability 2, method 3) reaches the host, and if the OS permission behind it
+is denied, the call reports an error instead of crashing.
+
+## 6. Add the second screen
+
+Finish with the About screen and its navigation handlers:
+
+<Code lang="rust" code={`compo TodoApp
+    // ...tasks screen from steps 2-5...
+    Button text: "About", onPress: || { RouterNav.navigate("about") }
+
+    // Second screen:
+
+    Screen route: "about"
+        Column gap: 12.0
+            Text text: "About"
+            Text text: "A real Flux app"
+            Button text: "Back",
+                onPress: || { RouterNav.navigate("tasks") }`} />
+
+`RouterNav.navigate("about")` drives the visible screen. The `route` prop
+name is part of the adapter contract — the host reads it by its hashed name,
+so it must be exactly `route`.
+
+## 7. Run it
+
+Start the dev server from the project directory and open the host app:
+
+<Code lang="bash" code={`flux dev                 # WebSocket on :7331`} />
+
+Point the iOS or Android host at `ws://127.0.0.1:7331` (see
+[run the host app](/tutorials/your-first-app/#4-run-the-host-app) if you need
+the platform steps). Add tasks, remove one, switch to the About screen and
+back, then press Reset.
+
+## 8. Ship the release forms
+
+Generate the native sources for both platforms:
+
+<Code lang="bash" code={`flux build ios       # -> platforms/ios/Generated/main.swift
+flux build android   # -> platforms/android/Generated/main.kt`} />
+
+The generated SwiftUI and Compose code renders the same screens you ran
+in dev — the parity harness proves the two paths stay equivalent.
+
+<Aside type="note">The full source of this app lives at
+`examples/todo/main.flux` in the repository, together with the `counter` and
+`router` examples. Each example doubles as an integration test in CI.</Aside>
+
+## Next steps
+
+- [State management](/guides/state-management/) — patterns for derived values
+  and shared stores.
+- [Navigation](/guides/navigation/) — Router, Screen, and RouterNav in depth.
+- [Capabilities](/guides/capabilities/) — the full capability surface and
+  permission handling.
+
+
+---
+
+---
+title: Your first Flux app
+description: Build the Flux CLI, scaffold a project, hot-reload a counter on an iOS or Android host app, and ship a native release — end to end.
+type: tutorial
+sidebar:
+  order: 1
+---
+
+import { Aside, Code, LinkCard, Steps } from '@astrojs/starlight/components';
+
+This tutorial walks you from a clean machine to a live, hot-reloading Flux UI
+on a real device or simulator, and finishes with a native release build. It
+takes about ten minutes.
+
+## Prerequisites
+
+| Tool | Why you need it | Check |
+| --- | --- | --- |
+| Rust (rustup) | Builds the `flux` CLI | `cargo --version` |
+| Xcode 16+ and XcodeGen | Runs the iOS host app (iOS 16+ target) | `xcodegen version` |
+| Android Studio + JDK 17+ | Runs the Android host app | `./gradlew --version` |
+
+You need Xcode or the Android SDK only for the host apps. Everything on the
+Rust side — dev server, parser, differ, VM oracle, codegen — builds and runs
+without them.
+
+## 1. Build the CLI
+
+From the repository root:
+
+<Code lang="bash" code={`git clone https://github.com/elcoosp/flux
+cd flux
+cargo build --bin flux`} />
+
+This produces `target/debug/flux`. Use `cargo build --release --bin flux` for
+a faster binary when you plan to keep the CLI installed.
+
+The first build provisions the pinned nightly toolchain automatically through
+`rust-toolchain.toml`, so you do not select a toolchain by hand.
+
+## 2. Scaffold a project
+
+<Code lang="bash" code={`flux init myapp
+cd myapp`} />
+
+`flux init` writes three files into `myapp/`:
+
+<Code lang="text" code={`myapp/
+├── main.flux      # entry component: a stateful counter
+├── flux.toml      # project config: name, entry, dev ports
+└── .fluxignore    # build output and VCS noise`} />
+
+Open `main.flux`. It contains the canonical Flux counter:
+
+<Code lang="rust" code={`compo Counter
+    $count: Int = 0
+
+    Column gap: 8.0
+        Text text: "tapped {count} times"
+        Button text: "Increment", onPress: || { count = count + 1 }`} />
+
+## 3. Start the dev server
+
+<Code lang="bash" code={`flux dev`} />
+
+You will see:
+
+<Code lang="text" code={`Listening on ws://127.0.0.1:7331`} />
+
+The dev server parses and type-checks every `.flux` file, lowers the program
+to the Reactive Tree IR, and binds two ports:
+
+- **WebSocket `:7331`** — the patch channel to the host apps.
+- **HTTP `:7332`** — the asset server, with a `/health` probe.
+
+Verify the server is up in another shell:
+
+<Code lang="bash" code={`curl http://127.0.0.1:7332/health`} />
+
+<Code lang="text" code={`ok`} />
+
+## 4. Run the host app
+
+The host app is precompiled native code that connects to the dev server and
+renders the IR it receives. Pick your platform.
+
+<Steps>
+
+1. **iOS.** The host project is generated with XcodeGen:
+
+    <Code lang="bash" code={`# from the repository root
+xcodegen generate            # writes runtimes/ios/FluxApp.xcworkspace
+open runtimes/ios/FluxApp.xcworkspace`} />
+
+    Pick a simulator or a tethered device in Xcode and press **Run**. The app
+    connects to `ws://127.0.0.1:7331` and renders your `Counter`.
+
+2. **Android.** Build and install the host on a connected emulator or device:
+
+    <Code lang="bash" code={`# from the repository root
+./gradlew :runtimes:android:app:installDebug`} />
+
+    Launch **Flux** from the launcher. It connects to `ws://127.0.0.1:7331`
+    and renders the same UI.
+
+</Steps>
+
+Tap **Increment** in the running app. The label updates — and the next step
+shows that you never recompile to change it.
+
+## 5. Edit and watch it hot-reload
+
+Open `main.flux` and change the `Text` label:
+
+<Code lang="rust" code={`Text text: "tapped {count} times — wow"`} />
+
+Save the file. The dev server diffs the tree and ships a binary patch over
+the WebSocket, and the host updates in place. You never leave the running
+app, and you never rebuild the host.
+
+A handler-body edit is typically a few hundred bytes on the wire, because
+props and closures are content-addressed with BLAKE3 and cached on the host
+after the first `Init` frame.
+
+## 6. Build a native release
+
+When you want real SwiftUI or Jetpack Compose instead of the dev patch path:
+
+<Code lang="bash" code={`flux build ios       # -> platforms/ios/Generated/main.swift
+flux build android   # -> platforms/android/Generated/main.kt`} />
+
+`flux build` lowers your `.flux` to idiomatic native source with no VM. If
+`xcodebuild` or `gradle` is present on your machine, it suggests the next
+build step; otherwise it emits the generated sources for you to compile.
+
+## What you learned
+
+- `flux init` scaffolds a project; `flux dev` serves it on `:7331`/`:7332`.
+- The host apps render and hot-reload over the WebSocket patch channel.
+- `flux build ios|android` emits SwiftUI and Jetpack Compose from the same
+  IR — dev and release are one program, verified by the parity harness.
+
+<Aside type="tip">Physical devices cannot reach `127.0.0.1`. See the
+[dev server guide](/guides/dev-server/) for LAN exposure and pairing
+tokens.</Aside>
+
+## Next steps
+
+Build the todo app from scratch to practice lists, routing, and capabilities:
+
+<LinkCard title="Build the todo app" href="/tutorials/todo-app/" description="A guided tutorial through the real examples/todo app: records, lists, routing, and capabilities." />
