@@ -12,7 +12,7 @@ The llms.txt convention expects absolute URLs in the index so AI agents can
 resolve links without knowing the deployment root. A Starlight site that
 wants absolute URLs in generated artifacts needs a canonical `site` origin.
 
-The repository's own `website/astro.config.mjs` already declares
+The repository's own `website/astro.config.ts` already declares
 `site: 'https://flux-lang.dev'` as its canonical URL.
 
 ## Decision
@@ -33,8 +33,8 @@ The repository's own `website/astro.config.mjs` already declares
 ## Consequences
 
 - `dist/llms.txt` and `dist/llms-full.txt` exist on every build; the build
-  fails loudly if `site:` is missing from `astro.config.mjs`.
-- If the canonical domain changes, update `site:` in `astro.config.mjs`
+  fails loudly if `site:` is missing from `astro.config.ts`.
+- If the canonical domain changes, update `site:` in `astro.config.ts`
   only — the generator reads it from there rather than duplicating it.
 - The generated files mirror the shipped pages; agents reading
   `llms-full.txt` get exactly what human readers get, which keeps AI-facing

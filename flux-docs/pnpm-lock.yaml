@@ -37,8 +37,8 @@ importers:
         specifier: ^0.9.12
         version: 0.9.12(@emnapi/runtime@2.0.0-beta.2)(prettier@3.9.10)(typescript@6.0.3)
       '@elcoosp/docs-toolkit':
-        specifier: github:elcoosp/docs-toolkit#dd2fa6d7981534c0e3b230f4eed59e38bd51e4e5
-        version: https://codeload.github.com/elcoosp/docs-toolkit/tar.gz/dd2fa6d7981534c0e3b230f4eed59e38bd51e4e5(@astrojs/starlight@0.42.10(@astrojs/markdown-remark@7.3.6(supports-color@10.2.2))(astro@7.4.7(@astrojs/markdown-remark@7.3.6(supports-color@10.2.2))(@types/node@24.19.2)(esbuild@0.28.2)(yaml@2.9.1))(supports-color@10.2.2)(typescript@6.0.3))(@types/node@24.19.2)(astro-takumi@https://codeload.github.com/elcoosp/astro-takumi/tar.gz/c4b8331abb1dc2f157d62fba634eeb17f5e689cd(csstype@3.2.3)(linkedom@0.18.15))(astro@7.4.7(@astrojs/markdown-remark@7.3.6(supports-color@10.2.2))(@types/node@24.19.2)(esbuild@0.28.2)(yaml@2.9.1))(react@19.3.1)
+        specifier: github:elcoosp/docs-toolkit#d8bb48f1f293a6441cc5964ffa26ebd0121290cd
+        version: https://codeload.github.com/elcoosp/docs-toolkit/tar.gz/d8bb48f1f293a6441cc5964ffa26ebd0121290cd(@astrojs/starlight@0.42.10(@astrojs/markdown-remark@7.3.6(supports-color@10.2.2))(astro@7.4.7(@astrojs/markdown-remark@7.3.6(supports-color@10.2.2))(@types/node@24.19.2)(esbuild@0.28.2)(yaml@2.9.1))(supports-color@10.2.2)(typescript@6.0.3))(@types/node@24.19.2)(astro-takumi@https://codeload.github.com/elcoosp/astro-takumi/tar.gz/4bb9e47833c48388b17da9612d77bc9f600d525e(csstype@3.2.3)(linkedom@0.18.15))(astro@7.4.7(@astrojs/markdown-remark@7.3.6(supports-color@10.2.2))(@types/node@24.19.2)(esbuild@0.28.2)(yaml@2.9.1))(react@19.3.1)
       '@types/react':
         specifier: ^19.3.0
         version: 19.3.0
@@ -46,8 +46,8 @@ importers:
         specifier: ^19.3.0
         version: 19.3.0(@types/react@19.3.0)
       astro-takumi:
-        specifier: github:elcoosp/astro-takumi#c4b8331abb1dc2f157d62fba634eeb17f5e689cd
-        version: https://codeload.github.com/elcoosp/astro-takumi/tar.gz/c4b8331abb1dc2f157d62fba634eeb17f5e689cd(csstype@3.2.3)(linkedom@0.18.15)
+        specifier: github:elcoosp/astro-takumi#4bb9e47833c48388b17da9612d77bc9f600d525e
+        version: https://codeload.github.com/elcoosp/astro-takumi/tar.gz/4bb9e47833c48388b17da9612d77bc9f600d525e(csstype@3.2.3)(linkedom@0.18.15)
       markdownlint-cli2:
         specifier: ^0.24.0
         version: 0.24.0(supports-color@10.2.2)
@@ -399,8 +399,8 @@ packages:
     resolution: {integrity: sha512-9rQHijqB2Rq6qOEC/xHaA6aPlsKGi5kmCQW50O1asn9g63XFeD5NmBwysriistW5Xx0JPafyD/TA7yk2S3pXGQ==}
     engines: {node: '>=14'}
 
-  '@elcoosp/docs-toolkit@https://codeload.github.com/elcoosp/docs-toolkit/tar.gz/dd2fa6d7981534c0e3b230f4eed59e38bd51e4e5':
-    resolution: {gitHosted: true, integrity: sha512-278y7eGsDuanCvMCYVdJ7R4pa68keMKx2Ly0mZeJctYuzxK+EFNI2DsVWfDNArgKu+0DLGw+WNoQ98gOwRnF+A==, tarball: https://codeload.github.com/elcoosp/docs-toolkit/tar.gz/dd2fa6d7981534c0e3b230f4eed59e38bd51e4e5}
+  '@elcoosp/docs-toolkit@https://codeload.github.com/elcoosp/docs-toolkit/tar.gz/d8bb48f1f293a6441cc5964ffa26ebd0121290cd':
+    resolution: {gitHosted: true, integrity: sha512-MLxP+Rr8XKAuKEW7Ss2aSSKdBbWWe4PlMN/sv14t2QOcoGG0Bv+BnSLXCH1VGtnhR5bzrQr7+9EPLL0jfXnA+w==, tarball: https://codeload.github.com/elcoosp/docs-toolkit/tar.gz/d8bb48f1f293a6441cc5964ffa26ebd0121290cd}
     version: 0.1.0
     engines: {node: '>=22.18.0'}
     hasBin: true
@@ -1360,9 +1360,9 @@ packages:
     peerDependencies:
       astro: ^4.0.0-beta || ^5.0.0-beta || ^3.3.0 || ^6.0.0-beta || ^7.0.0
 
-  astro-takumi@https://codeload.github.com/elcoosp/astro-takumi/tar.gz/c4b8331abb1dc2f157d62fba634eeb17f5e689cd:
-    resolution: {gitHosted: true, integrity: sha512-32CfozhLy4nuz6pKzYdkUo81gv7aWu/EvpajwD/Knn28/xw4RPTPD9yiwHbVZeKYomAfosOpQHqvVV9ct25nVQ==, tarball: https://codeload.github.com/elcoosp/astro-takumi/tar.gz/c4b8331abb1dc2f157d62fba634eeb17f5e689cd}
-    version: 2.0.4
+  astro-takumi@https://codeload.github.com/elcoosp/astro-takumi/tar.gz/4bb9e47833c48388b17da9612d77bc9f600d525e:
+    resolution: {gitHosted: true, integrity: sha512-nzGnOPRWz6Sfb5X4Ny03bcz4XI+c6a6CnX9LknjKDJxMesfuBLV7VRv5SvDSAd57vzK26RtYIbQuDVkNJPWmfw==, tarball: https://codeload.github.com/elcoosp/astro-takumi/tar.gz/4bb9e47833c48388b17da9612d77bc9f600d525e}
+    version: 2.0.4-fork.1
     peerDependencies:
       happy-dom: ^21.0.4
       linkedom: ^0.18.15
@@ -3421,11 +3421,11 @@ snapshots:
 
   '@ctrl/tinycolor@4.2.2': {}
 
-  '@elcoosp/docs-toolkit@https://codeload.github.com/elcoosp/docs-toolkit/tar.gz/dd2fa6d7981534c0e3b230f4eed59e38bd51e4e5(@astrojs/starlight@0.42.10(@astrojs/markdown-remark@7.3.6(supports-color@10.2.2))(astro@7.4.7(@astrojs/markdown-remark@7.3.6(supports-color@10.2.2))(@types/node@24.19.2)(esbuild@0.28.2)(yaml@2.9.1))(supports-color@10.2.2)(typescript@6.0.3))(@types/node@24.19.2)(astro-takumi@https://codeload.github.com/elcoosp/astro-takumi/tar.gz/c4b8331abb1dc2f157d62fba634eeb17f5e689cd(csstype@3.2.3)(linkedom@0.18.15))(astro@7.4.7(@astrojs/markdown-remark@7.3.6(supports-color@10.2.2))(@types/node@24.19.2)(esbuild@0.28.2)(yaml@2.9.1))(react@19.3.1)':
+  '@elcoosp/docs-toolkit@https://codeload.github.com/elcoosp/docs-toolkit/tar.gz/d8bb48f1f293a6441cc5964ffa26ebd0121290cd(@astrojs/starlight@0.42.10(@astrojs/markdown-remark@7.3.6(supports-color@10.2.2))(astro@7.4.7(@astrojs/markdown-remark@7.3.6(supports-color@10.2.2))(@types/node@24.19.2)(esbuild@0.28.2)(yaml@2.9.1))(supports-color@10.2.2)(typescript@6.0.3))(@types/node@24.19.2)(astro-takumi@https://codeload.github.com/elcoosp/astro-takumi/tar.gz/4bb9e47833c48388b17da9612d77bc9f600d525e(csstype@3.2.3)(linkedom@0.18.15))(astro@7.4.7(@astrojs/markdown-remark@7.3.6(supports-color@10.2.2))(@types/node@24.19.2)(esbuild@0.28.2)(yaml@2.9.1))(react@19.3.1)':
     dependencies:
       '@astrojs/starlight': 0.42.10(@astrojs/markdown-remark@7.3.6(supports-color@10.2.2))(astro@7.4.7(@astrojs/markdown-remark@7.3.6(supports-color@10.2.2))(@types/node@24.19.2)(esbuild@0.28.2)(yaml@2.9.1))(supports-color@10.2.2)(typescript@6.0.3)
       astro: 7.4.7(@astrojs/markdown-remark@7.3.6(supports-color@10.2.2))(@types/node@24.19.2)(esbuild@0.28.2)(yaml@2.9.1)
-      astro-takumi: https://codeload.github.com/elcoosp/astro-takumi/tar.gz/c4b8331abb1dc2f157d62fba634eeb17f5e689cd(csstype@3.2.3)(linkedom@0.18.15)
+      astro-takumi: https://codeload.github.com/elcoosp/astro-takumi/tar.gz/4bb9e47833c48388b17da9612d77bc9f600d525e(csstype@3.2.3)(linkedom@0.18.15)
       react: 19.3.1
       sharp: 0.35.5(@types/node@24.19.2)
     transitivePeerDependencies:
@@ -3577,7 +3577,8 @@ snapshots:
   '@esbuild/win32-x64@0.28.2':
     optional: true
 
-  '@exodus/bytes@1.16.0': {}
+  '@exodus/bytes@1.16.0':
+    optional: true
 
   '@expressive-code/core@0.44.3':
     dependencies:
@@ -4163,13 +4164,13 @@ snapshots:
       rehype-expressive-code: 0.44.3
       url-extras: 0.1.0
 
-  astro-takumi@https://codeload.github.com/elcoosp/astro-takumi/tar.gz/c4b8331abb1dc2f157d62fba634eeb17f5e689cd(csstype@3.2.3)(linkedom@0.18.15):
+  astro-takumi@https://codeload.github.com/elcoosp/astro-takumi/tar.gz/4bb9e47833c48388b17da9612d77bc9f600d525e(csstype@3.2.3)(linkedom@0.18.15):
     dependencies:
       '@takumi-rs/core': 2.20.0(csstype@3.2.3)(react@19.3.1)
       '@takumi-rs/helpers': 2.20.0(react@19.3.1)
-      jsdom: 31.0.0
       react: 19.3.1
     optionalDependencies:
+      jsdom: 31.0.0
       linkedom: 0.18.15
     transitivePeerDependencies:
       - '@napi-rs/canvas'
@@ -4377,6 +4378,7 @@ snapshots:
       whatwg-url: 17.3.0
     transitivePeerDependencies:
       - '@noble/hashes'
+    optional: true
 
   debug@4.4.3(supports-color@10.2.2):
     dependencies:
@@ -4384,7 +4386,8 @@ snapshots:
     optionalDependencies:
       supports-color: 10.2.2
 
-  decimal.js@10.6.0: {}
+  decimal.js@10.6.0:
+    optional: true
 
   decode-named-character-reference@1.3.0:
     dependencies:
@@ -4461,7 +4464,8 @@ snapshots:
 
   entities@8.1.0: {}
 
-  entities@9.0.0: {}
+  entities@9.0.0:
+    optional: true
 
   environment@1.1.0: {}
 
@@ -4835,6 +4839,7 @@ snapshots:
       '@exodus/bytes': 1.16.0
     transitivePeerDependencies:
       - '@noble/hashes'
+    optional: true
 
   html-escaper@3.0.3: {}
 
@@ -4890,7 +4895,8 @@ snapshots:
 
   is-plain-obj@4.1.0: {}
 
-  is-potential-custom-element-name@1.0.1: {}
+  is-potential-custom-element-name@1.0.1:
+    optional: true
 
   js-yaml@4.3.2:
     dependencies:
@@ -4922,6 +4928,7 @@ snapshots:
       xml-name-validator: 5.0.0
     transitivePeerDependencies:
       - '@noble/hashes'
+    optional: true
 
   json-schema-traverse@1.0.0: {}
 
@@ -5634,6 +5641,7 @@ snapshots:
   parse5-parser-stream@8.1.1:
     dependencies:
       parse5: 8.1.1
+    optional: true
 
   parse5@7.3.0:
     dependencies:
@@ -5642,6 +5650,7 @@ snapshots:
   parse5@8.1.1:
     dependencies:
       entities: 9.0.0
+    optional: true
 
   path-browserify@1.0.1: {}
 
@@ -5679,7 +5688,8 @@ snapshots:
 
   punycode.js@2.3.1: {}
 
-  punycode@2.3.1: {}
+  punycode@2.3.1:
+    optional: true
 
   queue-microtask@1.2.3: {}
 
@@ -5956,6 +5966,7 @@ snapshots:
   saxes@6.0.0:
     dependencies:
       xmlchars: 2.2.0
+    optional: true
 
   scheduler@0.28.0: {}
 
@@ -6137,11 +6148,13 @@ snapshots:
 
   tinyps@0.5.1: {}
 
-  tldts-core@7.4.20: {}
+  tldts-core@7.4.20:
+    optional: true
 
   tldts@7.4.19:
     dependencies:
       tldts-core: 7.4.20
+    optional: true
 
   to-regex-range@5.0.1:
     dependencies:
@@ -6150,10 +6163,12 @@ snapshots:
   tough-cookie@6.1.0:
     dependencies:
       tldts: 7.4.19
+    optional: true
 
   tr46@7.0.0:
     dependencies:
       punycode: 2.3.1
+    optional: true
 
   trim-lines@3.0.1: {}
 
@@ -6403,12 +6418,15 @@ snapshots:
   w3c-xmlserializer@6.0.0:
     dependencies:
       xml-name-validator: 5.0.0
+    optional: true
 
   web-namespaces@2.0.1: {}
 
-  webidl-conversions@8.0.1: {}
+  webidl-conversions@8.0.1:
+    optional: true
 
-  whatwg-mimetype@5.0.0: {}
+  whatwg-mimetype@5.0.0:
+    optional: true
 
   whatwg-url@17.3.0:
     dependencies:
@@ -6417,6 +6435,7 @@ snapshots:
       webidl-conversions: 8.0.1
     transitivePeerDependencies:
       - '@noble/hashes'
+    optional: true
 
   wrap-ansi@9.0.2:
     dependencies:
@@ -6424,9 +6443,11 @@ snapshots:
       string-width: 7.2.0
       strip-ansi: 7.2.0
 
-  xml-name-validator@5.0.0: {}
+  xml-name-validator@5.0.0:
+    optional: true
 
-  xmlchars@2.2.0: {}
+  xmlchars@2.2.0:
+    optional: true
 
   xxhash-wasm@1.1.0: {}
 

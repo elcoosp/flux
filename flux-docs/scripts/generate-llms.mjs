@@ -13,11 +13,11 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const docsDir = join(root, 'src', 'content', 'docs');
 const distDir = join(root, 'dist');
 
-// Site URL: read from astro.config.mjs (single source of truth).
-const configText = readFileSync(join(root, 'astro.config.mjs'), 'utf8');
+// Site URL: read from astro.config.ts (single source of truth).
+const configText = readFileSync(join(root, 'astro.config.ts'), 'utf8');
 const siteMatch = configText.match(/site:\s*['"]([^'"]+)['"]/);
 if (!siteMatch) {
-  console.error('generate-llms: could not read `site` from astro.config.mjs');
+  console.error('generate-llms: could not read `site` from astro.config.ts');
   process.exit(1);
 }
 const site = siteMatch[1].replace(/\/$/, '');
