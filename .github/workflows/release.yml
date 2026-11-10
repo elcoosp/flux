@@ -20,6 +20,7 @@ jobs:
     with:
       publish: true
       binary_targets: '[]'
+      linux_deps: 'libfontconfig1-dev pkg-config'
       extra_checks: '["verify-tag","fmt","test"]'
       linux_deps: ''
       dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
