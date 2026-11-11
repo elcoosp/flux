@@ -6,11 +6,10 @@
   "description": "Documentation site for Flux \u2014 a write-once UI language for native iOS and Android.",
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build && pnpm run generate:llms",
+    "build": "astro build",
     "preview": "astro preview",
     "check": "astro check",
-    "lint": "markdownlint-cli2 \"src/content/docs/**/*.{md,mdx}\"",
-    "generate:llms": "node scripts/generate-llms.mjs"
+    "lint": "markdownlint-cli2 \"src/content/docs/**/*.{md,mdx}\""
   },
   "dependencies": {
     "@astrojs/mdx": "^8.1.3",
