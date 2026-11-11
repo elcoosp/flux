@@ -162,20 +162,19 @@ SHARED_CONSTANTS: dict[str, set[str]] = {
 
 def scan_kotlin(kotlin_dir: Path) -> dict[str, set[str]]:
     """Return ``{component: {prop_name, ...}}`` of props each Kotlin kit reads."""
-    idx_text = KOTLIN_PROPSINDEX.read_text()
-
-    # Build constant-name → prop-name from propIndexForName("propName")
     idx_pattern = re.compile(
         r"val\s+(\w+)\s*:\s*UShort\s*=\s*(?:PropsIndex\.)?propIndexForName\(\"(\w+)\"\)"
     )
     const_to_prop: dict[str, str] = {}
-    for m in idx_pattern.finditer(idx_text):
-        const_to_prop[m.group(1)] = m.group(2)
+    ui_dir = REPO / "adapters" / "ui-kotlin" / "src/main/kotlin/dev/flux/ui"
+    for path in sorted(ui_dir.glob("*.kt")):
+        text = path.read_text()
+        for m in idx_pattern.finditer(text):
+            const_to_prop[m.group(1)] = m.group(2)
 
     reads: dict[str, set[str]] = {}
 
     # Scan adapter files for static  props.<accessor>(PropsIndex.CONSTANT)
-    ui_dir = REPO / "adapters" / "ui-kotlin" / "src/main/kotlin/dev/flux/ui"
     for path in sorted(ui_dir.glob("*.kt")):
         text = path.read_text()
         for m in re.finditer(r"props\.\w+\((?:PropsIndex\.)?(\w+)", text):
@@ -251,13 +250,9 @@ swift_file_to_comps: dict[str, list[str]] = {
     "TextInputAdapter.swift": ["TextInput"],
     "ToggleAdapter.swift": ["Toggle"],
     "WebHostView.swift": ["WebHost"],
-    # Multi-component files — reads here are attributed to ALL listed comps,
-    # but the props they carry are treated as unreliable for "not declared"
-    # checks (see *multi_comps* tracking below).
     "LayoutAdapters.swift": ["Stack", "Spacer", "SafeArea", "Grid"],
     "OverlayMotionAdapters.swift": ["Dialog", "Modal", "Sheet", "Animate"],
 }
-
 
 def scan_swift(swift_dir: Path) -> tuple[dict[str, set[str]], set[str]]:
     """Return ``({component: {prop, ...}}, multi_comp_unreliable)``.
