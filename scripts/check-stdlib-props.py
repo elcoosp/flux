@@ -138,6 +138,7 @@ KOTLIN_PREFIXES = [
     ("TEXT", "Text"),
     ("TOGGLE", "Toggle"),
     ("WEBHOST", "WebHost"),
+    ("WEBVIEW", "WebHost"),
 ]
 
 
@@ -165,7 +166,7 @@ def scan_kotlin(kotlin_dir: Path) -> dict[str, set[str]]:
 
     # Build constant-name → prop-name from propIndexForName("propName")
     idx_pattern = re.compile(
-        r"val\s+(\w+)\s*:\s*UShort\s*=\s*propIndexForName\(\"(\w+)\"\)"
+        r"val\s+(\w+)\s*:\s*UShort\s*=\s*(?:PropsIndex\.)?propIndexForName\(\"(\w+)\"\)"
     )
     const_to_prop: dict[str, str] = {}
     for m in idx_pattern.finditer(idx_text):
@@ -177,7 +178,7 @@ def scan_kotlin(kotlin_dir: Path) -> dict[str, set[str]]:
     ui_dir = REPO / "adapters" / "ui-kotlin" / "src/main/kotlin/dev/flux/ui"
     for path in sorted(ui_dir.glob("*.kt")):
         text = path.read_text()
-        for m in re.finditer(r"props\.\w+\(PropsIndex\.(\w+)", text):
+        for m in re.finditer(r"props\.\w+\((?:PropsIndex\.)?(\w+)", text):
             const = m.group(1)
             prop = const_to_prop.get(const, const)
             if const in SHARED_CONSTANTS:
