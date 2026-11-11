@@ -8,6 +8,7 @@ import fluxGrammar from './src/flux.tmLanguage.json';
 
 
 export default await defineDocsConfig({
+  changelog: { repo: 'elcoosp/flux' },
   site: 'https://flux-language-docs.vercel.app',
   domain: 'flux-language-docs.vercel.app',
   title: "Flux",
