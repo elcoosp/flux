@@ -1,4 +1,6 @@
 [package]
+description = "The flux-differ crate for the flux ecosystem"
+readme = "../../README.md"
 name = "flux-differ"
 keywords = ["flux", "differ", "compiler", "diff", "ast"]
 version.workspace = true

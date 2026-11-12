@@ -1,4 +1,6 @@
 [package]
+description = "The flux-syntax crate for the flux ecosystem"
+readme = "../../README.md"
 name = "flux-syntax"
 keywords = ["flux", "syntax", "parser", "ast", "compiler"]
 version.workspace = true

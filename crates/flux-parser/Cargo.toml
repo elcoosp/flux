@@ -1,4 +1,6 @@
 [package]
+description = "The flux-parser crate for the flux ecosystem"
+readme = "../../README.md"
 name = "flux-parser"
 keywords = ["flux", "parser", "ast", "compiler", "lexer"]
 version.workspace = true

@@ -1,4 +1,5 @@
 [package]
+readme = "../../README.md"
 name = "flux-vm-ref"
 keywords = ["flux", "vm", "interpreter", "runtime", "bytecode"]
 description = "Reference implementation of the Flux VM, used as a test oracle only"

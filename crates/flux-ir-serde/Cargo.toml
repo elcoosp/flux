@@ -1,4 +1,6 @@
 [package]
+description = "The flux-ir-serde crate for the flux ecosystem"
+readme = "../../README.md"
 name = "flux-ir-serde"
 keywords = ["flux", "ir", "serde", "serialization", "compiler"]
 version.workspace = true

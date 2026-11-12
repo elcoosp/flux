@@ -1,4 +1,6 @@
 [package]
+description = "The flux-types crate for the flux ecosystem"
+readme = "../../README.md"
 name = "flux-types"
 keywords = ["flux", "types", "compiler", "type-system", "typeck"]
 version.workspace = true

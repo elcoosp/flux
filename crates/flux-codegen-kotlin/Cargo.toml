@@ -1,4 +1,6 @@
 [package]
+description = "The flux-codegen-kotlin crate for the flux ecosystem"
+readme = "../../README.md"
 name = "flux-codegen-kotlin"
 keywords = ["flux", "codegen", "kotlin", "compiler", "android"]
 version.workspace = true

@@ -1,4 +1,6 @@
 [package]
+description = "The flux-codegen-swift crate for the flux ecosystem"
+readme = "../../README.md"
 name = "flux-codegen-swift"
 keywords = ["flux", "codegen", "swift", "compiler", "ios"]
 version.workspace = true

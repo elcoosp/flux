@@ -1,4 +1,6 @@
 [package]
+description = "The flux-codegen-core crate for the flux ecosystem"
+readme = "../../README.md"
 name = "flux-codegen-core"
 keywords = ["flux", "codegen", "core", "compiler", "ir"]
 version.workspace = true
