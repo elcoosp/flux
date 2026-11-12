@@ -23,7 +23,7 @@ export default await defineDocsConfig({
         'Flux — a write-once UI language for native iOS and Android. Write .flux, hot-reload on device over binary patches, and ship SwiftUI + Jetpack Compose.',
       favicon: '/favicon.png',
       social: [
-        { icon: 'github', label: 'GitHub', href: 'https://github.com/elcoosp/flux' },
+        { icon: 'github', label: 'GitHub', translations: { fr: "GitHub" }, href: 'https://github.com/elcoosp/flux' },
       ],
       editLink: {
         baseUrl: 'https://github.com/elcoosp/flux/edit/main/website/src/content/docs/'
