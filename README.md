@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/logo.png" alt="Flux Logo" width="200"/>
+  <img src="https://cdn.jsdelivr.net/gh/elcoosp/flux@main/docs/logo.png" alt="Flux Logo" width="200"/>
   <p>
     <strong>Write once, render native.</strong><br/>
     A write-once UI language for native iOS &amp; Android. Edit <code>.flux</code> source and watch it
@@ -20,9 +20,9 @@
     <img src="https://img.shields.io/badge/ADRs-39%20MADR-blueviolet?style=flat-square" alt="ADRs"/>
     <img src="https://img.shields.io/badge/Testing-nextest%20%2B%20proptest%20%2B%20insta-brightgreen?style=flat-square" alt="Testing"/>
     <br/>
-    <img src="https://github.com/elcoosp/flux/actions/workflows/rust-check.yml/badge.svg?style=flat-square" alt="Rust CI"/>
-    <img src="https://github.com/elcoosp/flux/actions/workflows/ios-check.yml/badge.svg?style=flat-square" alt="iOS CI"/>
-    <img src="https://github.com/elcoosp/flux/actions/workflows/android-check.yml/badge.svg?style=flat-square" alt="Android CI"/>
+    <img src="https://img.shields.io/github/actions/workflow/status/elcoosp/flux/rust-check.yml?style=flat-square&label=Rust%20CI" alt="Rust CI"/>
+    <img src="https://img.shields.io/github/actions/workflow/status/elcoosp/flux/ios-check.yml?style=flat-square&label=iOS%20CI" alt="iOS CI"/>
+    <img src="https://img.shields.io/github/actions/workflow/status/elcoosp/flux/android-check.yml?style=flat-square&label=Android%20CI" alt="Android CI"/>
   </p>
 </div>
 
@@ -265,7 +265,7 @@ http_port = 7332
 
 ## Language Tour
 
-A real component from [`examples/todo/main.flux`](examples/todo/main.flux):
+A real component from [`examples/todo/main.flux`](https://github.com/elcoosp/flux/blob/main/examples/todo/main.flux):
 
 ```flux
 record Task { label: String, done: Bool, }
@@ -298,7 +298,7 @@ compo TodoApp
                 Button text: "Back", onPress: || { RouterNav.navigate("tasks") }
 ```
 
-More examples live in [`examples/`](examples/): `counter` (minimal state + patch flow) and
+More examples live in [`examples/`](https://github.com/elcoosp/flux/tree/main/examples): `counter` (minimal state + patch flow) and
 `router` (multi-screen navigation).
 
 ---
@@ -405,13 +405,13 @@ p50/p99):
 
 ## Documentation
 
-- **Specification:** [`docs/spec/mlp-spec.md`](docs/spec/mlp-spec.md) and
-  [`docs/spec/mlp-appendices.md`](docs/spec/mlp-appendices.md) — grammar, IR schema, wire
+- **Specification:** [`docs/spec/mlp-spec.md`](https://github.com/elcoosp/flux/blob/main/docs/spec/mlp-spec.md) and
+  [`docs/spec/mlp-appendices.md`](https://github.com/elcoosp/flux/blob/main/docs/spec/mlp-appendices.md) — grammar, IR schema, wire
   protocol (Appendix D), VM ISA (Appendix E), adapter contracts (Appendix F), glossary.
-- **Architecture decisions:** [`docs/adr/`](docs/adr/) — 39 MADR records (through ADR-0058).
-- **Contributor manual:** [`AGENTS.md`](AGENTS.md) — workflow, quality bar, and house rules.
-- **Docs site:** [`website/`](website/) — Astro source (`pnpm install && pnpm dev`).
-- **Benchmarks:** [`benches/`](benches/) and [`crates/flux-perf-harness/`](crates/flux-perf-harness/).
+- **Architecture decisions:** [`docs/adr/`](https://github.com/elcoosp/flux/tree/main/docs/adr) — 39 MADR records (through ADR-0058).
+- **Contributor manual:** [`AGENTS.md`](https://github.com/elcoosp/flux/blob/main/AGENTS.md) — workflow, quality bar, and house rules.
+- **Docs site:** [`website/`](https://github.com/elcoosp/flux/tree/main/website) — Astro source (`pnpm install && pnpm dev`).
+- **Benchmarks:** [`benches/`](https://github.com/elcoosp/flux/tree/main/benches) and [`crates/flux-perf-harness/`](https://github.com/elcoosp/flux/tree/main/crates/flux-perf-harness).
 
 ---
 
