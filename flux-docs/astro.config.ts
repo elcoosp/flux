@@ -1,4 +1,5 @@
 import { defineDocsConfig } from '@elcoosp/docs-toolkit/config';
+import starlightChangelogs from 'starlight-changelogs';
 import mdx from '@astrojs/mdx';
 import linksValidator from 'starlight-links-validator';
 import imageZoom from 'starlight-image-zoom';
@@ -35,7 +36,7 @@ export default await defineDocsConfig({
 
       // Starlight plugins. Pagefind ships with Starlight and stays enabled —
       // no DocSearch application exists, so Pagefind is the search solution.
-      plugins: [
+      plugins: [ starlightChangelogs(), 
         // Release blocker: the build fails on broken internal links.
         linksValidator(),
         imageZoom(),
