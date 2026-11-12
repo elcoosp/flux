@@ -5,10 +5,10 @@
   "private": true,
   "description": "Documentation site for Flux \u2014 a write-once UI language for native iOS and Android.",
   "scripts": {
-    "dev": "astro dev",
-    "build": "astro build",
-    "preview": "astro preview",
-    "check": "astro check",
+    "dev": "tsx ./node_modules/astro/bin/astro.mjs dev",
+    "build": "tsx ./node_modules/astro/bin/astro.mjs build",
+    "preview": "tsx ./node_modules/astro/bin/astro.mjs preview",
+    "check": "tsx ./node_modules/astro/bin/astro.mjs check",
     "lint": "markdownlint-cli2 \"src/content/docs/**/*.{md,mdx}\"",
     "predev": "mkdir -p src/content/i18n && cp -r node_modules/@elcoosp/docs-toolkit/i18n/* src/content/i18n/ 2>/dev/null || true",
     "prebuild": "mkdir -p src/content/i18n && cp -r node_modules/@elcoosp/docs-toolkit/i18n/* src/content/i18n/ 2>/dev/null || true"
@@ -20,10 +20,9 @@
     "sharp": "^0.35.5",
     "starlight-heading-badges": "^0.8.0",
     "starlight-image-zoom": "^0.16.2",
-    "starlight-links-validator": "^0.27.0",
     "linkedom": "^0.18.0",
     "mermaid": "^11.0.0",
-    "@elcoosp/docs-toolkit": "^0.5.11",
+    "@elcoosp/docs-toolkit": "file:../../docs-toolkit",
     "starlight-changelogs": "^0.7.1"
   },
   "devDependencies": {
@@ -35,7 +34,8 @@
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "typescript": "6.0.3",
-    "@elcoosp/docs-toolkit": "^0.5.11"
+    "@elcoosp/docs-toolkit": "file:../../docs-toolkit",
+    "tsx": "^4.19.2"
   },
   "engines": {
     "node": ">=22.23.4"

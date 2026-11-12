@@ -1,0 +1,63 @@
+import { defineDocsConfig } from '@elcoosp/docs-toolkit/config';
+import mdx from '@astrojs/mdx';
+import imageZoom from 'starlight-image-zoom';
+import headingBadges from 'starlight-heading-badges';
+
+import fluxGrammar from './src/flux.tmLanguage.json';
+
+export default await defineDocsConfig({
+  llmsTxt: {},
+  site: "https://flux-ui.vercel.app",
+  domain: 'flux-language-docs.vercel.app',
+  title: "Flux",
+  description: "Flux — a write-once UI language for native iOS and Android. Write .flux, hot-reload on device over binary patches, and ship SwiftUI + Jetpack Compose.",
+  sidebar: [],
+  extraStarlight: {
+      expressiveCode: {
+      	themes: ['github-light', 'github-dark']
+      },
+      title: 'Flux',
+      description:
+        'Flux — a write-once UI language for native iOS and Android. Write .flux, hot-reload on device over binary patches, and ship SwiftUI + Jetpack Compose.',
+      favicon: '/favicon.png',
+      social: [
+        { icon: 'github', label: 'GitHub', translations: { fr: "GitHub" }, href: 'https://github.com/elcoosp/flux' },
+      ],
+      editLink: {
+        baseUrl: 'https://github.com/elcoosp/flux/edit/main/website/src/content/docs/'
+      },
+      // English is the only authored locale today. The locale map is
+      // declared so future translations (the upstream site ships es/fr)
+      // drop into locale subdirectories without touching the config.
+      // See docs/decisions/0004-i18n-scope.md.
+
+      // Starlight plugins. Pagefind ships with Starlight and stays enabled —
+      // no DocSearch application exists, so Pagefind is the search solution.
+      plugins: [
+        // Release blocker: the build fails on broken internal links.
+        imageZoom(),
+        headingBadges(),
+      ],
+      sidebar: [
+        { label: 'Overview', translations: { fr: 'Aperçu' }, link: '/' },
+        {
+          label: 'Tutorials', translations: { fr: 'Tutoriels' },
+          items: [{ autogenerate: { directory: 'tutorials' } }]
+        },
+        {
+          label: 'How-to guides', translations: { fr: 'Guides pratiques' },
+          items: [{ autogenerate: { directory: 'guides' } }]
+        },
+        {
+          label: 'Reference', translations: { fr: 'Référence' },
+          collapsed: true,
+          items: [{ autogenerate: { directory: 'reference' } }]
+        },
+        {
+          label: 'Explanation', translations: { fr: 'Explication' },
+          collapsed: true,
+          items: [{ autogenerate: { directory: 'explanation' } }]
+        },
+      ]
+    },
+});
