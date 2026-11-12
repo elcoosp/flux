@@ -46,3 +46,5 @@ fuzz/artifacts
 # Generated code output from `flux build --root examples/*`
 examples/*/platforms/
 wr.sh
+.vercel
+.env*
