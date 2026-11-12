@@ -1,5 +1,6 @@
 [package]
 name = "flux-differ"
+keywords = ["flux", "differ", "compiler", "diff", "ast"]
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -1,5 +1,6 @@
 [package]
 name = "flux-cli"
+keywords = ["flux", "cli", "compiler", "interpreter", "codegen"]
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

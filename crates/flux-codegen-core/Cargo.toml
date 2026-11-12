@@ -1,5 +1,6 @@
 [package]
 name = "flux-codegen-core"
+keywords = ["flux", "codegen", "core", "compiler", "ir"]
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
