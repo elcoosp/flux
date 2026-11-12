@@ -1,17 +1,11 @@
-import { defineCollection, z } from 'astro:content';
-import { docsLoader } from '@astrojs/starlight/loaders';
-import { docsSchema } from '@astrojs/starlight/schema';
+import { defineCollection } from 'astro:content';
+import { docsLoader, i18nLoader } from '@astrojs/starlight/loaders';
+import { docsSchema, i18nSchema } from '@astrojs/starlight/schema';
+import { fileURLToPath } from 'node:url';
 
-// Every docs page declares its Diátaxis type in frontmatter. The build fails
-// if a page omits it, which keeps the information architecture honest:
-// one page teaches one thing, and the sidebar groups match the type.
+const toolkitI18nPath = fileURLToPath(new URL('../node_modules/@elcoosp/docs-toolkit/i18n/', import.meta.url));
+
 export const collections = {
-  docs: defineCollection({
-    loader: docsLoader(),
-    schema: docsSchema({
-      extend: z.object({
-        type: z.enum(['tutorial', 'how-to', 'reference', 'explanation']),
-      }),
-    }),
-  }),
+  docs: defineCollection({ loader: docsLoader(), schema: docsSchema() }),
+  i18n: defineCollection({ loader: i18nLoader({ base: toolkitI18nPath }), schema: i18nSchema() }),
 };

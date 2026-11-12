@@ -6,7 +6,6 @@ import headingBadges from 'starlight-heading-badges';
 
 import fluxGrammar from './src/flux.tmLanguage.json';
 
-
 export default await defineDocsConfig({
   llmsTxt: {},
   changelog: { repo: 'elcoosp/flux' },
@@ -33,10 +32,7 @@ export default await defineDocsConfig({
       // declared so future translations (the upstream site ships es/fr)
       // drop into locale subdirectories without touching the config.
       // See docs/decisions/0004-i18n-scope.md.
-      defaultLocale: 'en',
-      locales: {
-        en: { label: 'English' }
-      },
+
       // Starlight plugins. Pagefind ships with Starlight and stays enabled —
       // no DocSearch application exists, so Pagefind is the search solution.
       plugins: [
