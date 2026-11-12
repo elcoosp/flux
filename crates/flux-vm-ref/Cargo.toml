@@ -1,5 +1,5 @@
 [package]
-documentation = "https://flux-rs.vercel.app"
+documentation = "https://flux-ui.vercel.app"
 
 readme = "../../README.md"
 name = "flux-vm-ref"

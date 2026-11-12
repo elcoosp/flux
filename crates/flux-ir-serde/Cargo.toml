@@ -1,5 +1,5 @@
 [package]
-documentation = "https://flux-rs.vercel.app"
+documentation = "https://flux-ui.vercel.app"
 
 description = "The flux-ir-serde crate for the flux ecosystem"
 readme = "../../README.md"
