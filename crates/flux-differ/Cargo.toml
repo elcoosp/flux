@@ -1,4 +1,6 @@
 [package]
+documentation = "https://flux-rs.vercel.app"
+
 description = "The flux-differ crate for the flux ecosystem"
 readme = "../../README.md"
 name = "flux-differ"

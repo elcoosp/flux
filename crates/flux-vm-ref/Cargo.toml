@@ -1,4 +1,6 @@
 [package]
+documentation = "https://flux-rs.vercel.app"
+
 readme = "../../README.md"
 name = "flux-vm-ref"
 keywords = ["flux", "vm", "interpreter", "runtime", "bytecode"]
