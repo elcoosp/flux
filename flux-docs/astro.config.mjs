@@ -39,22 +39,22 @@ export default await defineDocsConfig({
         headingBadges(),
       ],
       sidebar: [
-        { label: 'Overview', translations: { fr: 'Aperçu' }, link: '/' },
+        { label: 'Overview', link: '/' },
         {
-          label: 'Tutorials', translations: { fr: 'Tutoriels' },
+          label: 'Tutorials',
           items: [{ autogenerate: { directory: 'tutorials' } }]
         },
         {
-          label: 'How-to guides', translations: { fr: 'Guides pratiques' },
+          label: 'How-to guides',
           items: [{ autogenerate: { directory: 'guides' } }]
         },
         {
-          label: 'Reference', translations: { fr: 'Référence' },
+          label: 'Reference',
           collapsed: true,
           items: [{ autogenerate: { directory: 'reference' } }]
         },
         {
-          label: 'Explanation', translations: { fr: 'Explication' },
+          label: 'Explanation',
           collapsed: true,
           items: [{ autogenerate: { directory: 'explanation' } }]
         },
