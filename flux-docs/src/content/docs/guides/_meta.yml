@@ -1,0 +1,12 @@
+order:
+  - dev-server
+  - state-management
+  - navigation
+  - capabilities
+  - build-native
+  - editor-tooling
+  - formatting-and-ci
+  - testing-and-benchmarks
+  - migrate-from-rn
+  - migrate-from-flutter
+  - troubleshooting

@@ -1,0 +1,9 @@
+collapsed: true
+order:
+  - language
+  - stdlib
+  - cli
+  - flux-toml
+  - wire-protocol
+  - vm-isa
+  - capabilities
