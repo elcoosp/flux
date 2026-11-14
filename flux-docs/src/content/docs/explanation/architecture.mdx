@@ -15,28 +15,28 @@ and why dev and release stay equivalent.
 
 ## The pipeline
 
-<Code lang="text" code={` main.flux
-     │
-     ▼
-┌─────────────┐   ┌─────────────┐   ┌──────────────────────┐
-│ flux-parser │──▶│ flux-types  │──▶│       flux-ir        │
-│ (lex/parse) │   │ (typecheck) │   │ (Reactive Tree IR)   │
-└─────────────┘   └─────────────┘   └──────────┬───────────┘
-                                               │
-                    ┌──────────────────────────┴──────────────┐
-                    ▼ dev                                     ▼ release
-        ┌──────────────┐   ┌───────────────┐      ┌─────────────────────────┐
-        │ flux-differ  │──▶│ flux-ir-serde │      │    flux-codegen-core    │
-        │ (tree diff)  │   │ (MsgPack patch│      │ (data-driven emitter)   │
-        └──────────────┘   └───────┬───────┘      └───────────┬─────────────┘
-                                   │ WebSocket :7331           │
-                                   ▼                           ├─▶ flux-codegen-swift  → SwiftUI
-                        ┌──────────────────┐                   └─▶ flux-codegen-kotlin → Compose
-                        │  Host app VM +   │
-                        │  signal graph +  │   ◀── validated against
-                        │  shadow tree     │        92 golden ISA vectors
-                        │ (Swift / Kotlin) │        (tests/isa-vectors/)
-                        └──────────────────┘`} />
+```mermaid
+flowchart TD
+    SRC["main.flux"]
+    PARSER["flux-parser<br/><i>lex / parse</i>"]
+    TYPES["flux-types<br/><i>typecheck</i>"]
+    IR["flux-ir<br/><i>Reactive Tree IR</i>"]
+    DIFFER["flux-differ<br/><i>tree diff</i>"]
+    SERDE["flux-ir-serde<br/><i>MsgPack patch</i>"]
+    HOST["Host app VM +<br/>signal graph +<br/>shadow tree<br/><i>Swift / Kotlin</i>"]
+    CGEN["flux-codegen-core<br/><i>data-driven emitter</i>"]
+    SWIFT["flux-codegen-swift<br/>&rarr; SwiftUI"]
+    KOTLIN["flux-codegen-kotlin<br/>&rarr; Compose"]
+    ISA["92 golden ISA vectors<br/><i>tests/isa-vectors/</i>"]
+
+    SRC --> PARSER --> TYPES --> IR
+    IR -->|dev| DIFFER --> SERDE
+    IR -->|release| CGEN
+    SERDE -->|"WebSocket :7331"| HOST
+    CGEN --> SWIFT
+    CGEN --> KOTLIN
+    HOST -.->|validated against| ISA
+```
 
 One source, two consumers. The dev tier diffs and patches; the release tier
 codegens. Both start from the same Reactive Tree IR, which is what the
