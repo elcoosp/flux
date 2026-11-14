@@ -1,0 +1,102 @@
+---
+title: Référence du protocole filaire
+description: "Le protocole binaire entre le serveur de dev et les applications hôtes — en-tête de trame, encodages de patch, layouts de nœud et de valeur, diffs de props, closures, et adressage de contenu BLAKE3."
+type: reference
+sidebar:
+  order: 5
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Le serveur de dev et les applications hôtes parlent un **protocole filaire binaire** — l'Annexe D normative de la spécification. Tous les entiers multi-octets sont little-endian. Cette page est une carte de travail du layout ; l'annexe dans `docs/spec/mlp-appendices.md` reste la source normative.
+
+## Version de protocole
+
+La version actuelle du protocole est **3** (`0x03`), introduite par l'ADR-0059 : les préfixes de longueur au niveau trame, nœud et prop pour les collections écrites par l'utilisateur (patches, props, enfants, handlers, clés de réordonnancement, et les deltas de trame) sont écrits en **u32** au lieu de u16, donc une prop de liste à 70 000 éléments ou une chaîne >64 Ko atteint l'hôte. Un hôte qui reçoit une version qu'il ne supporte pas rejette la poignée de main (`unsupported_version`).
+
+## Structure de trame
+
+Chaque trame commence par un en-tête :
+
+| Offset | Taille | Champ | Description |
+| --- | --- | --- | --- |
+| 0 | 4 | magic | `0x465C5558` (`"FLUX"`) |
+| 4 | 1 | version | Version de protocole (actuellement 3) |
+| 5 | 4 | seq | Numéro de séquence monotone |
+| 9 | 1 | flags | Voir les bits de drapeau ci-dessous |
+| 10 | 2 | patch_count | Nombre d'entrées Patch |
+| 12 | 2 | handler_count | Nombre d'entrées HandlerDef |
+| 14 | 2 | string_count | Nouvelles chaînes internées (0 si pas de delta) |
+| 16 | … | patches | `[Patch; patch_count]` |
+| … | … | handlers | `[HandlerDef; handler_count]` |
+| … | … | strings | `[StringEntry; string_count]` (si delta) |
+| … | … | state_delta | StateDelta (si drapeau posé) |
+| … | … | src_map_delta | SourceMapDelta (si drapeau posé) |
+
+Bits de drapeau : 0 `full_tree` · 1 `error` · 2 `heartbeat` · 3 `has_state_delta` · 4 `has_src_map_delta` · 5 `has_string_table_delta`.
+
+## Encodage de patch
+
+Chaque patch commence par un tag d'un octet :
+
+| Tag | Type | Charge utile |
+| --- | --- | --- |
+| `0x01` | Replace | u32 id, Node |
+| `0x02` | Update | u32 id, PropDiff |
+| `0x03` | Insert | u32 parent_id, u16 index, Node |
+| `0x04` | Remove | u32 id |
+| `0x05` | Reorder | u32 parent_id, key_count, `[u32; key_count]` |
+| `0x06` | Handler | u32 id, ClosureRef |
+
+Le serveur de dev calcule l'ensemble sale depuis les signaux écrits et émet des patches **Update** adressés seulement aux nœuds sales, plus des patches structurels là où les props de contrôle ont changé.
+
+## Encodage de nœud
+
+| Champ | Taille | Description |
+| --- | --- | --- |
+| id | 4 | NodeId |
+| kind | 1 | NodeKind (0 = Component, 1 = Primitive, …) |
+| component_id | 4 | ID de nom de composant interné |
+| prop_count + props | … | `[(u16 prop_idx, Value); prop_count]` |
+| child_count + children | … | `[Child; child_count]` |
+| handler_count + handlers | … | `[u32 HandlerId; handler_count]` |
+| span_file / span_start / span_end | 12 | Span source (FileId, offsets d'octets) |
+
+## Encodage de valeur
+
+| Tag | Type | Charge utile (après tag) |
+| --- | --- | --- |
+| `0x00` | Null | (aucune) |
+| `0x01` | Int | i64 (8 octets) |
+| `0x02` | Float | f64 (8 octets) |
+| `0x03` | Bool | u8 (0 ou 1) |
+| `0x04` | Str | u32 string_id (interné) |
+| `0x05` | HandlerRef | u32 handler_id |
+| `0x06` | List | count, `[Value; count]` |
+| `0x07` | Record | count, `[(u16 prop_idx, Value); count]` |
+
+## Encodage de PropDiff
+
+| Champ | Description |
+| --- | --- |
+| change_count + changes | `[(u16 prop_idx, Value); change_count]` |
+| removal_count + removals | `[u16 prop_idx; removal_count]` |
+
+## Closures (ClosureRef)
+
+Les closures de handler et de thunk de prop partagent l'encodage `ClosureRef` : un hash BLAKE3 de 8 octets (adresse de contenu), un offset/longueur de bytecode dans le blob partagé, les ids de signaux capturés, et un span source. Sur `HALT`, `r0` est réservé au contexte de nœud et `r1` tient le résultat de `ALLOC_RECORD` ; le layout de props mappe les champs de record aux indices de prop.
+
+## Adressage de contenu
+
+Les props, closures et nœuds sont adressés par contenu par hash BLAKE3. Pour chaque élément d'une trame : si le hash est déjà dans le cache de l'hôte, la trame envoie seulement le hash de 8 octets ; sinon elle envoie les données complètes et l'hôte les met en cache. Après l'`Init` initial, plus de 90 % des éléments sont des hits de cache — ce qui explique pourquoi une édition de corps de handler coûte typiquement quelques centaines d'octets sur le fil.
+
+## Poignée de main et appairage
+
+Les hôtes s'authentifient pendant la poignée de main `Hello` quand le serveur tourne avec `--token` : l'hôte présente le jeton lu depuis `FLUX_DEV_TOKEN` ou `[dev] token` dans `flux.toml`, et un hôte rejeté ne reçoit aucune trame (voir l'ADR-0038 pour le trou de transport que cela a comblé).
+
+<Aside type="caution">N'ajoutez pas d'opcodes, de tags de patch ou de champs de trame sans une ADR et un bump de version de protocole — les hôtes et serveurs se valident contre les mêmes tables, et la dérive livre silencieusement des fautes sur appareil.</Aside>
+
+## Étapes suivantes
+
+- [Le jeu d'instructions de la VM](/reference/vm-isa/) — le bytecode que les closures référencent.
+- [Le fil, expliqué](/explanation/the-wire/) — pourquoi le protocole est binaire et comment les patches restent minuscules.

@@ -1,0 +1,74 @@
+---
+title: Migrer depuis React Native
+description: "Une carte honnête des concepts React Native vers les primitives Flux — modèle de composant, état, effets — et les manques que Flux ne couvre pas encore."
+type: how-to
+sidebar:
+  order: 9
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Flux est un langage UI à écrire une fois qui compile vers iOS et Android natifs. Si vous connaissez React Native, la majeure partie du vocabulaire transfère avec un changement de syntaxe. Ce guide mappe les concepts RN vers les primitives Flux et nomme les manques franchement : Flux cible les 90 % courants des écrans d'app — formulaires, navigation, état, capacités — pas 100 % de la surface RN.
+
+## Modèle de composant
+
+| React Native | Flux | Notes |
+| --- | --- | --- |
+| `function Component() { return <View>… }` | `compo Name` avec un corps indenté | Les enfants s'indentent sous un appel de vue qui porte une prop nommée |
+| `<View style={{flexDirection:'column'}}>` | [`Column`](/guides/state-management/) | Flux scinde le `View` de RN en `Column`/`Row` par conception |
+| `<View style={{flexDirection:'row'}}>` | `Row` | Même scission, horizontale |
+| `<Text>` | `Text` | Interpolez des signaux avec `{expr}` |
+| `<Button>` | `Button` | `onPress` prend une closure `Handler` |
+| `<TextInput>` | `TextInput` | Contrôlé : `text: $binding`, `onChangeText` |
+| `<Image>` | `Image` | `source` prend un chemin d'asset |
+| `react-navigation` | `Router` + `Screen` | Naviguez via `RouterNav.navigate` |
+
+Les noms publics de composants de la stdlib reflètent délibérément le nommage RN (voir l'ADR-0053 sur le nommage de surface publique), donc la mémoire musculaire survit au port.
+
+## État
+
+| React Native | Flux |
+| --- | --- |
+| `useState` | `state name: Type = initial` en haut d'un `compo` |
+| `setState(v)` | Assignez le signal : `name = v` dans un handler |
+| Valeur dérivée au rendu | Un `let` en lecture seule calculé depuis les signaux |
+| Context / Redux | Un `compo` store élevé au-dessus des consommateurs ; valeurs comme props |
+
+Le basculement mental : il n'y a pas de cycle de re-rendu à opter. L'assignation propage à travers le graphe de signaux, et seuls les nœuds qui lisent le signal écrit recomposent. Voir [gestion d'état](/guides/state-management/).
+
+## Listes et clés
+
+| React Native | Flux |
+| --- | --- |
+| `.map` sur des données en éléments | `ForEach(tasks, key: fn(t) { t.label }) { item => … }` |
+| Prop `key` | L'argument `key` fonction |
+| Muter le tableau + `setState` | `tasks.append(...)` / `tasks.remove(task)` / `tasks.clear()` |
+
+Le réconciliateur fait correspondre les enfants par node ID et la fonction key, donc les lignes existantes se réordonnent et patchent en place au lieu de se reconstruire.
+
+## Effets et asynchrone
+
+| React Native | Flux |
+| --- | --- |
+| `useEffect(fetch)` | Un appel de capacité renvoyant une cellule de résultat (`Ready`/`Pending`/`Error`) |
+| Branches loading | Rendez depuis la cellule : `name ?? "Loading..."` |
+| Modules natifs | Capacités avec ids stables (Storage, Camera, Clipboard, Location…) |
+
+Il n'y a pas de mot-clé `async` dans les handlers — le travail asynchrone se règle via la cellule de résultat de capacité, et les résultats atterrissent de retour sur le répartiteur réactif pour vous. Voir [capacités](/guides/capabilities/).
+
+## Ce que Flux ne couvre pas encore
+
+Ces manques sont réels à l'heure où nous écrivons — planifiez autour plutôt que de les découvrir en revue :
+
+- **Feuilles de style et props flex.** Pas de `StyleSheet.create` ni d'objet `style` arbitraire. La mise en page s'exprime via `gap`/`alignment` de `Column`/`Row` et les props de composant. Design tokens et thématisation sont un élément de roadmap.
+- **Bibliothèques de composants tierces.** Seules les primitives stdlib existent. Pour du contenu web il y a une primitive `WebHost` qui embarque des vues web ; l'interop native plus profonde est une préoccupation d'échappatoire.
+- **Cible web.** Flux rend nativement sur iOS et Android uniquement. Il n'y a pas de backend web.
+
+Si votre app dépend fortement de l'un de ces points, attendez avant le port — mais les écrans courants (formulaires, navigation, état, données adossées à des capacités) transfèrent directement.
+
+<Aside type="note">Les histoires de migration pour Flutter vivent dans un guide compagnon : [Migrer depuis Flutter](/guides/migrate-from-flutter/).</Aside>
+
+## Étapes suivantes
+
+- [Construire l'app todo](/tutorials/todo-app/) pour exercer les concepts mappés dans une vraie app.
+- [Dépannage](/guides/troubleshooting/) pour les formes d'erreur que vous rencontrez pendant un port.

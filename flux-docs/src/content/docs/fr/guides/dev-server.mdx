@@ -1,0 +1,77 @@
+---
+title: Lancer et configurer le serveur de dev
+description: "Configurez flux dev — ports, sonde de santé, exposition LAN et jetons d'appairage pour la boucle hot-reload."
+type: how-to
+sidebar:
+  order: 1
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+
+Le serveur de dev (`flux dev`) est votre compagnon constant pendant que vous construisez une app Flux : il surveille, analyse, vérifie les types, abaisse et diffe vos sources `.flux`, puis livre des patches binaires aux applications hôtes connectées. Ce guide couvre chaque réglage qu'il expose.
+
+## Lancer le serveur sur les défauts
+
+Lancez-le depuis la racine de votre projet (ou pointez-le ailleurs avec `--root`) :
+
+<Code lang="bash" code={`flux dev
+# Listening on ws://127.0.0.1:7331`} />
+
+Les défauts servent un projet dans le répertoire courant, lié à localhost :
+
+| Drapeau | Défaut | Rôle |
+| --- | --- | --- |
+| `--root <path>` | `.` | Racine de projet à surveiller et servir |
+| `--ws-host <addr>` | `127.0.0.1` | Adresse de liaison WebSocket |
+| `--ws-port <port>` | `7331` | Canal de patch vers les applications hôtes |
+| `--http-port <port>` | `7332` | Serveur d'assets HTTP |
+| `--token <secret>` | non défini | Exige un jeton d'appairage dans la poignée de main `Hello` |
+
+Les mêmes défauts vivent dans `flux.toml` sous `[dev]`, donc un projet versionné configure ses ports pour chaque contributeur. Voir la [référence flux.toml](/reference/flux-toml/).
+
+## Vérifier que le serveur est sain
+
+Le serveur d'assets expose une sonde de santé :
+
+<Code lang="bash" code={`curl http://127.0.0.1:7332/health`} />
+
+<Code lang="text" code={`ok`} />
+
+## Servir un appareil physique sur le LAN
+
+Les simulateurs et émulateurs atteignent `127.0.0.1` sur votre machine ; un appareil physique ne le peut pas. Exposez le serveur sur votre LAN et pointez l'app hôte sur l'IP LAN de votre machine :
+
+<Code lang="bash" code={`flux dev --ws-host 0.0.0.0`} />
+
+Dans l'app hôte, réglez l'adresse du serveur sur `ws://192.168.1.42:7331`, en remplaçant l'IP par l'adresse de la machine qui lance `flux dev`. L'hôte Android stocke ceci dans ses ressources ; l'hôte iOS le prend dans son écran de connexion.
+
+## Exiger un jeton d'appairage
+
+Une boucle de dev ouverte sur localhost est sûre par défaut. Un serveur exposé sur le LAN doit authentifier les hôtes qui lui poussent du bytecode :
+
+<Code lang="bash" code={`flux dev --ws-host 0.0.0.0 --token <secret>`} />
+
+L'hôte présente son jeton pendant la poignée de main `Hello` (protocole filaire Annexe D, section pairing/auth). Les hôtes lisent leur jeton depuis :
+
+- la variable d'environnement `FLUX_DEV_TOKEN`, ou
+- `[dev] token` dans `flux.toml`.
+
+Un hôte sans le jeton est rejeté à la poignée de main et ne reçoit aucune trame.
+
+<Aside type="caution">Ne lancez jamais `--ws-host 0.0.0.0` sans `--token` sur un réseau partagé. N'importe quel appareil du LAN pourrait alors se connecter et recevoir vos trames dérivées de la source.</Aside>
+
+## Ce que le serveur fait à la sauvegarde
+
+Chaque sauvegarde déclenche le pipeline complet — vous ne redémarrez jamais rien :
+
+1. Analyser et vérifier le type de chaque fichier `.flux`. Les diagnostics apparaissent dans le journal du serveur avec les spans source.
+2. Abaisser le programme en Reactive Tree IR.
+3. Differ le nouvel arbre contre le précédent.
+4. Sérialiser le script d'édition minimal en patch binaire et l'envoyer sur `:7331`.
+
+Une édition de corps de handler coûte typiquement quelques centaines d'octets sur le fil parce que les props et les closures sont adressées par contenu (BLAKE3) et mises en cache sur l'hôte après la première trame `Init`. Voir [Le fil, expliqué](/explanation/the-wire/).
+
+## Étapes suivantes
+
+- [Livrer une release native](/guides/build-native/) quand dev est bon.
+- [Référence du protocole filaire](/reference/wire-protocol/) pour les trames que le serveur envoie.

@@ -1,0 +1,60 @@
+---
+title: Naviguer entre écrans
+description: "Construisez des apps multi-écrans avec Router, Screen et RouterNav — le contrat de prop route, les routes initiales, et la navigation pilotée par capacité."
+type: how-to
+sidebar:
+  order: 3
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+
+Flux livre la navigation comme partie du langage : un `Router` déclare la pile, les enfants `Screen` déclarent les routes, et `RouterNav.navigate` échange l'écran visible. Ce guide montre le motif fonctionnel de `examples/router` et `examples/todo`.
+
+## Déclarer un routeur avec deux écrans
+
+Chaque écran doit porter une prop `route`, et le routeur nomme son premier écran :
+
+<Code lang="rust" code={`compo App
+    Column gap: 8.0
+        Router initialRouteName: "home"
+            Screen route: "home"
+                Column gap: 16.0
+                    Text text: "Home"
+                    Button text: "Go to Settings", onPress: || {
+                        RouterNav.navigate("settings")
+                    }
+            Screen route: "settings"
+                Column gap: 16.0
+                    Text text: "Settings"
+                    Button text: "Go to Home", onPress: || {
+                        RouterNav.navigate("home")
+                    }`} />
+
+- `initialRouteName` nomme l'écran affiché au démarrage.
+- `RouterNav.navigate("settings")` rend visible l'écran dont la `route` égale `"settings"`.
+- Chaque écran possède sa mise en page via son propre composant de mise en page (`Column`).
+
+<Aside type="caution">Le nom de la prop doit être exactement `route`. L'hôte la lit par son nom de prop haché (FNV-1a de `"route"`), donc la renommer casse silencieusement la navigation — le contrat est normatif dans les annexes d'adaptateur.</Aside>
+
+## Conserver l'état d'écran à travers la navigation
+
+Le réconciliateur fait correspondre les enfants par node ID, donc un écran existant est réordonné, jamais recréé, à travers les push/pop. L'état que vous gardez dans des signaux au niveau écran survit à la navigation : un formulaire à moitié rempli reste rempli quand l'utilisateur change d'écran et revient.
+
+Modélisez l'état par écran avec des déclarations `state` à l'intérieur des composants de l'écran, et l'état inter-écrans avec un store élevé au-dessus du `Router` (voir [gestion d'état](/guides/state-management/)).
+
+## Piloter la navigation depuis les données
+
+La navigation passe par la capacité Router (capacité 3, méthode 1), qui écrit son argument dans un signal bien connu que les réconciliateurs de l'hôte observent. Vous l'appelez via `RouterNav.navigate` depuis n'importe quel handler — boutons, sélecteurs, callbacks de gestes — et l'écran visible suit la valeur.
+
+Le bouton About de l'app todo est l'exemple minimal :
+
+<Code lang="rust" code={`Button text: "About", onPress: || { RouterNav.navigate("about") }`} />
+
+## Structure d'une app multi-écrans
+
+L'app `examples/todo` montre la forme complète : un écran rend la liste de tâches et sa ligne de saisie, le second rend un écran About statique, et les deux vivent dans un `Router` à la racine de l'arbre de mise en page. Gardez les routeurs à la racine d'une région d'écran et laissez les composants en dessous ignorer les routes — ils reçoivent des données et émettent des handlers, exactement comme n'importe quel autre composant.
+
+## Étapes suivantes
+
+- [Le tutoriel todo](/tutorials/todo-app/) construit une app à deux écrans de bout en bout.
+- [Le fil, expliqué](/explanation/the-wire/) explique pourquoi les patches — pas les re-envois d'arbre complet — déplacent les écrans.

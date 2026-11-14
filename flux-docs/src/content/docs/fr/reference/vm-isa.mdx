@@ -1,0 +1,72 @@
+---
+title: Jeu d'instructions de la VM
+description: "L'ISA à registres de la VM hôte — ops de signal, arithmétique monomorphisée, ops de liste, closures, politique de faute, et les vecteurs dorés qui l'épinglent."
+type: reference
+sidebar:
+  order: 6
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+L'application hôte embarque une **VM bytecode à registres**. Les instructions sont monomorphisées : il n'y a pas d'`ADD` générique avec dispatch de tag — il y a `ADD_I64`, `ADD_F64`, etc. Cela garde le chemin chaud sans branche et la trace d'exécution octet-identique entre les hôtes. L'ISA est normative dans l'Annexe E de la spécification.
+
+## Opérations sur les signaux
+
+| Opcode | Mnémonique | Args | Description |
+| --- | --- | --- | --- |
+| `0x10` | `READ_SIGNAL` | reg_dst(u8), signal_id(u32) | Lit un signal dans un registre |
+| `0x11` | `WRITE_SIGNAL` | signal_id(u32), reg_src(u8) | Écrit la valeur d'un registre dans un signal |
+
+Une fermeture de handler se termine en écrivant les signaux que le dispatch a consommés. Ces ids écrits, triés ascendant, deviennent l'événement de trace `signals`.
+
+## Arithmétique (monomorphisée)
+
+| Opcode | Mnémonique | Args | Description |
+| --- | --- | --- | --- |
+| `0x20` | `ADD_I64` | dst, a, b (u8 chacun) | `dst = a + b` (i64) |
+| `0x21` | `SUB_I64` | dst, a, b | `dst = a - b` |
+| `0x22` | `MUL_I64` | dst, a, b | `dst = a * b` |
+| `0x23` | `DIV_I64` | dst, a, b | `dst = a / b` |
+| `0x24` | `MOD_I64` | dst, a, b | `dst = a % b` |
+
+Les variantes flottantes (`ADD_F64`, …) occupent la même bande `0x2x` avec le suffixe `F64`. Le `count = count + 1` du compteur compile en `READ_SIGNAL` → `LOAD_INT_CONST` → `ADD_I64` → `WRITE_SIGNAL`.
+
+## Opérations sur les listes
+
+Quatre opcodes `LIST_*` adossent les mutations de liste que le compilateur émet pour `append` / `remove` / `clear` sur des signaux `List[T]`. Avec le reste de la table, le vocabulaire d'opcodes totalise 61 entrées (`Opcode::ALL`), et les tables d'opcodes des hôtes dev sont générées depuis cette source unique (voir ADR-0058) — une table portée à la main qui dérive échoue en CI avant d'atteindre un appareil.
+
+## Opcodes liés aux fautes
+
+| Opcode | Mnémonique | Notes |
+| --- | --- | --- |
+| `0xD1` | `IS_NULL` | Test de null utilisé avant un accès de champ ; un `GET_FIELD` sur `Null` défaille (ADR-0024) |
+
+## Closures et conventions d'appel
+
+Les closures de handler et de thunk de prop partagent l'encodage `ClosureRef` du fil (adressé par contenu via BLAKE3). Conventions de registre :
+
+- `r0` est réservé au contexte de nœud.
+- `r1` tient le résultat de `ALLOC_RECORD` sur `HALT`.
+- `prop_layout` mappe les champs de record aux indices de prop pour les résultats de thunk.
+
+## Politique de faute
+
+| Ressource | Limite | Comportement à l'épuisement |
+| --- | --- | --- |
+| Gas | 100 000 instructions par handler | Faute : `gas budget exhausted` |
+| Pool mémoire | 16 Mio par trame | Faute : `memory pool exhausted` |
+
+Une faute de thunk ou de handler laisse le nœud avec ses props antérieures — le rendu devient périmé, jamais vide. L'erreur fait surface via l'overlay sur appareil et un événement de trace `error` ; la vue n'est jamais détruite. La division par zéro et l'accès de champ sur null sont aussi des fautes (ADR-0023, ADR-0024), pas des paniques.
+
+## Vecteurs dorés
+
+L'ISA est épinglée par **92 vecteurs ISA dorés** sous
+[`tests/isa-vectors/`](https://github.com/elcoosp/flux/tree/main/tests/isa-vectors),
+partagés par l'oracle Rust (`flux-vm-ref`), la VM Swift livrée (`FluxBytecodeVM`) et la VM Kotlin. Un changement de code de faute ou d'opcode échoue aux trois implémentations à la fois.
+
+<Aside type="caution">N'ajoutez pas d'opcodes sans une ADR et un bump de version de protocole. Les tables d'opcodes des hôtes dev sont générées depuis `Opcode::ALL` — les éditer à la main est la dérive que les gardes de parité existent à attraper.</Aside>
+
+## Étapes suivantes
+
+- [Référence du protocole filaire](/reference/wire-protocol/) — comment les closures et leur bytecode voyagent vers l'hôte.
+- [Tests et benchmarks](/guides/testing-and-benchmarks/) — comment lancer les vecteurs et la suite de parité.

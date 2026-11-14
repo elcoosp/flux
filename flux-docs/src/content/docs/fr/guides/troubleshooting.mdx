@@ -1,0 +1,95 @@
+---
+title: Diagnostiquer les erreurs Flux
+description: "Diagnostiquez les erreurs Flux par classe — compile (parse, type, lower), fautes VM à l'exécution, et refus de capacité — avec la forme du message, la cause racine et le correctif pour chacun."
+type: how-to
+sidebar:
+  order: 11
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+
+Chaque erreur que Flux fait surface — dans le journal du serveur de dev, le bandeau rouge sur l'appareil, ou la sortie CLI — appartient à la taxonomie d'erreur unifiée : trois classes, chacune portant une charge `what` / `where` / `why` / `how`. Ce guide est indexé sur cette taxonomie pour que vous alliez du message au correctif.
+
+| Classe | Quand elle se déclenche | Où vous la voyez |
+| --- | --- | --- |
+| **Compile** | Échec de parse, de vérification de types ou de lowering | Journal du serveur de dev, `flux lsp`, VS Code |
+| **Runtime** | Faute VM pendant l'évaluation d'un handler | Overlay sur appareil, journal serveur, trace |
+| **Capability** | Un `CALL_CAP` refusé par l'hôte ou l'OS | Bandeau rouge sur appareil, trace |
+
+## Erreurs de compilation
+
+Forme typique :
+
+<Code lang="text" code={`[compile:Parse] expected \`Int\`, got \`String\` (hint: \`count\` was inferred as Int at line 18)
+[compile:Type] …
+[compile:Lower] …`} />
+
+Chaque erreur de compilation porte une phase, un message, un `span` (file:line:col), et un indice optionnel.
+
+| Phase | Ce que ça veut dire | Cause courante | Correctif |
+| --- | --- | --- | --- |
+| `Parse` | Le parseur a rejeté la source | Indentation et accolades mélangées, ou une indentation manquante sous un appel de vue | Suivez la grammaire d'indentation ; lancez `flux dev` et lisez le caret |
+| `Type` | Le vérificateur de types a rejeté une expression | Un signal utilisé avec le mauvais type, ou un corps de handler qui ne correspond pas au type de sa prop | Lisez le `hint` — il nomme le type inféré précédemment et son emplacement |
+| `Lower` | L'AST typé n'a pas pu être abaissé en IR | Une construction hors de la surface supportée | Simplifiez l'expression ; vérifiez `flux doc` pour la surface supportée |
+
+**Chemin de correctif :** ouvrez le file:line:col du `span`, lisez le `hint`, et ré-exprimez la construction. Les erreurs de compilation sont déterministes — relancer `flux dev` les reproduit exactement.
+
+## Erreurs d'exécution (VM)
+
+Forme typique :
+
+<Code lang="text" code={`[runtime] gas budget exhausted at offset 42
+[runtime] division by zero at offset 17`} />
+
+Les erreurs d'exécution enveloppent un type de faute VM stable, donc le code de faute est porteur et asserté par les vecteurs ISA dorés. L'`offset` pointe sur l'instruction fautive, qui vous dit quelle expression Flux y a été abaissée.
+
+### Gas budget exhausted
+
+Un handler a tourné plus de 100 000 instructions. Répartissez le travail en handlers plus petits, ou retirez une boucle infinie accidentelle ou une récursion non bornée.
+
+### Memory pool exhausted
+
+Le pool de mémoire de trame de 16 Mio est épuisé — généralement de gros littéraux ou des trames profondes. Réduisez les données tenues dans la portée du handler ; paginez les grandes données via une capacité au lieu de les inliner.
+
+### Index out of bounds
+
+Un index de liste, de record ou de chaîne est tombé hors de ses bornes. Gardez l'index avant l'accès — c'est un bug de logique dans le handler.
+
+### Null dereference
+
+Un accès de champ a été effectué sur `Null`. Vérifiez la valeur avant l'accès de champ, ou assurez-vous que le signal amont est initialisé ; l'opérateur `??` couvre le cas de repli courant.
+
+### Invalid opcode dispatch
+
+L'octet de dispatch n'était pas un opcode valide — généralement une trame de patch corrompue ou obsolète. Redémarrez `flux dev`. Si cela se reproduit, traitez-le comme un bug filaire ou de lowering et ouvrez un ticket avec les octets de trame.
+
+### Type mismatch
+
+Les opérandes ne correspondaient pas à ce qu'attend l'opcode monomorphisé — `ADD_I64` a besoin de deux entiers, `ADD_F64` de deux flottants. Alignez les types d'opérandes.
+
+### Division by zero
+
+La division entière ou le reste par zéro échoue comme erreur, jamais comme panique. Gardez le diviseur avant l'opération `/` ou `%`.
+
+**Chemin de correctif :** la faute est déterministe et reproductible. Le bytecode de handler autour de l'offset rapporté se mappe en retour à une expression Flux précise — corrigez cette expression.
+
+## Erreurs de capacité
+
+Forme typique :
+
+<Code lang="text" code={`[capability] \`Storage.removeItem\` (2/3): the OS grant \`.storage\` was not authorized for this capability call`} />
+
+Les erreurs de capacité portent le `cap_id` / `method_id` numérique, le `cap_name` / `method_name` résolu quand enregistré, la permission OS requise, et un `why` lisible. Elles **ne font jamais planter** l'app — l'appel refusé ne s'exécute pas, et l'hôte rend un bandeau rouge.
+
+- **Cause racine :** un appel de capacité a atteint un service derrière une permission OS que l'utilisateur n'a pas accordée (Camera, Location, Notifications).
+- **Correctif :** demandez et attendez la permission avant d'appeler la capacité. L'hôte fait surface la demande système ; re-invoquez le handler après que le grant s'est résolu.
+
+Les ids de capacité sont dérivés de façon déterministe — voir la [référence des capacités](/reference/capabilities/) pour la table d'ids.
+
+<Aside type="tip">Les erreurs de compilation nomment un span, les erreurs d'exécution nomment un offset de bytecode, les erreurs de capacité nomment une paire cap/méthode. Lisez ce localisateur en premier — c'est la route la plus rapide du message à la cause.</Aside>
+
+## Toujours bloqué ?
+
+- [Dev vs release](/explanation/dev-vs-release/) clarifie quel étage d'exécution a produit l'erreur.
+- [Le fil, expliqué](/explanation/the-wire/) aide quand les trames semblent corrompues.
+- [Gestion d'état](/guides/state-management/) couvre l'état qui refuse de se mettre à jour.

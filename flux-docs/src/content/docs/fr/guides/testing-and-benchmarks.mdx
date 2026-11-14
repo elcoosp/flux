@@ -1,0 +1,63 @@
+---
+title: Lancer les tests et benchmarks
+description: "Exercez les cinq couches de test — nextest, proptest, instantanés insta, budgets criterion, et le harnais de parité dev-vs-release."
+type: how-to
+sidebar:
+  order: 8
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+
+La barre de qualité de Flux est mécanique : chaque fonction publique a un test, et la suite couvre cinq couches. Ce guide montre comment lancer chaque couche et ce qu'elle prouve.
+
+## Lancer la suite complète
+
+Le lanceur de test du projet est `cargo-nextest` — jamais un simple `cargo test` :
+
+<Code lang="bash" code={`cargo nextest run`} />
+
+| Couche | Outil | Ce qu'elle prouve |
+| --- | --- | --- |
+| Unitaire | `cargo nextest run` | Chaque fonction, cas limites, chemins d'erreur |
+| Propriété | `proptest` | Stabilité des Node-ID, minimalité du diff, allers-retours |
+| Instantané | `insta` | Sortie du codegen Swift & Kotlin |
+| Benchmark | `criterion` | Budgets de latence par étage |
+| Parité | `tests/` | L'exécution VM dev égale le codegen release |
+
+Les doctests tournent séparément, parce que nextest ne les exécute pas :
+
+<Code lang="bash" code={`cargo test --doc`} />
+
+## Vérifier la parité dev-vs-release
+
+Le harnais de parité (`flux-parity`) est l'outil qui garde les deux étages d'exécution honnêtes : il capture des traces de l'exécution VM dev et du codegen release, les réduit, et vérifie l'équivalence. Les scénarios dorés — dont un arbre compteur à 1 000 nœuds et des dispatches no-op — vivent sous `tests/` et tournent dans le workflow CI `parity-check`.
+
+Quand vous changez le comportement de lowering, de differ ou de codegen, lancez les scénarios de parité avant de faire confiance à vos propres tests :
+
+<Code lang="bash" code={`cargo nextest run -p flux-parity`} />
+
+## Valider contre les vecteurs ISA dorés
+
+Les VM Swift (`FluxBytecodeVM`) et Kotlin livrées sont validées contre **92 vecteurs ISA dorés** sous `tests/isa-vectors/`. L'oracle Rust de la VM (`flux-vm-ref`) est la référence comportementale du jeu d'instructions, et les vecteurs sont partagés par les trois implémentations, donc un changement de code de faute échoue partout à la fois.
+
+## Mesurer contre les budgets de latence
+
+La métrique phare est le budget **Save → pixels** — le temps mur qu'un développeur ressent pendant le hot reload — mesuré de bout en bout par le harnais LANE-H : un vrai `DevServer` plus un client WebSocket loopback sans tête, avec au moins 50 éditions par taille d'arbre, rapporté en p50/p99.
+
+| Étage | Budget |
+| --- | --- |
+| Parse d'un fichier de 500 lignes | < 5 ms |
+| Diff d'un arbre de 50 nœuds | < 1 ms |
+| Sérialisation d'un patch de 50 nœuds | < 1 ms |
+| Évaluation VM par trame | < 2 ms |
+
+Les benchmarks criterion portent ces budgets ; les workflows CI `benchmarks.yml` et `perf-harness.yml` les lancent :
+
+<Code lang="bash" code={`cargo bench`} />
+
+<Aside type="caution">Les suites basées sur les propriétés et adversariales (`proptest`, le fuzzer filaire, les tests de corruption) jettent intentionnellement des déchets dans le pipeline. Un échec là signifie un vrai bug de robustesse, pas une mauvaise graine — enregistrez le cas en échec, ne le supprimez pas du corpus.</Aside>
+
+## Étapes suivantes
+
+- [Le jeu d'instructions de la VM](/reference/vm-isa/) — le contrat qu'encodent les vecteurs dorés.
+- [Formatage et portails CI](/guides/formatting-and-ci/) pour les portails pre-commit qui tournent avant la suite.

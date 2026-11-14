@@ -1,0 +1,63 @@
+---
+title: Flux
+description: "Flux est un langage UI à écrire une fois pour iOS et Android natifs — hot-reload des .flux sur appareil, puis livrez SwiftUI et Jetpack Compose depuis la même source."
+template: splash
+type: explanation
+sidebar:
+  order: 0
+hero:
+  image:
+    file: ../../../assets/logo.png
+    alt: Logo
+  title: "Flux"
+  tagline: Écrivez une fois. Rendez natif sur iOS et Android.
+  actions:
+    - text: Commencer le tutoriel
+      link: /tutorials/your-first-app/
+      icon: right-arrow
+    - text: Parcourir la référence CLI
+      link: /reference/cli/
+      icon: document
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkButton, LinkCard } from '@astrojs/starlight/components';
+
+Flux est un langage UI à écrire une fois pour iOS et Android natifs. Vous rédigez votre UI dans des fichiers `.flux`. En développement, une application hôte précompilée reçoit des patches binaires sur WebSocket et hot-reload votre UI en millisecondes. En release, la source exacte se compile en **SwiftUI** et **Jetpack Compose** idiomatiques. Pas de webview. Pas de pont JavaScript. Pas d'interpréteur en production.
+
+| | Cross-platform traditionnel | Flux |
+| --- | --- | --- |
+| Cible de rendu | WebView / canvas | Vrai `UIView` / Compose `View` |
+| Hot reload | Rebuild complet ou JS eval | Patch IR binaire sur WebSocket |
+| Build release | Interpréteur livré en prod | Codegen SwiftUI / Compose |
+| État | Verrouillé par framework | Graphe de signaux de style SolidJS sur un IR partagé |
+
+La boucle de développement et l'artefact release viennent du **même Reactive Tree IR**. Vous itérez contre un hôte VM bytecode rapide pendant le développement et livrez du code natif par plateforme en release — pas de bifurcation, pas de « dev différent de prod ». Un harnais de parité (`flux-parity`) prouve continûment que l'exécution VM dev et le codegen release restent équivalents, donc les deux chemins sont vérifiés, pas supposés.
+
+<CardGrid stagger>
+  <Card title="Un langage, deux apps natives" icon="document">
+    Rédigez votre UI une fois en `.flux`. Une application hôte précompilée la rend sur iOS et Android en dev ; les builds release compilent le même IR en SwiftUI et Jetpack Compose.
+  </Card>
+  <Card title="Hot reload en direct" icon="rocket">
+    Sauvegardez un fichier `.flux` et le serveur de dev analyse, vérifie les types, abaisse, diffe et livre un patch binaire en millisecondes. L'arbre sur appareil se met à jour en place.
+  </Card>
+  <Card title="Outillage réel" icon="puzzle">
+    Une CLI, un serveur de dev hot-reload avec jetons d'appairage, un serveur de langage avec une extension VS Code, un formateur, et une application de bureau DevTools gpui.
+  </Card>
+  <Card title="Piloté par spécification" icon="open-book">
+    Chaque choix non évident est justifié dans un Architecture Decision Record — 40 ADR, des annexes wire et ISA normatives, et des tests de parité imposés.
+  </Card>
+</CardGrid>
+
+<LinkButton href="/tutorials/todo-app/" icon="right-arrow">Commencer le tutoriel</LinkButton>
+
+## Choisissez votre chemin
+
+<LinkCard title="Construire votre première app Flux" href="/tutorials/your-first-app/" description="Un tutoriel guidé : compilez la CLI, échafaudez un projet, hot-reload sur appareil, et livrez une release native." />
+<LinkCard title="Lancer et configurer le serveur de dev" href="/guides/dev-server/" description="Ports, exposition LAN et jetons d'appairage pour la boucle hot-reload." />
+<LinkCard title="Référence du langage et de la stdlib" href="/reference/language/" description="La surface .flux complète : composants, signaux, closures et types." />
+<LinkCard title="Comment fonctionne Flux" href="/explanation/architecture/" description="Le pipeline parse → typecheck → lower → diff → patch → VM, expliqué." />
+
+## Ce dont vous avez besoin
+
+La chaîne d'outils Rust construit tout du côté CLI. Xcode (cible de déploiement iOS 16+) et le SDK Android sont requis uniquement pour les applications hôtes. Parcourez le [tutoriel de la première app](/tutorials/your-first-app/) pour l'installation complète.

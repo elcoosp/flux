@@ -1,0 +1,95 @@
+---
+title: Référence CLI
+description: "L'interface en ligne de commande flux — init, dev, build, lsp, fmt, doc, doctor — avec chaque drapeau, défaut et variable d'environnement."
+type: reference
+sidebar:
+  order: 3
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+
+Le binaire `flux` est la CLI développeur du langage UI Flux : il échafaude des projets, lance le serveur de dev hot-reload, codegen des apps natives, et inspecte la stdlib et l'environnement. La surface ci-dessous est générée depuis les définitions de commande de la CLI dans `crates/flux-cli`.
+
+<Code lang="bash" code={`flux <command> [flags]`} />
+
+| Commande | Objet |
+| --- | --- |
+| `flux init <name>` | Échafaude un nouveau projet Flux à `<name>/` |
+| `flux dev` | Lance le serveur de dev hot-reload |
+| `flux build <platform>` | Codegen le projet pour une plateforme native |
+| `flux lsp <file>` | Émet les diagnostics de parse + vérification de types en JSON |
+| `flux fmt [files…]` | Formate les sources `.flux` au style canonique |
+| `flux doc` | Émet un schéma JSON de l'API stdlib |
+| `flux doctor` | Lance la vérification de santé de l'environnement |
+
+## `flux init <name>`
+
+Échafaude `<name>/` avec `main.flux` (un composant compteur avec état), `flux.toml` et `.fluxignore`.
+
+| Argument | Valeur |
+| --- | --- |
+| `name` | Nom du projet ; aussi le répertoire créé |
+
+## `flux dev`
+
+| Drapeau | Défaut | Description |
+| --- | --- | --- |
+| `--root <path>` | `.` | Racine de projet à surveiller et servir |
+| `--ws-host <addr>` | `127.0.0.1` | Hôte de liaison WebSocket ; `0.0.0.0` expose le LAN |
+| `--ws-port <port>` | `7331` | Canal de patch WebSocket |
+| `--http-port <port>` | `7332` | Serveur d'assets HTTP |
+| `--token <secret>` | non défini | Exige le jeton dans la poignée de main `Hello` de l'hôte |
+
+Les hôtes s'authentifient avec le jeton lu depuis `FLUX_DEV_TOKEN` ou `[dev] token` dans `flux.toml`. Sans `--token`, localhost garde une boucle de dev ouverte. Voir le [guide du serveur de dev](/guides/dev-server/) pour les détails opérationnels.
+
+## `flux build <platform>`
+
+| Argument / drapeau | Valeurs | Description |
+| --- | --- | --- |
+| `platform` | `ios`, `android` | Plateforme cible (positionnel) |
+| `--root <path>` | `.` | Racine de projet à construire |
+
+Émet les sources générées vers `platforms/<platform>/Generated/` (`main.swift` / `main.kt`), puis invoque la chaîne d'outils native quand elle est présente.
+
+## `flux lsp <file>`
+
+| Argument / drapeau | Défaut | Description |
+| --- | --- | --- |
+| `file` | requis | Le fichier source `.flux` à analyser |
+| `--no-types` | off | Diagnostics de parse seulement — le chemin rapide pour les gros fichiers |
+
+Imprime les diagnostics de parse et de vérification de types en JSON ; chaque diagnostic porte un span et un indice optionnel.
+
+## `flux fmt [files…]`
+
+| Argument / drapeau | Défaut | Description |
+| --- | --- | --- |
+| `files…` | `main.flux` | Fichiers à formater ; sans chemins, formate `main.flux` à la racine du projet |
+| `--check` | off | Vérifie sans écrire ; sort en non-zéro quand un fichier changerait (verrouillage CI) |
+
+## `flux doc`
+
+Pas de drapeaux. Imprime le schéma JSON de l'API stdlib sur stdout — la surface source de vérité derrière la [référence stdlib](/reference/stdlib/).
+
+## `flux doctor`
+
+| Drapeau | Défaut | Description |
+| --- | --- | --- |
+| `--strict` | off | Sort en non-zéro sur toute trouvaille consultative pour que la commande puisse verrouiller un hook pre-commit |
+
+Vérifie l'état de la chaîne d'outils, la santé du parse de stdlib, la version du protocole filaire, et (best-effort) les appareils et simulateurs connectés, plus les vérifications structurelles locales : dérive de dépendances approuvées et violations de règles maison.
+
+## Variables d'environnement
+
+| Variable | Utilisée par | Objet |
+| --- | --- | --- |
+| `FLUX_DEV_TOKEN` | Applications hôtes | Jeton d'appairage pour la poignée de main `Hello` du serveur de dev |
+| `RUST_LOG` | CLI | Filtre de tracing ; défaut `info` |
+| `NO_COLOR` | CLI | Désactive les couleurs ANSI en sortie |
+
+<Aside type="note">Les couleurs ANSI sont émises uniquement quand stdout est un vrai terminal et que `NO_COLOR` est unset, donc la sortie pipée et redirigée reste en texte brut.</Aside>
+
+## Étapes suivantes
+
+- [Référence flux.toml](/reference/flux-toml/) pour le manifeste de projet.
+- [Guide du serveur de dev](/guides/dev-server/) pour l'opération jour par jour.

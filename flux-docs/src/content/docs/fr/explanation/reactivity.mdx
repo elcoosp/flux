@@ -1,0 +1,48 @@
+---
+title: Réactivité et état faisant autorité sur l'hôte
+description: "Le graphe de signaux de style SolidJS, l'invariant d'état faisant autorité sur l'hôte (ADR-0027), et comment un tap devient exactement une mise à jour — indépendamment de la taille de l'arbre."
+type: explanation
+sidebar:
+  order: 2
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+La réactivité de Flux est de **style SolidJS** : un graphe de dépendances à grain fin sur des signaux, pas une boucle de re-rendu à diffing virtuel. Et l'état de Flux **fait autorité sur l'hôte** : le serveur ne possède jamais les valeurs de signal à l'exécution — il livre la structure (l'IR) et les deltas (patches), tandis que l'hôte possède le graphe de signaux, évalue les handlers et réconcilie la vue.
+
+## L'invariant
+
+> Après qu'un dispatch a écrit un ensemble `S` de signaux, les seuls nœuds dont la sortie rendue peut changer sont (a) les nœuds dont les expressions de prop/contrôle lisent un `s ∈ S`, et (b) les nœuds construits/détruits/réordonnés par des diffs structurels à clé déclenchés par (a). Tout le reste doit être intact.
+
+Cet invariant est normatif (ADR-0027), et c'est ce qui fait qu'un arbre de 1 000 nœuds coûte **une mise à jour** quand vous tapez sur un compteur lié à un seul signal — indépendamment de la taille de l'arbre.
+
+## Comment un dispatch s'écoule
+
+1. **Dispatch** — un tap évalue la fermeture du handler dans la VM hôte, écrivant un ou plusieurs signaux (par exemple `count = count + 1`).
+2. **Signaux** — la VM rapporte les ids de signaux écrits, triés ascendant, comme l'événement de trace `signals`.
+3. **Ensemble sale** — l'hôte intersecte les signaux écrits avec les `signal_deps` de chaque nœud, émettant une liste `dirty` dans l'ordre `(depth asc, id asc)`.
+4. **Mise à jour** — seuls les nœuds sales re-matérialisent leurs props et déclenchent `update`. Les voisins propres sont intacts.
+5. **Fin d'étape** — des compteurs cumulatifs closent l'étape : `built`, `updated`, `skipped_unchanged`, `detached`, `prop_materializations`.
+
+Un handler qui écrit un signal que personne ne lit produit `dirty: []` et zéro événement update/build/detach — le scénario doré `noop_dispatch` épingle cela.
+
+## Conséquences
+
+- **Les patches sont minimaux.** Un tap `count = count + 1` produit un patch `Update` adressé seulement aux nœuds sales, jamais un re-envoi de tout l'arbre.
+- **La parité de trace est observable.** Parce que l'état est possédé par l'hôte et déterministe, la même trame + le même script de dispatch exécutés contre Swift et Kotlin produisent des traces octet-identiques — c'est le travail du harnais de parité.
+- **L'aller-retour serveur est en voie de disparition.** La phase 3 de l'ADR-0027 livre des thunks de props à l'hôte, donc l'aller-retour serveur par tap et la reconstruction `currentFrame()` disparaissent entièrement ; l'hôte recalcule depuis l'ensemble sale.
+
+## Ce que cela exclut
+
+<Aside type="caution">Le réconciliateur ne doit pas s'abonner au graphe de signaux comme observateur — cela déclencherait deux fois. Il consomme le résultat de la VM (l'ADR-0027 le consigne comme explicitement hors périmètre).</Aside>
+
+La même discipline explique la politique de faute que vous rencontrez en pratique : quand un handler défaille, le nœud garde ses props antérieures (rendu périmé, jamais vide), et l'erreur fait surface via l'overlay et la trace — la vue n'est jamais détruite.
+
+## Où le voir
+
+L'exemple compteur est la démonstration canonique : un signal, un `Text` dépendant, et un tap qui coûte exactement une mise à jour tandis que la `Column` et le `Button` passent inchangés. Le [tutoriel todo](/tutorials/todo-app/) montre les mêmes mécaniques avec des listes et du routage par-dessus.
+
+## Étapes suivantes
+
+- [Dev vs release](/explanation/dev-vs-release/) — comment les deux étages d'exécution partagent cette machinerie.
+- [Architecture](/explanation/architecture/) — les crates qui implémentent le graphe et l'ensemble sale.

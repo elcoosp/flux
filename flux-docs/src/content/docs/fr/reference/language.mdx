@@ -1,0 +1,106 @@
+---
+title: Référence du langage
+description: "La surface .flux — composants, records, signaux, closures, appels de vue, interpolation, opérateurs et types."
+type: reference
+sidebar:
+  order: 1
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+
+Cette page est la référence de la surface du langage `.flux`. Les extensions de grammaire et leur justification sont consignées comme ADR (la grammaire du parseur est normative dans les annexes de la spécification) ; cette page présente la surface que vous écrivez tous les jours.
+
+## Structure du programme
+
+Un fichier `.flux` contient des déclarations de niveau supérieur :
+
+| Déclaration | Syntaxe | Objet |
+| --- | --- | --- |
+| Composant | `compo Name(props…)` | Un composant UI avec un corps indenté |
+| Record | `record Name { field: Type, … }` | Un type de données avec des champs nommés |
+| Liaison const | `Name.field = expr` | Une constante de niveau supérieur (utilisée par `color.flux`, `font.flux`) |
+
+## Composants (`compo`)
+
+<Code lang="rust" code={`compo TaskRow(task: Task, tasks: List[Task])
+    Row gap: 8.0
+        Text text: task.label
+        Button text: "Remove", onPress: || { tasks.remove(task) }`} />
+
+- Un `compo` déclare des props typées en parenthèses et possède un corps indenté.
+- Les enfants s'indentent sous un appel de vue qui porte au moins une prop nommée — c'est ce qui permet à la grammaire délimitée par indentation de distinguer un bloc enfant d'un frère.
+- Les défauts de props s'écrivent inline : `enabled: Bool = true`.
+
+## Signaux d'état
+
+Deux formes équivalentes déclarent un signal réactif en haut d'un `compo` :
+
+<Code lang="rust" code={`compo Counter
+    $count: Int = 0            // forme sigil
+
+compo Counter2
+    state count: Int = 0       // forme mot-clé`} />
+
+Une assignation dans un handler écrit le signal. Les signaux écrits propagent à travers le graphe de dépendances, et seuls les nœuds dont les props lisent un signal écrit re-matérialisent — voir [état faisant autorité sur l'hôte](/explanation/reactivity/).
+
+## Valeurs dérivées (`let`)
+
+<Code lang="rust" code={`let total: Float = items * price`} />
+
+Un `let` déclare une liaison en lecture seule calculée depuis les signaux. Il recalcule quand un signal écrit l'atteint ; ne le reflétez pas dans un second signal.
+
+## Closures
+
+| Forme | Forme | Utilisée pour |
+| --- | --- | --- |
+| Zéro argument | `\|\| { count = count + 1 }` | Props de handler (`onPress`, `onChange`) |
+| Paramètre nommé | `fn(v) { newTask = v }` | Callbacks qui reçoivent la valeur d'événement |
+| Fonction key | `fn(t) { t.label }` | Clés `ForEach` |
+| Enfant lambda | `{ item => TaskRow(task: item, …) }` | Rendu d'élément `ForEach` |
+
+## Appels de vue et props
+
+Un appel de vue nomme un composant stdlib et porte des props nommées :
+
+<Code lang="rust" code={`TextInput text: $newTask, onChangeText: fn(v) { newTask = v }, placeholder: "What needs doing?"`} />
+
+- Les props sont des paires `name: value` séparées par des virgules sur une ligne.
+- `text: $signal` lie la prop à un signal dans les deux sens (utilisé par `TextInput`).
+- Les handlers sont des closures ; leurs corps compilent en bytecode que la VM hôte exécute.
+
+## Interpolation et opérateurs
+
+<Code lang="rust" code={`Text text: "tapped {count} times"`} />
+
+`{expr}` à l'intérieur d'un littéral de chaîne interpole une valeur dans la prop. La surface d'expression inclut l'arithmétique, la comparaison, le chaînage optionnel avec `?.`, et l'opérateur de repli `??` :
+
+<Code lang="rust" code={`Text text: name ?? "Loading..."`} />
+
+## Flux de contrôle : ForEach et routage
+
+<Code lang="rust" code={`ForEach(tasks, key: fn(t) { t.label }) { item => TaskRow(task: item, tasks: tasks) }
+Router initialRouteName: "tasks"
+    Screen route: "tasks"
+        …`} />
+
+`ForEach` rend une liste avec une fonction key ; `Router`/`Screen`/`RouterNav` pilotent la navigation. Voir le [guide de navigation](/guides/navigation/).
+
+## Types
+
+| Type | Écrit comme | Notes |
+| --- | --- | --- |
+| Primitives | `String`, `Int`, `Float`, `Bool` | |
+| Liste | `List[Task]` | Mutable via `append`/`remove`/`clear` |
+| Optionnel | `Option[String]` | Déballé avec repli `??` |
+| Record | types `record` déclarés | Accès de champ avec `.` |
+| Couleur | `Color` | Préréglages `red`/`green`/`blue`/`black`/`white` |
+| Police | `Font`, `Weight`, `Style` | Préréglages `body`/`title`/`caption` |
+
+Les types valeur stdlib vivent dans `stdlib/prelude.flux` (`Option`, `Alignment`, `Overflow`, `KeyboardType`, `ContentMode`, `Ref`, `Handler`) et `stdlib/traits.flux` (`Numeric`, `Eq`, `Show`).
+
+<Aside type="note">Les manques de grammaire dont la stdlib avait besoin — constantes de niveau supérieur `Name.field = expr`, défauts de props, littéraux de record en position de valeur, et noms de méthodes d'opérateur symboliques — sont tous fermés et consignés dans ADR-0037/ADR-0035 ; aucun manque ne reste ouvert.</Aside>
+
+## Étapes suivantes
+
+- [La référence stdlib](/reference/stdlib/) pour les props de chaque composant.
+- [La référence CLI](/reference/cli/) pour exécuter le langage.

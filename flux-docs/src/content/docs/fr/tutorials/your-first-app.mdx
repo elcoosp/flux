@@ -1,0 +1,131 @@
+---
+title: Votre première app Flux
+description: "Compilez la CLI Flux, échafaudez un projet, hot-reload d'un compteur sur une app hôte iOS ou Android, et livrez une release native — de bout en bout."
+type: tutorial
+sidebar:
+  order: 1
+---
+
+import { Aside, Code, LinkCard, Steps } from '@astrojs/starlight/components';
+
+Ce tutoriel vous emmène d'une machine propre à une UI Flux vivante en hot-reload sur un appareil ou simulateur réel, et se termine par un build release natif. Cela prend une dizaine de minutes.
+
+## Prérequis
+
+| Outil | Pourquoi vous en avez besoin | Vérification |
+| --- | --- | --- |
+| Rust (rustup) | Compile la CLI `flux` | `cargo --version` |
+| Xcode 16+ et XcodeGen | Lance l'app hôte iOS (cible iOS 16+) | `xcodegen version` |
+| Android Studio + JDK 17+ | Lance l'app hôte Android | `./gradlew --version` |
+
+Vous avez besoin de Xcode ou du SDK Android uniquement pour les apps hôtes. Tout du côté Rust — serveur de dev, parseur, differ, oracle VM, codegen — se compile et s'exécute sans eux.
+
+## 1. Compiler la CLI
+
+Depuis la racine du dépôt :
+
+<Code lang="bash" code={`git clone https://github.com/elcoosp/flux
+cd flux
+cargo build --bin flux`} />
+
+Cela produit `target/debug/flux`. Utilisez `cargo build --release --bin flux` pour un binaire plus rapide quand vous prévoyez de garder la CLI installée.
+
+Le premier build provisionne automatiquement la chaîne d'outils nightly épinglée via `rust-toolchain.toml`, donc vous ne sélectionnez pas de chaîne à la main.
+
+## 2. Échafauder un projet
+
+<Code lang="bash" code={`flux init myapp
+cd myapp`} />
+
+`flux init` écrit trois fichiers dans `myapp/` :
+
+<Code lang="text" code={`myapp/
+├── main.flux      # composant d'entrée : un compteur avec état
+├── flux.toml      # config du projet : nom, entrée, ports dev
+└── .fluxignore    # sortie de build et bruit VCS`} />
+
+Ouvrez `main.flux`. Il contient le compteur Flux canonique :
+
+<Code lang="rust" code={`compo Counter
+    $count: Int = 0
+
+    Column gap: 8.0
+        Text text: "tapped {count} times"
+        Button text: "Increment", onPress: || { count = count + 1 }`} />
+
+## 3. Lancer le serveur de dev
+
+<Code lang="bash" code={`flux dev`} />
+
+Vous verrez :
+
+<Code lang="text" code={`Listening on ws://127.0.0.1:7331`} />
+
+Le serveur de dev analyse et vérifie les types de chaque fichier `.flux`, abaisse le programme en Reactive Tree IR, et lie deux ports :
+
+- **WebSocket `:7331`** — le canal de patch vers les apps hôtes.
+- **HTTP `:7332`** — le serveur d'assets, avec une sonde `/health`.
+
+Vérifiez que le serveur est up dans un autre shell :
+
+<Code lang="bash" code={`curl http://127.0.0.1:7332/health`} />
+
+<Code lang="text" code={`ok`} />
+
+## 4. Lancer l'app hôte
+
+L'app hôte est du code natif précompilé qui se connecte au serveur de dev et rend l'IR qu'il reçoit. Choisissez votre plateforme.
+
+<Steps>
+
+1. **iOS.** Le projet hôte est généré avec XcodeGen :
+
+    <Code lang="bash" code={`# depuis la racine du dépôt
+xcodegen generate            # écrit runtimes/ios/FluxApp.xcworkspace
+open runtimes/ios/FluxApp.xcworkspace`} />
+
+    Choisissez un simulateur ou un appareil connecté dans Xcode et appuyez sur **Run**. L'app se connecte à `ws://127.0.0.1:7331` et rend votre `Counter`.
+
+2. **Android.** Compilez et installez l'hôte sur un émulateur ou appareil connecté :
+
+    <Code lang="bash" code={`# depuis la racine du dépôt
+./gradlew :runtimes:android:app:installDebug`} />
+
+    Lancez **Flux** depuis le lanceur. Il se connecte à `ws://127.0.0.1:7331` et rend la même UI.
+
+</Steps>
+
+Tapez sur **Increment** dans l'app en cours d'exécution. Le libellé se met à jour — et l'étape suivante montre que vous ne recompilez jamais pour le changer.
+
+## 5. Éditer et voir le hot-reload
+
+Ouvrez `main.flux` et changez le libellé du `Text` :
+
+<Code lang="rust" code={`Text text: "tapped {count} times — wow"`} />
+
+Sauvegardez le fichier. Le serveur de dev diffe l'arbre et livre un patch binaire sur le WebSocket, et l'hôte se met à jour en place. Vous ne quittez jamais l'app en cours, et vous ne reconstruisez jamais l'hôte.
+
+Une édition de corps de handler coûte typiquement quelques centaines d'octets sur le fil, parce que les props et les closures sont adressées par contenu avec BLAKE3 et mises en cache sur l'hôte après la première trame `Init`.
+
+## 6. Construire une release native
+
+Quand vous voulez du vrai SwiftUI ou Jetpack Compose au lieu du chemin de patch dev :
+
+<Code lang="bash" code={`flux build ios       # -> platforms/ios/Generated/main.swift
+flux build android   # -> platforms/android/Generated/main.kt`} />
+
+`flux build` abaisse votre `.flux` en source native idiomatique sans VM. Si `xcodebuild` ou `gradle` est présent sur votre machine, il suggère l'étape de build suivante ; sinon il émet les sources générées que vous compilez.
+
+## Ce que vous avez appris
+
+- `flux init` échafaude un projet ; `flux dev` le sert sur `:7331`/`:7332`.
+- Les apps hôtes rendent et hot-reloadent sur le canal de patch WebSocket.
+- `flux build ios|android` émet SwiftUI et Jetpack Compose depuis le même IR — dev et release sont un seul programme, vérifié par le harnais de parité.
+
+<Aside type="tip">Les appareils physiques ne peuvent pas atteindre `127.0.0.1`. Voir le [guide du serveur de dev](/guides/dev-server/) pour l'exposition LAN et les jetons d'appairage.</Aside>
+
+## Étapes suivantes
+
+Construisez l'app todo de zéro pour pratiquer les listes, le routage et les capacités :
+
+<LinkCard title="Construire l'app todo" href="/tutorials/todo-app/" description="Un tutoriel guidé à travers la vraie app examples/todo : records, listes, routage et capacités." />

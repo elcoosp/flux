@@ -1,0 +1,93 @@
+---
+title: Gérer l'état
+description: "Des motifs sur le graphe de signaux Flux — signaux locaux, valeurs dérivées, stores partagés, inputs contrôlés, et données asynchrones via capacités."
+type: how-to
+sidebar:
+  order: 2
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+
+Flux rend depuis un graphe de signaux réactif. Chaque déclaration `state` est un signal, et une assignation dans un handler est toute la mise à jour : l'UI recalcule seulement les nœuds qui lisent le signal écrit. Ce guide donne des motifs copier-coller pour les formes que vous rencontrez au-delà du compteur.
+
+## Déclarer un état local
+
+Déclarez un signal en haut d'un `compo` :
+
+<Code lang="rust" code={`compo Counter
+    state count: Int = 0
+    Column gap: 8.0
+        Text text: "tapped {count} times"
+        Button text: "Increment", onPress: || { count = count + 1 }`} />
+
+Le raccourci `$count: Int = 0` est équivalent — vous le rencontrez dans le squelette et dans `examples/counter`. Les deux formes créent le même signal ; choisissez un style par base de code et gardez-le.
+
+Il n'y a pas de `setState` séparé. L'assignation *est* la mise à jour, et l'assignation dans un handler propage à travers le graphe de dépendances avant que l'hôte ne réconcilie l'ensemble sale.
+
+## Dériver des valeurs au lieu de les stocker
+
+Une valeur calculée depuis d'autres signaux doit être dérivée, pas stockée — deux signaux qui peuvent diverger sont un bug que vous n'avez pas encore rencontré. Déclarez-la comme un `let` en lecture seule calculé depuis les signaux :
+
+<Code lang="rust" code={`compo Cart
+    state items: Int = 3
+    state price: Float = 9.99
+    let total: Float = items * price   // recalculé quand items ou price change
+    Column
+        Text text: "Total: {total}"`} />
+
+La dérivation recalcule quand un signal écrit l'atteint, et seules les feuilles qui lisent `total` recomposent.
+
+## Lier un champ de texte dans les deux sens
+
+`TextInput` est contrôlé : liez le signal avec `$` et réécrivez la valeur tapée dans `onChangeText` :
+
+<Code lang="rust" code={`compo Composer
+    state draft: String = ""
+    Column gap: 8.0
+        TextInput text: $draft, onChangeText: fn(v) { draft = v }, placeholder: "Say something"
+        Button text: "Clear", onPress: || { draft = "" }`} />
+
+La liaison `$draft` garde le champ et le signal en verrouillage, donc le bouton Clear vide le champ en assignant le signal.
+
+## Partager l'état entre composants
+
+Flux n'a pas de widget provider/context. Pour l'état partagé entre composants, élevez un composant store au-dessus de ses consommateurs et passez les valeurs vers le bas comme props :
+
+<Code lang="rust" code={`compo SessionStore
+    state token: Option[String] = None
+    // les actions sont des handlers qui écrivent les signaux du store
+
+compo App
+    SessionStore
+        // les enfants lisent token/user via props passées d'ici`} />
+
+Gardez les stores petits et explicites — un store par domaine (auth, panier, paramètres), monté à la `Router` ou `Screen` racine qui en a besoin. Le graphe de signaux est partagé à travers toute l'app, donc un store monté haut est visible à tout ce qui est monté en dessous.
+
+## Charger des données asynchrones via une capacité
+
+Les handlers restent synchrones ; le travail asynchrone passe par un appel de capacité qui renvoie une cellule de résultat (`Ready` / `Pending` / `Error`). Une capacité asynchrone laisse la cellule à `Pending`, et un resolver injecté la règle quand la plateforme répond :
+
+<Code lang="rust" code={`compo Profile
+    state name: Option[String] = None
+    Column gap: 8.0
+        Text text: name ?? "Loading..."
+        Button text: "Load", onPress: || {
+            // appelle la capacité ; la cellule de résultat se règle et met à jour \`name\`
+        }`} />
+
+L'opérateur `??` rend le repli tant que la cellule est en attente. Voir [Capacités](/guides/capabilities/) pour la surface d'appel et la gestion de permission.
+
+<Aside type="caution">N'écrivez jamais de signaux et ne mutez jamais l'arbre d'ombre en dehors du répartiteur réactif. Les résultats de capacité sont ramenés sur le répartiteur pour vous — gardez-le ainsi.</Aside>
+
+## Résumé des motifs
+
+- **Local** : `state` (ou `$`) plus assignation dans un handler.
+- **Calculé** : un `let` dérivé des signaux, jamais un second signal.
+- **Partagé** : un `compo` store élevé au-dessus de ses consommateurs ; valeurs comme props.
+- **Input** : `$binding` sur `TextInput` plus `onChangeText`.
+- **Asynchrone** : appel de capacité → cellule de résultat → mise à jour de signal à la résolution.
+
+## Étapes suivantes
+
+- [Navigation](/guides/navigation/) pour les apps multi-écrans qui partagent de l'état.
+- [État faisant autorité sur l'hôte](/explanation/reactivity/) pour l'invariant qui fait qu'un tap coûte une mise à jour, indépendamment de la taille de l'arbre.

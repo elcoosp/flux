@@ -1,0 +1,144 @@
+---
+title: Construire l'app todo
+description: "Recréez pas à pas la vraie app examples/todo — records, état List, ForEach à clé, champ de texte contrôlé, routage, et un appel de capacité Storage."
+type: tutorial
+sidebar:
+  order: 2
+---
+
+import { Aside, Code, LinkCard } from '@astrojs/starlight/components';
+
+Ce tutoriel reconstruit l'app todo livrée à
+[`examples/todo/`](https://github.com/elcoosp/flux/tree/main/examples/todo).
+En chemin vous utilisez des records, l'état de liste, l'itération par clé, un champ de texte contrôlé, deux écrans routés, et un appel de capacité. Vous avez besoin d'une installation fonctionnelle du [tutoriel de la première app](/tutorials/your-first-app/) — la CLI compilée et une app hôte lançable.
+
+## 1. Créer le projet et le modèle de données
+
+<Code lang="bash" code={`flux init todo
+cd todo`} />
+
+Remplacez le contenu de `main.flux` par le modèle de données : un type `record` et un composant de ligne qui rend une tâche.
+
+<Code lang="rust" code={`record Task { label: String, done: Bool, }
+
+compo TaskRow(task: Task, tasks: List[Task])
+    Row gap: 8.0
+        Text text: task.label
+        Button text: "Remove", onPress: || { tasks.remove(task) }`} />
+
+Un `record` déclare un type de données avec des champs nommés. `TaskRow` montre les deux façons dont les composants reçoivent des données : la tâche rendue arrive comme prop, et la liste propriétaire arrive comme seconde prop pour que le handler Remove puisse la muter.
+
+## 2. Déclarer l'état de l'app
+
+Ajoutez le composant racine. Ses déclarations `state` créent des signaux — les cellules réactives que toute l'UI lit.
+
+<Code lang="rust" code={`compo TodoApp
+    state tasks: List[Task] = [
+        Task(label: "Buy milk", done: false),
+        Task(label: "Walk dog", done: false),
+    ]
+    state newTask: String = ""`} />
+
+- `tasks` tient le modèle de liste. La valeur initiale est une liste de littéraux de record.
+- `newTask` adosse le champ de texte. L'assigner dans un handler met à jour chaque nœud qui le lit — rien d'autre ne re-rend.
+
+## 3. Disposer le premier écran avec routage
+
+Enveloppez l'UI dans `Router` / `Screen`. L'hôte n'affiche que l'écran dont la prop `route` correspond à la route active.
+
+<Code lang="rust" code={`compo TodoApp
+    // ...déclarations d'état de l'étape 2...
+
+    Router initialRouteName: "tasks"
+        Screen route: "tasks"
+            Column gap: 12.0
+                Text text: "Flux To-Do"
+                Row gap: 8.0
+                    TextInput text: $newTask,
+                        onChangeText: fn(v) { newTask = v },
+                        placeholder: "What needs doing?"
+                    Button text: "Add", onPress: || {
+                        tasks.append(Task(label: newTask, done: false))
+                        newTask = ""
+                    }`} />
+
+Trois détails comptent :
+
+- **`TextInput` est contrôlé.** `text: $newTask` lie le champ au signal dans les deux sens, et `onChangeText` réécrit la valeur tapée. Vous réinitialisez le champ en assignant `newTask = ""` dans le handler Add.
+- **La mutation de liste est une assignation ordinaire.** `tasks.append(...)` est toute la mise à jour — il n'y a pas de `setState` séparé.
+- **Un appel de vue ne possède un bloc enfant indenté que quand il porte au moins une prop nommée.** `Router initialRouteName: "tasks"` déclare `initialRouteName`, donc ses enfants `Screen` s'indentent en dessous.
+
+## 4. Rendre la liste avec un ForEach à clé
+
+Sous la ligne de saisie, itérez sur les tâches :
+
+<Code lang="rust" code={`compo TodoApp
+    // ...état, Router, écran tasks des étapes 2-3...
+
+    Column gap: 8.0
+        ForEach(tasks, key: fn(t) { t.label }) {
+                        item => TaskRow(task: item, tasks: tasks)
+                    }`} />
+
+La fonction `key` identifie chaque élément à travers les éditions, donc le réconciliateur réordonne et patche les lignes existantes en place — il ne reconstruit pas la liste à chaque changement. Parce que `TaskRow` reçoit aussi `tasks`, son handler Remove peut appeler `tasks.remove(task)` et le diff à clé retire exactement cette ligne.
+
+## 5. Reset via une capacité
+
+Ajoutez un bouton Reset qui vide la liste et la copie persistée :
+
+<Code lang="rust" code={`compo TodoApp
+    // ...écran tasks des étapes 2-4...
+
+    Button text: "Reset", onPress: || {
+        tasks.clear()
+        Storage.removeItem(key: "todos")
+    }`} />
+
+`Storage` est une **capacité** — un service de plateforme déclaré dans la stdlib et résolu identiquement sur le serveur et sur les deux hôtes. `Storage.removeItem` (capacité 2, méthode 3) atteint l'hôte, et si la permission OS derrière est refusée, l'appel rapporte une erreur au lieu de planter.
+
+## 6. Ajouter le second écran
+
+Terminez avec l'écran About et ses handlers de navigation :
+
+<Code lang="rust" code={`compo TodoApp
+    // ...écran tasks des étapes 2-5...
+    Button text: "About", onPress: || { RouterNav.navigate("about") }
+
+    // Second écran :
+
+    Screen route: "about"
+        Column gap: 12.0
+            Text text: "About"
+            Text text: "A real Flux app"
+            Button text: "Back",
+                onPress: || { RouterNav.navigate("tasks") }`} />
+
+`RouterNav.navigate("about")` pilote l'écran visible. Le nom de prop `route` fait partie du contrat d'adaptateur — l'hôte le lit par son nom haché, donc il doit être exactement `route`.
+
+## 7. Lancer
+
+Lancez le serveur de dev depuis le répertoire du projet et ouvrez l'app hôte :
+
+<Code lang="bash" code={`flux dev                 # WebSocket sur :7331`} />
+
+Pointez l'hôte iOS ou Android sur `ws://127.0.0.1:7331` (voir
+[lancer l'app hôte](/tutorials/your-first-app/#4-run-the-host-app) si vous avez besoin des étapes de plateforme). Ajoutez des tâches, retirez-en une, basculez vers l'écran About et revenez, puis appuyez sur Reset.
+
+## 8. Livrer les formes release
+
+Générez les sources natives pour les deux plateformes :
+
+<Code lang="bash" code={`flux build ios       # -> platforms/ios/Generated/main.swift
+flux build android   # -> platforms/android/Generated/main.kt`} />
+
+Le code SwiftUI et Compose généré rend les mêmes écrans que vous avez lancés en dev — le harnais de parité prouve que les deux chemins restent équivalents.
+
+<Aside type="note">Le source complet de cette app vit à
+`examples/todo/main.flux` dans le dépôt, avec les exemples `counter` et
+`router`. Chaque exemple fait aussi office de test d'intégration en CI.</Aside>
+
+## Étapes suivantes
+
+- [Gestion d'état](/guides/state-management/) — motifs pour les valeurs dérivées et les stores partagés.
+- [Navigation](/guides/navigation/) — Router, Screen et RouterNav en profondeur.
+- [Capacités](/guides/capabilities/) — la surface complète de capacités et la gestion de permission.

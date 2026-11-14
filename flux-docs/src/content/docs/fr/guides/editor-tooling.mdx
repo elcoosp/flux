@@ -1,0 +1,53 @@
+---
+title: Installer l'outillage d'éditeur
+description: "Installez l'extension VS Code et utilisez flux lsp pour les diagnostics de parse et de types sur les sources .flux."
+type: how-to
+sidebar:
+  order: 6
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+
+Flux livre un serveur de langage (`flux-lsp`, construit sur `async-lsp`) et une extension VS Code qui l'enveloppe. Ensemble ils vous donnent la coloration syntaxique, les diagnostics, le statut de hot-reload, et une exécution en un clic sur appareil.
+
+## Installer l'extension VS Code
+
+L'extension vit dans le dépôt à
+[`editors/vscode/`](https://github.com/elcoosp/flux/tree/main/editors/vscode) :
+
+<Code lang="bash" code={`cd editors/vscode
+pnpm install`} />
+
+Ouvrez le dossier dans VS Code et lancez-le comme hôte de développement d'extension (appuyez sur `F5`), ou packagez-le avec `vsce` et installez le `.vsix` produit. L'extension embarque la grammaire TextMate de Flux — la même grammaire que ce site de docs utilise pour les blocs de code `flux` — donc la coloration correspond à la vue de la CLI du langage.
+
+Pendant que l'extension est active, vous obtenez :
+
+- **Coloration syntaxique** pour les sources `.flux`.
+- **Diagnostics** poussés depuis les vérifications de parse et de types.
+- **Statut de hot-reload** pour le serveur de dev connecté.
+- **« Run on device »** pour pointer le projet courant vers un hôte connecté.
+
+## Obtenir des diagnostics depuis la CLI
+
+Les mêmes diagnostics sont disponibles sans tête via `flux lsp`. Il analyse et vérifie les types d'un fichier et imprime les trouvailles en JSON :
+
+<Code lang="bash" code={`flux lsp src/main.flux`} />
+
+La sortie porte le message, le span et l'indice de chaque diagnostic, donc vous pouvez la rediriger dans votre outillage de revue :
+
+<Code lang="json" code={`{ "diagnostics": [ { "message": "expected \`Int\`, got \`String\`", "span": { "file": "src/main.flux", "start": 214, "end": 228 }, "hint": "\`count\` was inferred as Int at line 18" } ] }`} />
+
+Sur de grands fichiers où vous n'avez besoin que des erreurs de syntaxe, sautez le vérificateur de types :
+
+<Code lang="bash" code={`flux lsp src/main.flux --no-types`} />
+
+## Comment les diagnostics atteignent votre éditeur
+
+Chaque erreur que Flux produit porte un `Span` source — fichier, ligne et colonne — ce qui rend l'intégration d'éditeur utile : vous obtenez des diagnostics positionnés au caret au lieu d'un dump de journal. Le [guide de dépannage](/guides/troubleshooting/) explique ce que signifie chaque classe de diagnostic et comment la corriger.
+
+<Aside type="tip">Lancez `flux doctor` quand une session d'éditeur se comporte bizarrement. Il vérifie la chaîne d'outils, la santé du parse de stdlib, et la version du protocole filaire en un coup.</Aside>
+
+## Étapes suivantes
+
+- [Formatage et portails CI](/guides/formatting-and-ci/) pour garder les sources canoniques avant la revue.
+- [Référence CLI](/reference/cli/) pour la surface complète de `flux lsp`.

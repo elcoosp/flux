@@ -1,0 +1,51 @@
+---
+title: Référence flux.toml
+description: "Le manifeste de projet Flux — nom et entrée du projet, ports du serveur de dev et configuration du jeton d'appairage."
+type: reference
+sidebar:
+  order: 4
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+
+`flux.toml` est le manifeste de projet à la racine de chaque projet Flux. Il configure la CLI et le serveur de dev, et il est versionné avec votre projet pour que chaque contributeur ait les mêmes ports et réglages.
+
+## Format
+
+<Code lang="toml" code={`[project]
+name = "todo"
+entry = "main.flux"
+
+[dev]
+ws_port = 7331
+http_port = 7332`} />
+
+## Clés
+
+### `[project]`
+
+| Clé | Type | Défaut | Description |
+| --- | --- | --- | --- |
+| `name` | string | — | Nom du projet |
+| `entry` | string | — | Le fichier `.flux` d'entrée, généralement `main.flux` |
+
+### `[dev]`
+
+| Clé | Type | Défaut | Description |
+| --- | --- | --- | --- |
+| `ws_port` | integer | `7331` | Port du canal de patch WebSocket |
+| `http_port` | integer | `7332` | Port du serveur d'assets HTTP (sert `/health`) |
+| `token` | string | non défini | Jeton d'appairage que les hôtes doivent présenter dans la poignée de main `Hello` |
+
+`flux dev` lit ces valeurs, et ses drapeaux `--ws-port` / `--http-port` / `--token` les surchargent pour une seule exécution.
+
+## Jetons d'appairage
+
+Les hôtes lisent leur jeton depuis la variable d'environnement `FLUX_DEV_TOKEN` ou depuis `[dev] token` dans ce fichier, et le présentent pendant la poignée de main `Hello` quand le serveur a été lancé avec `--token`. Réglez le même secret aux deux endroits quand vous exposez le serveur de dev sur un LAN — voir le [guide du serveur de dev](/guides/dev-server/).
+
+<Aside type="caution">Un jeton dans `flux.toml` est versionné avec le projet. Pour tout au-delà d'un secret d'appairage local et jetable, préférez `FLUX_DEV_TOKEN` dans votre shell ou la configuration de l'appareil.</Aside>
+
+## Étapes suivantes
+
+- [Référence CLI](/reference/cli/) pour les drapeaux qui surchargent ces clés.
+- [Référence du protocole filaire](/reference/wire-protocol/) pour la poignée de main que le jeton garde.

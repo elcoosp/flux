@@ -1,0 +1,75 @@
+---
+title: Utiliser les capacités de la plateforme
+description: "Appelez Camera, Storage, Router, Clipboard et Location à travers le contrat de capacités versionné — cellules de résultat, barrière de permission et gestion d'erreur."
+type: how-to
+sidebar:
+  order: 4
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+
+Les services de plateforme — stockage, caméra, presse-papiers, localisation — ne sont pas compilés dans votre arbre UI. Ce sont des **capacités** : des contrats versionnés avec des identifiants stables et dérivés de façon déterministe, résolus identiquement sur le serveur de dev et sur les deux hôtes natifs. Ce guide montre comment les appeler et comment leurs erreurs font surface.
+
+## La surface de capacités
+
+Les identifiants stables de capacités sont déclarés dans
+[`stdlib/capabilities.flux`](https://github.com/elcoosp/flux/blob/main/stdlib/capabilities.flux)
+et reflétés par les registres de capacités des hôtes :
+
+| Capacité | ID | Méthode exemple |
+| --- | --- | --- |
+| `Camera` | 1 | capture |
+| `Storage` | 2 | `removeItem` (méthode 3) |
+| `Router` | 3 | `navigate` (méthode 1 — pilote l'écran visible) |
+| `Clipboard` | 4 | copy / paste |
+| `Location` | 5 | position courante |
+| … | jusqu'à 11 | voir `stdlib/capabilities.flux` |
+
+Les ids de capacité sont dérivés de façon déterministe et jamais assignés à la main — un id assigné à la main désynchronise les registres du serveur et des hôtes et fait échouer les gardes de parité en CI.
+
+## Appeler une capacité depuis un handler
+
+`CALL_CAP` est le mécanisme ; vous y accédez via la surface stdlib. Le bouton Reset de l'app todo vide la liste et retire la copie persistée :
+
+<Code lang="rust" code={`Button text: "Reset", onPress: || {
+    tasks.clear()
+    Storage.removeItem(key: "todos")
+}`} />
+
+`Storage.removeItem` est la capacité 2, méthode 3. L'appel porte ses arguments comme un record et renvoie une **cellule de résultat** :
+
+| État de cellule | Signification |
+| --- | --- |
+| `Ready` | L'appel s'est terminé ; la valeur est disponible. |
+| `Pending` | Une capacité asynchrone est en vol ; rendez votre état de chargement. |
+| `Error` | L'appel a échoué ou a été refusé ; l'erreur porte la raison. |
+
+Une capacité synchrone règle la cellule avant le retour de l'appel. Une asynchrone la laisse à `Pending`, et un `AsyncResolver` injecté la règle quand la plateforme répond — le résultat est ramené sur le répartiteur réactif, donc vous n'écrivez jamais de signaux depuis un thread d'arrière-plan vous-même.
+
+## Rendre les états pending et error
+
+Parce que la cellule est une valeur du graphe de signaux, vous rendez ses états avec des expressions ordinaires :
+
+<Code lang="rust" code={`compo Profile
+    state name: Option[String] = None
+    Column gap: 8.0
+        Text text: name ?? "Loading..."`} />
+
+Le repli `??` couvre `Pending` et les résultats vides. Pour une gestion d'erreur explicite, branchez sur l'état de la cellule et faites surface la raison dans votre UI — les erreurs de capacité sont de la donnée, pas des exceptions.
+
+## Gérer le refus de permission
+
+Les capacités derrière des permissions OS (Camera, Location, Notifications) rapportent un refus via le chemin d'erreur. L'appel **ne fait jamais planter** l'app :
+
+- L'hôte fait surface la demande de permission système quand la capacité en a besoin.
+- Un appel refusé rend un bandeau rouge sur l'appareil et enregistre une erreur dans la trace ; l'appel refusé ne s'exécute pas.
+- Re-invoquez le handler après que l'utilisateur a accordé la permission.
+
+La charge d'erreur nomme le `cap_id` / `method_id` numérique, le `cap_name` / `method_name` résolu quand enregistré, la permission OS requise, et un `why` lisible — voir le [guide de dépannage](/guides/troubleshooting/) pour les formes complètes.
+
+<Aside type="note">La surface canonique lisible par machine est émise par la CLI : `flux doc` imprime le schéma JSON de l'API stdlib, capacités incluses. Gardez-le ouvert pendant que vous câblez des appels.</Aside>
+
+## Étapes suivantes
+
+- [Référence des capacités](/reference/capabilities/) pour les tables id/méthode et le modèle de cellule de résultat.
+- [Gestion d'état](/guides/state-management/) pour les motifs de données asynchrones construits sur les cellules de résultat.

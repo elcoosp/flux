@@ -1,0 +1,65 @@
+---
+title: Migrer depuis Flutter
+description: "Une carte honnête des widgets Flutter vers les primitives Flux — mise en page, état, asynchrone — et les manques que Flux ne couvre pas encore."
+type: how-to
+sidebar:
+  order: 10
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Si vous venez de Flutter, le modèle de composant déclaratif de Flux semble familier : un arbre de composants, recalculé depuis l'état. Les différences sont structurelles — Flux scinde la mise en page en un petit ensemble de primitives, garde l'état dans des signaux, et livre du code natif au lieu d'un moteur de rendu. Ce guide mappe les concepts et nomme les manques franchement.
+
+## Carte widget → composant
+
+| Flutter | Flux | Notes |
+| --- | --- | --- |
+| `Column(children: [...])` | `Column` | `gap` remplace les espaceurs `SizedBox` entre enfants |
+| `Row(children: [...])` | `Row` | Idem, horizontal |
+| `Text('...')` | `Text` | Interpolez des signaux avec `{expr}` |
+| `ElevatedButton` / `TextButton` | `Button` | `onPress` prend une closure `Handler` |
+| `TextField` | `TextInput` | Contrôlé : `text: $binding`, `onChangeText` |
+| `Image.asset(...)` | `Image` | `source` prend un chemin d'asset |
+| `Navigator` / `MaterialPageRoute` | `Router` + `Screen` | `RouterNav.navigate` échange les écrans |
+| `Stack` | `Stack` | Même nom, même idée |
+| `GridView` | `Grid` | Props `columns` et `gap` |
+| `Scaffold` | Composez-le | Assemblez vous-même une racine `Column`/`Row` |
+| `Container` / `Padding` | Props de composant + `gap` | Pas de widget padding autonome |
+
+## État
+
+| Flutter | Flux |
+| --- | --- |
+| `StatefulWidget` + `setState` | `compo` avec signaux `state` ; assignez dans un handler |
+| `ValueNotifier` / `ChangeNotifier` | Un signal ; un `let` dérivé remplace `Selector` |
+| `InheritedWidget` / `Provider` | Un `compo` store élevé au-dessus des consommateurs ; valeurs comme props |
+| `FutureBuilder` | Un appel de capacité renvoyant une cellule de résultat (`Ready`/`Pending`/`Error`) |
+| `StreamBuilder` | Pas encore ; les données asynchrones passent par les capacités |
+
+Le basculement mental : pas de danse « rebuild en cours ». L'assignation écrit un signal, l'ensemble sale est calculé depuis le graphe de dépendances, et seules les feuilles affectées recomposent. Voir [gestion d'état](/guides/state-management/).
+
+## Listes et clés
+
+| Flutter | Flux |
+| --- | --- |
+| `ListView` sur des données | `ForEach(tasks, key: fn(t) { t.label }) { item => … }` |
+| `Key` / `ValueKey` | L'argument `key` fonction |
+| Muter la liste + `setState` | `tasks.append(...)` / `tasks.remove(task)` / `tasks.clear()` |
+
+La réconciliation par clé fait correspondre les enfants par node ID, donc les lignes se réordonnent et patchent en place — les positions de défilement et le contenu des champs survivent aux éditions.
+
+## Ce que Flux ne couvre pas encore
+
+- **Le catalogue complet de widgets.** Seules les primitives stdlib existent ; les widgets thématisés plus riches (cartes, chips) sont un élément de roadmap design-tokens/thématisation.
+- **Animations implicites.** Les primitives d'animation sont un élément de roadmap ; aujourd'hui vous pilotez les valeurs via des signaux. Une primitive `Animate` existe pour les courbes et durées pilotées par signal.
+- **Cibles web et desktop.** Flux rend nativement sur iOS et Android uniquement. Pour du contenu web embarqué il y a une primitive `WebHost`.
+- **Profondeur de style.** Pas d'objets `style` arbitraires ; la mise en page passe par `gap`/`alignment` et les props de chaque composant.
+
+Pour les écrans courants — formulaires, navigation, listes, données adossées à des capacités — Flux couvre le terrain. Là où un manque mord, tendez la main vers l'échappatoire `WebHost` ou attendez l'élément de roadmap plutôt que de vous battre avec le système de mise en page.
+
+<Aside type="note">Vous venez plutôt de React Native ? Le mapping est dans [Migrer depuis React Native](/guides/migrate-from-rn/).</Aside>
+
+## Étapes suivantes
+
+- [Construire l'app todo](/tutorials/todo-app/) pour exercer les concepts mappés dans une vraie app.
+- [La référence stdlib](/reference/stdlib/) pour les props de chaque primitive.

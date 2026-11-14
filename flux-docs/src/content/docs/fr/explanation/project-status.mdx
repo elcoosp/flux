@@ -1,0 +1,51 @@
+---
+title: Statut du projet
+description: "Ce qui est vérifié et exécutable dans Flux aujourd'hui — le chemin hot-reload dev, le codegen release, l'outillage — et ce qui converge encore."
+type: explanation
+sidebar:
+  order: 5
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Flux est en développement actif, et le projet distingue délibérément ce qui est prouvé de ce qui converge. Cette page suit la différence.
+
+## Ce qui fonctionne aujourd'hui
+
+- **Serveur de dev (`flux dev`)** — lie un canal de patch WebSocket sur `:7331` et un serveur d'assets HTTP sur `:7332` avec une sonde `/health`. Les sauvegardes sont diffées et livrées comme patches binaires ; vérifié en direct contre les exemples du dépôt.
+- **Applications hôtes (iOS et Android)** — hôtes natifs précompilés qui se connectent au serveur de dev, exécutent la VM bytecode embarquée et réconcilient un arbre d'ombre de vues natives. La connexion par défaut est `ws://127.0.0.1:7331`.
+- **CLI** — `flux init` / `dev` / `build` / `fmt` / `lsp` / `doc` / `doctor`, tous documentés dans la [référence CLI](/reference/cli/).
+- **Codegen release** — `flux build ios|android` abaisse `.flux` en SwiftUI et Jetpack Compose idiomatiques, piloté par l'émetteur data-driven partagé avec des ponts node-ID sur les deux backends.
+- **Serveur de langage et outillage d'éditeur** — `flux-lsp` plus l'extension VS Code avec coloration, diagnostics, statut de hot-reload et exécution sur appareil.
+- **Application de bureau DevTools** — une interface gpui rendant la télémétrie en direct sur le même protocole filaire.
+- **Harnais de parité** — capture, réduction et vérification d'équivalence de traces entre l'exécution VM dev et la sortie de codegen release.
+- **Harnais de perf et budgets** — le budget Save → pixels et les budgets de latence par étage imposés par les benchmarks.
+
+## En convergence
+
+- **Étage dev déclaratif iOS** — le dev Android rend déjà à travers les mêmes composants déclaratifs que le codegen release émet ; l'étage dev iOS est impératif (UIKit) jusqu'à convergence, et cette migration est conditionnée par la mesure (ADR-0048).
+- **Convergence de nommage entre hôtes** — le nommage des adaptateurs et des capacités est aligné entre les hôtes sous une seule convention (ADR-0049).
+
+## Comment le projet prouve ses affirmations
+
+Chaque affirmation ci-dessus est adossée à un mécanisme, pas à une promesse :
+
+| Affirmation | Mécanisme |
+| --- | --- |
+| Dev et release sont le même programme | Vérification d'équivalence `flux-parity` en CI |
+| Les hôtes se comportent identiquement | Traces de réconciliation octet-identiques entre Swift et Kotlin |
+| La VM correspond à son contrat | 92 vecteurs ISA dorés partagés par Rust, Swift, Kotlin |
+| Le hot reload reste rapide | Harnais LANE-H avec budgets p50/p99 sur Save → pixels |
+| Les régressions échouent bruyamment | 19 workflows GitHub Actions gardent `main` |
+
+## Décisions d'architecture
+
+Chaque choix non évident est consigné comme ADR dans le dépôt sous
+[`docs/adr/`](https://github.com/elcoosp/flux/tree/main/docs/adr) — 40 enregistrements MADR jusqu'à ADR-0059, de la comptabilité de gaz au protocole filaire v3. Ils restent dans le dépôt (pas copiés dans ce site) pour que la source de vérité soit un fichier par décision, versionné à côté du code qui l'implémente.
+
+<Aside type="caution">Le projet ne livre pas d'interpréteur à l'exécution dans les builds release. Si une proposition en ajoute un, elle nécessite une ADR et un budget — l'artefact release est du code natif, point final.</Aside>
+
+## Étapes suivantes
+
+- [Dev vs release](/explanation/dev-vs-release/) — le raisonnement derrière les deux étages.
+- [Tests et benchmarks](/guides/testing-and-benchmarks/) — exécutez les mécanismes vous-même.

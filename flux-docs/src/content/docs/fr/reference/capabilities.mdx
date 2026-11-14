@@ -1,0 +1,61 @@
+---
+title: Référence des capacités
+description: "Le contrat de capacités versionné — ids stables, méthodes, cellules de résultat, barrière de permission, et comment les résultats asynchrones reviennent au graphe de signaux."
+type: reference
+sidebar:
+  order: 7
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Les services de plateforme sont exposés aux programmes `.flux` à travers un **contrat de capacités versionné** : un registre de capacités et de méthodes avec des ids numériques stables et dérivés de façon déterministe, résolus identiquement sur le serveur de dev et sur les deux hôtes natifs. Les déclarations vivent dans
+[`stdlib/capabilities.flux`](https://github.com/elcoosp/flux/blob/main/stdlib/capabilities.flux)
+et les registres d'hôtes les reflètent ; l'IDL est maintenu en phase par du code généré (ADR-0045, ADR-0058).
+
+## Ids de capacité
+
+| Capacité | ID | Méthode connue |
+| --- | --- | --- |
+| `Camera` | 1 | capture |
+| `Storage` | 2 | `removeItem` (méthode 3) |
+| `Router` | 3 | `navigate` (méthode 1) |
+| `Clipboard` | 4 | copy / paste |
+| `Location` | 5 | position courante |
+| … | jusqu'à 11 | voir `stdlib/capabilities.flux` |
+
+Les ids de capacité sont dérivés de façon déterministe et jamais assignés à la main — un id assigné à la main désynchronise les registres du serveur et des hôtes, et les gardes de parité font échouer le build quand les tables dérivent.
+
+Un appel de capacité dans le fil/la VM est `CALL_CAP` ; il porte les ids de capacité et de méthode plus le record d'arguments.
+
+## Cellules de résultat
+
+`CALL_CAP` renvoie un **signal de cellule de résultat**. La cellule fait partie du graphe réactif, donc vous rendez ses états avec des expressions ordinaires :
+
+| État | Signification | Rendu typique |
+| --- | --- | --- |
+| `Ready` | L'appel s'est terminé | La valeur |
+| `Pending` | Un appel asynchrone est en vol | `value ?? "Loading..."` |
+| `Error` | L'appel a échoué ou a été refusé | Votre UI d'erreur |
+
+Une capacité synchrone règle la cellule avant le retour de l'appel. Une capacité asynchrone la laisse à `Pending` et un `AsyncResolver` injecté la règle quand la plateforme répond (ADR-0044, ADR-0045).
+
+## Livraison asynchrone
+
+Les résultats asynchrones sont ramenés sur le répartiteur réactif par l'hôte — vous n'écrivez jamais de signaux depuis un thread d'arrière-plan. Quand une cellule se règle, l'hôte recalcule l'ensemble sale depuis le signal écrit exactement comme pour tout autre dispatch, et seuls les nœuds qui lisent la cellule recomposent.
+
+## Barrière de permission
+
+Les capacités adossées à des permissions OS (Camera, Location, Notifications) sont conditionnées par l'hôte :
+
+- L'hôte fait surface la demande de permission système quand requise.
+- Un appel refusé produit une **erreur de capacité** — il ne fait jamais planter l'app. L'appel refusé ne s'exécute pas, et l'hôte rend le bandeau rouge sur appareil.
+- La charge d'erreur nomme `cap_id` / `method_id`, le `cap_name` / `method_name` résolu, la permission OS requise, et un `why` lisible.
+
+Voir le [guide de dépannage](/guides/troubleshooting/) pour le chemin de correctif, et le [how-to des capacités](/guides/capabilities/) pour les motifs d'appel.
+
+<Aside type="note">`flux doc` imprime le schéma lisible par machine de la surface de capacités avec le reste de la stdlib — gardez-le ouvert pendant que vous câblez des appels.</Aside>
+
+## Étapes suivantes
+
+- [How-to des capacités](/guides/capabilities/) pour des motifs d'appel copier-coller.
+- [Référence du protocole filaire](/reference/wire-protocol/) pour comment les résultats de capacité voyagent.

@@ -1,0 +1,54 @@
+---
+title: Dev vs release
+description: "Pourquoi Flux a deux étages d'exécution sur un seul IR — patches interprétés pour la vivacité en dev, codegen natif pour zéro surcoût à l'exécution en release — et comment la parité est prouvée."
+type: explanation
+sidebar:
+  order: 3
+---
+
+import { Card, CardGrid, Aside } from '@astrojs/starlight/components';
+
+Flux a deux modes d'exécution. Les deux consomment le **même Reactive Tree IR** produit par la passe de lowering — ils diffèrent seulement dans la façon dont l'hôte transforme cet IR en pixels.
+
+## Mode dev — interprété et patché
+
+En dev, une **application hôte** précompilée est livrée sur l'appareil. Le serveur de dev analyse `.flux`, l'abaisse en Reactive Tree IR, le diffe contre l'arbre précédent, et livre des **patches binaires** sur un WebSocket. La VM bytecode à registres embarquée dans l'hôte et le graphe de signaux appliquent le patch et mutent un arbre d'ombre de vues natives.
+
+- Itération rapide : sauvegarde → diff → patch, sans recompiler l'app.
+- Introspection complète : la trame filaire, le résultat de la VM et la trace de réconciliation sont tous observables.
+- Le puits `trace` est gratuit en production (ADR-0027 INV-2) : aucun surcoût quand aucun driver n'est attaché.
+
+## Mode release — natif généré
+
+En release, le même IR est **généré** en Swift/SwiftUI et Kotlin/Jetpack Compose idiomatiques. Il n'y a pas de VM, pas de protocole de patch, pas d'arbre d'ombre — la sortie est une application native normale.
+
+<CardGrid>
+  <Card title="SwiftUI" icon="seti:swift">
+    `compo Counter` → `struct Counter: View`. `state` → `@State`.
+    `Column(gap:)` → `VStack(spacing:)`.
+  </Card>
+  <Card title="Jetpack Compose" icon="seti:kotlin">
+    `compo Counter` → `@Composable fun Counter()`. `state` →
+    `remember { mutableStateOf(...) }`. `Column(gap:)` →
+    `Column(verticalArrangement = spacedBy(...))`.
+  </Card>
+</CardGrid>
+
+## Pourquoi deux modes ?
+
+La boucle dev a besoin de vivacité (patcher, pas recompiler) ; le produit livré a besoin de zéro surcoût d'exécution (codegen natif). Garder un seul IR comme contrat signifie que l'expérience dev et le binaire release sont prouvablement le même programme — ce que le harnais de parité prouve exactement : il capture des traces des deux étages et vérifie leur équivalence en CI.
+
+## Statut des plateformes dans les étages
+
+Les deux hôtes convergent à des vitesses différentes, et le projet est explicite à ce sujet :
+
+- **Le dev Android rend déclarativement.** L'étage dev pilote les mêmes composants déclaratifs que le codegen release émet.
+- **Le dev iOS est encore impératif (UIKit).** La convergence vers l'étage déclaratif est conditionnée par la mesure (ADR-0048) — la migration a lieu quand les chiffres le soutiennent, pas par décret.
+- **La release est native sur les deux plateformes.** La sortie du codegen SwiftUI et Compose est l'artefact livré dans tous les cas.
+
+<Aside type="note">L'identité de nœud est ce qui rend les deux étages équivalents en pratique : les backends de codegen traversent les mêmes IDs de nœud stables que la VM dev a utilisés, donc les vues générées gardent l'identité exacte que le réconciliateur a matchée pendant le développement. Voir [Architecture](/explanation/architecture/).</Aside>
+
+## Étapes suivantes
+
+- [Livrer une release native](/guides/build-native/) — le how-to opérationnel.
+- [Statut du projet](/explanation/project-status/) — ce qui est vérifié aujourd'hui.

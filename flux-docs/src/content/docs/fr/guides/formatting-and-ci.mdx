@@ -1,0 +1,59 @@
+---
+title: Formater les sources et verrouiller la CI
+description: "Imposez le style canonique avec flux fmt --check, attrapez la dérive d'environnement avec flux doctor --strict, et gardez les portails fmt/clippy du dépôt au vert."
+type: how-to
+sidebar:
+  order: 7
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+
+Flux impose mécaniquement le style canonique et la santé d'environnement, donc les revues débattent du code au lieu du formatage. Ce guide couvre les trois portails que vous lancez avant d'ouvrir une PR.
+
+## Formater les sources `.flux`
+
+`flux fmt` formate les fichiers `.flux` au style canonique. Sans chemins, il formate `main.flux` à la racine du projet :
+
+<Code lang="bash" code={`flux fmt                       # formate main.flux en place
+flux fmt src/views.flux        # formate des fichiers précis`} />
+
+Verrouillez un pipeline avec `--check` : les fichiers sont vérifiés mais pas écrits, et le processus sort en non-zéro quand un fichier changerait :
+
+<Code lang="bash" code={`flux fmt --check`} />
+
+## Vérifier la santé de l'environnement
+
+`flux doctor` lance la vérification de santé de l'environnement : état de la chaîne d'outils, santé du parse de stdlib, version du protocole filaire, et — best effort — appareils et simulateurs connectés :
+
+<Code lang="bash" code={`flux doctor`} />
+
+Il lance aussi les vérifications structurelles locales : dérive de dépendances approuvées (le dépôt approuve les dépendances via ADR, et `flux doctor` rapporte la dérive non approuvée) et violations des règles maison documentées du dépôt.
+
+Utilisez `--strict` pour rendre les trouvailles consultatives bloquantes, pour que la commande puisse verrouiller un hook pre-commit :
+
+<Code lang="bash" code={`flux doctor --strict   # sort en non-zéro sur toute trouvaille`} />
+
+## Garder les portails Rust au vert
+
+Si vous touchez l'implémentation de Flux elle-même, la CI du dépôt attend un arbre propre par ces commandes — jamais un simple `cargo test` :
+
+<Code lang="bash" code={`cargo fmt -- --check
+cargo clippy -- -D warnings
+cargo nextest run
+cargo test --doc      # doctests : nextest ne les exécute pas`} />
+
+| Commande | Portail |
+| --- | --- |
+| `cargo fmt -- --check` | Formatage propre |
+| `cargo clippy -- -D warnings` | Aucun lint |
+| `cargo nextest run` | Suite complète (unitaire, propriété, instantané) |
+| `cargo test --doc` | Doctests |
+
+Les crates bibliothèque interdisent `unsafe_code`, le code de production ne contient ni `unwrap` / `expect` / `panic!`, et chaque erreur porte un `Span` source — les portails clippy et nextest sont la façon dont ces règles restent vraies.
+
+<Aside type="tip">`flux fmt --check` et `flux doctor --strict` sont bon marché. Câblez les deux dans un hook pre-commit et la CI échoue sur le formatage ou la dérive avant qu'un humain ne le voie.</Aside>
+
+## Étapes suivantes
+
+- [Tests et benchmarks](/guides/testing-and-benchmarks/) pour les cinq couches de test derrière `cargo nextest run`.
+- [Statut du projet](/explanation/project-status/) pour la carte des workflows CI.

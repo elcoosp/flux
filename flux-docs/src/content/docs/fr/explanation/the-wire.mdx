@@ -1,0 +1,45 @@
+---
+title: Le fil, expliqué
+description: "Pourquoi Flux parle en binaire sur WebSocket, comment l'adressage de contenu BLAKE3 garde les patches minuscules, et pourquoi l'ensemble sale décide de ce qui part."
+type: explanation
+sidebar:
+  order: 4
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Flux parle à l'hôte sur un **protocole filaire binaire** (Annexe D), pas du JSON. Cette page explique le raisonnement ; le layout au niveau des octets vit dans la [référence du protocole filaire](/reference/wire-protocol/).
+
+## Pourquoi binaire
+
+Le canal de patch transporte des trames à chaque sauvegarde — potentiellement plusieurs par minute pendant une session de hot-reload, chacune sur un appareil qui fait tourner votre UI en même temps. Un format texte dépenserait ses octets en guillemets, accolades et noms de champs. Le protocole binaire les dépense en structure :
+
+- Tous les entiers multi-octets sont little-endian.
+- Un en-tête fixe de 16 octets ouvre chaque trame : magie `0x465C5558` (`"FLUX"`), version, numéro de séquence, drapeaux, et les comptes d'entrées.
+- Les données variables suivent : patches, définitions de handlers et chaînes internées.
+
+## Pourquoi l'adressage de contenu
+
+Chaque prop, closure et nœud est adressé par contenu par un **hash BLAKE3**. Pour chaque élément d'une trame, le serveur vérifie le cache de l'hôte : si le hash est présent, il envoie seulement le hash de 8 octets ; sinon, il envoie les données complètes et l'hôte les met en cache.
+
+Les conséquences sont l'économie de patch que vous observez en pratique :
+
+- Après la trame `Init` initiale, plus de 90 % des props et closures sont des hits de cache.
+- Une édition de corps de handler coûte typiquement quelques centaines d'octets sur le fil.
+- Les chaînes internées sont livrées une fois dans un delta de table de chaînes et référencées par id ensuite.
+
+## Pourquoi l'ensemble sale décide
+
+Le serveur ne devine pas ce qui a changé. Il calcule
+`dirty = ⋃ dependents[S]` — l'union de chaque nœud qui dépend d'un signal écrit (ADR-0027) — et émet des patches **Update** adressés seulement aux nœuds sales, plus des patches structurels (`Insert` / `Remove` / `Reorder`) là où les props de contrôle ont réellement changé. Tout le reste reste hors de la trame, ce qui fait qu'un tap dans un arbre de 1 000 nœuds coûte une mise à jour.
+
+## Drapeaux et vivacité
+
+Les bits de drapeau de l'en-tête rendent le canal auto-descriptif : `full_tree` marque l'instantané initial, `heartbeat` garde la connexion observable, les trames `error` portent les états d'échec, et les drapeaux delta annoncent quelles tables (état, source maps, chaînes) accompagnent les patches. Un hôte qui ne peut pas supporter la version de protocole annoncée rejette la poignée de main plutôt que de mal interpréter les trames — le protocole v3 (ADR-0059) a élargi les préfixes de longueur des collections écrites par l'utilisateur à u32 précisément pour ce genre de discipline de compatibilité ascendante.
+
+<Aside type="note">L'application de bureau DevTools (`flux-devtools-ui`, basée sur gpui) s'abonne au même protocole filaire et en rend la télémétrie en direct — un protocole, deux consommateurs (ADR-0039, ADR-0041).</Aside>
+
+## Étapes suivantes
+
+- [Référence du protocole filaire](/reference/wire-protocol/) — les layouts normatifs, octet par octet.
+- [Jeu d'instructions de la VM](/reference/vm-isa/) — ce à quoi référencent les closures d'une trame.
