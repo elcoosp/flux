@@ -1,0 +1,56 @@
+---
+title: Comment nous avons conçu un compilateur d'interfaces mobiles à deux niveaux d'exécution
+date: 2026-11-15
+cover:
+  alt: Architecture de Flux
+  image: ../../blog/welcome-cover.jpg
+image: ../../blog/welcome-cover.jpg
+---
+
+import { Card, CardGrid, Aside } from '@astrojs/starlight/components';
+
+Les boîtes à outils d'interfaces mobiles imposent généralement un mauvais compromis. Soit vous embarquez un moteur d'exécution JavaScript pour profiter d'un rechargement rapide, soit vous compilez directement vers des composants natifs et attendez Xcode et Gradle à chaque ajustement de marge.
+
+Nous avons conçu Flux pour séparer la vitesse d'itération de la génération en production grâce à une représentation intermédiaire réactive unique (Reactive Tree IR).
+
+## L'objectif
+
+Nous voulions un langage d'interface unique (`.flux`) capable d'émettre du code SwiftUI et Jetpack Compose idiomatique pour les builds de production, tout en mettant à jour un écran de téléphone en direct via WebSocket pendant le développement. Modifier une mise en page devait préserver l'état local — comme la position du curseur ou le défilement — sans recompiler l'application hôte native.
+
+## L'architecture
+
+Le compilateur est un workspace Rust de 16 crates (~63 000 lignes de code) associé à des kits hôtes natifs en Swift et Kotlin. Chaque fichier frontend est abaissé vers `flux-ir`, qui se divise en deux chemins d'exécution.
+
+<CardGrid stagger>
+  <Card title="Niveau Dev (VM à registres)" icon="laptop">
+    `flux-differ` calcule des différences structurelles et envoie des patchs binaires MessagePack via WebSocket. Une VM compacte met à jour un arbre fantôme natif sur l'appareil.
+  </Card>
+  <Card title="Niveau Release (Codegen natif)" icon="rocket">
+    `flux-codegen-swift` et `flux-codegen-kotlin` génèrent des vues `@State` et des fonctions `@Composable` sans embarquer d'interpréteur.
+  </Card>
+  <Card title="Identité structurelle des nœuds" icon="puzzle">
+    Les identifiants de nœuds sont des empreintes FNV-1a-32 de la position dans l'arbre et des clés plutôt que des compteurs séquentiels, préservant l'état entre les patchs.
+  </Card>
+  <Card title="Porte de parité ISA" icon="approve-check">
+    `flux-parity` exécute des traces sur 92 vecteurs ISA de référence en CI pour vérifier que la VM de développement et les générateurs natifs produisent exactement le même résultat.
+  </Card>
+</CardGrid>
+
+## Ce que cela a coûté
+
+Prendre en charge deux niveaux d'exécution à partir d'une même IR signifie que chaque nouvelle primitive d'interface doit être implémentée deux fois : une fois dans le runtime de l'arbre fantôme hôte et une fois dans chacun des deux générateurs de code natif.
+
+Nous avons également dû maintenir un protocole filaire strict. Les indices de propriétés sont dérivés d'empreintes FNV-1a-32 des noms de propriétés plutôt que de décalages codés en dur. Si un kit hôte et le serveur de développement sont désynchronisés sur le hachage, les vues s'affichent vides — c'est pourquoi le protocole filaire, l'ISA de la VM et les contrats d'adaptateurs comportent des vérifications explicites de version.
+
+<Aside type="caution" title="Limitations">
+Flux cible les applications dont la logique d'interface est partagée entre iOS et Android. Si votre écran repose fortement sur des API spécifiques à Apple ou Google (comme ARKit ou des shaders Metal personnalisés), écrire directement en Swift ou Kotlin natif reste plus simple que d'encapsuler chaque liaison via des extensions hôtes.
+</Aside>
+
+## Démarrer
+
+```bash
+cargo build --release -p flux-cli
+flux dev
+```
+
+Le code source et la suite de parité sont disponibles dans le dépôt, et le [guide d'architecture](/fr/explanation/architecture/) détaille les 16 crates.
