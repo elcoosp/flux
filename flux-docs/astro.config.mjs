@@ -7,7 +7,7 @@ import fluxGrammar from './src/flux.tmLanguage.json';
 
 export default await defineDocsConfig({
   llmsTxt: {},
-  site: "https://flux-ui.vercel.app",
+  site: "https://flux-rs-docs.vercel.app",
   domain: 'flux-language-docs.vercel.app',
   title: "Flux",
   description: "Flux — a write-once UI language for native iOS and Android. Write .flux, hot-reload on device over binary patches, and ship SwiftUI + Jetpack Compose.",
