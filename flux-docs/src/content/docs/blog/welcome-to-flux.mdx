@@ -1,0 +1,56 @@
+---
+title: How we built a mobile UI compiler with two execution tiers
+date: 2026-11-15
+cover:
+  alt: Flux Architecture
+  image: ./welcome-cover.jpg
+image: ./welcome-cover.jpg
+---
+
+import { Card, CardGrid, Aside } from '@astrojs/starlight/components';
+
+Mobile UI toolkits usually force a bad trade-off. You either ship a JavaScript runtime to get fast reload loops, or you compile directly to native widgets and wait on Xcode and Gradle every time you adjust padding.
+
+We built Flux to separate iteration speed from production output using one Reactive Tree IR.
+
+## The Goal
+
+We wanted a single UI language (`.flux`) that emits idiomatic SwiftUI and Jetpack Compose for release builds while still updating a running phone screen over WebSocket during development. Editing a layout had to preserve local state like cursor position and scroll offset without rebuilding the native host app.
+
+## The Architecture
+
+The compiler is a 16-crate Rust workspace (~63,000 lines of code) paired with native host kits in Swift and Kotlin. Every frontend file lowers into `flux-ir`, which splits into two execution paths.
+
+<CardGrid stagger>
+  <Card title="Dev Tier (Register VM)" icon="laptop">
+    `flux-differ` computes structural diffs and sends binary MessagePack patches over WebSocket. A compact VM updates a native shadow tree on device.
+  </Card>
+  <Card title="Release Tier (Native Codegen)" icon="rocket">
+    `flux-codegen-swift` and `flux-codegen-kotlin` generate `@State` views and `@Composable` functions with no interpreter bundled.
+  </Card>
+  <Card title="Structural Node Identity" icon="puzzle">
+    Node IDs are FNV-1a-32 hashes of tree position and keys rather than sequential counters, keeping state intact across patches.
+  </Card>
+  <Card title="ISA Parity Gate" icon="approve-check">
+    `flux-parity` executes traces against 92 golden ISA vectors in CI to verify that the dev VM and release emitters match.
+  </Card>
+</CardGrid>
+
+## What it cost
+
+Supporting two execution tiers over one IR means every new UI primitive has to be implemented twice: once in the host shadow tree runtime and once in both native code generators.
+
+We also had to keep the wire protocol strict. Prop indices are derived from FNV-1a-32 hashes of prop names rather than hardcoded offsets. If a host kit and the dev server fall out of sync on hashing, views render blank—which is why the wire protocol, VM ISA, and adapter contracts carry explicit version checks.
+
+<Aside type="caution" title="Limitations">
+Flux targets apps where UI logic is shared across iOS and Android. If your screen relies heavily on platform-specific Apple or Google APIs (such as ARKit or custom Metal shaders), writing native Swift or Kotlin directly is still simpler than wrapping every binding through host extensions.
+</Aside>
+
+## Getting started
+
+```bash
+cargo build --release -p flux-cli
+flux dev
+```
+
+The source and parity suite are in the repository, and the [architecture guide](/explanation/architecture/) maps out the 16 crates.
