@@ -38,7 +38,7 @@ guards in CI.
 `CALL_CAP` is the mechanism; you reach it through the stdlib surface. The todo
 app's Reset button clears the list and removes the persisted copy:
 
-<Code lang="flux" code={`Button text: "Reset", onPress: || {
+<Code lang="flux" title="stdlib/capabilities.flux" code={`Button text: "Reset", onPress: || {
     tasks.clear()
     Storage.removeItem(key: "todos")
 }`} />

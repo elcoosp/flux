@@ -66,7 +66,7 @@ button empties the field by assigning the signal.
 Flux has no provider/context widget. For state shared across components, lift
 a store component above its consumers and thread values down as props:
 
-<Code lang="flux" code={`compo SessionStore
+<Code lang="flux" title="main.flux" code={`compo SessionStore
     state token: Option[String] = None
     // actions are handlers that write the store's signals
 

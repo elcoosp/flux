@@ -53,7 +53,7 @@ La liaison `$draft` garde le champ et le signal en verrouillage, donc le bouton 
 
 Flux n'a pas de widget provider/context. Pour l'état partagé entre composants, élevez un composant store au-dessus de ses consommateurs et passez les valeurs vers le bas comme props :
 
-<Code lang="flux" code={`compo SessionStore
+<Code lang="flux" title="main.flux" code={`compo SessionStore
     state token: Option[String] = None
     // les actions sont des handlers qui écrivent les signaux du store
 

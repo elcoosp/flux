@@ -23,7 +23,7 @@ cd todo`} />
 Replace the contents of `main.flux` with the data model: a `record` type and
 a row component that renders one task.
 
-<Code lang="flux" code={`record Task { label: String, done: Bool, }
+<Code lang="flux" title="main.flux" code={`record Task { label: String, done: Bool, }
 
 compo TaskRow(task: Task, tasks: List[Task])
     Row gap: 8.0
@@ -39,7 +39,7 @@ owning list arrives as a second prop so the Remove handler can mutate it.
 Add the root component. Its `state` declarations create signals — the
 reactive cells that the whole UI reads from.
 
-<Code lang="flux" code={`compo TodoApp
+<Code lang="flux" title="main.flux" code={`compo TodoApp
     state tasks: List[Task] = [
         Task(label: "Buy milk", done: false),
         Task(label: "Walk dog", done: false),
@@ -56,7 +56,7 @@ reactive cells that the whole UI reads from.
 Wrap the UI in `Router` / `Screen`. The host shows only the screen whose
 `route` prop matches the active route.
 
-<Code lang="flux" code={`compo TodoApp
+<Code lang="flux" title="main.flux" code={`compo TodoApp
     // ...state declarations from step 2...
 
     Router initialRouteName: "tasks"
@@ -87,7 +87,7 @@ Three details matter:
 
 Below the input row, iterate over the tasks:
 
-<Code lang="flux" code={`compo TodoApp
+<Code lang="flux" title="main.flux" code={`compo TodoApp
     // ...state, Router, tasks screen from steps 2-3...
 
     Column gap: 8.0
@@ -104,7 +104,7 @@ can call `tasks.remove(task)` and the keyed diff removes exactly that row.
 
 Add a Reset button that clears the list and the persisted copy:
 
-<Code lang="flux" code={`compo TodoApp
+<Code lang="flux" title="main.flux" code={`compo TodoApp
     // ...tasks screen from steps 2-4...
 
     Button text: "Reset", onPress: || {
@@ -121,7 +121,7 @@ is denied, the call reports an error instead of crashing.
 
 Finish with the About screen and its navigation handlers:
 
-<Code lang="flux" code={`compo TodoApp
+<Code lang="flux" title="main.flux" code={`compo TodoApp
     // ...tasks screen from steps 2-5...
     Button text: "About", onPress: || { RouterNav.navigate("about") }
 

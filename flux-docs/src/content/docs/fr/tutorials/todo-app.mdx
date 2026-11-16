@@ -32,7 +32,7 @@ Un `record` déclare un type de données avec des champs nommés. `TaskRow` mont
 
 Ajoutez le composant racine. Ses déclarations `state` créent des signaux — les cellules réactives que toute l'UI lit.
 
-<Code lang="flux" code={`compo TodoApp
+<Code lang="flux" title="main.flux" code={`compo TodoApp
     state tasks: List[Task] = [
         Task(label: "Buy milk", done: false),
         Task(label: "Walk dog", done: false),
@@ -46,7 +46,7 @@ Ajoutez le composant racine. Ses déclarations `state` créent des signaux — l
 
 Enveloppez l'UI dans `Router` / `Screen`. L'hôte n'affiche que l'écran dont la prop `route` correspond à la route active.
 
-<Code lang="flux" code={`compo TodoApp
+<Code lang="flux" title="main.flux" code={`compo TodoApp
     // ...déclarations d'état de l'étape 2...
 
     Router initialRouteName: "tasks"
@@ -72,7 +72,7 @@ Trois détails comptent :
 
 Sous la ligne de saisie, itérez sur les tâches :
 
-<Code lang="flux" code={`compo TodoApp
+<Code lang="flux" title="main.flux" code={`compo TodoApp
     // ...état, Router, écran tasks des étapes 2-3...
 
     Column gap: 8.0
@@ -86,7 +86,7 @@ La fonction `key` identifie chaque élément à travers les éditions, donc le r
 
 Ajoutez un bouton Reset qui vide la liste et la copie persistée :
 
-<Code lang="flux" code={`compo TodoApp
+<Code lang="flux" title="main.flux" code={`compo TodoApp
     // ...écran tasks des étapes 2-4...
 
     Button text: "Reset", onPress: || {
@@ -100,7 +100,7 @@ Ajoutez un bouton Reset qui vide la liste et la copie persistée :
 
 Terminez avec l'écran About et ses handlers de navigation :
 
-<Code lang="flux" code={`compo TodoApp
+<Code lang="flux" title="main.flux" code={`compo TodoApp
     // ...écran tasks des étapes 2-5...
     Button text: "About", onPress: || { RouterNav.navigate("about") }
 
