@@ -18,8 +18,8 @@ importers:
         specifier: ^0.1.34
         version: 0.1.34
       '@elcoosp/docs-toolkit':
-        specifier: ^0.10.0
-        version: 0.10.0(c44d924b3180c3263826249dde65d7b3)
+        specifier: ^0.11.0
+        version: 0.11.0(c44d924b3180c3263826249dde65d7b3)
       astro:
         specifier: ^7.4.12
         version: 7.4.12(@astrojs/markdown-remark@7.3.9(supports-color@10.2.2))(@types/node@26.6.6)(esbuild@0.28.2)(tsx@4.23.15)(yaml@2.9.1)
@@ -50,9 +50,6 @@ importers:
       starlight-github-alerts:
         specifier: ^0.5.0
         version: 0.5.0(@astrojs/starlight@0.43.1(@astrojs/markdown-remark@7.3.9(supports-color@10.2.2))(astro@7.4.12(@astrojs/markdown-remark@7.3.9(supports-color@10.2.2))(@types/node@26.6.6)(esbuild@0.28.2)(tsx@4.23.15)(yaml@2.9.1))(supports-color@10.2.2)(typescript@6.0.3))
-      starlight-heading-badges:
-        specifier: ^0.8.0
-        version: 0.8.0(@astrojs/starlight@0.43.1(@astrojs/markdown-remark@7.3.9(supports-color@10.2.2))(astro@7.4.12(@astrojs/markdown-remark@7.3.9(supports-color@10.2.2))(@types/node@26.6.6)(esbuild@0.28.2)(tsx@4.23.15)(yaml@2.9.1))(supports-color@10.2.2)(typescript@6.0.3))(supports-color@10.2.2)
       starlight-image-zoom:
         specifier: ^0.16.2
         version: 0.16.2(@astrojs/starlight@0.43.1(@astrojs/markdown-remark@7.3.9(supports-color@10.2.2))(astro@7.4.12(@astrojs/markdown-remark@7.3.9(supports-color@10.2.2))(@types/node@26.6.6)(esbuild@0.28.2)(tsx@4.23.15)(yaml@2.9.1))(supports-color@10.2.2)(typescript@6.0.3))(astro@7.4.12(@astrojs/markdown-remark@7.3.9(supports-color@10.2.2))(@types/node@26.6.6)(esbuild@0.28.2)(tsx@4.23.15)(yaml@2.9.1))(supports-color@10.2.2)
@@ -93,9 +90,6 @@ importers:
       react-dom:
         specifier: ^19.3.1
         version: 19.3.1(react@19.3.1)
-      tsx:
-        specifier: ^4.23.15
-        version: 4.23.15
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
@@ -471,8 +465,8 @@ packages:
     resolution: {integrity: sha512-tEj8X2No2A1c9NDnZECxiiJ8TP3vmFlN9tLlLeSaMqVW4tUmVG2R4qpv/eP4zymWxnymYLkLcIYVV0VcWj3RCQ==}
     engines: {node: '>= 20.12.0'}
 
-  '@ctrl/tinycolor@4.3.0':
-    resolution: {integrity: sha512-6V0+8vw/GmH92URQ/Ki12FPhoB3nqaQUJE+5xgbFbB5ok0OXYK5jCQsQQoyR3BzCddHsCpyCFRnIcI1PSOVYkQ==}
+  '@ctrl/tinycolor@4.3.1':
+    resolution: {integrity: sha512-miLzcPaPApfChfqxxDw7nsTA8hlU4M9GZnL3UVdaxgyRzewiYaI0lsmn72SOARHgVDlVSagTTh2zWt4OcxYmmg==}
     engines: {node: '>=14'}
 
   '@d2lang/d2@0.1.34':
@@ -493,8 +487,8 @@ packages:
       linkedom:
         optional: true
 
-  '@elcoosp/docs-toolkit@0.10.0':
-    resolution: {integrity: sha512-XUYcGhMm1IyykHJKa4GWqOKtWLs+vaHtPbrgER7aUP7jS2NgQhyUXSaGhgCQAqlMvTZLGRPq4jKkuUIS1H70xQ==}
+  '@elcoosp/docs-toolkit@0.11.0':
+    resolution: {integrity: sha512-HM0LMhVeQWydYhYp+n1zdQxvUxa3ZjY1dhBo5uJBn/vwuoll82+5/rAWvYm6o1GxUWJBhusSEGSjhG6cNZqaQA==}
     engines: {node: '>=22.18.0'}
     hasBin: true
     peerDependencies:
@@ -2131,8 +2125,8 @@ packages:
   http-cache-semantics@4.3.0:
     resolution: {integrity: sha512-M5t5LlJpS1UHMjvwRQVdFHvPISGeLAxNcrWuJkeGh0KxsqCHZ1O3NXZU/8x7cD0BDcGW8kapxMKTvwlqrNkHkA==}
 
-  i18next@27.1.1:
-    resolution: {integrity: sha512-Qq3aJizS3RXQ30crhx9BKQLrHoa6GKpgrOJjVZ9vgj3EBxAddrmVfDNUrAMxSUimw5Jc+ld4SSZUAzf1q4nGyQ==}
+  i18next@27.1.2:
+    resolution: {integrity: sha512-851D6dY9vuhn9hF0p5KpY7FPeYnm3P73tqyX2nxfsjeEYVg7Du0Fflw0rJtv7nFnZcDQS0+Hqn0UP6+SPx8mew==}
     engines: {node: '>=22'}
     peerDependencies:
       typescript: ^5 || ^6 || ^7
@@ -3678,7 +3672,7 @@ snapshots:
       hast-util-to-html: 9.0.6
       hast-util-to-string: 3.0.1
       hastscript: 9.0.3
-      i18next: 27.1.1(typescript@6.0.3)
+      i18next: 27.1.2(typescript@6.0.3)
       klona: 2.0.6
       magic-string: 1.4.5
       mdast-util-directive: 3.2.0(supports-color@10.2.2)
@@ -3868,7 +3862,7 @@ snapshots:
       fast-wrap-ansi: 0.2.2
       sisteransi: 2.0.0
 
-  '@ctrl/tinycolor@4.3.0': {}
+  '@ctrl/tinycolor@4.3.1': {}
 
   '@d2lang/d2@0.1.34': {}
 
@@ -3883,7 +3877,7 @@ snapshots:
       - csstype
       - preact
 
-  '@elcoosp/docs-toolkit@0.10.0(c44d924b3180c3263826249dde65d7b3)':
+  '@elcoosp/docs-toolkit@0.11.0(c44d924b3180c3263826249dde65d7b3)':
     dependencies:
       '@astrojs/starlight': 0.43.1(@astrojs/markdown-remark@7.3.9(supports-color@10.2.2))(astro@7.4.12(@astrojs/markdown-remark@7.3.9(supports-color@10.2.2))(@types/node@26.6.6)(esbuild@0.28.2)(tsx@4.23.15)(yaml@2.9.1))(supports-color@10.2.2)(typescript@6.0.3)
       '@d2lang/d2': 0.1.34
@@ -4068,7 +4062,7 @@ snapshots:
 
   '@expressive-code/core@0.44.3':
     dependencies:
-      '@ctrl/tinycolor': 4.3.0
+      '@ctrl/tinycolor': 4.3.1
       hast-util-select: 6.0.4
       hast-util-to-html: 9.0.6
       hast-util-to-text: 4.0.3
@@ -5652,7 +5646,7 @@ snapshots:
 
   http-cache-semantics@4.3.0: {}
 
-  i18next@27.1.1(typescript@6.0.3):
+  i18next@27.1.2(typescript@6.0.3):
     optionalDependencies:
       typescript: 6.0.3
 

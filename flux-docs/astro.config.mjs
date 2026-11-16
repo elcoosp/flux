@@ -1,6 +1,5 @@
 import { defineDocsConfig } from '@elcoosp/docs-toolkit/config';
 import mdx from '@astrojs/mdx';
-import headingBadges from 'starlight-heading-badges';
 
 import fluxGrammar from './src/flux.tmLanguage.json';
 
@@ -33,7 +32,7 @@ export default await defineDocsConfig({
       // Starlight plugins. Pagefind ships with Starlight and stays enabled —
       // no DocSearch application exists, so Pagefind is the search solution.
       plugins: [
-        // Release blocker: the build fails on broken internal links. headingBadges(),
+        // Release blocker: the build fails on broken internal links.
       ],
       sidebar: [
         { label: 'Overview', link: '/' },
