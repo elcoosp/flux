@@ -28,7 +28,7 @@ without them.
 
 From the repository root:
 
-<Code lang="bash" code={`git clone https://github.com/elcoosp/flux
+<Code lang="bash" title="Terminal" code={`git clone https://github.com/elcoosp/flux
 cd flux
 cargo build --bin flux`} />
 
@@ -40,7 +40,7 @@ The first build provisions the pinned nightly toolchain automatically through
 
 ## 2. Scaffold a project
 
-<Code lang="bash" code={`flux init myapp
+<Code lang="bash" title="Terminal" code={`flux init myapp
 cd myapp`} />
 
 `flux init` writes three files into `myapp/`:
@@ -52,7 +52,7 @@ cd myapp`} />
 
 Open `main.flux`. It contains the canonical Flux counter:
 
-<Code lang="rust" code={`compo Counter
+<Code lang="flux" title="main.flux" code={`compo Counter
     $count: Int = 0
 
     Column gap: 8.0
@@ -61,7 +61,7 @@ Open `main.flux`. It contains the canonical Flux counter:
 
 ## 3. Start the dev server
 
-<Code lang="bash" code={`flux dev`} />
+<Code lang="bash" title="Terminal" code={`flux dev`} />
 
 You will see:
 
@@ -75,7 +75,7 @@ to the Reactive Tree IR, and binds two ports:
 
 Verify the server is up in another shell:
 
-<Code lang="bash" code={`curl http://127.0.0.1:7332/health`} />
+<Code lang="bash" title="Terminal" code={`curl http://127.0.0.1:7332/health`} />
 
 <Code lang="text" code={`ok`} />
 
@@ -88,7 +88,7 @@ renders the IR it receives. Pick your platform.
 
 1. **iOS.** The host project is generated with XcodeGen:
 
-    <Code lang="bash" code={`# from the repository root
+    <Code lang="bash" title="Terminal" code={`# from the repository root
 xcodegen generate            # writes runtimes/ios/FluxApp.xcworkspace
 open runtimes/ios/FluxApp.xcworkspace`} />
 
@@ -97,7 +97,7 @@ open runtimes/ios/FluxApp.xcworkspace`} />
 
 2. **Android.** Build and install the host on a connected emulator or device:
 
-    <Code lang="bash" code={`# from the repository root
+    <Code lang="bash" title="Terminal" code={`# from the repository root
 ./gradlew :runtimes:android:app:installDebug`} />
 
     Launch **Flux** from the launcher. It connects to `ws://127.0.0.1:7331`
@@ -112,7 +112,7 @@ shows that you never recompile to change it.
 
 Open `main.flux` and change the `Text` label:
 
-<Code lang="rust" code={`Text text: "tapped {count} times — wow"`} />
+<Code lang="flux" title="main.flux" code={`Text text: "tapped {count} times — wow"`} />
 
 Save the file. The dev server diffs the tree and ships a binary patch over
 the WebSocket, and the host updates in place. You never leave the running
@@ -126,7 +126,7 @@ after the first `Init` frame.
 
 When you want real SwiftUI or Jetpack Compose instead of the dev patch path:
 
-<Code lang="bash" code={`flux build ios       # -> platforms/ios/Generated/main.swift
+<Code lang="bash" title="Terminal" code={`flux build ios       # -> platforms/ios/Generated/main.swift
 flux build android   # -> platforms/android/Generated/main.kt`} />
 
 `flux build` lowers your `.flux` to idiomatic native source with no VM. If

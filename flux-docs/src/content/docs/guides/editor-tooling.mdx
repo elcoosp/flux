@@ -17,7 +17,7 @@ diagnostics, hot-reload status, and a one-click run on device.
 The extension lives in the repository at
 [`editors/vscode/`](https://github.com/elcoosp/flux/tree/main/editors/vscode):
 
-<Code lang="bash" code={`cd editors/vscode
+<Code lang="bash" title="Terminal" code={`cd editors/vscode
 pnpm install`} />
 
 Open the folder in VS Code and launch it as an extension development host
@@ -38,7 +38,7 @@ While the extension is active you get:
 The same diagnostics are available headlessly through `flux lsp`. It parses
 and type-checks one file and prints the findings as JSON:
 
-<Code lang="bash" code={`flux lsp src/main.flux`} />
+<Code lang="bash" title="Terminal" code={`flux lsp src/main.flux`} />
 
 The output carries each diagnostic's message, span, and hint, so you can pipe
 it into review tooling:
@@ -47,7 +47,7 @@ it into review tooling:
 
 On large files where you only need syntax errors, skip the type checker:
 
-<Code lang="bash" code={`flux lsp src/main.flux --no-types`} />
+<Code lang="bash" title="Terminal" code={`flux lsp src/main.flux --no-types`} />
 
 ## How diagnostics reach your editor
 

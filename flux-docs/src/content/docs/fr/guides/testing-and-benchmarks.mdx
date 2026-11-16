@@ -14,7 +14,7 @@ La barre de qualité de Flux est mécanique : chaque fonction publique a un test
 
 Le lanceur de test du projet est `cargo-nextest` — jamais un simple `cargo test` :
 
-<Code lang="bash" code={`cargo nextest run`} />
+<Code lang="bash" title="Terminal" code={`cargo nextest run`} />
 
 | Couche | Outil | Ce qu'elle prouve |
 | --- | --- | --- |
@@ -26,7 +26,7 @@ Le lanceur de test du projet est `cargo-nextest` — jamais un simple `cargo tes
 
 Les doctests tournent séparément, parce que nextest ne les exécute pas :
 
-<Code lang="bash" code={`cargo test --doc`} />
+<Code lang="bash" title="Terminal" code={`cargo test --doc`} />
 
 ## Vérifier la parité dev-vs-release
 
@@ -34,7 +34,7 @@ Le harnais de parité (`flux-parity`) est l'outil qui garde les deux étages d'e
 
 Quand vous changez le comportement de lowering, de differ ou de codegen, lancez les scénarios de parité avant de faire confiance à vos propres tests :
 
-<Code lang="bash" code={`cargo nextest run -p flux-parity`} />
+<Code lang="bash" title="Terminal" code={`cargo nextest run -p flux-parity`} />
 
 ## Valider contre les vecteurs ISA dorés
 
@@ -53,7 +53,7 @@ La métrique phare est le budget **Save → pixels** — le temps mur qu'un dév
 
 Les benchmarks criterion portent ces budgets ; les workflows CI `benchmarks.yml` et `perf-harness.yml` les lancent :
 
-<Code lang="bash" code={`cargo bench`} />
+<Code lang="bash" title="Terminal" code={`cargo bench`} />
 
 <Aside type="caution">Les suites basées sur les propriétés et adversariales (`proptest`, le fuzzer filaire, les tests de corruption) jettent intentionnellement des déchets dans le pipeline. Un échec là signifie un vrai bug de robustesse, pas une mauvaise graine — enregistrez le cas en échec, ne le supprimez pas du corpus.</Aside>
 

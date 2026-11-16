@@ -18,7 +18,7 @@ visible screen. This guide shows the working pattern from
 Every screen must carry a `route` prop, and the router names its first
 screen:
 
-<Code lang="rust" code={`compo App
+<Code lang="flux" code={`compo App
     Column gap: 8.0
         Router initialRouteName: "home"
             Screen route: "home"
@@ -63,7 +63,7 @@ gesture callbacks — and the visible screen follows the value.
 
 The todo app's About button is the minimal example:
 
-<Code lang="rust" code={`Button text: "About", onPress: || { RouterNav.navigate("about") }`} />
+<Code lang="flux" code={`Button text: "About", onPress: || { RouterNav.navigate("about") }`} />
 
 ## Structure of a multi-screen app
 

@@ -14,30 +14,30 @@ Flux impose mécaniquement le style canonique et la santé d'environnement, donc
 
 `flux fmt` formate les fichiers `.flux` au style canonique. Sans chemins, il formate `main.flux` à la racine du projet :
 
-<Code lang="bash" code={`flux fmt                       # formate main.flux en place
+<Code lang="bash" title="Terminal" code={`flux fmt                       # formate main.flux en place
 flux fmt src/views.flux        # formate des fichiers précis`} />
 
 Verrouillez un pipeline avec `--check` : les fichiers sont vérifiés mais pas écrits, et le processus sort en non-zéro quand un fichier changerait :
 
-<Code lang="bash" code={`flux fmt --check`} />
+<Code lang="bash" title="Terminal" code={`flux fmt --check`} />
 
 ## Vérifier la santé de l'environnement
 
 `flux doctor` lance la vérification de santé de l'environnement : état de la chaîne d'outils, santé du parse de stdlib, version du protocole filaire, et — best effort — appareils et simulateurs connectés :
 
-<Code lang="bash" code={`flux doctor`} />
+<Code lang="bash" title="Terminal" code={`flux doctor`} />
 
 Il lance aussi les vérifications structurelles locales : dérive de dépendances approuvées (le dépôt approuve les dépendances via ADR, et `flux doctor` rapporte la dérive non approuvée) et violations des règles maison documentées du dépôt.
 
 Utilisez `--strict` pour rendre les trouvailles consultatives bloquantes, pour que la commande puisse verrouiller un hook pre-commit :
 
-<Code lang="bash" code={`flux doctor --strict   # sort en non-zéro sur toute trouvaille`} />
+<Code lang="bash" title="Terminal" code={`flux doctor --strict   # sort en non-zéro sur toute trouvaille`} />
 
 ## Garder les portails Rust au vert
 
 Si vous touchez l'implémentation de Flux elle-même, la CI du dépôt attend un arbre propre par ces commandes — jamais un simple `cargo test` :
 
-<Code lang="bash" code={`cargo fmt -- --check
+<Code lang="bash" title="Terminal" code={`cargo fmt -- --check
 cargo clippy -- -D warnings
 cargo nextest run
 cargo test --doc      # doctests : nextest ne les exécute pas`} />

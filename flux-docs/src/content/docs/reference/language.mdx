@@ -25,7 +25,7 @@ A `.flux` file contains top-level declarations:
 
 ## Components (`compo`)
 
-<Code lang="rust" code={`compo TaskRow(task: Task, tasks: List[Task])
+<Code lang="flux" code={`compo TaskRow(task: Task, tasks: List[Task])
     Row gap: 8.0
         Text text: task.label
         Button text: "Remove", onPress: || { tasks.remove(task) }`} />
@@ -40,7 +40,7 @@ A `.flux` file contains top-level declarations:
 
 Two equivalent forms declare a reactive signal at the top of a `compo`:
 
-<Code lang="rust" code={`compo Counter
+<Code lang="flux" code={`compo Counter
     $count: Int = 0            // sigil form
 
 compo Counter2
@@ -78,13 +78,13 @@ A view call names a stdlib component and carries named props:
 
 ## Interpolation and operators
 
-<Code lang="rust" code={`Text text: "tapped {count} times"`} />
+<Code lang="flux" code={`Text text: "tapped {count} times"`} />
 
 `{expr}` inside a string literal interpolates a value into the prop. The
 expression surface includes arithmetic, comparison, optional chaining with
 `?.`, and the `??` fallback operator:
 
-<Code lang="rust" code={`Text text: name ?? "Loading..."`} />
+<Code lang="flux" code={`Text text: name ?? "Loading..."`} />
 
 ## Control flow: ForEach and routing
 

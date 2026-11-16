@@ -17,7 +17,7 @@ knob it exposes.
 
 Run it from your project root (or point it anywhere with `--root`):
 
-<Code lang="bash" code={`flux dev
+<Code lang="bash" title="Terminal" code={`flux dev
 # Listening on ws://127.0.0.1:7331`} />
 
 The defaults serve a project in the current directory, bound to localhost:
@@ -38,7 +38,7 @@ configures its ports for every contributor. See the
 
 The asset server exposes a health probe:
 
-<Code lang="bash" code={`curl http://127.0.0.1:7332/health`} />
+<Code lang="bash" title="Terminal" code={`curl http://127.0.0.1:7332/health`} />
 
 <Code lang="text" code={`ok`} />
 
@@ -48,7 +48,7 @@ Simulators and emulators reach `127.0.0.1` on your machine; a physical device
 cannot. Expose the server on your LAN and point the host app at your machine's
 LAN IP:
 
-<Code lang="bash" code={`flux dev --ws-host 0.0.0.0`} />
+<Code lang="bash" title="Terminal" code={`flux dev --ws-host 0.0.0.0`} />
 
 In the host app, set the server address to `ws://192.168.1.42:7331`, replacing
 the IP with the address of the machine running `flux dev`. The Android host
@@ -59,7 +59,7 @@ stores this in its resources; the iOS host takes it in its connection screen.
 An open dev loop on localhost is safe by default. A LAN-exposed server must
 authenticate the hosts that push bytecode to it:
 
-<Code lang="bash" code={`flux dev --ws-host 0.0.0.0 --token <secret>`} />
+<Code lang="bash" title="Terminal" code={`flux dev --ws-host 0.0.0.0 --token <secret>`} />
 
 The host presents its token during the `Hello` handshake (wire protocol
 Appendix D, pairing/auth section). Hosts read their token from:

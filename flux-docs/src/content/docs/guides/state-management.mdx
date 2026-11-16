@@ -17,7 +17,7 @@ copy-paste patterns for the shapes you meet beyond the counter.
 
 Declare a signal at the top of a `compo`:
 
-<Code lang="rust" code={`compo Counter
+<Code lang="flux" code={`compo Counter
     state count: Int = 0
     Column gap: 8.0
         Text text: "tapped {count} times"
@@ -37,7 +37,7 @@ A value computed from other signals should be derived, not stored — two
 signals that can disagree are a bug you have not met yet. Declare it as a
 read-only `let` computed from signals:
 
-<Code lang="rust" code={`compo Cart
+<Code lang="flux" code={`compo Cart
     state items: Int = 3
     state price: Float = 9.99
     let total: Float = items * price   // recomputed when items or price change
@@ -52,7 +52,7 @@ that read `total` recompose.
 `TextInput` is controlled: bind the signal with `$` and write the typed value
 back in `onChangeText`:
 
-<Code lang="rust" code={`compo Composer
+<Code lang="flux" code={`compo Composer
     state draft: String = ""
     Column gap: 8.0
         TextInput text: $draft, onChangeText: fn(v) { draft = v }, placeholder: "Say something"
@@ -66,7 +66,7 @@ button empties the field by assigning the signal.
 Flux has no provider/context widget. For state shared across components, lift
 a store component above its consumers and thread values down as props:
 
-<Code lang="rust" code={`compo SessionStore
+<Code lang="flux" code={`compo SessionStore
     state token: Option[String] = None
     // actions are handlers that write the store's signals
 
@@ -86,7 +86,7 @@ returns a result cell (`Ready` / `Pending` / `Error`). An async capability
 leaves the cell `Pending`, and an injected resolver settles it when the
 platform responds:
 
-<Code lang="rust" code={`compo Profile
+<Code lang="flux" code={`compo Profile
     state name: Option[String] = None
     Column gap: 8.0
         Text text: name ?? "Loading..."

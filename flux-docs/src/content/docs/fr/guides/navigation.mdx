@@ -14,7 +14,7 @@ Flux livre la navigation comme partie du langage : un `Router` déclare la pile,
 
 Chaque écran doit porter une prop `route`, et le routeur nomme son premier écran :
 
-<Code lang="rust" code={`compo App
+<Code lang="flux" code={`compo App
     Column gap: 8.0
         Router initialRouteName: "home"
             Screen route: "home"
@@ -48,7 +48,7 @@ La navigation passe par la capacité Router (capacité 3, méthode 1), qui écri
 
 Le bouton About de l'app todo est l'exemple minimal :
 
-<Code lang="rust" code={`Button text: "About", onPress: || { RouterNav.navigate("about") }`} />
+<Code lang="flux" code={`Button text: "About", onPress: || { RouterNav.navigate("about") }`} />
 
 ## Structure d'une app multi-écrans
 

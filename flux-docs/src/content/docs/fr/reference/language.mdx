@@ -22,7 +22,7 @@ Un fichier `.flux` contient des déclarations de niveau supérieur :
 
 ## Composants (`compo`)
 
-<Code lang="rust" code={`compo TaskRow(task: Task, tasks: List[Task])
+<Code lang="flux" code={`compo TaskRow(task: Task, tasks: List[Task])
     Row gap: 8.0
         Text text: task.label
         Button text: "Remove", onPress: || { tasks.remove(task) }`} />
@@ -35,7 +35,7 @@ Un fichier `.flux` contient des déclarations de niveau supérieur :
 
 Deux formes équivalentes déclarent un signal réactif en haut d'un `compo` :
 
-<Code lang="rust" code={`compo Counter
+<Code lang="flux" code={`compo Counter
     $count: Int = 0            // forme sigil
 
 compo Counter2
@@ -70,11 +70,11 @@ Un appel de vue nomme un composant stdlib et porte des props nommées :
 
 ## Interpolation et opérateurs
 
-<Code lang="rust" code={`Text text: "tapped {count} times"`} />
+<Code lang="flux" code={`Text text: "tapped {count} times"`} />
 
 `{expr}` à l'intérieur d'un littéral de chaîne interpole une valeur dans la prop. La surface d'expression inclut l'arithmétique, la comparaison, le chaînage optionnel avec `?.`, et l'opérateur de repli `??` :
 
-<Code lang="rust" code={`Text text: name ?? "Loading..."`} />
+<Code lang="flux" code={`Text text: name ?? "Loading..."`} />
 
 ## Flux de contrôle : ForEach et routage
 

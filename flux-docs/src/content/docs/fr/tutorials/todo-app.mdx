@@ -14,12 +14,12 @@ En chemin vous utilisez des records, l'état de liste, l'itération par clé, un
 
 ## 1. Créer le projet et le modèle de données
 
-<Code lang="bash" code={`flux init todo
+<Code lang="bash" title="Terminal" code={`flux init todo
 cd todo`} />
 
 Remplacez le contenu de `main.flux` par le modèle de données : un type `record` et un composant de ligne qui rend une tâche.
 
-<Code lang="rust" code={`record Task { label: String, done: Bool, }
+<Code lang="flux" title="main.flux" code={`record Task { label: String, done: Bool, }
 
 compo TaskRow(task: Task, tasks: List[Task])
     Row gap: 8.0
@@ -32,7 +32,7 @@ Un `record` déclare un type de données avec des champs nommés. `TaskRow` mont
 
 Ajoutez le composant racine. Ses déclarations `state` créent des signaux — les cellules réactives que toute l'UI lit.
 
-<Code lang="rust" code={`compo TodoApp
+<Code lang="flux" code={`compo TodoApp
     state tasks: List[Task] = [
         Task(label: "Buy milk", done: false),
         Task(label: "Walk dog", done: false),
@@ -46,7 +46,7 @@ Ajoutez le composant racine. Ses déclarations `state` créent des signaux — l
 
 Enveloppez l'UI dans `Router` / `Screen`. L'hôte n'affiche que l'écran dont la prop `route` correspond à la route active.
 
-<Code lang="rust" code={`compo TodoApp
+<Code lang="flux" code={`compo TodoApp
     // ...déclarations d'état de l'étape 2...
 
     Router initialRouteName: "tasks"
@@ -72,7 +72,7 @@ Trois détails comptent :
 
 Sous la ligne de saisie, itérez sur les tâches :
 
-<Code lang="rust" code={`compo TodoApp
+<Code lang="flux" code={`compo TodoApp
     // ...état, Router, écran tasks des étapes 2-3...
 
     Column gap: 8.0
@@ -86,7 +86,7 @@ La fonction `key` identifie chaque élément à travers les éditions, donc le r
 
 Ajoutez un bouton Reset qui vide la liste et la copie persistée :
 
-<Code lang="rust" code={`compo TodoApp
+<Code lang="flux" code={`compo TodoApp
     // ...écran tasks des étapes 2-4...
 
     Button text: "Reset", onPress: || {
@@ -100,7 +100,7 @@ Ajoutez un bouton Reset qui vide la liste et la copie persistée :
 
 Terminez avec l'écran About et ses handlers de navigation :
 
-<Code lang="rust" code={`compo TodoApp
+<Code lang="flux" code={`compo TodoApp
     // ...écran tasks des étapes 2-5...
     Button text: "About", onPress: || { RouterNav.navigate("about") }
 
@@ -119,7 +119,7 @@ Terminez avec l'écran About et ses handlers de navigation :
 
 Lancez le serveur de dev depuis le répertoire du projet et ouvrez l'app hôte :
 
-<Code lang="bash" code={`flux dev                 # WebSocket sur :7331`} />
+<Code lang="bash" title="Terminal" code={`flux dev                 # WebSocket sur :7331`} />
 
 Pointez l'hôte iOS ou Android sur `ws://127.0.0.1:7331` (voir
 [lancer l'app hôte](/tutorials/your-first-app/#4-run-the-host-app) si vous avez besoin des étapes de plateforme). Ajoutez des tâches, retirez-en une, basculez vers l'écran About et revenez, puis appuyez sur Reset.
@@ -128,7 +128,7 @@ Pointez l'hôte iOS ou Android sur `ws://127.0.0.1:7331` (voir
 
 Générez les sources natives pour les deux plateformes :
 
-<Code lang="bash" code={`flux build ios       # -> platforms/ios/Generated/main.swift
+<Code lang="bash" title="Terminal" code={`flux build ios       # -> platforms/ios/Generated/main.swift
 flux build android   # -> platforms/android/Generated/main.kt`} />
 
 Le code SwiftUI et Compose généré rend les mêmes écrans que vous avez lancés en dev — le harnais de parité prouve que les deux chemins restent équivalents.

@@ -38,7 +38,7 @@ guards in CI.
 `CALL_CAP` is the mechanism; you reach it through the stdlib surface. The todo
 app's Reset button clears the list and removes the persisted copy:
 
-<Code lang="rust" code={`Button text: "Reset", onPress: || {
+<Code lang="flux" code={`Button text: "Reset", onPress: || {
     tasks.clear()
     Storage.removeItem(key: "todos")
 }`} />
@@ -62,7 +62,7 @@ so you never write signals from a background thread yourself.
 Because the cell is a value in the signal graph, you render its states with
 ordinary expressions:
 
-<Code lang="rust" code={`compo Profile
+<Code lang="flux" code={`compo Profile
     state name: Option[String] = None
     Column gap: 8.0
         Text text: name ?? "Loading..."`} />
