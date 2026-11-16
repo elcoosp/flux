@@ -4,6 +4,7 @@ import mdx from '@astrojs/mdx';
 import fluxGrammar from './src/flux.tmLanguage.json';
 
 export default await defineDocsConfig({
+  topics: true,
   llmsTxt: {},
   site: "https://flux-rs-docs.vercel.app",
   domain: 'flux-language-docs.vercel.app',
