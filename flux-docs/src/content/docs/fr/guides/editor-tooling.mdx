@@ -15,8 +15,7 @@ Flux livre un serveur de langage (`flux-lsp`, construit sur `async-lsp`) et une 
 L'extension vit dans le dépôt à
 [`editors/vscode/`](https://github.com/elcoosp/flux/tree/main/editors/vscode) :
 
-<Code lang="bash" title="Terminal" code={`cd editors/vscode
-pnpm install`} />
+<Code lang="bash" title="Terminal" code={"cd editors/vscode\npnpm install"} />
 
 Ouvrez le dossier dans VS Code et lancez-le comme hôte de développement d'extension (appuyez sur `F5`), ou packagez-le avec `vsce` et installez le `.vsix` produit. L'extension embarque la grammaire TextMate de Flux — la même grammaire que ce site de docs utilise pour les blocs de code `flux` — donc la coloration correspond à la vue de la CLI du langage.
 
@@ -31,15 +30,15 @@ Pendant que l'extension est active, vous obtenez :
 
 Les mêmes diagnostics sont disponibles sans tête via `flux lsp`. Il analyse et vérifie les types d'un fichier et imprime les trouvailles en JSON :
 
-<Code lang="bash" title="Terminal" code={`flux lsp src/main.flux`} />
+<Code lang="bash" title="Terminal" code={"flux lsp src/main.flux"} />
 
 La sortie porte le message, le span et l'indice de chaque diagnostic, donc vous pouvez la rediriger dans votre outillage de revue :
 
-<Code lang="json" code={`{ "diagnostics": [ { "message": "expected \`Int\`, got \`String\`", "span": { "file": "src/main.flux", "start": 214, "end": 228 }, "hint": "\`count\` was inferred as Int at line 18" } ] }`} />
+<Code lang="json" code={"{ \"diagnostics\": [ { \"message\": \"expected `Int`, got `String`\", \"span\": { \"file\": \"src/main.flux\", \"start\": 214, \"end\": 228 }, \"hint\": \"`count` was inferred as Int at line 18\" } ] }"} />
 
 Sur de grands fichiers où vous n'avez besoin que des erreurs de syntaxe, sautez le vérificateur de types :
 
-<Code lang="bash" title="Terminal" code={`flux lsp src/main.flux --no-types`} />
+<Code lang="bash" title="Terminal" code={"flux lsp src/main.flux --no-types"} />
 
 ## Comment les diagnostics atteignent votre éditeur
 

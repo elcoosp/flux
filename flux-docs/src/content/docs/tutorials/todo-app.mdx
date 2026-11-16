@@ -17,18 +17,12 @@ one host app runnable.
 
 ## 1. Create the project and data model
 
-<Code lang="bash" title="Terminal" code={`flux init todo
-cd todo`} />
+<Code lang="bash" title="Terminal" code={"flux init todo\ncd todo"} />
 
 Replace the contents of `main.flux` with the data model: a `record` type and
 a row component that renders one task.
 
-<Code lang="flux" title="main.flux" code={`record Task { label: String, done: Bool, }
-
-compo TaskRow(task: Task, tasks: List[Task])
-    Row gap: 8.0
-        Text text: task.label
-        Button text: "Remove", onPress: || { tasks.remove(task) }`} />
+<Code lang="flux" title="main.flux" code={"record Task { label: String, done: Bool, }\n\ncompo TaskRow(task: Task, tasks: List[Task])\n    Row gap: 8.0\n        Text text: task.label\n        Button text: \"Remove\", onPress: || { tasks.remove(task) }"} />
 
 A `record` declares a data type with named fields. `TaskRow` shows the two
 ways components receive data: the task it renders comes in as a prop, and the
@@ -39,12 +33,7 @@ owning list arrives as a second prop so the Remove handler can mutate it.
 Add the root component. Its `state` declarations create signals — the
 reactive cells that the whole UI reads from.
 
-<Code lang="flux" title="main.flux" code={`compo TodoApp
-    state tasks: List[Task] = [
-        Task(label: "Buy milk", done: false),
-        Task(label: "Walk dog", done: false),
-    ]
-    state newTask: String = ""`} />
+<Code lang="flux" title="main.flux" code={"compo TodoApp\n    state tasks: List[Task] = [\n        Task(label: \"Buy milk\", done: false),\n        Task(label: \"Walk dog\", done: false),\n    ]\n    state newTask: String = \"\""} />
 
 - `tasks` holds the list model. The initial value is a list of record
   literals.
@@ -56,21 +45,7 @@ reactive cells that the whole UI reads from.
 Wrap the UI in `Router` / `Screen`. The host shows only the screen whose
 `route` prop matches the active route.
 
-<Code lang="flux" title="main.flux" code={`compo TodoApp
-    // ...state declarations from step 2...
-
-    Router initialRouteName: "tasks"
-        Screen route: "tasks"
-            Column gap: 12.0
-                Text text: "Flux To-Do"
-                Row gap: 8.0
-                    TextInput text: $newTask,
-                        onChangeText: fn(v) { newTask = v },
-                        placeholder: "What needs doing?"
-                    Button text: "Add", onPress: || {
-                        tasks.append(Task(label: newTask, done: false))
-                        newTask = ""
-                    }`} />
+<Code lang="flux" title="main.flux" code={"compo TodoApp\n    // ...state declarations from step 2...\n\n    Router initialRouteName: \"tasks\"\n        Screen route: \"tasks\"\n            Column gap: 12.0\n                Text text: \"Flux To-Do\"\n                Row gap: 8.0\n                    TextInput text: $newTask,\n                        onChangeText: fn(v) { newTask = v },\n                        placeholder: \"What needs doing?\"\n                    Button text: \"Add\", onPress: || {\n                        tasks.append(Task(label: newTask, done: false))\n                        newTask = \"\"\n                    }"} />
 
 Three details matter:
 
@@ -87,13 +62,7 @@ Three details matter:
 
 Below the input row, iterate over the tasks:
 
-<Code lang="flux" title="main.flux" code={`compo TodoApp
-    // ...state, Router, tasks screen from steps 2-3...
-
-    Column gap: 8.0
-        ForEach(tasks, key: fn(t) { t.label }) {
-                        item => TaskRow(task: item, tasks: tasks)
-                    }`} />
+<Code lang="flux" title="main.flux" code={"compo TodoApp\n    // ...state, Router, tasks screen from steps 2-3...\n\n    Column gap: 8.0\n        ForEach(tasks, key: fn(t) { t.label }) {\n                        item => TaskRow(task: item, tasks: tasks)\n                    }"} />
 
 The `key` function identifies each item across edits, so the reconciler
 reorders and patches existing rows in place — it does not rebuild the list
@@ -104,13 +73,7 @@ can call `tasks.remove(task)` and the keyed diff removes exactly that row.
 
 Add a Reset button that clears the list and the persisted copy:
 
-<Code lang="flux" title="main.flux" code={`compo TodoApp
-    // ...tasks screen from steps 2-4...
-
-    Button text: "Reset", onPress: || {
-        tasks.clear()
-        Storage.removeItem(key: "todos")
-    }`} />
+<Code lang="flux" title="main.flux" code={"compo TodoApp\n    // ...tasks screen from steps 2-4...\n\n    Button text: \"Reset\", onPress: || {\n        tasks.clear()\n        Storage.removeItem(key: \"todos\")\n    }"} />
 
 `Storage` is a **capability** — a platform service declared in the stdlib and
 resolved identically on the server and on both hosts. `Storage.removeItem`
@@ -121,18 +84,7 @@ is denied, the call reports an error instead of crashing.
 
 Finish with the About screen and its navigation handlers:
 
-<Code lang="flux" title="main.flux" code={`compo TodoApp
-    // ...tasks screen from steps 2-5...
-    Button text: "About", onPress: || { RouterNav.navigate("about") }
-
-    // Second screen:
-
-    Screen route: "about"
-        Column gap: 12.0
-            Text text: "About"
-            Text text: "A real Flux app"
-            Button text: "Back",
-                onPress: || { RouterNav.navigate("tasks") }`} />
+<Code lang="flux" title="main.flux" code={"compo TodoApp\n    // ...tasks screen from steps 2-5...\n    Button text: \"About\", onPress: || { RouterNav.navigate(\"about\") }\n\n    // Second screen:\n\n    Screen route: \"about\"\n        Column gap: 12.0\n            Text text: \"About\"\n            Text text: \"A real Flux app\"\n            Button text: \"Back\",\n                onPress: || { RouterNav.navigate(\"tasks\") }"} />
 
 `RouterNav.navigate("about")` drives the visible screen. The `route` prop
 name is part of the adapter contract — the host reads it by its hashed name,
@@ -142,7 +94,7 @@ so it must be exactly `route`.
 
 Start the dev server from the project directory and open the host app:
 
-<Code lang="bash" title="Terminal" code={`flux dev                 # WebSocket on :7331`} />
+<Code lang="bash" title="Terminal" code={"flux dev                 # WebSocket on :7331"} />
 
 Point the iOS or Android host at `ws://127.0.0.1:7331` (see
 [run the host app](/tutorials/your-first-app/#4-run-the-host-app) if you need
@@ -153,8 +105,7 @@ back, then press Reset.
 
 Generate the native sources for both platforms:
 
-<Code lang="bash" title="Terminal" code={`flux build ios       # -> platforms/ios/Generated/main.swift
-flux build android   # -> platforms/android/Generated/main.kt`} />
+<Code lang="bash" title="Terminal" code={"flux build ios       # -> platforms/ios/Generated/main.swift\nflux build android   # -> platforms/android/Generated/main.kt"} />
 
 The generated SwiftUI and Compose code renders the same screens you ran
 in dev — the parity harness proves the two paths stay equivalent.

@@ -16,7 +16,7 @@ proves.
 
 The project's test runner is `cargo-nextest` — never plain `cargo test`:
 
-<Code lang="bash" title="Terminal" code={`cargo nextest run`} />
+<Code lang="bash" title="Terminal" code={"cargo nextest run"} />
 
 | Layer | Tool | What it proves |
 | --- | --- | --- |
@@ -28,7 +28,7 @@ The project's test runner is `cargo-nextest` — never plain `cargo test`:
 
 Doctests run separately, because nextest does not execute them:
 
-<Code lang="bash" title="Terminal" code={`cargo test --doc`} />
+<Code lang="bash" title="Terminal" code={"cargo test --doc"} />
 
 ## Check dev-vs-release parity
 
@@ -41,7 +41,7 @@ in the `parity-check` CI workflow.
 When you change lowering, differ, or codegen behavior, run the parity
 scenarios before trusting your own tests:
 
-<Code lang="bash" title="Terminal" code={`cargo nextest run -p flux-parity`} />
+<Code lang="bash" title="Terminal" code={"cargo nextest run -p flux-parity"} />
 
 ## Validate against the golden ISA vectors
 
@@ -68,7 +68,7 @@ at least 50 edits per tree size, reported as p50/p99.
 Criterion benchmarks carry these budgets; the `benchmarks.yml` and
 `perf-harness.yml` CI workflows run them:
 
-<Code lang="bash" title="Terminal" code={`cargo bench`} />
+<Code lang="bash" title="Terminal" code={"cargo bench"} />
 
 <Aside type="caution">Property-based and adversarial suites
 (`proptest`, the wire fuzzer, the corruption tests) intentionally throw

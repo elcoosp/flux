@@ -18,21 +18,7 @@ visible screen. This guide shows the working pattern from
 Every screen must carry a `route` prop, and the router names its first
 screen:
 
-<Code lang="flux" title="main.flux" code={`compo App
-    Column gap: 8.0
-        Router initialRouteName: "home"
-            Screen route: "home"
-                Column gap: 16.0
-                    Text text: "Home"
-                    Button text: "Go to Settings", onPress: || {
-                        RouterNav.navigate("settings")
-                    }
-            Screen route: "settings"
-                Column gap: 16.0
-                    Text text: "Settings"
-                    Button text: "Go to Home", onPress: || {
-                        RouterNav.navigate("home")
-                    }`} />
+<Code lang="flux" title="main.flux" code={"compo App\n    Column gap: 8.0\n        Router initialRouteName: \"home\"\n            Screen route: \"home\"\n                Column gap: 16.0\n                    Text text: \"Home\"\n                    Button text: \"Go to Settings\", onPress: || {\n                        RouterNav.navigate(\"settings\")\n                    }\n            Screen route: \"settings\"\n                Column gap: 16.0\n                    Text text: \"Settings\"\n                    Button text: \"Go to Home\", onPress: || {\n                        RouterNav.navigate(\"home\")\n                    }"} />
 
 - `initialRouteName` names the screen shown at startup.
 - `RouterNav.navigate("settings")` makes the screen whose `route` equals
@@ -63,7 +49,7 @@ gesture callbacks — and the visible screen follows the value.
 
 The todo app's About button is the minimal example:
 
-<Code lang="flux" code={`Button text: "About", onPress: || { RouterNav.navigate("about") }`} />
+<Code lang="flux" code={"Button text: \"About\", onPress: || { RouterNav.navigate(\"about\") }"} />
 
 ## Structure of a multi-screen app
 

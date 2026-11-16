@@ -14,8 +14,7 @@ Le serveur de dev (`flux dev`) est votre compagnon constant pendant que vous con
 
 Lancez-le depuis la racine de votre projet (ou pointez-le ailleurs avec `--root`) :
 
-<Code lang="bash" title="Terminal" code={`flux dev
-# Listening on ws://127.0.0.1:7331`} />
+<Code lang="bash" title="Terminal" code={"flux dev\n# Listening on ws://127.0.0.1:7331"} />
 
 Les défauts servent un projet dans le répertoire courant, lié à localhost :
 
@@ -33,15 +32,15 @@ Les mêmes défauts vivent dans `flux.toml` sous `[dev]`, donc un projet version
 
 Le serveur d'assets expose une sonde de santé :
 
-<Code lang="bash" title="Terminal" code={`curl http://127.0.0.1:7332/health`} />
+<Code lang="bash" title="Terminal" code={"curl http://127.0.0.1:7332/health"} />
 
-<Code lang="text" code={`ok`} />
+<Code lang="text" code={"ok"} />
 
 ## Servir un appareil physique sur le LAN
 
 Les simulateurs et émulateurs atteignent `127.0.0.1` sur votre machine ; un appareil physique ne le peut pas. Exposez le serveur sur votre LAN et pointez l'app hôte sur l'IP LAN de votre machine :
 
-<Code lang="bash" title="Terminal" code={`flux dev --ws-host 0.0.0.0`} />
+<Code lang="bash" title="Terminal" code={"flux dev --ws-host 0.0.0.0"} />
 
 Dans l'app hôte, réglez l'adresse du serveur sur `ws://192.168.1.42:7331`, en remplaçant l'IP par l'adresse de la machine qui lance `flux dev`. L'hôte Android stocke ceci dans ses ressources ; l'hôte iOS le prend dans son écran de connexion.
 
@@ -49,7 +48,7 @@ Dans l'app hôte, réglez l'adresse du serveur sur `ws://192.168.1.42:7331`, en 
 
 Une boucle de dev ouverte sur localhost est sûre par défaut. Un serveur exposé sur le LAN doit authentifier les hôtes qui lui poussent du bytecode :
 
-<Code lang="bash" title="Terminal" code={`flux dev --ws-host 0.0.0.0 --token <secret>`} />
+<Code lang="bash" title="Terminal" code={"flux dev --ws-host 0.0.0.0 --token <secret>"} />
 
 L'hôte présente son jeton pendant la poignée de main `Hello` (protocole filaire Annexe D, section pairing/auth). Les hôtes lisent leur jeton depuis :
 

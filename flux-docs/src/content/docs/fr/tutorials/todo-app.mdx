@@ -14,17 +14,11 @@ En chemin vous utilisez des records, l'état de liste, l'itération par clé, un
 
 ## 1. Créer le projet et le modèle de données
 
-<Code lang="bash" title="Terminal" code={`flux init todo
-cd todo`} />
+<Code lang="bash" title="Terminal" code={"flux init todo\ncd todo"} />
 
 Remplacez le contenu de `main.flux` par le modèle de données : un type `record` et un composant de ligne qui rend une tâche.
 
-<Code lang="flux" title="main.flux" code={`record Task { label: String, done: Bool, }
-
-compo TaskRow(task: Task, tasks: List[Task])
-    Row gap: 8.0
-        Text text: task.label
-        Button text: "Remove", onPress: || { tasks.remove(task) }`} />
+<Code lang="flux" title="main.flux" code={"record Task { label: String, done: Bool, }\n\ncompo TaskRow(task: Task, tasks: List[Task])\n    Row gap: 8.0\n        Text text: task.label\n        Button text: \"Remove\", onPress: || { tasks.remove(task) }"} />
 
 Un `record` déclare un type de données avec des champs nommés. `TaskRow` montre les deux façons dont les composants reçoivent des données : la tâche rendue arrive comme prop, et la liste propriétaire arrive comme seconde prop pour que le handler Remove puisse la muter.
 
@@ -32,12 +26,7 @@ Un `record` déclare un type de données avec des champs nommés. `TaskRow` mont
 
 Ajoutez le composant racine. Ses déclarations `state` créent des signaux — les cellules réactives que toute l'UI lit.
 
-<Code lang="flux" title="main.flux" code={`compo TodoApp
-    state tasks: List[Task] = [
-        Task(label: "Buy milk", done: false),
-        Task(label: "Walk dog", done: false),
-    ]
-    state newTask: String = ""`} />
+<Code lang="flux" title="main.flux" code={"compo TodoApp\n    state tasks: List[Task] = [\n        Task(label: \"Buy milk\", done: false),\n        Task(label: \"Walk dog\", done: false),\n    ]\n    state newTask: String = \"\""} />
 
 - `tasks` tient le modèle de liste. La valeur initiale est une liste de littéraux de record.
 - `newTask` adosse le champ de texte. L'assigner dans un handler met à jour chaque nœud qui le lit — rien d'autre ne re-rend.
@@ -46,21 +35,7 @@ Ajoutez le composant racine. Ses déclarations `state` créent des signaux — l
 
 Enveloppez l'UI dans `Router` / `Screen`. L'hôte n'affiche que l'écran dont la prop `route` correspond à la route active.
 
-<Code lang="flux" title="main.flux" code={`compo TodoApp
-    // ...déclarations d'état de l'étape 2...
-
-    Router initialRouteName: "tasks"
-        Screen route: "tasks"
-            Column gap: 12.0
-                Text text: "Flux To-Do"
-                Row gap: 8.0
-                    TextInput text: $newTask,
-                        onChangeText: fn(v) { newTask = v },
-                        placeholder: "What needs doing?"
-                    Button text: "Add", onPress: || {
-                        tasks.append(Task(label: newTask, done: false))
-                        newTask = ""
-                    }`} />
+<Code lang="flux" title="main.flux" code={"compo TodoApp\n    // ...d\u00e9clarations d'\u00e9tat de l'\u00e9tape 2...\n\n    Router initialRouteName: \"tasks\"\n        Screen route: \"tasks\"\n            Column gap: 12.0\n                Text text: \"Flux To-Do\"\n                Row gap: 8.0\n                    TextInput text: $newTask,\n                        onChangeText: fn(v) { newTask = v },\n                        placeholder: \"What needs doing?\"\n                    Button text: \"Add\", onPress: || {\n                        tasks.append(Task(label: newTask, done: false))\n                        newTask = \"\"\n                    }"} />
 
 Trois détails comptent :
 
@@ -72,13 +47,7 @@ Trois détails comptent :
 
 Sous la ligne de saisie, itérez sur les tâches :
 
-<Code lang="flux" title="main.flux" code={`compo TodoApp
-    // ...état, Router, écran tasks des étapes 2-3...
-
-    Column gap: 8.0
-        ForEach(tasks, key: fn(t) { t.label }) {
-                        item => TaskRow(task: item, tasks: tasks)
-                    }`} />
+<Code lang="flux" title="main.flux" code={"compo TodoApp\n    // ...\u00e9tat, Router, \u00e9cran tasks des \u00e9tapes 2-3...\n\n    Column gap: 8.0\n        ForEach(tasks, key: fn(t) { t.label }) {\n                        item => TaskRow(task: item, tasks: tasks)\n                    }"} />
 
 La fonction `key` identifie chaque élément à travers les éditions, donc le réconciliateur réordonne et patche les lignes existantes en place — il ne reconstruit pas la liste à chaque changement. Parce que `TaskRow` reçoit aussi `tasks`, son handler Remove peut appeler `tasks.remove(task)` et le diff à clé retire exactement cette ligne.
 
@@ -86,13 +55,7 @@ La fonction `key` identifie chaque élément à travers les éditions, donc le r
 
 Ajoutez un bouton Reset qui vide la liste et la copie persistée :
 
-<Code lang="flux" title="main.flux" code={`compo TodoApp
-    // ...écran tasks des étapes 2-4...
-
-    Button text: "Reset", onPress: || {
-        tasks.clear()
-        Storage.removeItem(key: "todos")
-    }`} />
+<Code lang="flux" title="main.flux" code={"compo TodoApp\n    // ...\u00e9cran tasks des \u00e9tapes 2-4...\n\n    Button text: \"Reset\", onPress: || {\n        tasks.clear()\n        Storage.removeItem(key: \"todos\")\n    }"} />
 
 `Storage` est une **capacité** — un service de plateforme déclaré dans la stdlib et résolu identiquement sur le serveur et sur les deux hôtes. `Storage.removeItem` (capacité 2, méthode 3) atteint l'hôte, et si la permission OS derrière est refusée, l'appel rapporte une erreur au lieu de planter.
 
@@ -100,18 +63,7 @@ Ajoutez un bouton Reset qui vide la liste et la copie persistée :
 
 Terminez avec l'écran About et ses handlers de navigation :
 
-<Code lang="flux" title="main.flux" code={`compo TodoApp
-    // ...écran tasks des étapes 2-5...
-    Button text: "About", onPress: || { RouterNav.navigate("about") }
-
-    // Second écran :
-
-    Screen route: "about"
-        Column gap: 12.0
-            Text text: "About"
-            Text text: "A real Flux app"
-            Button text: "Back",
-                onPress: || { RouterNav.navigate("tasks") }`} />
+<Code lang="flux" title="main.flux" code={"compo TodoApp\n    // ...\u00e9cran tasks des \u00e9tapes 2-5...\n    Button text: \"About\", onPress: || { RouterNav.navigate(\"about\") }\n\n    // Second \u00e9cran :\n\n    Screen route: \"about\"\n        Column gap: 12.0\n            Text text: \"About\"\n            Text text: \"A real Flux app\"\n            Button text: \"Back\",\n                onPress: || { RouterNav.navigate(\"tasks\") }"} />
 
 `RouterNav.navigate("about")` pilote l'écran visible. Le nom de prop `route` fait partie du contrat d'adaptateur — l'hôte le lit par son nom haché, donc il doit être exactement `route`.
 
@@ -119,7 +71,7 @@ Terminez avec l'écran About et ses handlers de navigation :
 
 Lancez le serveur de dev depuis le répertoire du projet et ouvrez l'app hôte :
 
-<Code lang="bash" title="Terminal" code={`flux dev                 # WebSocket sur :7331`} />
+<Code lang="bash" title="Terminal" code={"flux dev                 # WebSocket sur :7331"} />
 
 Pointez l'hôte iOS ou Android sur `ws://127.0.0.1:7331` (voir
 [lancer l'app hôte](/tutorials/your-first-app/#4-run-the-host-app) si vous avez besoin des étapes de plateforme). Ajoutez des tâches, retirez-en une, basculez vers l'écran About et revenez, puis appuyez sur Reset.
@@ -128,8 +80,7 @@ Pointez l'hôte iOS ou Android sur `ws://127.0.0.1:7331` (voir
 
 Générez les sources natives pour les deux plateformes :
 
-<Code lang="bash" title="Terminal" code={`flux build ios       # -> platforms/ios/Generated/main.swift
-flux build android   # -> platforms/android/Generated/main.kt`} />
+<Code lang="bash" title="Terminal" code={"flux build ios       # -> platforms/ios/Generated/main.swift\nflux build android   # -> platforms/android/Generated/main.kt"} />
 
 Le code SwiftUI et Compose généré rend les mêmes écrans que vous avez lancés en dev — le harnais de parité prouve que les deux chemins restent équivalents.
 

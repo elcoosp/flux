@@ -38,10 +38,7 @@ guards in CI.
 `CALL_CAP` is the mechanism; you reach it through the stdlib surface. The todo
 app's Reset button clears the list and removes the persisted copy:
 
-<Code lang="flux" code={`Button text: "Reset", onPress: || {
-    tasks.clear()
-    Storage.removeItem(key: "todos")
-}`} />
+<Code lang="flux" code={"Button text: \"Reset\", onPress: || {\n    tasks.clear()\n    Storage.removeItem(key: \"todos\")\n}"} />
 
 `Storage.removeItem` is capability 2, method 3. The call carries its
 arguments as a record and returns a **result cell**:
@@ -62,10 +59,7 @@ so you never write signals from a background thread yourself.
 Because the cell is a value in the signal graph, you render its states with
 ordinary expressions:
 
-<Code lang="flux" code={`compo Profile
-    state name: Option[String] = None
-    Column gap: 8.0
-        Text text: name ?? "Loading..."`} />
+<Code lang="flux" code={"compo Profile\n    state name: Option[String] = None\n    Column gap: 8.0\n        Text text: name ?? \"Loading...\""} />
 
 The `??` fallback covers `Pending` and empty results. For explicit error
 handling, branch on the cell state and surface the reason in your UI —

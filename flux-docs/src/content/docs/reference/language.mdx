@@ -25,10 +25,7 @@ A `.flux` file contains top-level declarations:
 
 ## Components (`compo`)
 
-<Code lang="flux" code={`compo TaskRow(task: Task, tasks: List[Task])
-    Row gap: 8.0
-        Text text: task.label
-        Button text: "Remove", onPress: || { tasks.remove(task) }`} />
+<Code lang="flux" code={"compo TaskRow(task: Task, tasks: List[Task])\n    Row gap: 8.0\n        Text text: task.label\n        Button text: \"Remove\", onPress: || { tasks.remove(task) }"} />
 
 - A `compo` declares typed props in parentheses and owns an indented body.
 - Children indent beneath a view call that carries at least one named prop —
@@ -40,11 +37,7 @@ A `.flux` file contains top-level declarations:
 
 Two equivalent forms declare a reactive signal at the top of a `compo`:
 
-<Code lang="flux" code={`compo Counter
-    $count: Int = 0            // sigil form
-
-compo Counter2
-    state count: Int = 0       // keyword form`} />
+<Code lang="flux" code={"compo Counter\n    $count: Int = 0            // sigil form\n\ncompo Counter2\n    state count: Int = 0       // keyword form"} />
 
 An assignment inside a handler writes the signal. Written signals propagate
 through the dependency graph, and only nodes whose props read a written
@@ -52,7 +45,7 @@ signal re-materialize — see [host-authoritative state](/explanation/reactivity
 
 ## Derived values (`let`)
 
-<Code lang="rust" code={`let total: Float = items * price`} />
+<Code lang="rust" code={"let total: Float = items * price"} />
 
 A `let` declares a read-only binding computed from signals. It recomputes
 when a written signal reaches it; do not mirror it into a second signal.
@@ -70,7 +63,7 @@ when a written signal reaches it; do not mirror it into a second signal.
 
 A view call names a stdlib component and carries named props:
 
-<Code lang="rust" code={`TextInput text: $newTask, onChangeText: fn(v) { newTask = v }, placeholder: "What needs doing?"`} />
+<Code lang="rust" code={"TextInput text: $newTask, onChangeText: fn(v) { newTask = v }, placeholder: \"What needs doing?\""} />
 
 - Props are comma-separated `name: value` pairs on one line.
 - `text: $signal` two-way binds the prop to a signal (used by `TextInput`).
@@ -78,20 +71,17 @@ A view call names a stdlib component and carries named props:
 
 ## Interpolation and operators
 
-<Code lang="flux" code={`Text text: "tapped {count} times"`} />
+<Code lang="flux" code={"Text text: \"tapped {count} times\""} />
 
 `{expr}` inside a string literal interpolates a value into the prop. The
 expression surface includes arithmetic, comparison, optional chaining with
 `?.`, and the `??` fallback operator:
 
-<Code lang="flux" code={`Text text: name ?? "Loading..."`} />
+<Code lang="flux" code={"Text text: name ?? \"Loading...\""} />
 
 ## Control flow: ForEach and routing
 
-<Code lang="rust" code={`ForEach(tasks, key: fn(t) { t.label }) { item => TaskRow(task: item, tasks: tasks) }
-Router initialRouteName: "tasks"
-    Screen route: "tasks"
-        …`} />
+<Code lang="rust" code={"ForEach(tasks, key: fn(t) { t.label }) { item => TaskRow(task: item, tasks: tasks) }\nRouter initialRouteName: \"tasks\"\n    Screen route: \"tasks\"\n        \u2026"} />
 
 `ForEach` renders a list with a key function; `Router`/`Screen`/`RouterNav`
 drive navigation. See the [navigation guide](/guides/navigation/).

@@ -17,11 +17,7 @@ copy-paste patterns for the shapes you meet beyond the counter.
 
 Declare a signal at the top of a `compo`:
 
-<Code lang="flux" code={`compo Counter
-    state count: Int = 0
-    Column gap: 8.0
-        Text text: "tapped {count} times"
-        Button text: "Increment", onPress: || { count = count + 1 }`} />
+<Code lang="flux" code={"compo Counter\n    state count: Int = 0\n    Column gap: 8.0\n        Text text: \"tapped {count} times\"\n        Button text: \"Increment\", onPress: || { count = count + 1 }"} />
 
 The `$count: Int = 0` shorthand is equivalent — you meet it in the scaffold
 and in `examples/counter`. Both forms create the same signal; pick one style
@@ -37,12 +33,7 @@ A value computed from other signals should be derived, not stored — two
 signals that can disagree are a bug you have not met yet. Declare it as a
 read-only `let` computed from signals:
 
-<Code lang="flux" code={`compo Cart
-    state items: Int = 3
-    state price: Float = 9.99
-    let total: Float = items * price   // recomputed when items or price change
-    Column
-        Text text: "Total: {total}"`} />
+<Code lang="flux" code={"compo Cart\n    state items: Int = 3\n    state price: Float = 9.99\n    let total: Float = items * price   // recomputed when items or price change\n    Column\n        Text text: \"Total: {total}\""} />
 
 Derivation recomputes when a written signal reaches it, and only the leaves
 that read `total` recompose.
@@ -52,11 +43,7 @@ that read `total` recompose.
 `TextInput` is controlled: bind the signal with `$` and write the typed value
 back in `onChangeText`:
 
-<Code lang="flux" code={`compo Composer
-    state draft: String = ""
-    Column gap: 8.0
-        TextInput text: $draft, onChangeText: fn(v) { draft = v }, placeholder: "Say something"
-        Button text: "Clear", onPress: || { draft = "" }`} />
+<Code lang="flux" code={"compo Composer\n    state draft: String = \"\"\n    Column gap: 8.0\n        TextInput text: $draft, onChangeText: fn(v) { draft = v }, placeholder: \"Say something\"\n        Button text: \"Clear\", onPress: || { draft = \"\" }"} />
 
 The `$draft` binding keeps the field and the signal in lockstep, so the Clear
 button empties the field by assigning the signal.
@@ -66,13 +53,7 @@ button empties the field by assigning the signal.
 Flux has no provider/context widget. For state shared across components, lift
 a store component above its consumers and thread values down as props:
 
-<Code lang="flux" title="main.flux" code={`compo SessionStore
-    state token: Option[String] = None
-    // actions are handlers that write the store's signals
-
-compo App
-    SessionStore
-        // children read token/user via props threaded from here`} />
+<Code lang="flux" title="main.flux" code={"compo SessionStore\n    state token: Option[String] = None\n    // actions are handlers that write the store's signals\n\ncompo App\n    SessionStore\n        // children read token/user via props threaded from here"} />
 
 Keep stores small and explicit — one store per domain (auth, cart, settings),
 mounted at the root `Router` or `Screen` that needs it. The signal graph is
@@ -86,13 +67,7 @@ returns a result cell (`Ready` / `Pending` / `Error`). An async capability
 leaves the cell `Pending`, and an injected resolver settles it when the
 platform responds:
 
-<Code lang="flux" code={`compo Profile
-    state name: Option[String] = None
-    Column gap: 8.0
-        Text text: name ?? "Loading..."
-        Button text: "Load", onPress: || {
-            // call the capability; the result cell settles and updates \`name\`
-        }`} />
+<Code lang="flux" code={"compo Profile\n    state name: Option[String] = None\n    Column gap: 8.0\n        Text text: name ?? \"Loading...\"\n        Button text: \"Load\", onPress: || {\n            // call the capability; the result cell settles and updates `name`\n        }"} />
 
 The `??` operator renders the fallback while the cell is pending. See
 [Capabilities](/guides/capabilities/) for the call surface and permission

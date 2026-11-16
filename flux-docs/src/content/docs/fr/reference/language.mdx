@@ -22,10 +22,7 @@ Un fichier `.flux` contient des déclarations de niveau supérieur :
 
 ## Composants (`compo`)
 
-<Code lang="flux" code={`compo TaskRow(task: Task, tasks: List[Task])
-    Row gap: 8.0
-        Text text: task.label
-        Button text: "Remove", onPress: || { tasks.remove(task) }`} />
+<Code lang="flux" code={"compo TaskRow(task: Task, tasks: List[Task])\n    Row gap: 8.0\n        Text text: task.label\n        Button text: \"Remove\", onPress: || { tasks.remove(task) }"} />
 
 - Un `compo` déclare des props typées en parenthèses et possède un corps indenté.
 - Les enfants s'indentent sous un appel de vue qui porte au moins une prop nommée — c'est ce qui permet à la grammaire délimitée par indentation de distinguer un bloc enfant d'un frère.
@@ -35,17 +32,13 @@ Un fichier `.flux` contient des déclarations de niveau supérieur :
 
 Deux formes équivalentes déclarent un signal réactif en haut d'un `compo` :
 
-<Code lang="flux" code={`compo Counter
-    $count: Int = 0            // forme sigil
-
-compo Counter2
-    state count: Int = 0       // forme mot-clé`} />
+<Code lang="flux" code={"compo Counter\n    $count: Int = 0            // forme sigil\n\ncompo Counter2\n    state count: Int = 0       // forme mot-cl\u00e9"} />
 
 Une assignation dans un handler écrit le signal. Les signaux écrits propagent à travers le graphe de dépendances, et seuls les nœuds dont les props lisent un signal écrit re-matérialisent — voir [état faisant autorité sur l'hôte](/explanation/reactivity/).
 
 ## Valeurs dérivées (`let`)
 
-<Code lang="rust" code={`let total: Float = items * price`} />
+<Code lang="rust" code={"let total: Float = items * price"} />
 
 Un `let` déclare une liaison en lecture seule calculée depuis les signaux. Il recalcule quand un signal écrit l'atteint ; ne le reflétez pas dans un second signal.
 
@@ -62,7 +55,7 @@ Un `let` déclare une liaison en lecture seule calculée depuis les signaux. Il 
 
 Un appel de vue nomme un composant stdlib et porte des props nommées :
 
-<Code lang="rust" code={`TextInput text: $newTask, onChangeText: fn(v) { newTask = v }, placeholder: "What needs doing?"`} />
+<Code lang="rust" code={"TextInput text: $newTask, onChangeText: fn(v) { newTask = v }, placeholder: \"What needs doing?\""} />
 
 - Les props sont des paires `name: value` séparées par des virgules sur une ligne.
 - `text: $signal` lie la prop à un signal dans les deux sens (utilisé par `TextInput`).
@@ -70,18 +63,15 @@ Un appel de vue nomme un composant stdlib et porte des props nommées :
 
 ## Interpolation et opérateurs
 
-<Code lang="flux" code={`Text text: "tapped {count} times"`} />
+<Code lang="flux" code={"Text text: \"tapped {count} times\""} />
 
 `{expr}` à l'intérieur d'un littéral de chaîne interpole une valeur dans la prop. La surface d'expression inclut l'arithmétique, la comparaison, le chaînage optionnel avec `?.`, et l'opérateur de repli `??` :
 
-<Code lang="flux" code={`Text text: name ?? "Loading..."`} />
+<Code lang="flux" code={"Text text: name ?? \"Loading...\""} />
 
 ## Flux de contrôle : ForEach et routage
 
-<Code lang="rust" code={`ForEach(tasks, key: fn(t) { t.label }) { item => TaskRow(task: item, tasks: tasks) }
-Router initialRouteName: "tasks"
-    Screen route: "tasks"
-        …`} />
+<Code lang="rust" code={"ForEach(tasks, key: fn(t) { t.label }) { item => TaskRow(task: item, tasks: tasks) }\nRouter initialRouteName: \"tasks\"\n    Screen route: \"tasks\"\n        \u2026"} />
 
 `ForEach` rend une liste avec une fonction key ; `Router`/`Screen`/`RouterNav` pilotent la navigation. Voir le [guide de navigation](/guides/navigation/).
 
