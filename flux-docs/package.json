@@ -37,12 +37,15 @@
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.12",
-    "@elcoosp/docs-toolkit": "^1.1.5",
+    "@elcoosp/docs-toolkit": "^1.2.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "markdownlint-cli2": "^0.24.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "starlight-auto-drafts": "^0.3.1",
+    "starlight-codeblock-fullscreen": "^2.0.0",
+    "starlight-package-managers": "^0.13.1",
     "starlight-sidebar-topics": "^0.9.0",
     "typescript": "~6.0.3"
   },

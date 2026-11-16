@@ -1,5 +1,4 @@
 import { defineDocsConfig } from '@elcoosp/docs-toolkit/config';
-import mdx from '@astrojs/mdx';
 
 import fluxGrammar from './src/flux.tmLanguage.json';
 
@@ -9,6 +8,7 @@ export default await defineDocsConfig({
   site: "https://flux-rs-docs.vercel.app",
   domain: 'flux-language-docs.vercel.app',
   title: "Flux",
+  expressiveCode: { themes: ['github-light', 'github-dark'], shiki: { langs: [fluxGrammar], langAlias: { 'github-actions': 'yaml' } } },
   description: "Flux — a write-once UI language for native iOS and Android. Write .flux, hot-reload on device over binary patches, and ship SwiftUI + Jetpack Compose.",
   extraStarlight: {
       title: 'Flux',
