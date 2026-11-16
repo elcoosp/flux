@@ -9,15 +9,10 @@ export default await defineDocsConfig({
   domain: 'flux-language-docs.vercel.app',
   title: "Flux",
   description: "Flux — a write-once UI language for native iOS and Android. Write .flux, hot-reload on device over binary patches, and ship SwiftUI + Jetpack Compose.",
-  sidebar: [],
   extraStarlight: {
-      expressiveCode: {
-      	themes: ['github-light', 'github-dark']
-      },
       title: 'Flux',
       description:
         'Flux — a write-once UI language for native iOS and Android. Write .flux, hot-reload on device over binary patches, and ship SwiftUI + Jetpack Compose.',
-      favicon: '/favicon.png',
       social: [
         { icon: 'github', label: 'GitHub', translations: { fr: "GitHub" }, href: 'https://github.com/elcoosp/flux' },
       ],

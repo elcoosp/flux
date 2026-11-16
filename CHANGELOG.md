@@ -93,7 +93,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   Rust/Swift/Kotlin parity). Residual identity-drift bug is tracked as C12;
   `native_kit_parity.rs` covers the adapter-drift gate.
 
-## 2026-08-29 — Flux syntax highlighting: grammar rebuild + compiler-driven LSP tokens
+### 2026-08-29 — Flux syntax highlighting: grammar rebuild + compiler-driven LSP tokens
 
 ### Docs site + LSP (flux-lsp, flux-parser) — `[verified]`
 - **Grammar rebuild (was stale).** `website/src/flux-grammar.mjs` (a hand-written
@@ -1617,7 +1617,7 @@ docs/issues) and the on-disk tree, not the prose above. Items marked
 
 ---
 
-## Agent-delivered work (tracked by orchestrator — NOT yet committed by this agent)
+### Agent-delivered work (tracked by orchestrator — NOT yet committed by this agent)
 
 The following were produced by concurrently-dispatched flux-N agents. They are
 recorded here for progress tracking only; this agent did **not** write, modify, or
@@ -2227,7 +2227,7 @@ stays current.
 
 ---
 
-## Promoted follow-up issues (deferred PRD work → tracked FLUX-0XX)
+### Promoted follow-up issues (deferred PRD work → tracked FLUX-0XX)
 
 Every "Deferred (documented follow-up)" / "Blocker" / "remain follow-up" /
 "PARTIAL" bullet in this changelog was promoted into a self-contained
@@ -2279,7 +2279,7 @@ manifest request already applied (FLUX-024). Summary by cluster:
 dependency request in `MANIFEST_REQUESTS.md` has been applied. No production
 code outside the `flux-lsp` scaffold was changed by this promotion.
 
-## 2026-08-29 — Pipeline & runtime performance pass (external review follow-up)
+### 2026-08-29 — Pipeline & runtime performance pass (external review follow-up)
 
 Code changes committed under FLUX-049. Benchmark figures in the external review
 were not reproduced; measured on this tree (release): parse 500 lines ~308 µs,
