@@ -25,7 +25,7 @@ A `.flux` file contains top-level declarations:
 
 ## Components (`compo`)
 
-<Code lang="flux" title="font.flux" code={`compo TaskRow(task: Task, tasks: List[Task])
+<Code lang="flux" code={`compo TaskRow(task: Task, tasks: List[Task])
     Row gap: 8.0
         Text text: task.label
         Button text: "Remove", onPress: || { tasks.remove(task) }`} />

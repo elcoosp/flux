@@ -31,7 +31,7 @@ Les ids de capacité sont dérivés de façon déterministe et jamais assignés 
 
 `CALL_CAP` est le mécanisme ; vous y accédez via la surface stdlib. Le bouton Reset de l'app todo vide la liste et retire la copie persistée :
 
-<Code lang="flux" title="stdlib/capabilities.flux" code={`Button text: "Reset", onPress: || {
+<Code lang="flux" code={`Button text: "Reset", onPress: || {
     tasks.clear()
     Storage.removeItem(key: "todos")
 }`} />
