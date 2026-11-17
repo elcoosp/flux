@@ -1,0 +1,49 @@
+# Curated domain glossary for @elcoosp/docs-toolkit (starlight-term-glossary)
+- term: "Reactive Tree IR"
+  locale: en
+  href: "/explanation/dev-vs-release/"
+  definition: "The lowered intermediate representation produced from .flux components and consumed identically by both dev and release execution tiers."
+- term: "keyed reconciliation"
+  locale: en
+  href: "/explanation/architecture/#the-shadow-tree-and-keyed-reconciliation"
+  definition: "Diffing strategy that matches list items by explicit keys so existing native views keep their identity across updates."
+- term: "shadow tree"
+  locale: en
+  href: "/explanation/architecture/#the-shadow-tree-and-keyed-reconciliation"
+  definition: "In-memory node tree maintained by the host to diff incoming UI updates and emit minimal native mutations."
+- term: "wire protocol"
+  locale: en
+  href: "/explanation/the-wire/"
+  definition: "Compact binary framing format used over WebSocket to stream UI patches and events between the dev server and native host."
+- term: "dirty set"
+  locale: en
+  href: "/explanation/the-wire/#why-the-dirty-set-decides"
+  definition: "Minimal set of signals and dependent nodes invalidated during a dispatch pass that determines what crosses the wire."
+- term: "parity harness"
+  locale: en
+  href: "/explanation/project-status/"
+  definition: "Automated test suite that captures execution traces and verifies identical UI output between dev mode and release codegen."
+- term: "capability"
+  locale: en
+  href: "/guides/capabilities/"
+  definition: "Typed, permission-gated bridge for accessing native device APIs such as storage, camera, or networking from Flux handlers."
+- term: "protocole filaire"
+  locale: fr
+  href: "/fr/explanation/the-wire/"
+  definition: "Format binaire compact utilisé sur WebSocket pour transmettre les patches UI et événements entre le serveur de dev et l’hôte."
+- term: "réconciliation par clé"
+  locale: fr
+  href: "/fr/explanation/architecture/"
+  definition: "Algorithme de diff qui associe les éléments de liste par clé explicite afin de préserver l’identité des vues natives."
+- term: "ensemble sale"
+  locale: fr
+  href: "/fr/explanation/the-wire/"
+  definition: "Sous-ensemble minimal de signaux et nœuds invalidés lors d’un dispatch qui détermine les patches envoyés sur le fil."
+- term: "harnais de parité"
+  locale: fr
+  href: "/fr/explanation/project-status/"
+  definition: "Suite de tests vérifiant que le mode dev interprété et le code natif généré en release produisent exactement le même résultat."
+- term: "capacité"
+  locale: fr
+  href: "/fr/guides/capabilities/"
+  definition: "Pont typé et soumis à permission permettant d’appeler les API natives de l’appareil depuis les gestionnaires Flux."
