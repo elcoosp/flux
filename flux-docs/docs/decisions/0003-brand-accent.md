@@ -25,21 +25,21 @@ light scheme and `#fff` in dark scheme.
 2. **Accent.** Derive the accent from the bolt hue (≈35°) and replace
    Starlight's default blue entirely, per theme via `data-theme`:
 
-| Variable | Light | Dark |
-| :-- | :-- | :-- |
-| `--sl-color-accent-low` | `hsl(36 100% 93%)` | `hsl(33 70% 16%)` |
-| `--sl-color-accent` | `hsl(35 89% 34%)` (#A4640A) | `hsl(37 92% 58%)` |
+| Variable                 | Light                       | Dark                         |
+| :----------------------- | :-------------------------- | :--------------------------- |
+| `--sl-color-accent-low`  | `hsl(36 100% 93%)`          | `hsl(33 70% 16%)`            |
+| `--sl-color-accent`      | `hsl(35 89% 34%)` (#A4640A) | `hsl(37 92% 58%)`            |
 | `--sl-color-accent-high` | `hsl(28 85% 30%)` (#8E480B) | `hsl(41 100% 72%)` (#FFD270) |
 
 3. **Contrast, computed and verified.** Relative-luminance contrast ratios
    for the shipped values:
 
-| Pair | Ratio | Requirement | Pass |
-| :-- | --: | :-- | :-- |
-| light accent-high (#8E480B) on white | 6.81:1 | ≥ 4.5 (body text) | Yes |
-| white on light accent (#A4640A) | 4.77:1 | ≥ 4.5 (normal text/UI) | Yes |
-| dark accent-high (#FFD270) on dark bg (≈#0F0F14) | 13.38:1 | ≥ 4.5 (body text) | Yes |
-| dark accent on dark bg (≈#0F0F14) | 9.82:1 | ≥ 4.5 | Yes |
+| Pair                                             |   Ratio | Requirement            | Pass |
+| :----------------------------------------------- | ------: | :--------------------- | :--- |
+| light accent-high (#8E480B) on white             |  6.81:1 | ≥ 4.5 (body text)      | Yes  |
+| white on light accent (#A4640A)                  |  4.77:1 | ≥ 4.5 (normal text/UI) | Yes  |
+| dark accent-high (#FFD270) on dark bg (≈#0F0F14) | 13.38:1 | ≥ 4.5 (body text)      | Yes  |
+| dark accent on dark bg (≈#0F0F14)                |  9.82:1 | ≥ 4.5                  | Yes  |
 
 The raw bolt (#F2A018) alone is 2.14:1 on white — decorative only, never
 used for text; the shipped values darken/adjust it while keeping the hue.

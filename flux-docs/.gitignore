@@ -3,3 +3,4 @@ dist/
 node_modules/
 .astro/
 .qa/
+ec.config.mjs

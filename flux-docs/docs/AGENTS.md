@@ -56,23 +56,23 @@ src/content/docs/
 
 ## Commands
 
-| Command | Action |
-| :--- | :--- |
-| `pnpm install` | Install dependencies |
-| `pnpm dev` | Dev server at `localhost:4321` |
-| `pnpm build` | Production build to `dist/` + generate llms.txt |
-| `pnpm preview` | Preview the built site |
-| `pnpm check` | `astro check` (TypeScript diagnostics) |
-| `pnpm lint` | `markdownlint-cli2` over `src/content/docs` |
+| Command        | Action                                          |
+| :------------- | :---------------------------------------------- |
+| `pnpm install` | Install dependencies                            |
+| `pnpm dev`     | Dev server at `localhost:4321`                  |
+| `pnpm build`   | Production build to `dist/` + generate llms.txt |
+| `pnpm preview` | Preview the built site                          |
+| `pnpm check`   | `astro check` (TypeScript diagnostics)          |
+| `pnpm lint`    | `markdownlint-cli2` over `src/content/docs`     |
 
 ## Decisions
 
 Documented in `docs/decisions/`:
 
-| ADR | Decision |
-| :-- | :-- |
-| 0001 | Pin TypeScript to 6.x for `astro check` |
+| ADR  | Decision                                                      |
+| :--- | :------------------------------------------------------------ |
+| 0001 | Pin TypeScript to 6.x for `astro check`                       |
 | 0002 | Plugin selection: links-validator, image-zoom, heading-badges |
-| 0003 | Brand accent derived from the logo bolt, WCAG AA verified |
-| 0004 | i18n scope: English today, locale-ready structure |
-| 0005 | Site URL and llms.txt generation |
+| 0003 | Brand accent derived from the logo bolt, WCAG AA verified     |
+| 0004 | i18n scope: English today, locale-ready structure             |
+| 0005 | Site URL and llms.txt generation                              |
