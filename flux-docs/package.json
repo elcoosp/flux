@@ -2,7 +2,7 @@
   "name": "flux-docs",
   "version": "0.1.0",
   "private": true,
-  "description": "Documentation site for Flux — a write-once UI language for native iOS and Android.",
+  "description": "Documentation site for Flux \u2014 a write-once UI language for native iOS and Android.",
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "@astrojs/starlight": "^0.43.1",
-    "@elcoosp/docs-toolkit": "^1.5.7",
+    "@elcoosp/docs-toolkit": "^1.5.8",
     "astro": "^7.4.12"
   },
   "devDependencies": {
