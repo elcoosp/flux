@@ -69,15 +69,15 @@ L'app hôte est du code natif précompilé qui se connecte au serveur de dev et 
 
 1. **iOS.** Le projet hôte est généré avec XcodeGen :
 
-    <Code lang="bash" title="Terminal" code={"# depuis la racine du d\u00e9p\u00f4t\nxcodegen generate            # \u00e9crit runtimes/ios/FluxApp.xcworkspace\nopen runtimes/ios/FluxApp.xcworkspace"} />
+   <Code lang="bash" title="Terminal" code={"# depuis la racine du d\u00e9p\u00f4t\nxcodegen generate            # \u00e9crit runtimes/ios/FluxApp.xcworkspace\nopen runtimes/ios/FluxApp.xcworkspace"} />
 
-    Choisissez un simulateur ou un appareil connecté dans Xcode et appuyez sur **Run**. L'app se connecte à `ws://127.0.0.1:7331` et rend votre `Counter`.
+   Choisissez un simulateur ou un appareil connecté dans Xcode et appuyez sur **Run**. L'app se connecte à `ws://127.0.0.1:7331` et rend votre `Counter`.
 
 2. **Android.** Compilez et installez l'hôte sur un émulateur ou appareil connecté :
 
-    <Code lang="bash" title="Terminal" code={"# depuis la racine du d\u00e9p\u00f4t\n./gradlew :runtimes:android:app:installDebug"} />
+   <Code lang="bash" title="Terminal" code={"# depuis la racine du d\u00e9p\u00f4t\n./gradlew :runtimes:android:app:installDebug"} />
 
-    Lancez **Flux** depuis le lanceur. Il se connecte à `ws://127.0.0.1:7331` et rend la même UI.
+   Lancez **Flux** depuis le lanceur. Il se connecte à `ws://127.0.0.1:7331` et rend la même UI.
 
 </Steps>
 

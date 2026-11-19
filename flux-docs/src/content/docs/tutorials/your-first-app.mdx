@@ -77,17 +77,17 @@ renders the IR it receives. Pick your platform.
 
 1. **iOS.** The host project is generated with XcodeGen:
 
-    <Code lang="bash" title="Terminal" code={"# from the repository root\nxcodegen generate            # writes runtimes/ios/FluxApp.xcworkspace\nopen runtimes/ios/FluxApp.xcworkspace"} />
+   <Code lang="bash" title="Terminal" code={"# from the repository root\nxcodegen generate            # writes runtimes/ios/FluxApp.xcworkspace\nopen runtimes/ios/FluxApp.xcworkspace"} />
 
-    Pick a simulator or a tethered device in Xcode and press **Run**. The app
-    connects to `ws://127.0.0.1:7331` and renders your `Counter`.
+   Pick a simulator or a tethered device in Xcode and press **Run**. The app
+   connects to `ws://127.0.0.1:7331` and renders your `Counter`.
 
 2. **Android.** Build and install the host on a connected emulator or device:
 
-    <Code lang="bash" title="Terminal" code={"# from the repository root\n./gradlew :runtimes:android:app:installDebug"} />
+   <Code lang="bash" title="Terminal" code={"# from the repository root\n./gradlew :runtimes:android:app:installDebug"} />
 
-    Launch **Flux** from the launcher. It connects to `ws://127.0.0.1:7331`
-    and renders the same UI.
+   Launch **Flux** from the launcher. It connects to `ws://127.0.0.1:7331`
+   and renders the same UI.
 
 </Steps>
 
